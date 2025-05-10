@@ -11,6 +11,7 @@ from utils.io_utils import imread, imwrite
 from utils import create_error_dialog
 from utils.proj_imgtrans import ProjImgTrans
 from .custom_widget import ProgressMessageBox
+from .misc import pixmap2ndarray
 
 
 class ThreadBase(QThread):
@@ -54,15 +55,14 @@ class ImgSaveThread(ThreadBase):
         while True:
             if len(self.im_save_list) == 0:
                 break
-            save_path, img, pagename_in_proj, save_params = self.im_save_list.pop(0)
+            save_path, img, pagename_in_proj, save_params = self.im_save_list[0]
+            if save_params is None:
+                save_params = {}
             if isinstance(img, QImage) or isinstance(img, QPixmap):
-                if save_params is not None and save_params['ext'] in {'.jpg', '.webp'}:
-                    img.save(save_path, quality=save_params['quality'])
-                else:
-                    img.save(save_path)
-            elif isinstance(img, np.ndarray):
-                imwrite(save_path, img)
+                img = pixmap2ndarray(img, keep_alpha=False)
+            imwrite(save_path, img, **save_params)
             self.img_writed.emit(pagename_in_proj)
+            self.im_save_list.pop(0)
 
 
 class ImgTransProjFileIOThread(ThreadBase):

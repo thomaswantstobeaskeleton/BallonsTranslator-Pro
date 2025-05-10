@@ -37,7 +37,7 @@ def pixmap2ndarray(pixmap: Union[QPixmap, QImage], keep_alpha=True):
     if isinstance(pixmap, QPixmap):
         qimg = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
     else:
-        qimg = pixmap
+        qimg = pixmap.convertToFormat(QImage.Format.Format_RGBA8888)
 
     byte_str = qimg.bits()
     if byte_str is None:
