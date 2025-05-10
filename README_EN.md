@@ -140,7 +140,7 @@ This project is heavily dependent upon [manga-image-translator](https://github.c
 
    * For detailed instructions, see **Tuanzi OCR Instructions**: ([Chinese](doc/团子OCR说明.md) & [Brazilian Portuguese](doc/Manual_TuanziOCR_pt-BR.md) only)
  
- * `YSGDetector` models are trained by [lhj5426](https://github.com/lhj5426), these models would filter out onomatopoeia in CGs/Manga, download checkpoints from [YSGYoloDetector](https://huggingface.co/dreMaz/YSGYoloDetector) and put into `data/models`. 
+ * `YSGDetector` models are trained by [lhj5426](https://github.com/lhj5426), these models would filter out onomatopoeia in CGs/Manga, download checkpoints from [YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) and put into `data/models`. 
 
 
 ## OCR
