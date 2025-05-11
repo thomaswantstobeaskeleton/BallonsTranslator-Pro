@@ -48,7 +48,7 @@ def pixmap2ndarray(pixmap: Union[QPixmap, QImage], keep_alpha=True):
     else:
         byte_str = byte_str.tobytes()
 
-    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w,h,4))
+    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w,h,4)).copy()
     
     if keep_alpha:
         return img
