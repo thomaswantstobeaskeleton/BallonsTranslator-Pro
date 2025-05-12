@@ -150,18 +150,7 @@ class OcrEngine:
     def recognize_pil(self, image: PilImage.Image):
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
-        try:
-            r, g, b, a = image.split()
-            # Try BGRA reorder needed by some libs
-            bgra_image = PilImage.merge('RGBA', (b, g, r, a))
-        except ValueError:
-            if self.logger:
-                self.logger.warning(
-                    "Could not split RGBA, trying via RGB->BGRA.")
-            rgb = image.convert('RGB')
-            r, g, b = rgb.split()
-            bgra_image = PilImage.merge('RGB', (b, g, r)).convert('RGBA')
-        return self._process_image(cols=bgra_image.width, rows=bgra_image.height, step=bgra_image.width*4, data=bgra_image.tobytes())
+        return self._process_image(cols=image.width, rows=image.height, step=image.width*4, data=image.tobytes())
 
     def _process_image(self, cols, rows, step, data):
         dp = ctypes.cast(data, c_ubyte_p) if not isinstance(
@@ -364,9 +353,9 @@ class OCROneAPI(OCRBase):
             if len(img_to_process.shape) == 2:
                 img_rgb = cv2.cvtColor(img_to_process, cv2.COLOR_GRAY2RGB)
             elif img_to_process.shape[2] == 3:
-                img_rgb = cv2.cvtColor(img_to_process, cv2.COLOR_BGR2RGB)
+                img_rgb = img_to_process
             elif img_to_process.shape[2] == 4:
-                img_rgb = cv2.cvtColor(img_to_process, cv2.COLOR_BGRA2RGB)
+                img_rgb = cv2.cvtColor(img_to_process, cv2.COLOR_RGBA2RGB)
             else:
                 raise ValueError(
                     f"Unsupported channels: {img_to_process.shape[2]}")

@@ -33,7 +33,7 @@ if platform.system() == 'Windows' and platform.version() >= '10.0.10240.0':
                 lang = winocr_available_recognizer_languages[0].language_tag
                 
                 def __call__(self, img: np.ndarray) -> str:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2RGBA)
                     w, h = img.shape[1], img.shape[0]
                     return asyncio.run(coroutine(ocr(img.tobytes(), w, h, self.lang))).text
 

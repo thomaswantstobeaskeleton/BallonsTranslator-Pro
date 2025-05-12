@@ -464,8 +464,8 @@ class OCR48pxCTC:
                     continue
                 textblk.text.append(''.join(cur_texts))
                 textblk.update_font_colors(
-                    [int(total_fb()), int(total_fg()), int(total_fr())],
-                    [int(total_bb()), int(total_bg()), int(total_br())]
+                    [int(total_fr()), int(total_fg()), int(total_fb())],
+                    [int(total_br()), int(total_bg()), int(total_bb())]
                 )
             chunck_idx += N
 

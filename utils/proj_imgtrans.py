@@ -559,6 +559,7 @@ def gen_ballon_cuts(cuts_dir: str, imgpath: str, blk_list: List[TextBlock], resi
 
         cut_path = os.path.join(cuts_dir, f'{imgname}-{ii}.jpg')
         bub = img[y1:y2, x1:x2]
+        max_width = 448
 
         if bub.shape[0] < 1 or bub.shape[1] < 1:
             emptyw = 60
@@ -566,11 +567,16 @@ def gen_ballon_cuts(cuts_dir: str, imgpath: str, blk_list: List[TextBlock], resi
             width = emptyw
         else:
             # scale_percent = 60 # percent of original size
-            scale_percent = 1280 / img.shape[0]
-            width = max(1, int(bub.shape[1] * scale_percent))
-            height = max(1, int(bub.shape[0] * scale_percent))
-            dim = (width, height)
-            resized = cv2.resize(bub, dim, interpolation = cv2.INTER_AREA) if resize else bub
+            scale_percent = min(1920 / img.shape[0], max_width / w)
+            
+            if scale_percent < 1:
+                width = max(1, int(bub.shape[1] * scale_percent))
+                height = max(1, int(bub.shape[0] * scale_percent))
+                dim = (width, height)
+                resized = cv2.resize(bub, dim, interpolation = cv2.INTER_AREA) if resize else bub
+            else:
+                width = w
+                resized = bub
 
         imwrite(cut_path, resized, '.jpg')
         cuts_path_list.append(cut_path)

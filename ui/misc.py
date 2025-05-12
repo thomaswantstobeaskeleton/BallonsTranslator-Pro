@@ -37,7 +37,7 @@ def pixmap2ndarray(pixmap: Union[QPixmap, QImage], keep_alpha=True):
     if isinstance(pixmap, QPixmap):
         qimg = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
     else:
-        qimg = pixmap
+        qimg = pixmap.convertToFormat(QImage.Format.Format_RGBA8888)
 
     byte_str = qimg.bits()
     if byte_str is None:
@@ -48,17 +48,16 @@ def pixmap2ndarray(pixmap: Union[QPixmap, QImage], keep_alpha=True):
     else:
         byte_str = byte_str.tobytes()
 
-    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w,h,4))
+    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w,h,4)).copy()
     
     if keep_alpha:
-        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
         return img
     else:
         return np.ascontiguousarray(img[:,:,:3])
 
 def ndarray2pixmap(img, return_qimg=False):
     if len(img.shape) == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     height, width, channel = img.shape
     bytesPerLine = channel * width
     if channel == 4:
@@ -66,7 +65,7 @@ def ndarray2pixmap(img, return_qimg=False):
     else:
         img_format = QImage.Format.Format_RGB888
     img = np.ascontiguousarray(img)
-    qImg = QImage(img.data, width, height, bytesPerLine, img_format).rgbSwapped()
+    qImg = QImage(img.data, width, height, bytesPerLine, img_format)
     if return_qimg:
         return qImg
     return QPixmap(qImg)

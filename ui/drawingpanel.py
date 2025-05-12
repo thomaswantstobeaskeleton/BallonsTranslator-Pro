@@ -768,12 +768,12 @@ class DrawingPanel(Widget):
                 inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=self.canvas.imgtrans_proj.mask_array[y1: y2, x1: x2])
                 mask = self.rectPanel.post_process_mask(inpaint_mask_array)
 
-                bground_bgr = bub_dict['bground_bgr']
+                bground_rgb = bub_dict['bground_rgb']
                 need_inpaint = bub_dict['need_inpaint']
 
                 inpaint_dict = {'img': im, 'mask': mask, 'inpaint_rect': [x1, y1, x2, y2]}
                 inpaint_dict['need_inpaint'] = need_inpaint
-                inpaint_dict['bground_bgr'] = bground_bgr
+                inpaint_dict['bground_rgb'] = bground_rgb
                 inpaint_dict['ballon_mask'] = ballon_mask
                 user_preview_mask = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
                 user_preview_mask[:, :, [0, 2, 3]] = (mask[:, :, np.newaxis] / 2).astype(np.uint8)
@@ -796,10 +796,10 @@ class DrawingPanel(Widget):
         img = inpaint_dict['img']
         mask = inpaint_dict['mask']
         need_inpaint = inpaint_dict['need_inpaint']
-        bground_bgr = inpaint_dict['bground_bgr']
+        bground_rgb = inpaint_dict['bground_rgb']
         ballon_mask = inpaint_dict['ballon_mask']
         if not need_inpaint and pcfg.module.check_need_inpaint:
-            img[np.where(ballon_mask > 0)] = bground_bgr
+            img[np.where(ballon_mask > 0)] = bground_rgb
             self.canvas.push_undo_command(InpaintUndoCommand(self.canvas, img, mask, inpaint_dict['inpaint_rect'], merge_existing_mask=True))
             self.clearInpaintItems()
         else:

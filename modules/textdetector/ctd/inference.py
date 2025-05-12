@@ -319,7 +319,7 @@ class TextDetector:
         blks = []
         resize_ratio = [1, 1]
         if lines_map is None:
-            img_in, ratio, dw, dh = preprocess_img(img, detect_size=detect_size, device=self.device, half=self.half, to_tensor=self.backend=='torch')
+            img_in, ratio, dw, dh = preprocess_img(img, bgr2rgb=False, detect_size=detect_size, device=self.device, half=self.half, to_tensor=self.backend=='torch')
             blks, mask, lines_map = self.net(img_in)
             if self.backend == 'opencv':
                 if mask.shape[1] == 2:     # some version of opencv spit out reversed result

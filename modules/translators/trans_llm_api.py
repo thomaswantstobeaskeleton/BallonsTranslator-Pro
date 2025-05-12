@@ -102,7 +102,7 @@ class LLM_API_Translator(BaseTranslator):
             "description": "Temperature for sampling (OpenAI). Google models may ignore this.",
         },
         "top p": {
-            "value": 1,
+            "value": 1.,
             "description": "Top P for sampling. Forced to 1 for Google models.",
         },
         "retry attempts": {
@@ -545,7 +545,7 @@ class LLM_API_Translator(BaseTranslator):
         func_args = {
             "model": model,
             "messages": messages,
-            "top_p": 1.0,
+            "top_p": self.top_p,
             "max_tokens": self.max_tokens // 2,
         }
 

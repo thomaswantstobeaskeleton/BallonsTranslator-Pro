@@ -1133,7 +1133,8 @@ class MainWindow(mainwindow_cls):
                 if self._run_imgtrans_wo_textstyle_update and ffmt_list is not None:
                     blk.fontformat.merge(ffmt_list[ii])
                 else:
-                    if override_fnt_size:
+                    if override_fnt_size or \
+                        blk.font_size < 0:  # fall back to global font size if font size is not valid, it will be set to -1 for detected blocks
                         blk.font_size = gf.font_size
                     elif blk._detected_font_size > 0 and not pcfg.module.enable_detect:
                         blk.font_size = blk._detected_font_size

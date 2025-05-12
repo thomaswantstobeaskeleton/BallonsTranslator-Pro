@@ -826,7 +826,7 @@ class TextBlkItem(QGraphicsTextItem):
             gradient = self.get_text_gradient()
             cfmt.setForeground(gradient)
         else:
-            cfmt.setForeground(QColor(*self.fontformat.frgb))
+            cfmt.setForeground(QColor(*[int(c) for c in self.fontformat.frgb]))
 
         self.set_cursor_cfmt(cursor, cfmt, True)
         self._after_set_ffmt(cursor, repaint_background, restore_cursor, **after_kwargs)

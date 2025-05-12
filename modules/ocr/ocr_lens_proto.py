@@ -471,7 +471,7 @@ class OCRLensAPI_exp(OCRBase):
 
         full_text = ""
         try:
-            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            pil_img = Image.fromarray(img)
             processed_bytes, width, height = _preprocess_image_for_lens(pil_img)
 
             if not processed_bytes:

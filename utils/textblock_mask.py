@@ -11,15 +11,15 @@ def show_img_by_dict(imgdicts):
         cv2.imshow(keyname, imgdicts[keyname])
     cv2.waitKey(0)
 
-# 计算文本bgr均值
-def letter_calculator(img, mask, bground_bgr, show_process=False):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # bgr to grey
-    aver_bground_bgr = 0.114 * bground_bgr[0] + 0.587 * bground_bgr[1] + 0.299 * bground_bgr[2]
+# 计算文本rgb均值
+def letter_calculator(img, mask, bground_rgb, show_process=False):
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # rgb to grey
+    aver_bground_rgb = 0.299 * bground_rgb[0] + 0.587 * bground_rgb[1] + 0.114 * bground_rgb[2]
     thresh_low = 127
     retval, threshed = cv2.threshold(gray, 127, 255, cv2.THRESH_OTSU)
 
-    if aver_bground_bgr < thresh_low:
+    if aver_bground_rgb < thresh_low:
         threshed = 255 - threshed
     threshed = 255 - threshed
 
@@ -35,7 +35,7 @@ def letter_calculator(img, mask, bground_bgr, show_process=False):
         # cv2.waitKey(0)
         return [-1, -1, -1], threshed
     
-    letter_bgr = np.mean(mat_region, axis=0).astype(int).tolist()
+    letter_rgb = np.mean(mat_region, axis=0).astype(int).tolist()
     
     if show_process:
         cv2.imshow("thresh", threshed)
@@ -43,11 +43,11 @@ def letter_calculator(img, mask, bground_bgr, show_process=False):
         imgcp = np.copy(img)
         imgcp *= 0
         imgcp += 127
-        imgcp[le_region] = letter_bgr
+        imgcp[le_region] = letter_rgb
         cv2.imshow("letter_img", imgcp)
         # cv2.waitKey(0)
         
-    return letter_bgr, threshed
+    return letter_rgb, threshed
 
 # 预处理让文本颜色提取准确点
 def usm(src):
@@ -59,19 +59,19 @@ def usm(src):
     result[0:h,w:2*w,:] = usm
     return usm
 
-# 计算文本bgr均值方法2，可能用中位数代替均值会好点
-def textbgr_calculator(img, text_mask, show_process=False):
+# 计算文本rgb均值方法2，可能用中位数代替均值会好点
+def textrgb_calculator(img, text_mask, show_process=False):
     text_mask = cv2.erode(text_mask, (3, 3), iterations=1)
     usm_img = usm(img)
-    overall_meanbgr = np.mean(usm_img[np.where(text_mask==255)], axis=0)
+    overall_meanrgb = np.mean(usm_img[np.where(text_mask==255)], axis=0)
     if show_process:
         colored_text_board = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8) + 127
-        colored_text_board[np.where(text_mask==255)] = overall_meanbgr
+        colored_text_board[np.where(text_mask==255)] = overall_meanrgb
         cv2.imshow("usm", usm_img)
         cv2.imshow("textcolor", colored_text_board)
-    return overall_meanbgr.astype(np.uint8)
+    return overall_meanrgb.astype(np.uint8)
 
-# 计算背景bgr均值和标准差
+# 计算背景rgb均值和标准差
 def bground_calculator(buble_img, back_ground_mask, dilate=True):
     kernel = np.ones((3,3),np.uint8)
     if dilate:
@@ -82,7 +82,7 @@ def bground_calculator(buble_img, back_ground_mask, dilate=True):
         pix_array = buble_img[bground_region]
         bground_aver = np.mean(pix_array, axis=0).astype(int)
         pix_array - bground_aver
-        gray = cv2.cvtColor(buble_img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(buble_img, cv2.COLOR_RGB2GRAY)
         gray_pixarray = gray[bground_region]
         gray_aver = np.mean(gray_pixarray)
         gray_pixarray = gray_pixarray - gray_aver
@@ -200,8 +200,8 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
         inner_rect.append(-1)
     
     bground_aver = bground_aver.astype(np.uint8)
-    bub_dict = {"bgr": letter_aver,
-                "bground_bgr": bground_aver,
+    bub_dict = {"rgb": letter_aver,
+                "bground_rgb": bground_aver,
                 "inner_rect": inner_rect,
                 "need_inpaint": need_inpaint}
     return mask, ballon_mask, bub_dict
@@ -258,8 +258,8 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
         reverse = False
         c_ind = 0
 
-        num_labels, labels, stats, centroids, pseduo_outermask = find_outermask(cv2.threshold(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), 1, 255, cv2.THRESH_OTSU+cv2.THRESH_BINARY)[1])
-        grayim = np.expand_dims(np.array(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)), axis=2)
+        num_labels, labels, stats, centroids, pseduo_outermask = find_outermask(cv2.threshold(cv2.cvtColor(im, cv2.COLOR_RGB2GRAY), 1, 255, cv2.THRESH_OTSU+cv2.THRESH_BINARY)[1])
+        grayim = np.expand_dims(np.array(cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)), axis=2)
         im = np.append(im, grayim, axis=2)
         outer_cords = np.where(pseduo_outermask==255)
         for bgr_ind in range(4):
@@ -292,7 +292,7 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
         return c_ind, reverse
     
     channel_index, reverse = ccctest(img)
-    chanel = img[:, :, channel_index] if channel_index < 3 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    chanel = img[:, :, channel_index] if channel_index < 3 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     ret, thresh = cv2.threshold(chanel, 1, 255, cv2.THRESH_OTSU+cv2.THRESH_BINARY)
     
     # reverse to get white text on black bg
@@ -312,7 +312,7 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
     if apply_strokewidth_check > 0:
         text_mask = strokewidth_check(text_mask, labels, num_labels, stats, debug_type=show_process-1)
         
-    text_color = textbgr_calculator(img, text_mask, show_process=show_process)
+    text_color = textrgb_calculator(img, text_mask, show_process=show_process)
     inner_rect = cv2.boundingRect(cv2.findNonZero(cv2.dilate(text_mask, (3, 3), iterations=1)))
     inner_rect = [ii for ii in inner_rect]
     inner_rect.append(-1)
@@ -334,15 +334,15 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
         show_img_by_dict({"thresh": thresh, "ori": img, "outer": ballon_mask, "text": text_mask, "bgmask": bg_mask})
 
     bground_aver = bground_aver.astype(np.uint8)
-    bub_dict = {"bgr": text_color,
-                "bground_bgr": bground_aver,
+    bub_dict = {"rgb": text_color,
+                "bground_rgb": bground_aver,
                 "inner_rect": inner_rect,
                 "need_inpaint": need_inpaint}
     return mask, ballon_mask, bub_dict
 
 
 def existing_mask(img, mask: np.ndarray):
-    bub_dict = {"bgr": [0, 0, 0],"bground_bgr": [255, 255, 255],"need_inpaint": True}
+    bub_dict = {"rgb": [0, 0, 0],"bground_rgb": [255, 255, 255],"need_inpaint": True}
     return mask, mask, bub_dict
 
 

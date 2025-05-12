@@ -237,7 +237,7 @@ def draw_bbox(pred, img, lang_list=None):
     for ii, obj in enumerate(pred):
         p1, p2 = (obj[0], obj[1]), (obj[2], obj[3])
         label = lang_list[obj[-1]] + str(ii+1)
-        cv2.rectangle(img, p1, p2, colors(obj[-1], bgr=True), lw, lineType=cv2.LINE_AA)
+        cv2.rectangle(img, p1, p2, colors(obj[-1], bgr=False), lw, lineType=cv2.LINE_AA)
         t_w, t_h = cv2.getTextSize(label, 0, fontScale=lw / 3, thickness=lw)[0]
-        cv2.putText(img, label, (p1[0], p1[1] + t_h + 2), 0, lw / 3, colors(obj[-1], bgr=True), max(lw-1, 1), cv2.LINE_AA)
+        cv2.putText(img, label, (p1[0], p1[1] + t_h + 2), 0, lw / 3, colors(obj[-1], bgr=False), max(lw-1, 1), cv2.LINE_AA)
     return img

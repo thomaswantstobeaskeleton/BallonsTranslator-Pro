@@ -602,10 +602,9 @@ class OCR32pxModel:
                     seq.append(ch)
                     
                 textblk.text.append(''.join(seq))
-                # manga-image-translator ocr extract bgr instead of rgb
                 textblk.update_font_colors(
-                    [fb, fg, fr],
-                    [bb, bg, br]
+                    [fr, fg, fb],
+                    [br, bg, bb]
                 )
             chunck_idx += N
 

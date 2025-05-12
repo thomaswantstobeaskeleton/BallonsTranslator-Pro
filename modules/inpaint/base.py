@@ -69,9 +69,9 @@ class InpainterBase(BaseModule):
                     non_text_region = np.where(non_text_msk > 0)
                     non_text_px = img[non_text_region]
                     average_bg_color = np.median(non_text_px, axis=0)
-                    std_bgr = np.std(non_text_px - average_bg_color, axis=0)
-                    std_max = np.max(std_bgr)
-                    inpaint_thresh = 7 if np.std(std_bgr) > 1 else 10
+                    std_rgb = np.std(non_text_px - average_bg_color, axis=0)
+                    std_max = np.max(std_rgb)
+                    inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
                     if std_max < inpaint_thresh:
                         img = img.copy()
                         img[np.where(ballon_msk > 0)] = average_bg_color
@@ -92,9 +92,9 @@ class InpainterBase(BaseModule):
                         non_text_region = np.where(non_text_msk > 0)
                         non_text_px = im[non_text_region]
                         average_bg_color = np.median(non_text_px, axis=0)
-                        std_bgr = np.std(non_text_px - average_bg_color, axis=0)
-                        std_max = np.max(std_bgr)
-                        inpaint_thresh = 7 if np.std(std_bgr) > 1 else 10
+                        std_rgb = np.std(non_text_px - average_bg_color, axis=0)
+                        std_max = np.max(std_rgb)
+                        inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
                         if std_max < inpaint_thresh:
                             need_inpaint = False
                             im[np.where(ballon_msk > 0)] = average_bg_color

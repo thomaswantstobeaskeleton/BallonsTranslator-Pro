@@ -137,7 +137,7 @@ Sugoi 翻译器作者: [mingshiba](https://www.patreon.com/mingshiba)
  * 暂时仅支持日文(方块字都差不多)和英文检测，训练代码和说明见https://github.com/dmMaze/comic-text-detector
  * 支持使用 [星河云（团子漫画OCR）](https://cloud.stariver.org.cn/)的文本检测，需要填写用户名和密码，每次启动时会自动登录。
    * 详细说明见 [团子OCR说明](doc/团子OCR说明.md)
- * `YSGDetector` 是由 [lhj5426](https://github.com/lhj5426) 训练的模型，能更好地过滤日漫/CG里的拟声词。需要手动从 [YSGYoloDetector](https://huggingface.co/dreMaz/YSGYoloDetector) 下载模型放到 data/models 目录下。
+ * `YSGDetector` 是由 [lhj5426](https://github.com/lhj5426) 训练的模型，能更好地过滤日漫/CG里的拟声词。需要手动从 [YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) 下载模型放到 data/models 目录下。
 
 
 ### OCR
