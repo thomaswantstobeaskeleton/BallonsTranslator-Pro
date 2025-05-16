@@ -182,15 +182,18 @@ Sugoi 翻译器作者: [mingshiba](https://www.patreon.com/mingshiba)
 1. 更新显卡驱动至最新版（建议 24.12.1 及以上，下载并安装 [AMD HIP SDK 6.2](https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html)  
 2. 下载 [ZLUDA](https://github.com/lshqqytiger/ZLUDA/releases)（ROCm6版本）并解压到 zluda 文件夹内，复制 zluda 文件夹到系统盘下：比如c盘（C:\zluda）  
 3. 配置系统环境变量，以 windows 10 系统为例：设置 - 系统属性 - 高级系统设置 - 环境变量 - 系统变量 - 找到 path 变量，点击编辑，在最后添加 `C:\zluda` 和 `%HIP_PATH_62%bin` 两项  
-4. 替换 CUDA 库的动态链接文件：将 `C:\zluda` 文件夹内的 `cublas64_11.dll` `cusparse64_11.dll` 和 `nvrtc64_112_0.dll` 复制出一份到桌面，按如下规则重命名复制出来的文件  
+4. 替换 CUDA 库的动态链接文件：将 `C:\zluda` 文件夹内的 `cublas.dll` `cusparse.dll` 和 `nvrtc.dll` 复制出一份到桌面，按如下规则重命名复制出来的文件  
+
+**注意：(AMD 驱动 25.5.1 务必更新 ZLUDA 版本到 3.9.5 及以上)**
+
 ```
-  `原文件名` → `新文件名`
+  原文件名 → 新文件名
 
-  `cublas.dll` → `cublas64_11.dll`
+  cublas.dll → cublas64_11.dll
 
-  `cusparse.dll` → `cusparse64_11.dll`
+  cusparse.dll → cusparse64_11.dll
 
-  `nvrtc.dll` → `nvrtc64_112_0.dll`
+  nvrtc.dll → nvrtc64_112_0.dll
 ```
   将已经重命名的文件替换掉 `BallonsTranslator\ballontrans_pylibs_win\Lib\site-packages\torch\lib\` 目录中的同名文件
 

@@ -246,7 +246,7 @@ class ParamWidget(QWidget):
                 else:
                     param_layout.addLayout(pw_lo, ii, widget_idx)
             else:
-                raise ValueError(f"Failed to initialize widget for key: {param_key}")
+                raise ValueError(f"Failed to initialize widget for key-value pair: {param_key}-" + params[param_key])
             
     def on_flushbtn_clicked(self):
         paramw: ParamComboBox = self.sender()

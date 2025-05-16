@@ -17,6 +17,8 @@ MODEL_DIR = 'data/models'
 CKPT_LIST = []
 
 def update_ckpt_list():
+    if not osp.exists(MODEL_DIR):
+        return
     global CKPT_LIST
     CKPT_LIST.clear()
     for p in os.listdir(MODEL_DIR):
@@ -34,11 +36,10 @@ CLS_MAP = {
     'other': 'other'
 }
 
+update_ckpt_list()
 
 @register_textdetectors('ysgyolo')
 class YSGYoloDetector(TextDetectorBase):
-
-    update_ckpt_list()
     params = {
         'model path': {
             'type': 'selector',
