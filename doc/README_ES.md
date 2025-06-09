@@ -246,7 +246,7 @@ Si deseas usar el traductor Sugoi (solo soporta traducción del japonés al ingl
    * La versión sin sufijo consume menos tokens, pero su estabilidad en la segmentación de oraciones es ligeramente peor, lo que puede causar problemas al traducir textos largos.
    * La versión con el sufijo **exp** consume más tokens, pero es más estable y usa técnicas tipo "jailbreak" en el prompt, adecuada para traducciones de textos largos.
 * [m2m100](https://huggingface.co/facebook/m2m100_1.2B): Descarga y mueve la carpeta 'm2m100-1.2B-ctranslate2' al directorio 'data/models'.
-* **Puedes encontrar información sobre los módulos de traductores [aquí](doc/modules/translators.md)**.
+* **Puedes encontrar información sobre los módulos de traductores [aquí](../doc/modules/translators.md)**.
 
 Para otros modelos de traducción offline al inglés de buena calidad, consulta este [hilo de discusión](https://github.com/dmMaze/BallonsTranslator/discussions/515).
 Para añadir un nuevo traductor, consulte [Cómo_añadir_un_nuevo_traductor](../doc/Como_añadir_un_nuevo_traductor.md). Es tan sencillo como crear una subclase de una clase base e implementar dos interfaces. Luego puedes usarla en la aplicación. Las contribuciones al proyecto son bienvenidas.
