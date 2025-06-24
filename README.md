@@ -39,7 +39,7 @@
 
 ## 运行源码
 
-安装 [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (别用微软应用商店版) 和 [Git](https://git-scm.com/downloads)
+安装 [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (别用微软应用商店版) 和 [Git](https://git-scm.com/downloads)
 
 ```bash
 # 克隆仓库

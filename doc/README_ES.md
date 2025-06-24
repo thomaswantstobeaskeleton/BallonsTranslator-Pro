@@ -37,7 +37,7 @@ Descarga `BallonsTranslator_dev_src_with_gitpython.7z` desde [MEGA](https://mega
 Ejecute `scripts/local_gitpull.bat` para obtener la última actualización.
 
 ### Ejecutar el código fuente
-Instale [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (no utilice la versión de Microsoft Store) y [Git](https://git-scm.com/downloads).
+Instale [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (no utilice la versión de Microsoft Store) y [Git](https://git-scm.com/downloads).
 
 ```bash
 # Clonar este repositorio

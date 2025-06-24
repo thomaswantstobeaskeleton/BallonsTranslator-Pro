@@ -136,7 +136,7 @@ def main():
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     os.chdir(APP_DIR)
 
-    prepare_environment()
+    # prepare_environment()
 
     from utils.zluda_config import enable_zluda_config
     enable_zluda_config()
@@ -206,17 +206,19 @@ def main():
 
     setup_logging(shared.LOGGING_PATH)
 
-    from modules.base import load_modules
-    from modules.prepare_local_files import prepare_local_files_forall
-    load_modules()
-    prepare_local_files_forall()
-
     app_args = sys.argv
     if args.headless:
         app_args = sys.argv + ['-platform', 'offscreen']
     app = QApplication(app_args)
     app.setApplicationName('BalloonsTranslator')
     app.setApplicationVersion(VERSION)
+
+    # import msl.loadlib (required by translators/trans_eztrans) before init QApplication
+    # yield QWindowsContext: OleInitialize() failed on py3.10, 
+    from modules.base import load_modules
+    from modules.prepare_local_files import prepare_local_files_forall
+    load_modules()
+    prepare_local_files_forall()
 
     if not args.headless:
         ps = QGuiApplication.primaryScreen()

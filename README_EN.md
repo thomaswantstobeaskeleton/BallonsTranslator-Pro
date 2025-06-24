@@ -38,7 +38,7 @@ Note these provided packages cannot run on Windows 7, Win 7 users need to instal
 
 ## Run the source code
 
-Install [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (dont use the one installed from microsoft store) and [Git](https://git-scm.com/downloads).
+Install [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (dont use the one installed from microsoft store) and [Git](https://git-scm.com/downloads).
 
 ```bash
 # Clone this repo
