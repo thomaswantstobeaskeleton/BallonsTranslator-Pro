@@ -5,7 +5,7 @@ import requests
 import base64
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
-from utils import create_error_dialog, create_info_dialog
+from utils.message import create_error_dialog, create_info_dialog
 
 import json
 import time

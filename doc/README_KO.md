@@ -38,7 +38,7 @@ scripts/local_gitpull.bat를 실행하여 최신 업데이트를 받으세요.
 
 ## 소스 코드를 실행
 
-[Python] 설치 (https://www.python.org/downloads/release/python-31011) **< 3.12** (Microsoft 스토어에서 설치 한 것을 사용하지 마세요) 및 [Git](https://git-scm.com/downloads).
+[Python] 설치 (https://www.python.org/downloads/release/python-31011) **<= 3.12** (Microsoft 스토어에서 설치 한 것을 사용하지 마세요) 및 [Git](https://git-scm.com/downloads).
 
 ```bash
 # 이 레포 복사

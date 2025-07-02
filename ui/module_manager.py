@@ -20,7 +20,7 @@ import modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
 from utils.textblock import TextBlock, sort_regions
 from utils import shared
-from utils import create_error_dialog, create_info_dialog, connect_once
+from utils.message import create_error_dialog, create_info_dialog
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
 from utils.proj_imgtrans import ProjImgTrans
@@ -376,7 +376,6 @@ class ImgtransThread(QThread):
                     existed_mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
                     if existed_mask is not None:
                         mask = np.bitwise_or(mask, existed_mask)
-                    print(len(blk_list), len(self.imgtrans_proj.pages[imgname]))
                 self.imgtrans_proj.pages[imgname] = blk_list
 
             if blk_list is None:

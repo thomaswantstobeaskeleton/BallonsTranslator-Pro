@@ -67,7 +67,7 @@ class SourceTextEdit(QTextEdit):
     push_undo_stack = Signal(int)
     text_changed = Signal()
     show_select_menu = Signal(QPoint, str)
-    focus_out = Signal()
+    focus_out = Signal(int)
 
     def __init__(self, idx, parent, fold=False, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -236,7 +236,7 @@ class SourceTextEdit(QTextEdit):
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
         self.setHoverEffect(False)
-        self.focus_out.emit()
+        self.focus_out.emit(self.idx)
         return super().focusOutEvent(event)
 
     def inputMethodEvent(self, e: QInputMethodEvent) -> None:

@@ -15,7 +15,7 @@ from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
 from utils.textblock import TextBlock, TextAlignment
 from utils import shared
-from utils import create_error_dialog, create_info_dialog
+from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY
@@ -917,7 +917,7 @@ class MainWindow(mainwindow_cls):
             if not save_rst_only:
                 mask_path = self.imgtrans_proj.get_mask_path()
                 mask_array = self.imgtrans_proj.mask_array
-                self.imsave_thread.saveImg(mask_path, mask_array)
+                self.imsave_thread.saveImg(mask_path, mask_array, save_params={'ext': pcfg.intermediate_imgsave_ext})
                 inpainted_path = self.imgtrans_proj.get_inpainted_path()
                 if self.canvas.drawingLayer.drawed():
                     inpainted = self.canvas.base_pixmap.copy()
@@ -926,7 +926,7 @@ class MainWindow(mainwindow_cls):
                     painter.end()
                 else:
                     inpainted = self.imgtrans_proj.inpainted_array
-                self.imsave_thread.saveImg(inpainted_path, inpainted)
+                self.imsave_thread.saveImg(inpainted_path, inpainted, save_params={'ext': pcfg.intermediate_imgsave_ext})
 
         img = self.canvas.render_result_img()
         imsave_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)

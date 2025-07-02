@@ -1,6 +1,6 @@
-name: 漏洞反馈
-title: "漏洞反馈:" # 默认标题
-description: 报告一个漏洞
+name: Bug 反馈
+title: "Bug 反馈:" # 默认标题
+description: 报告不符合预期的错误
 labels: [bug]
 body:
   - type: markdown
@@ -28,9 +28,6 @@ body:
         - Python 版本及解释器路径
         - 应用版本、分支及 Commit Hash
 
-        Please provide the version information of BallonsTranslator. Copy the following details from the console (displayed at startup). If the info is lost, save the project and restart the program:
-        - Python version and interpreter path
-        - Application version, branch, and Commit Hash
       placeholder: |
         示例:
         py version: 3.10.9 (tags/v3.10.9:...)

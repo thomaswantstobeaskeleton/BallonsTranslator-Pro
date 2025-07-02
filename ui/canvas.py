@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Union
 import os
 
-from qtpy.QtWidgets import QSlider, QMenu, QGraphicsScene, QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
+from qtpy.QtWidgets import QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
 from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSizeF, QEvent
 from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent
 
@@ -143,10 +143,13 @@ class CustomGV(QGraphicsView):
                 e.setAccepted(True)
 
         return super().event(e)
-    # def enterEvent(self, event: QEvent) -> None:
-    #   # not sure why i add it
-        # self.setFocus()
-    #     return super().enterEvent(event)
+    
+    def dragMoveEvent(self, e: QGraphicsSceneDragDropEvent):
+        super().dragMoveEvent(e)
+        if e.mimeData().hasUrls():
+            # issue #908, https://stackoverflow.com/questions/4177720/accepting-drops-on-a-qgraphicsscene
+            e.setAccepted(True)
+
 
 class Canvas(QGraphicsScene):
 

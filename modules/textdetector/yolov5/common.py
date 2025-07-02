@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from .yolov5_utils import make_divisible, initialize_weights, check_anchor_order, check_version, fuse_conv_and_bn
+from .yolov5_utils import make_divisible, initialize_weights, check_anchor_order, fuse_conv_and_bn
 
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same'

@@ -6,13 +6,16 @@ from typing import List, Dict, Callable, Union
 import base64
 import traceback
 
+from .logger import logger as LOGGER
 import requests
 from PIL import Image
+import PIL
 import cv2
 import numpy as np
+import pillow_jxl
 from natsort import natsorted
 
-IMG_EXT = ['.bmp', '.jpg', '.png', '.jpeg', '.webp']
+IMG_EXT = ['.bmp', '.jpg', '.png', '.jpeg', '.webp', '.jxl']
 
 NP_INT_TYPES = (np.int_, np.int8, np.int16, np.int32, np.int64, np.uint, np.uint8, np.uint16, np.uint32, np.uint64)
 if int(np.version.full_version.split('.')[0]) == 1:
@@ -85,16 +88,42 @@ def find_all_files_recursive(tgt_dir: Union[List, str], ext: Union[List, set], e
     
     return filelst
 
-def imread(imgpath, read_type=cv2.IMREAD_COLOR):
+def imread(imgpath, read_type=cv2.IMREAD_COLOR, max_retry_limit=5, retry_interval=0.1):
     if not osp.exists(imgpath):
         return None
-    # img = cv2.imdecode(np.fromfile(imgpath, dtype=np.uint8), read_type)
-    img = np.array(Image.open(imgpath).convert('RGB'))
+    
+    num_tries = 0
+    while True:
+        try:
+            img = Image.open(imgpath)
+            if read_type != cv2.IMREAD_GRAYSCALE:
+                img = img.convert('RGB')
+            img = np.array(img)
+            break
+        except PIL.UnidentifiedImageError as e:
+            # IMG I/O thread might not finished yet
+            num_tries += 1
+            if max_retry_limit is not None and num_tries >= max_retry_limit:
+                LOGGER.exception(e)
+                return None
+            LOGGER.warning(f'PIL.UnidentifiedImageError: failed to read {imgpath}, retries: {num_tries} / {max_retry_limit}')
+            time.sleep(retry_interval)
+    
     if read_type == cv2.IMREAD_GRAYSCALE:
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        if img.ndim == 3:
+            if img.shape[-1] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            elif img.shape[-1] == 4:
+                img = cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+            elif img.shape[-1] == 1:
+                img = img[..., 0]
+            else:
+                raise
     return img
 
-def imwrite(img_path, img, ext='.png', quality=100):
+
+def imwrite(img_path, img, ext='.png', quality=100, jxl_encode_effort=3):
+    # cv2 writing is faster than PIL
     suffix = Path(img_path).suffix
     ext = ext.lower()
     assert ext in IMG_EXT
@@ -102,10 +131,24 @@ def imwrite(img_path, img, ext='.png', quality=100):
         img_path = img_path.replace(suffix, ext)
     else:
         img_path += ext
-    params = {}
-    if ext in {'.jpg', '.jpeg', '.webp'}:
-        params = {'quality': quality}
-    Image.fromarray(img).save(img_path, **params)
+    encode_param = None
+    if ext in {'.jpg', '.jpeg'}:
+        encode_param = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    elif ext == '.webp':
+        encode_param = [cv2.IMWRITE_WEBP_QUALITY, quality]
+    if ext == '.jxl':
+        # jxl_encode_effort: https://github.com/Isotr0py/pillow-jpegxl-plugin/issues/23
+        # higher values theoretically produce smaller files at the expense of time, 3 seems to strike a balance
+        lossless = quality > 99 # quality=100, lossless=False seems to result in larger file compared with lossless=True
+        Image.fromarray(img).save(img_path, quality=quality, lossless=lossless, effort=jxl_encode_effort)
+    else:
+        if len(img.shape) == 3:
+            if img.shape[-1] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            elif img.shape[-1] == 4:
+                img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
+        cv2.imencode(ext, img, encode_param)[1].tofile(img_path)
+
 
 def show_img_by_dict(imgdicts):
     for keyname in imgdicts.keys():

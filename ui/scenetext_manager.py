@@ -3,9 +3,9 @@ from typing import List, Union, Tuple
 import numpy as np
 import copy
 
-from qtpy.QtWidgets import QApplication, QWidget
+from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF, QPoint
-from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetrics, QFontMetricsF, QFont, QTextCharFormat, QClipboard
+from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
     from qtpy.QtWidgets import QUndoCommand
 except:
@@ -971,6 +971,9 @@ class SceneTextManager(QObject):
 
         if idx < len(self.textblk_item_list):
             blk_item = self.textblk_item_list[idx]
+            sender = self.sender()
+            if isinstance(sender, TransTextEdit):
+                blk_item.setCacheMode(QGraphicsItem.CacheMode.NoCache)
             self.canvas.gv.ensureVisible(blk_item)
             self.txtblkShapeControl.setBlkItem(blk_item)
 
@@ -995,9 +998,13 @@ class SceneTextManager(QObject):
         if isinstance(w, SourceTextEdit) or isinstance(w, TextBlkItem):
             w.block_all_input = block
 
-    def on_pairw_focusout(self):
+    def on_pairw_focusout(self, idx: int):
         if self.selectext_minimenu.isVisible():
             self.selectext_minimenu.hide()
+        sender = self.sender()
+        if isinstance(sender, TransTextEdit) and idx < len(self.textblk_item_list):
+            blk_item = self.textblk_item_list[idx]
+            blk_item.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
 
     def on_push_textitem_undostack(self, num_steps: int, is_formatting: bool):
         blkitem: TextBlkItem = self.sender()

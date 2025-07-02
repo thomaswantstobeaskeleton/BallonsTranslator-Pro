@@ -230,7 +230,7 @@ class ParamWidget(QWidget):
                 param_label = ParamNameLabel(display_param_name)
                 param_layout.addWidget(param_label, ii, 0)
                 widget_idx = 1
-            if param_widget:
+            if param_widget is not None:
                 pw_lo = None
                 if hasattr(param_widget, 'flush_btn') or hasattr(param_widget, 'path_select_btn'):
                     pw_lo = QHBoxLayout()
@@ -246,7 +246,8 @@ class ParamWidget(QWidget):
                 else:
                     param_layout.addLayout(pw_lo, ii, widget_idx)
             else:
-                raise ValueError(f"Failed to initialize widget for key: {param_key}")
+                v = params[param_key]
+                raise ValueError(f"Failed to initialize widget for key-value pair: {param_key}-{v}")
             
     def on_flushbtn_clicked(self):
         paramw: ParamComboBox = self.sender()

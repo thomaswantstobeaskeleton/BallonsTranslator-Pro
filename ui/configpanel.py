@@ -463,15 +463,19 @@ class ConfigPanel(Widget):
         self.let_show_only_custom_fonts.stateChanged.connect(self.on_show_only_custom_fonts)
 
         generalConfigPanel.addTextLabel(label_save)
-        self.rst_imgformat_combobox, imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JPG', 'WEBP'], self.tr('Result image format'))
+        self.rst_imgformat_combobox, imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JPG', 'WEBP', 'JXL'], self.tr('Result image format'))
         self.rst_imgformat_combobox.activated.connect(self.on_rst_imgformat_changed)
         self.rst_imgquality_edit = PercentageLineEdit('100')
         self.rst_imgquality_edit.setFixedWidth(CONFIG_COMBOBOX_SHORT)
         self.rst_imgquality_edit.finish_edited.connect(self.on_edit_quality_changed)
+
         sublock = ConfigSubBlock(self.rst_imgquality_edit, self.tr('Quality'), vertical_layout=False)
         sublock.layout().setAlignment(Qt.AlignmentFlag.AlignLeft)
         sublock.layout().insertStretch(-1)
         imsave_sublock.layout().addWidget(sublock)
+
+        self.intermediate_imgformat_combobox, intermediate_imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JXL'], self.tr('Intermediate image format'))
+        self.intermediate_imgformat_combobox.activated.connect(self.on_intermediate_imgformat_changed)
 
         generalConfigPanel.addTextLabel(label_saladict)
 
@@ -551,6 +555,9 @@ class ConfigPanel(Widget):
 
     def on_rst_imgformat_changed(self):
         pcfg.imgsave_ext = '.' + self.rst_imgformat_combobox.currentText().lower()
+
+    def on_intermediate_imgformat_changed(self):
+        pcfg.intermediate_imgsave_ext = '.' + self.intermediate_imgformat_combobox.currentText().lower()
 
     def on_edit_quality_changed(self, value: str):
         pcfg.imgsave_quality = int(value)
@@ -636,6 +643,7 @@ class ConfigPanel(Widget):
         self.searchurl_combobox.setCurrentText(pcfg.search_url)
         self.ocr_config_panel.restoreEmptyOCRChecker.setChecked(pcfg.restore_ocr_empty)
         self.rst_imgformat_combobox.setCurrentText(pcfg.imgsave_ext.replace('.', '').upper())
+        self.intermediate_imgformat_combobox.setCurrentText(pcfg.intermediate_imgsave_ext.replace('.', '').upper())
         self.rst_imgquality_edit.setText(str(pcfg.imgsave_quality))
         self.load_model_checker.setChecked(pcfg.module.load_model_on_demand)
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)

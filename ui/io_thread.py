@@ -8,7 +8,7 @@ from qtpy.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.logger import logger as LOGGER
 from utils.io_utils import imread, imwrite
-from utils import create_error_dialog
+from utils.message import create_error_dialog
 from utils.proj_imgtrans import ProjImgTrans
 from .custom_widget import ProgressMessageBox
 from .misc import pixmap2ndarray
@@ -63,6 +63,20 @@ class ImgSaveThread(ThreadBase):
             imwrite(save_path, img, **save_params)
             self.img_writed.emit(pagename_in_proj)
             self.im_save_list.pop(0)
+
+    def on_exec_failed(self):
+        if len(self.im_save_list) > 0:
+            self.im_save_list.pop(0)
+            if len(self.im_save_list) == 0:
+                self.job = None
+            else:
+                try:
+                    self.job()
+                except Exception as e:
+                    self.on_exec_failed()
+                    create_error_dialog(e, self._thread_error_msg, self._thread_exception_type)
+
+
 
 
 class ImgTransProjFileIOThread(ThreadBase):

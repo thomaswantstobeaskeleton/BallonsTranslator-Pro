@@ -1,9 +1,7 @@
 # coding:utf-8
-import sys
 from ctypes import cast
 from ctypes.wintypes import LPRECT, MSG
 
-from pkg_resources import parse_version
 import win32con
 import win32gui
 from qtpy.QtCore import Qt

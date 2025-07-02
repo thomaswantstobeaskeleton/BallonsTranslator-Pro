@@ -176,7 +176,6 @@ class TextBlkItem(QGraphicsTextItem):
         
         self.repainting = True
         font_size = self.layout.max_font_size(to_px=True)
-        img_array = None
         target_map = QPixmap(self.boundingRect().size().toSize())
         target_map.fill(Qt.GlobalColor.transparent)
         painter = QPainter(target_map)
@@ -454,8 +453,26 @@ class TextBlkItem(QGraphicsTextItem):
             return self.scale()
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget) -> None:
+        # subpixel antialiasing is enabled for super().paint upon drawing on some non-transparent background https://github.com/dmMaze/BallonsTranslator/issues/919
+        # which can be avoided by calling super().paint first, but it results in disappeared background in editting mode
+        # so the checking logic lies here
+        
+        if self.is_editting():
+            self._draw_accessories(painter)
+
+        option.state = QStyle.State_None
+        super().paint(painter, option, widget)
+
+        if not self.is_editting():
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
+            self._draw_accessories(painter)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+
+    def _draw_accessories(self, painter: QPainter):
         br = self.boundingRect()
         painter.save()
+        
         if self.background_pixmap is not None:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             painter.drawPixmap(br.toRect(), self.background_pixmap)
@@ -471,8 +488,6 @@ class TextBlkItem(QGraphicsTextItem):
             painter.drawRect(self.unpadRect(br))
         painter.restore()
 
-        option.state = QStyle.State_None
-        super().paint(painter, option, widget)
 
     def startEdit(self, pos: QPointF = None) -> None:
         self.pre_editing = False

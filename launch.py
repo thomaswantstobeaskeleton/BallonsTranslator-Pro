@@ -5,7 +5,6 @@ import os.path as osp
 import os
 import importlib
 import subprocess
-import pkg_resources
 from platform import platform
 
 BRANCH = 'dev'
@@ -28,6 +27,7 @@ FONT_EXTS = {'.ttf','.otf','.ttc','.pfb'}
 
 IS_WIN7 = "Windows-7" in platform()
 
+import utils.shared as shared # Earlier import of shared to use default for config_path argument
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--reinstall-torch", action='store_true', help="launch.py argument: install the appropriate version of torch even if you have some version already installed")
@@ -45,6 +45,7 @@ parser.add_argument("--export-translation-txt", action='store_true', help='save 
 parser.add_argument("--export-source-txt", action='store_true', help='save source to txt file once RUN completed')
 parser.add_argument("--frozen", action='store_true', help='run without checking requirements')
 parser.add_argument("--update", action='store_true', help="Update the repository before launching") # Добавлен аргумент --update
+parser.add_argument("--config_path", default=shared.CONFIG_PATH, help='Config file to use for translation') # Named config_path to avoid conflict with existing name config
 args, _ = parser.parse_known_args()
 
 
@@ -164,7 +165,6 @@ def main():
 
 
     from utils.logger import setup_logging, logger as LOGGER
-    import utils.shared as shared
     from utils.io_utils import find_all_files_recursive
     from utils import config as program_config
 
@@ -173,7 +173,7 @@ def main():
     shared.DEFAULT_DISPLAY_LANG = QLocale.system().name().replace('en_CN', 'zh_CN')
     shared.HEADLESS = args.headless
     shared.load_cache()
-    program_config.load_config()
+    program_config.load_config(args.config_path)
     config = program_config.pcfg
 
     if args.headless:
@@ -206,17 +206,19 @@ def main():
 
     setup_logging(shared.LOGGING_PATH)
 
-    from modules.base import load_modules
-    from modules.prepare_local_files import prepare_local_files_forall
-    load_modules()
-    prepare_local_files_forall()
-
     app_args = sys.argv
     if args.headless:
         app_args = sys.argv + ['-platform', 'offscreen']
     app = QApplication(app_args)
     app.setApplicationName('BalloonsTranslator')
     app.setApplicationVersion(VERSION)
+
+    # import msl.loadlib (required by translators/trans_eztrans) before init QApplication
+    # yield QWindowsContext: OleInitialize() failed on py3.10, 
+    from modules.base import load_modules
+    from modules.prepare_local_files import prepare_local_files_forall
+    load_modules()
+    prepare_local_files_forall()
 
     if not args.headless:
         ps = QGuiApplication.primaryScreen()
@@ -288,6 +290,14 @@ def main():
     sys.exit(app.exec())
 
 def prepare_environment():
+
+    try:
+        import packaging
+    except ModuleNotFoundError:
+        run_pip(f"install packaging", "install packaging")
+
+    from utils.package import check_req_file, check_reqs
+
     if getattr(sys, 'frozen', False):
         print('Running as app, skip dependency installation')
         return
@@ -298,19 +308,15 @@ def prepare_environment():
     req_updated = False
     if sys.platform == 'win32':
         for req in REQ_WIN:
-            try:
-                pkg_resources.require(req)
-            except Exception:
+            if not check_reqs([req]):
                 run_pip(f"install {req}", req)
                 req_updated = True
-    torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.2.2 torchvision==0.17.2 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
+    torch_command = os.environ.get('TORCH_COMMAND', "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 --disable-pip-version-check")
     if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision"):
         run(f'"{python}" -m {torch_command}', "Installing torch and torchvision", "Couldn't install torch", live=True)
         req_updated = True
-    try:
-        pkg_resources.require(open(args.requirements,mode='r', encoding='utf8'))
-    except Exception as e:
-        print(e)
+
+    if not check_req_file(args.requirements):
         run_pip(f"install -r {args.requirements}", "requirements")
         req_updated = True
 

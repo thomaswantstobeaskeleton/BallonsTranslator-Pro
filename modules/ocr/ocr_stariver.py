@@ -6,7 +6,7 @@ import base64
 from typing import List
 
 from .base import register_OCR, OCRBase, TextBlock
-from utils import create_error_dialog, create_info_dialog
+from utils.message import create_error_dialog, create_info_dialog
 
 
 @register_OCR('stariver_ocr')

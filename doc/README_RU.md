@@ -37,7 +37,7 @@
 
 ## Запуск исходного кода
 
-Установите [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (не используйте версию, установленную из Microsoft Store) и [Git](https://git-scm.com/downloads).
+Установите [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (не используйте версию, установленную из Microsoft Store) и [Git](https://git-scm.com/downloads).
 
 ```bash
 # Клонируйте этот репозиторий

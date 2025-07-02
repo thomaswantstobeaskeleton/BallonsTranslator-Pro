@@ -3,14 +3,12 @@
 import re
 import numpy as np
 import time
-import cv2
 import random
 from typing import List, Dict, Any, Tuple, Optional, Union
 from math import sqrt
 import io
 import os
 import json
-from urllib.parse import urlparse
 
 import requests
 from PIL import Image, ImageFile

@@ -36,7 +36,7 @@ Chạy file ```scripts/local_gitpull.bat``` để cập nhật bản mới nhấ
 
 *Phù hợp cho mấy bạn sài linux như tui hehe.*
 
-Cài [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (Đừng cóa mà sài cái bản có sẵn trên Microsoft Store) và [Git](https://git-scm.com/downloads).
+Cài [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (Đừng cóa mà sài cái bản có sẵn trên Microsoft Store) và [Git](https://git-scm.com/downloads).
 
 ```bash
 # Clone this repo

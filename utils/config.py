@@ -135,6 +135,7 @@ class ProgramConfig(Config):
     display_lang: str = field(default_factory=lambda: shared.DEFAULT_DISPLAY_LANG) # to always apply shared.DEFAULT_DISPLAY_LANG
     imgsave_quality: int = 100
     imgsave_ext: str = '.png'
+    intermediate_imgsave_ext: str = '.png'
     show_text_style_preset: bool = True
     expand_tstyle_panel: bool = True
     show_text_effect_panel: bool = True
@@ -210,7 +211,10 @@ def load_textstyle_from(p: str, raise_exception = False):
     text_styles.extend(styles_loaded)
     pcfg.text_styles_path = p
 
-def load_config():
+def load_config(config_path: str = shared.CONFIG_PATH):
+    if config_path != shared.CONFIG_PATH:
+        shared.CONFIG_PATH = config_path
+        LOGGER.info(f'Using specified config file at {shared.CONFIG_PATH}')
 
     if osp.exists(shared.CONFIG_PATH):
         try:

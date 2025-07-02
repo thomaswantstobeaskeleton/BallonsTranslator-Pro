@@ -1,10 +1,7 @@
 import re
-import pkg_resources
 
 from qtpy.QtCore import Qt, QRectF, QPointF, Signal, QSizeF, QSize
 from qtpy.QtGui import QTextCharFormat, QTextDocument, QPixmap, QImage, QTransform, QPalette, QPainter, QTextFrame, QTextBlock, QAbstractTextDocumentLayout, QTextLayout, QFont, QFontMetricsF, QTextOption, QTextLine, QTextFormat
-from qtpy import QT_VERSION
-TEXTLAYOUT_QTVERSION = pkg_resources.parse_version(QT_VERSION) > pkg_resources.parse_version('6.4.2')
 
 import cv2
 import numpy as np

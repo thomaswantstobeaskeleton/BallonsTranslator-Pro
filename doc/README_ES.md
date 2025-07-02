@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Si planeas compartir públicamente los resultados de traducción automática generados con esta herramienta, y no han sido revisados o traducidos completamente por un traductor con experiencia, por favor indícalo claramente como traducción automática en un lugar visible.**
+
 ## BallonTranslator
 
 [Chino](/README.md) | [Inglês](/README_EN.md) | [pt-BR](../doc/README_PT-BR.md) | [Ruso](../doc/README_RU.md) | [Japonés](../doc/README_JA.md) | [Indonesio](../doc/README_ID.md) | [Vietnamita](../doc/README_VI.md) | [Koreano](../doc/README_KO.md) | Español
@@ -9,7 +12,7 @@ BallonTranslator es otra herramienta asistida por ordenador, basada en el aprend
 <p align=center>
   <strong>Vista previa</strong>
 </p>
-
+  
 ## Recursos
 * **Traducción totalmente automática:** 
   - Detecta, reconoce, elimina y traduce textos automáticamente. El rendimiento global depende de estos módulos.
@@ -30,11 +33,11 @@ BallonTranslator es otra herramienta asistida por ordenador, basada en el aprend
 
 ### En Windows
 Si no quieres instalar Python y Git manualmente y tienes acceso a Internet:  
-Descarga BallonsTranslator_dev_src_with_gitpython.7z desde [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) o [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing), descomprime y ejecuta launch_win.bat.  
-Ejecute scripts/local_gitpull.bat para obtener la última actualización.
+Descarga `BallonsTranslator_dev_src_with_gitpython.7z` desde [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) o [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing), descomprime y ejecuta `launch_win.bat`.  
+Ejecute `scripts/local_gitpull.bat` para obtener la última actualización.
 
 ### Ejecutar el código fuente
-Instale [Python](https://www.python.org/downloads/release/python-31011) **< 3.12** (no utilice la versión de Microsoft Store) y [Git](https://git-scm.com/downloads).
+Instale [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (no utilice la versión de Microsoft Store) y [Git](https://git-scm.com/downloads).
 
 ```bash
 # Clonar este repositorio
@@ -42,11 +45,16 @@ $ git clone https://github.com/dmMaze/BallonsTranslator.git ; cd BallonsTranslat
 
 # Iniciar la aplicación
 $ python3 launch.py
+
+# Actualizar la aplicación
+$ python3 launch.py --update
 ```
 
 En la primera ejecución, se instalarán las librerías necesarias y las plantillas se descargarán automáticamente. Si las descargas fallan, tendrás que descargar la carpeta **data** (o los archivos que faltan mencionados en el terminal) desde [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) o [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) y guardarla en la ruta correspondiente de la carpeta de código fuente.
 
 ## Creación de la aplicación para macOS (compatible con chips Intel y Apple Silicon)
+[Referencia](doc/macOS_app.md)
+Pueden ocurrir algunos problemas; por ahora, se recomienda ejecutar el código fuente directamente.
 
 *Nota: macOS también puede ejecutar el código fuente si la aplicación no funciona.*
 
@@ -125,9 +133,6 @@ sh scripts/build-macos-app.sh
 
 </details>
 
-Para utilizar el traductor Sugoi (sólo japonés-inglés), descarga la [plantilla offline](https://drive.google.com/drive/folders/1KnDlfUM9zbnYFTo6iCbnBaBKabXfnVJm) y mueve la carpeta «sugoi_translator» a BallonsTranslator/ballontranslator/data/models.
-
-
 # Utilización
 
 **Se recomienda ejecutar el programa en un terminal en caso de que se produzca un fallo y no se proporcione información, como se muestra en el siguiente gif.**
@@ -185,6 +190,7 @@ Para 'borrar' los resultados de inpainting no deseados, utilice la herramienta i
 * `0-9` para ajustar la opacidad de la capa de texto.
 * Para editar texto: negrita - `Ctrl+B`, subrayado - `Ctrl+U`, cursiva - `Ctrl+I`.
 * Ajuste la sombra y la transparencia del texto en el panel de estilo de texto -> Efecto.
+* ```Alt+Arrow Keys``` o ```Alt+WASD``` (```pageDown``` o ```pageUp``` mientras estás en el modo de edición de texto) para cambiar entre bloques de texto.
 
 <img src="../doc/src/configpanel.png">
 
@@ -205,9 +211,11 @@ Este proyecto depende en gran medida de [manga-image-translator](https://github.
 El [traductor de Sugoi](https://sugoitranslator.com/) fue creado por [mingshiba](https://www.patreon.com/mingshiba).
 
 ## Detección de texto
-* Permite detectar texto en inglés y japonés. El código de entrenamiento y más detalles en [comic-text-detector](https://github.com/dmMaze/comic-text-detector).
-* Admite el uso de la detección de texto de [Starriver Cloud (Tuanzi Manga OCR)](https://cloud.stariver.org.cn/). Es necesario rellenar el nombre de usuario y la contraseña, y el inicio de sesión automático se realizará cada vez que se inicie el programa.
-  * Para obtener instrucciones detalladas, consulte el [Manual de TuanziOCR](../doc/Manual_TuanziOCR_ES.md).
+ * Permite detectar texto en inglés y japonés. El código de entrenamiento y más detalles en [comic-text-detector](https://github.com/dmMaze/comic-text-detector).
+ * Admite el uso de la detección de texto de [Starriver Cloud (Tuanzi Manga OCR)](https://cloud.stariver.org.cn/). Es necesario rellenar el nombre de usuario y la contraseña, y el inicio de sesión automático se realizará cada vez que se inicie el programa.
+   * Para obtener instrucciones detalladas, consulte el [Manual de TuanziOCR](../doc/Manual_TuanziOCR_ES.md).
+ * Los modelos `YSGDetector` fueron entrenados por [lhj5426](https://github.com/lhj5426). Estos modelos filtran las onomatopeyas en CGs/Manga. Descarga los checkpoints desde [YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) y colócalos en la carpeta `data/models`.
+
 
 ## OCR
 * Todos los modelos mit* proceden de manga-image-translator y admiten el reconocimiento en inglés, japonés y coreano, así como la extracción del color del texto.
@@ -215,27 +223,67 @@ El [traductor de Sugoi](https://sugoitranslator.com/) fue creado por [mingshiba]
 * Admite el uso de OCR de [Starriver Cloud (Tuanzi Manga OCR)](https://cloud.stariver.org.cn/). Es necesario rellenar el nombre de usuario y la contraseña, y el inicio de sesión automático se realizará cada vez que se inicie el programa.
   * La implementación actual utiliza OCR en cada bloque de texto individualmente, lo que resulta en una velocidad más lenta y ninguna mejora significativa en la precisión. No se recomienda. Si es necesario, utilice el Detector Tuanzi.
   * Cuando se utiliza Tuanzi Detector para la detección de texto, se recomienda configurar el OCR a none_ocr para leer el texto directamente, ahorrando tiempo y reduciendo el número de peticiones.
-  * Para obtener instrucciones detalladas, consulte el [Manual de TuanziOCR](doc/Manual_TuanziOCR_ES.md). 
+  * Para obtener instrucciones detalladas, consulte el [Manual de TuanziOCR](doc/Manual_TuanziOCR_ES.md).
+* Se añadió como un módulo opcional el soporte para PaddleOCR. En el modo Debug, verás un mensaje indicando que no está instalado. Puedes instalarlo fácilmente siguiendo las instrucciones que se muestran ahí. Si no quieres instalar el paquete manualmente, simplemente descomenta (elimina el `#`) las líneas correspondientes a paddlepaddle(gpu) y paddleocr. Hazlo bajo tu propia responsabilidad y riesgo. Si no se instaló correctamente, y genera errores; de ser así, repórtalo en Issues.
+* Se añadió soporte para [OneOCR](https://github.com/b1tg/win11-oneocr). Es un modelo local de Windows, tomado de las aplicaciones Recortes (Snipping Tool) o Fotos `Win.PHOTOS`. Para usarlo, necesitas colocar el modelo y los archivos DLL en la carpeta 'data/models/one-ocr'. Es mejor colocar todos los archivos antes de ejecutar el programa. Puedes leer cómo encontrar y extraer los archivos DLL y del modelo aquí:
+https://github.com/dmMaze/BallonsTranslator/discussions/859#discussioncomment-12876757. Agradecimientos a AuroraWright por el proyecto [OneOCR](https://github.com/AuroraWright/oneocr).
 
 ## Inpainting
 * AOT es de [manga-image-translator](https://github.com/zyddnys/manga-image-translator).
 * Todas las lama* se ajustan mediante [LaMa](https://github.com/advimman/lama).
 * PatchMatch es un algoritmo de [PyPatchMatch](https://github.com/vacancy/PyPatchMatch). Este programa utiliza una [versión modificada](https://github.com/dmMaze/PyPatchMatchInpaint) por mí.
 
-## Traductores
-Traductores disponibles: Google, DeepL, ChatGPT, Sugoi, Caiyun, Baidu, Papago y Yandex.
-* Google ha desactivado el servicio de traducción en China, establece la «url» correspondiente en el panel de configuración a *.com.
-* Los traductores [Caiyun](https://dashboard.caiyunapp.com/), [ChatGPT](https://platform.openai.com/playground), [Yandex](https://yandex.com/dev/translate/), [Baidu](http://developers.baidu.com/) y [DeepL](https://www.deepl.com/docs-api/api-access) requieren un token o clave de API.
-* DeepL y el traductor Sugoi (y su conversión CT2 Translation) gracias a [Snowad14](https://github.com/Snowad14).
-* Sugoi traduce del japonés al inglés completamente offline.
-* [Sakura-13B-Galgame](https://github.com/SakuraLLM/Sakura-13B-Galgame)
-*
+## Traductores disponibles
+* **Google Translate**: El servicio de Google Translate ha sido desactivado en China. Para usarlo desde la China continental, debes configurar un proxy global y cambiar la URL en el panel de configuración a `*`.com
+* **Caiyun**: Requiere que solicites un [token de acceso](https://dashboard.caiyunapp.com/).
+* **Papago**: Compatible sin configuraciones adicionales.
+* **DeepL y Sugoi (incluyendo su conversión con CT2 Translation)**: Agradecimientos a [Snowad14](https://github.com/Snowad14).
+Si deseas usar el traductor Sugoi (solo soporta traducción del japonés al inglés), debes descargar el [modelo offline](https://drive.google.com/drive/folders/1KnDlfUM9zbnYFTo6iCbnBaBKabXfnVJm) y mover la carpeta ```sugoi_translator``` dentro del directorio BallonsTranslator/ballontranslator/data/models.
+* **Sugoi** traduce del japonés al inglés completamente sin conexión.
+* Se admite [Sakura-13B-Galgame](https://github.com/SakuraLLM/Sakura-13B-Galgame). Si se ejecuta localmente en una sola tarjeta gráfica con poca memoria de video, puedes activar el ```low vram mode``` o Modo de bajo consumo de VRAM en el panel de configuración (activado por defecto).
+* Para **DeepLX**, consulta [Vercel](https://github.com/bropines/Deeplx-vercel) o el [proyecto deeplx](https://github.com/OwO-Network/DeepLX).
+* Se admiten dos versiones de traductores compatibles con **OpenAI**. Son compatibles tanto con el proveedor oficial como con proveedores de LLM de terceros que sigan la API de **OpenAI**. Es necesario configurarlo en el panel de ajustes.
+   * La versión sin sufijo consume menos tokens, pero su estabilidad en la segmentación de oraciones es ligeramente peor, lo que puede causar problemas al traducir textos largos.
+   * La versión con el sufijo **exp** consume más tokens, pero es más estable y usa técnicas tipo "jailbreak" en el prompt, adecuada para traducciones de textos largos.
+* [m2m100](https://huggingface.co/facebook/m2m100_1.2B): Descarga y mueve la carpeta 'm2m100-1.2B-ctranslate2' al directorio 'data/models'.
+* **Puedes encontrar información sobre los módulos de traductores [aquí](../doc/modules/translators.md)**.
+
+Para otros modelos de traducción offline al inglés de buena calidad, consulta este [hilo de discusión](https://github.com/dmMaze/BallonsTranslator/discussions/515).
 Para añadir un nuevo traductor, consulte [Cómo_añadir_un_nuevo_traductor](../doc/Como_añadir_un_nuevo_traductor.md). Es tan sencillo como crear una subclase de una clase base e implementar dos interfaces. Luego puedes usarla en la aplicación. Las contribuciones al proyecto son bienvenidas.
-*
+
 ## FAQ & Varios
-* Si tu ordenador tiene una GPU Nvidia o Apple Silicon, el programa activará la aceleración por hardware.
-* Añadir soporte para [saladict](https://saladict.crimx.com) (*Diccionario emergente profesional y traductor de páginas todo en uno*) al mini menú al seleccionar texto. [Guía de instalación](../doc/saladict_es.md).
+* Los ordenadores con tarjeta gráfica Nvidia o chip Apple Silicon activan por defecto la aceleración por GPU.
+* Gracias a [bropines](https://github.com/bropines) por proporcionar la traducción al ruso.
+* Los métodos de entrada de terceros pueden causar errores visuales en el cuadro de edición de la derecha. Véase el issue [#76](https://github.com/dmMaze/BallonsTranslator/issues/76); de momento no se planea solucionar esto.
+* El menú flotante al seleccionar texto admite funciones como diccionarios agregados, traducción profesional palabra por palabra y [Saladict](https://saladict.crimx.com)(*Diccionario emergente profesional y traductor de páginas todo en uno*). Consulta las [instrucciones de instalación](../doc/saladict_es.md).
 * Acelera el rendimiento si tienes un dispositivo [NVIDIA CUDA](https://pytorch.org/docs/stable/notes/cuda.html) o [AMD ROCm](https://pytorch.org/docs/stable/notes/hip.html), ya que la mayoría de los módulos utilizan [PyTorch](https://pytorch.org/get-started/locally/).
 * Las fuentes son de tu sistema.
-* Gracias a [bropines](https://github.com/bropines) por la localización rusa.
 * Añadido script de exportación JSX para Photoshop por [bropines](https://github.com/bropines). Para leer las instrucciones, mejorar el código y simplemente explorar cómo funciona, vaya a `scripts/export to photoshop` -> `install_manual.md`.
+
+<details>
+  <summary><i>Pasos para habilitar la aceleración por GPU con tarjetas gráficas AMD (ROCm6)</i></summary>
+
+1.  Actualiza el controlador de la tarjeta gráfica a la versión más reciente (se recomienda la versión 24.12.1 o superior). Descarga e instala [AMD HIP SDK 6.2](https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html).
+2.  Descarga [ZLUDA](https://github.com/lshqqytiger/ZLUDA/releases) (versión ROCm6) y descomprímelo dentro de una carpeta llamada 'zluda'.
+Copia esta carpeta 'zluda' al disco del sistema, por ejemplo: 'C:\zluda'.
+3.  Configura las variables de entorno del sistema (en **Windows 10**):
+Ve a `Configuración → Propiedades del sistema → Configuración avanzada del sistema → Variables de entorno`.
+En “Variables del sistema”, busca la variable **Path**, haz clic en editar y añade al final: `C:\zluda` y `%HIP_PATH_62%\bin`.
+4.  Sustituye los archivos de enlace dinámico de la biblioteca CUDA: Copia los siguientes archivos desde 'C:\zluda' al escritorio: `cublas.dll`, `cusparse.dll` y `nvrtc.dll`. Luego, renómbralos de acuerdo con las siguientes reglas:
+
+**Nota: Si usas el controlador AMD 25.5.1, asegúrate de actualizar ZLUDA a la versión 3.9.5 o superior.**
+
+```
+  Nombre original → Nuevo nombre
+
+  cublas.dll → cublas64_11.dll
+
+  cusparse.dll → cusparse64_11.dll
+
+  nvrtc.dll → nvrtc64_112_0.dll
+```
+  Sustituye los archivos renombrados en el directorio: `BallonsTranslator\ballontrans_pylibs_win\Lib\site-packages\torch\lib\` reemplazando los archivos del mismo nombre.
+
+5.  Inicia el programa y configura el OCR y la detección de texto para que usen CUDA **(la reparación de imágenes debe seguir usando la CPU)**.
+6.  Al ejecutar OCR por primera vez, ZLUDA compilará los archivos PTX **(este proceso puede tardar entre 5 y 10 minutos dependiendo del rendimiento del CPU)**,**En las siguientes ejecuciones, no será necesario volver a compilar.**
+</details>

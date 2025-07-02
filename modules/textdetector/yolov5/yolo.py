@@ -1,5 +1,5 @@
-from operator import mod
-from cv2 import imshow
+from packaging.version import parse as package_version_parse
+
 from .yolov5_utils import scale_img
 from copy import deepcopy
 from .common import *
@@ -45,7 +45,7 @@ class Detect(nn.Module):
 
     def _make_grid(self, nx=20, ny=20, i=0):
         d = self.anchors[i].device
-        if check_version(torch.__version__, '1.10.0'):  # torch>=1.10.0 meshgrid workaround for torch>=0.7 compatibility
+        if package_version_parse(torch.__version__) >= package_version_parse('1.10.0'):  # torch>=1.10.0 meshgrid workaround for torch>=0.7 compatibility
             yv, xv = torch.meshgrid([torch.arange(ny, device=d), torch.arange(nx, device=d)], indexing='ij')
         else:
             yv, xv = torch.meshgrid([torch.arange(ny, device=d), torch.arange(nx, device=d)])

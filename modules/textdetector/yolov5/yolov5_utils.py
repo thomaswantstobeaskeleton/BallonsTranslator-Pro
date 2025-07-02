@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-import pkg_resources as pkg
 import torch.nn.functional as F
 import cv2
 import numpy as np
@@ -71,14 +70,6 @@ def intersect_dicts(da, db, exclude=()):
     # Dictionary intersection of matching keys and shapes, omitting 'exclude' keys, using da values
     return {k: v for k, v in da.items() if k in db and not any(x in k for x in exclude) and v.shape == db[k].shape}
 
-def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False):
-    # Check version vs. required version
-    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
-    result = (current == minimum) if pinned else (current >= minimum)  # bool
-    if hard:  # assert min requirements met
-        assert result, f'{name}{minimum} required by YOLOv5, but {name}{current} is currently installed'
-    else:
-        return result
 
 class Colors:
     # Ultralytics color palette https://ultralytics.com/
