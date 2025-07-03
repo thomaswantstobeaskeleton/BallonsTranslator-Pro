@@ -369,7 +369,6 @@ class ImgtransThread(QThread):
                     create_error_dialog(e, self.tr('Text Detection Failed.'), 'TextDetectFailed')
                     blk_list = []
                 self.detect_counter += 1
-                self.update_detect_progress.emit(self.detect_counter)
                 if pcfg.module.keep_exist_textlines:
                     blk_list = self.imgtrans_proj.pages[imgname] + blk_list
                     blk_list = sort_regions(blk_list)
@@ -377,6 +376,12 @@ class ImgtransThread(QThread):
                     if existed_mask is not None:
                         mask = np.bitwise_or(mask, existed_mask)
                 self.imgtrans_proj.pages[imgname] = blk_list
+
+                if mask is not None and not cfg_module.enable_ocr:
+                    self.imgtrans_proj.save_mask(imgname, mask)
+                    need_save_mask = False
+                    
+                self.update_detect_progress.emit(self.detect_counter)
 
             if blk_list is None:
                 blk_list = self.imgtrans_proj.pages[imgname] if imgname in self.imgtrans_proj.pages else []
