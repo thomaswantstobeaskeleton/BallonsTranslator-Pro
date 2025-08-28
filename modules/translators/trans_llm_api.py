@@ -31,7 +31,7 @@ class LLM_API_Translator(BaseTranslator):
     params: Dict = {
         "provider": {
             "type": "selector",
-            "options": ["OpenAI", "Google", "Grok"],
+            "options": ["OpenAI", "Google", "Grok", "LLM Studio"],
             "value": "OpenAI",
             "description": "Select the LLM provider.",
         },
@@ -56,6 +56,7 @@ class LLM_API_Translator(BaseTranslator):
                 "XAI: grok-4",
                 "XAI: grok-3",
                 "XAI: grok-3-mini",
+                "LLMS: (override model field)",
             ],
             "value": "OAI: gpt-4o",
             "description": "Select a model that supports JSON Mode for structured output.",
@@ -70,7 +71,6 @@ class LLM_API_Translator(BaseTranslator):
         },
         "chat system template": {
             "type": "editor",
-            # ИЗМЕНЕНО: Добавлена инструкция по исправлению ошибок OCR
             "value": "You are an expert translator specializing in Japanese manga. You understand that OCR can misread vertical Japanese text horizontally, creating jumbled input. Your first task is to mentally reconstruct the correct Japanese sentence from the jumbled characters. After reconstruction, translate the corrected sentence. You must provide the output strictly in the specified JSON format. Never leave a translation empty. If reconstruction is genuinely impossible, provide a phonetic transliteration of the input. The JSON should conform to this schema: {\"translations\": [{\"id\": integer, \"translation\": string}]}.",
             "description": "System message to instruct the LLM on its role and required output format."
         },
@@ -288,10 +288,10 @@ class LLM_API_Translator(BaseTranslator):
         
         if not api_keys:
             if self._respect_key_limit(single_key):
-                 now = time.time(); count, start_time = self.key_usage.get(single_key, (0, now))
-                 if now - start_time >= 60: count = 0; start_time = now
-                 self.key_usage[single_key] = (count + 1, start_time)
-                 return single_key
+                now = time.time(); count, start_time = self.key_usage.get(single_key, (0, now))
+                if now - start_time >= 60: count = 0; start_time = now
+                self.key_usage[single_key] = (count + 1, start_time)
+                return single_key
             return None
 
         start_index = self.current_key_index
@@ -306,13 +306,18 @@ class LLM_API_Translator(BaseTranslator):
         self.logger.error("All available API keys are currently rate-limited.")
         return None
         
-    def _request_translation(self, prompt: str) -> Optional[TranslationResponse]:
-        current_api_key = self._select_api_key()
-        if not current_api_key:
-            raise ConnectionError("No available API key found.")
-            
+def _request_translation(self, prompt: str) -> Optional[TranslationResponse]:
+        current_api_key = "lm-studio"
+        if self.provider != "LLM Studio":
+            current_api_key = self._select_api_key()
+            if not current_api_key:
+                raise ConnectionError("No available API key found.")
+
+        if self.provider == "LLM Studio" and not self.endpoint:
+            raise ValueError("Endpoint must be specified when using the LLM Studio provider (e.g., http://localhost:1234/v1).")
+
         if not self._initialize_client(current_api_key):
-             raise ConnectionError("Failed to initialize API client.")
+            raise ConnectionError("Failed to initialize API client.")
         
         self._respect_delay()
         
@@ -330,8 +335,18 @@ class LLM_API_Translator(BaseTranslator):
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
         }
+
+        # --- ИЗМЕНЕНИЕ: Условное добавление response_format ---
+        if self.provider == "LLM Studio":
+            self.logger.debug("Using 'json_schema' mode for LLM Studio.")
+            api_args["response_format"] = {
+                "type": "json_schema",
+                "schema": TranslationResponse.model_json_schema(),
+            }
+        elif self.provider in ["OpenAI", "Grok"]:
+            self.logger.debug(f"Using 'json_object' mode for {self.provider}.")
+            api_args["response_format"] = {"type": "json_object"}
         
         if self.provider == "OpenAI":
             api_args["frequency_penalty"] = self.frequency_penalty
