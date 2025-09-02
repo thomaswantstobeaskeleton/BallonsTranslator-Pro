@@ -15,7 +15,6 @@ class InvalidNumTranslations(Exception):
     """Exception raised when the number of translations does not match the number of sources."""
     pass
 
-# --- Pydantic модели для генерации схемы и валидации ответа ---
 class TranslationElement(BaseModel):
     id: int = Field(..., description="The original numeric ID of the text snippet.")
     translation: str = Field(..., description="The translated text corresponding to the id.")
@@ -71,7 +70,7 @@ class LLM_API_Translator(BaseTranslator):
         },
         "chat system template": {
             "type": "editor",
-            "value": "You are an expert translator specializing in Japanese manga. You understand that OCR can misread vertical Japanese text horizontally, creating jumbled input. Your first task is to mentally reconstruct the correct Japanese sentence from the jumbled characters. After reconstruction, translate the corrected sentence. You must provide the output strictly in the specified JSON format. Never leave a translation empty. If reconstruction is genuinely impossible, provide a phonetic transliteration of the input. The JSON should conform to this schema: {\"translations\": [{\"id\": integer, \"translation\": string}]}.",
+            "value": "You are an expert translator. Your task is to accurately translate the given text snippets. You must provide the output strictly in the specified JSON format, without any additional explanations or markdown formatting. The JSON must conform to this schema: {\"translations\": [{\"id\": integer, \"translation\": string}]}. If a text snippet is untranslatable or does not require translation, return the original text in the 'translation' field.",
             "description": "System message to instruct the LLM on its role and required output format."
         },
         "invalid repeat count": {
@@ -214,13 +213,9 @@ class LLM_API_Translator(BaseTranslator):
 
     def _assemble_prompts(self, queries: List[str], to_lang: str, max_len_approx=8000):
         from_lang = self.lang_map.get(self.lang_source, self.lang_source)
-        # ИЗМЕНЕНО: Добавлена инструкция по исправлению ошибок OCR в пользовательский промпт
         prompt_instructions = (
             f"Please translate the following {from_lang} text snippets to {to_lang}. "
-            f"For each snippet, provide its translation corresponding to its original ID. "
-            f"IMPORTANT: If a {from_lang} snippet seems jumbled or nonsensical, it is likely due to an OCR error reading vertical text horizontally. "
-            f"You MUST first attempt to reconstruct the correct, meaningful sentence from the jumbled characters, and then translate the RECONSTRUCTED sentence. "
-            f"Do not translate the jumbled text literally. If a snippet is already correct, translate it directly.\n\n"
+            f"For each snippet, provide its translation corresponding to its original ID.\n\n"
         )
         current_prompt_content = ""
         num_src = 0
