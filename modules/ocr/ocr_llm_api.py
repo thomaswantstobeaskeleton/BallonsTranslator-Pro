@@ -201,30 +201,25 @@ class LLM_OCR(OCRBase):
     def __init__(self, **params) -> None:
         super().__init__(**params)
         self.last_request_time = 0
-        self.client = None ### ИЗМЕНЕНИЕ ###: Инициализируем клиент как None
+        self.client = None
         self.request_count_minute = 0
         self.minute_start_time = time.time()
 
     def _initialize_client(self):
-        # Configure proxies using mounts
-        transport = None # ### ИЗМЕНЕНИЕ ###: Явно определим transport
+        transport = None
         if self.proxy:
             try:
-                # Проверка, что прокси не пустая строка
                 if self.debug_mode:
                     self.logger.info(f"Using proxy: {self.proxy}")
                 proxy_mounts = {
                     "http://": httpx.HTTPTransport(proxy=self.proxy),
                     "https://": httpx.HTTPTransport(proxy=self.proxy),
                 }
-                # ### ИЗМЕНЕНИЕ ###: httpx.Client теперь не нужен, используем mounts напрямую в OpenAI клиенте
                 transport = httpx.HTTPTransport(proxy=self.proxy)
             except Exception as e:
                 self.logger.error(f"Invalid proxy configuration: {self.proxy}. Error: {e}")
-                # Если прокси невалидный, не используем его
                 transport = None
         
-        # Determine the endpoint
         endpoint = self.endpoint
         if not endpoint:
             provider = self.provider
