@@ -200,7 +200,7 @@ class LLM_OCR(OCRBase):
             "description": "Maximum number of requests per minute (0 for no limit).",
         },
         "max_response_tokens": {
-            "value": 4096,
+            "value": 10240,
             "description": "Maximum number of tokens in the LLM's response.",
         },
         "description": "OCR using various LLMs compatible with the OpenAI API.",
