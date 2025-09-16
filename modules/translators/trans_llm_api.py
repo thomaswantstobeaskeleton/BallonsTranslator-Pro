@@ -5,7 +5,7 @@ import traceback
 from typing import List, Dict, Optional, Type
 
 import httpx
-from openai import OpenAI
+import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from .base import BaseTranslator, register_translator
@@ -30,7 +30,7 @@ class LLM_API_Translator(BaseTranslator):
     params: Dict = {
         "provider": {
             "type": "selector",
-            "options": ["OpenAI", "Google", "Grok", "LLM Studio"],
+            "options": ["OpenAI", "Google", "Grok", "OpenRouter", "LLM Studio"],
             "value": "OpenAI",
             "description": "Select the LLM provider.",
         },
@@ -68,9 +68,9 @@ class LLM_API_Translator(BaseTranslator):
             "value": "",
             "description": "Base URL for the API. Leave empty for provider default.",
         },
-        "chat system template": {
+        "system_prompt": {
             "type": "editor",
-            "value": "You are an expert translator. Your task is to accurately translate the given text snippets. You must provide the output strictly in the specified JSON format, without any additional explanations or markdown formatting. The JSON must conform to this schema: {\"translations\": [{\"id\": integer, \"translation\": string}]}. If a text snippet is untranslatable or does not require translation, return the original text in the 'translation' field.",
+            "value": "You are an expert translator. Your task is to accurately translate the given text snippets. You MUST provide the output strictly in the specified JSON format, without any additional explanations or markdown formatting. The JSON object must have a single key 'translations', which is a list of objects, each with an 'id' (integer) and a 'translation' (string).\n\nExample Output Schema:\n{\"translations\": [{\"id\": 1, \"translation\": \"Translated text here.\"}]}",
             "description": "System message to instruct the LLM on its role and required output format."
         },
         "invalid repeat count": {
@@ -137,11 +137,14 @@ class LLM_API_Translator(BaseTranslator):
         endpoint = self.endpoint
         provider = self.provider
         if not endpoint:
+            # --- ИЗМЕНЕНИЕ: Добавлена логика для OpenRouter и уточнен Grok ---
             if provider == "Google":
                 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
             elif provider == "OpenAI":
                 endpoint = "https://api.openai.com/v1"
-            else: # Grok
+            elif provider == "OpenRouter":
+                endpoint = "https://openrouter.ai/api/v1"
+            elif provider == "Grok":
                 endpoint = "https://api.x.ai/v1"
 
         proxy = self.proxy
@@ -163,7 +166,7 @@ class LLM_API_Translator(BaseTranslator):
         self.logger.debug(f"Initializing client for {provider} with key {masked_key} at endpoint {endpoint}")
 
         try:
-            self.client = OpenAI(api_key=api_key_to_use, base_url=endpoint, http_client=http_client)
+            self.client = openai.OpenAI(api_key=api_key_to_use, base_url=endpoint, http_client=http_client)
             return True
         except Exception as e:
             self.logger.error(f"Failed to initialize OpenAI client: {e}")
@@ -199,7 +202,7 @@ class LLM_API_Translator(BaseTranslator):
     @property
     def proxy(self) -> str: return self.get_param_value("proxy")
     @property
-    def chat_system_template(self) -> str: return self.get_param_value("chat system template")
+    def system_prompt(self) -> str: return self.get_param_value("system_prompt")
     @property
     def invalid_repeat_count(self) -> int: return int(self.get_param_value("invalid repeat count"))
     @property
@@ -211,29 +214,19 @@ class LLM_API_Translator(BaseTranslator):
     @property
     def global_delay(self) -> float: return float(self.get_param_value("delay"))
 
-    def _assemble_prompts(self, queries: List[str], to_lang: str, max_len_approx=8000):
+    def _assemble_prompts(self, queries: List[str], to_lang: str):
         from_lang = self.lang_map.get(self.lang_source, self.lang_source)
-        prompt_instructions = (
-            f"Please translate the following {from_lang} text snippets to {to_lang}. "
-            f"For each snippet, provide its translation corresponding to its original ID.\n\n"
+        
+        input_elements = [{"id": i + 1, "source": query} for i, query in enumerate(queries)]
+        input_json_str = json.dumps(input_elements, ensure_ascii=False, indent=2)
+
+        prompt = (
+            f"Please translate the following text snippets from {from_lang} to {to_lang}. "
+            f"The input is provided as a JSON array. Respond with a JSON object in the specified format.\n\n"
+            f"INPUT:\n{input_json_str}"
         )
-        current_prompt_content = ""
-        num_src = 0
-        i_offset = 0
 
-        for i, query in enumerate(queries):
-            element = f"id={i + 1 - i_offset}: {query}\n"
-            if len(prompt_instructions) + len(current_prompt_content) + len(element) > max_len_approx and num_src > 0:
-                yield prompt_instructions + current_prompt_content, num_src
-                current_prompt_content = element
-                num_src = 1
-                i_offset = i
-            else:
-                current_prompt_content += element
-                num_src += 1
-
-        if num_src > 0:
-            yield prompt_instructions + current_prompt_content, num_src
+        yield prompt, len(queries)
 
     def _respect_delay(self):
         current_time = time.time()
@@ -320,7 +313,7 @@ class LLM_API_Translator(BaseTranslator):
         if ": " in model_name: model_name = model_name.split(": ", 1)[1]
 
         messages = [
-            {"role": "system", "content": self.chat_system_template},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
 
@@ -340,7 +333,7 @@ class LLM_API_Translator(BaseTranslator):
                     "schema": TranslationResponse.model_json_schema()
                 },
             }
-        elif self.provider in ["OpenAI", "Grok"]:
+        elif self.provider in ["OpenAI", "Grok", "Google", "OpenRouter"]:
             self.logger.debug(f"Using 'json_object' mode for {self.provider}.")
             api_args["response_format"] = {"type": "json_object"}
         
@@ -367,19 +360,31 @@ class LLM_API_Translator(BaseTranslator):
                 end = json_to_parse.rfind('}')
                 if start != -1 and end != -1 and end > start:
                     json_to_parse = json_to_parse[start:end+1]
-
             try:
                 data_to_validate = json.loads(json_to_parse)
-                
-                if self.provider == "Google" and isinstance(data_to_validate, list):
-                    self.logger.debug("Google API returned a list, wrapping it in {'translations': ...} for validation.")
-                    data_to_validate = {"translations": data_to_validate}
-
                 validated_response = TranslationResponse.model_validate(data_to_validate)
             except (ValidationError, json.JSONDecodeError) as e:
-                self.logger.error(f"Pydantic validation or JSON parsing failed: {e}")
-                self.logger.debug(f"Raw JSON content from API: {raw_content}")
-                raise
+                self.logger.warning(f"Initial Pydantic validation failed: {e}. Attempting to fix simple dictionary or list format.")
+                try:
+                    simple_data = json.loads(json_to_parse)
+                    fixed_translations = []
+
+                    if isinstance(simple_data, dict) and all(k.isdigit() for k in simple_data.keys()):
+                        fixed_translations = [{"id": int(k), "translation": v} for k, v in simple_data.items()]
+                    elif isinstance(simple_data, list):
+                        fixed_translations = simple_data
+                    
+                    if fixed_translations:
+                        fixed_data = {"translations": fixed_translations}
+                        self.logger.debug(f"Transformed simple response to: {fixed_data}")
+                        validated_response = TranslationResponse.model_validate(fixed_data)
+                        self.logger.info("Successfully parsed response after fixing simple format.")
+                    else:
+                        raise e 
+                except (ValidationError, json.JSONDecodeError, Exception) as final_e:
+                    self.logger.error(f"Pydantic validation or JSON parsing failed even after attempting fix: {final_e}")
+                    self.logger.debug(f"Raw JSON content from API: {raw_content}")
+                    raise 
         else:
             self.logger.warning("No valid message content in API response.")
             return None
@@ -393,7 +398,18 @@ class LLM_API_Translator(BaseTranslator):
         return validated_response
 
     def _translate(self, src_list: List[str]) -> List[str]:
-        if not src_list: return []
+        if not src_list:
+            return []
+
+        RETRYABLE_EXCEPTIONS = (
+            openai.RateLimitError,
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.InternalServerError,
+            openai.APIStatusError,
+            httpx.RequestError,
+        )
+
         translations = []
         to_lang = self.lang_map.get(self.lang_target, self.lang_target)
         
@@ -401,7 +417,7 @@ class LLM_API_Translator(BaseTranslator):
             api_retry_attempt = 0
             mismatch_retry_attempt = 0
             
-            while True:
+            while True: 
                 try:
                     parsed_response = self._request_translation(prompt)
                     
@@ -422,26 +438,30 @@ class LLM_API_Translator(BaseTranslator):
                     mismatch_retry_attempt += 1
                     self.logger.warning(f"Translation structure mismatch: {e}. Attempt {mismatch_retry_attempt}/{self.invalid_repeat_count}.")
                     if mismatch_retry_attempt >= self.invalid_repeat_count:
-                        self.logger.error("Failed to get correct translation structure after retries.")
+                        self.logger.error("Fatal Error: Failed to get correct translation structure after retries.")
                         translations.extend(["[ERROR: Structure Mismatch]"] * num_src)
                         break
                     time.sleep(self.retry_timeout / 2)
                 
-                except Exception as e:
+                except RETRYABLE_EXCEPTIONS as e:
                     api_retry_attempt += 1
-                    self.logger.warning(f"API request/parsing failed: {e}. Attempt {api_retry_attempt}/{self.retry_attempts}.")
+                    self.logger.warning(f"API Error (retryable): {type(e).__name__} - {e}. Attempt {api_retry_attempt}/{self.retry_attempts}.")
                     if api_retry_attempt >= self.retry_attempts:
-                        self.logger.error(f"Failed to translate batch after {self.retry_attempts} attempts: {traceback.format_exc()}")
+                        self.logger.error(f"Fatal Error: Failed to connect to API after {self.retry_attempts} attempts.")
                         translations.extend([f"[ERROR: API Failed]"] * num_src)
                         break
                     time.sleep(self.retry_timeout)
+
+                except (ValidationError, json.JSONDecodeError, openai.BadRequestError, openai.AuthenticationError, ValueError) as e:
+                    self.logger.error(f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}")
+                    self.logger.debug(traceback.format_exc())
+                    translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)
+                    break
                     
         return translations
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
-        # self.logger.debug(f"Parameter '{param_key}' updated.")
         
         if param_key in ["proxy", "multiple_keys", "apikey", "provider", "endpoint"]:
-        #   self.logger.info(f"Client will be re-initialized on next request due to change in '{param_key}'.")
             self.client = None
