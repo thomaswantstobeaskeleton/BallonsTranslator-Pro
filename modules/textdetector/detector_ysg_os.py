@@ -168,6 +168,7 @@ class YSGYoloDetectorOS(TextDetectorBase):
 
                 pts_sorted, is_vertical = sort_pnts(item['pts'])
                 blk = TextBlock(lines=[pts_sorted], src_is_vertical=is_vertical, label=item['label'])
+                blk.vertical = is_vertical
                 blk.adjust_bbox()
                 examine_textblk(blk, im_w, im_h)
                 blk_list.append(blk)
