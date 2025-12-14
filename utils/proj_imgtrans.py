@@ -319,10 +319,12 @@ class ProjImgTrans:
         self.pages = {}
         self._pagename2idx = {}
         self._idx2pagename = {}
+        self._image_info = {}
         for ii, imgname in enumerate(imglist):
             self.pages[imgname] = []
             self._pagename2idx[imgname] = ii
             self._idx2pagename[ii] = imgname
+            self._image_info[imgname] = {'finish_code': 0}
         self.set_current_img_byidx(0)
         self.save()
         
