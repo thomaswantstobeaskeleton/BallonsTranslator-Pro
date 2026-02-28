@@ -74,7 +74,7 @@ class ColorPickerLabel(QLabel):
         self.color = color
         r, g, b, a = color.getRgb()
         rgba = f'rgba({r}, {g}, {b}, {a})'
-        self.setStyleSheet("background-color: " + rgba)
+        self.setStyleSheet("background-color: " + rgba + "; border: none;")
 
     def rgb(self) -> List:
         color = self.color
