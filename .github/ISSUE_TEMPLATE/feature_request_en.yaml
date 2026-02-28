@@ -1,6 +1,6 @@
 name: Feature Request
-title: "Feature Request:" # Default title
-description: Propose new features or optimizations
+title: "Feature Request:"
+description: Propose new features or optimizations for BallonsTranslator Pro
 labels: [feature]
 body:
   - type: markdown
@@ -8,30 +8,28 @@ body:
       value: |
         ## Before You Begin
 
-        🚨 **Please follow these steps before creating an issue** 🚨
+        🚨 **Please follow these steps** 🚨
 
-        1. Ensure your repository is up-to-date by running one of the following commands:
-           - `.\git\bin\git.exe pull`
-           - `.\PortableGit\bin\git.exe pull`
-           - `git pull`
-           
+        1. Ensure your repository is up-to-date: `git pull` (or `.\git\bin\git.exe pull` / `.\PortableGit\bin\git.exe pull` on Windows)
         2. Check if a similar feature request already exists.
+
+        **This is the BallonsTranslator Pro fork.** Feature ideas for the original BallonsTranslator should be reported upstream.
   - type: textarea
     validations:
       required: true
     attributes:
       label: Version Info
       description: |
-        Please provide the version information of BallonsTranslator. Copy the following details from the console output (if missing, save your project and restart the application):
+        Copy from the console output when the app starts (if missing, save project and restart):
         - Python version and interpreter path
-        - Application version, branch, and Commit Hash
+        - Application version, branch, Commit hash
       placeholder: |
         Example:
-        py version: 3.10.9 (tags/v3.10.9:...)
-        py executable: Path\to\interpreter
-        version: 1.4.0
-        branch: dev
-        Commit hash: 53eee46fd7bef117a4ada9a86843c3bf6e37d953
+        Python version: 3.10.11 (...)
+        Python executable: C:\...\python.exe
+        Version: 1.5.0
+        Branch: main
+        Commit hash: 9a0e75f...
   - type: dropdown
     validations:
       required: true
@@ -40,6 +38,23 @@ body:
       options:
         - New Feature
         - Feature Optimization
+  - type: dropdown
+    attributes:
+      label: Area (optional)
+      description: Which part of BallonsTranslator Pro does this relate to?
+      options:
+        - Not specified
+        - Text detection (incl. dual detection)
+        - OCR
+        - Inpainting
+        - Translation (incl. LLM API, context, glossary)
+        - Translation context / glossary / batch queue
+        - UI / Config panel
+        - Text eraser / drawing tools
+        - Canvas / text edit panel
+        - Manga source / download
+        - Keyboard shortcuts / workflow
+        - Other
   - type: textarea
     validations:
       required: true
@@ -51,9 +66,9 @@ body:
     attributes:
       label: Pictures
       description: |
-        If possible, attach relevant examples or UI screenshots (you can drag and drop the image).
+        If possible, attach relevant examples or UI screenshots (drag and drop image).
   - type: textarea
     attributes:
       label: Additional Information
       description: |
-        Any additional information you would like to provide.
+        Any other context (use case, alternatives considered, etc.).

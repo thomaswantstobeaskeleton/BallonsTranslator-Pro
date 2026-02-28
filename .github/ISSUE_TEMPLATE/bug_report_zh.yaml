@@ -1,6 +1,6 @@
 name: Bug 反馈
-title: "Bug 反馈:" # 默认标题
-description: 报告不符合预期的错误
+title: "Bug 反馈:"
+description: 报告 BallonsTranslator Pro 中的错误
 labels: [bug]
 body:
   - type: markdown
@@ -10,31 +10,27 @@ body:
 
         🚨 **请务必按以下步骤操作** 🚨
 
-        1. 请确保在创建问题前更新仓库，运行以下任一命令：
-           - `.\git\bin\git.exe pull`
-           - `.\PortableGit\bin\git.exe pull`
-           - `git pull`
-           
+        1. 请确保在创建问题前更新仓库：`git pull`（Windows 可用 `.\git\bin\git.exe pull` 或 `.\PortableGit\bin\git.exe pull`）
         2. 检查是否已有类似问题存在。
-
         3. 请尽可能提供详细信息，包括崩溃日志（如有）。
+
+        **本仓库为 BallonsTranslator Pro 分支。** 若问题属于原版 BallonsTranslator，请向上游反馈。
   - type: textarea
     validations:
       required: true
     attributes:
       label: 版本信息
       description: |
-        请提供 BallonsTranslator 的版本信息。请复制控制台显示的以下内容（如果信息消失，请保存项目并重启程序）：
+        请从程序启动时控制台输出中复制以下内容（若未显示，请保存项目后重启）：
         - Python 版本及解释器路径
-        - 应用版本、分支及 Commit Hash
-
+        - 应用版本、分支、Commit hash
       placeholder: |
         示例:
-        py version: 3.10.9 (tags/v3.10.9:...)
-        py executable: 路径\到\解释器
-        version: 1.4.0
-        branch: dev
-        Commit hash: 53eee46fd7bef117a4ada9a86843c3bf6e37d953
+        Python version: 3.10.11 (...)
+        Python executable: C:\...\python.exe
+        Version: 1.5.0
+        Branch: main
+        Commit hash: 9a0e75f...
   - type: textarea
     validations:
       required: true
@@ -45,48 +41,147 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### 受影响的模块
-        如果问题与特定模块相关，请选择相关项（如果不适用，请选择“无”）:
+        ### 受影响的模块（BallonsTranslator Pro）
+        若问题与特定模块相关，请选择对应项；否则请选「不适用」。
   - type: dropdown
     attributes:
       label: 文本检测
       options:
+        - 不适用
         - ctd
+        - craft_det
+        - dptext_detr
+        - easyocr_det
+        - hf_object_det
+        - hunyuan_ocr_det
+        - magi_det
+        - mmocr_det
+        - paddle_det
+        - paddle_det_v5
         - stariver_ocr
+        - surya_det
+        - swintextspotter_v2
+        - textmamba_det
+        - ysgyolo
   - type: dropdown
     attributes:
       label: OCR
       options:
-        - google_lens
+        - 不适用
+        - bing_ocr
+        - chandra_ocr
+        - deepseek_ocr
+        - docowl2_ocr
+        - donut
+        - easyocr_ocr
+        - florence2_ocr
+        - glm_ocr
+        - google_lens_exp
+        - google_vision
+        - got_ocr2
+        - hunyuan_ocr
+        - internvl2_ocr
+        - internvl3_ocr
+        - lighton_ocr
+        - llm_ocr
+        - macos_ocr
         - manga_ocr
+        - manga_ocr_mobile
+        - minicpm_ocr
         - mit32px
-        - mit48px_ctc
         - mit48px
+        - mit48px_ctc
+        - mmocr_ocr
+        - nanonets_ocr
+        - nemotron_ocr
+        - none_ocr
+        - ocean_ocr
+        - ocrflux
+        - one_ocr
+        - paddle_ocr
+        - paddle_rec_v5
+        - PaddleOCRVLManga
+        - paddle_vl
+        - paddleocr_vl_hf
+        - qwen2vl_7b
         - stariver_ocr
-        - windows ocr
+        - surya_ocr
+        - trocr
+        - windows_ocr
   - type: dropdown
     attributes:
-      label: Inpaint
+      label: 修复/涂鸦 (Inpaint)
       options:
+        - 不适用
+        - aot
+        - cuhk_manga_inpaint
+        - diffusers_sd2_inpaint
+        - diffusers_sd_inpaint
+        - diffusers_sdxl_inpaint
+        - dreamshaper_inpaint
+        - fluently_v4_inpaint
+        - flux_fill
+        - kandinsky_inpaint
+        - lama_large_512px
+        - lama_manga_onnx
+        - lama_mpe
+        - lama_onnx
+        - mat
         - opencv-tela
         - patchmatch
-        - aot
-        - lama_mpe
-        - lama_large_512px
+        - qwen_image_edit
+        - repaint
+        - simple_lama
   - type: dropdown
     attributes:
       label: 翻译器
       options:
+        - 不适用
         - Baidu
         - Caiyun
         - ChatGPT
         - ChatGPT_exp
+        - Copy Source
         - DeepL
         - DeepL Free
         - DeepLX API
+        - ezTrans
         - google
+        - LLM_API_Translator
+        - m2m100
+        - nllb200
+        - None
+        - opus_mt
         - Papago
         - Sakura
+        - Sugoi
+        - t5_mt
+        - text-generation-webui
+        - TranslatorsPack
+        - Youdao
+        - Yandex
+        - Yandex-FOSWLY
+  - type: dropdown
+    attributes:
+      label: 双检测（第二检测器）
+      description: 仅在使用「运行第二检测器」且问题与之相关时选择。
+      options:
+        - 不适用 / 未使用
+        - ctd
+        - craft_det
+        - dptext_detr
+        - easyocr_det
+        - hf_object_det
+        - hunyuan_ocr_det
+        - magi_det
+        - mmocr_det
+        - paddle_det
+        - paddle_det_v5
+        - stariver_ocr
+        - surya_det
+        - swintextspotter_v2
+        - textmamba_det
+        - ysgyolo
   - type: textarea
     attributes:
       label: 屏幕截图
@@ -96,10 +191,10 @@ body:
     attributes:
       label: 日志
       description: |
-        请复制粘贴日志内容（内容会自动格式化为代码块）。
+        请粘贴日志内容（将自动格式化为代码块）。
       render: shell
   - type: textarea
     attributes:
       label: 其他信息
       description: |
-        其他你想提供的信息。
+        其他你想提供的信息（配置、项目类型等）。

@@ -1,6 +1,6 @@
 name: Bug Report
-title: "Bug Report:" # Default title
-description: Report a bug
+title: "Bug Report:"
+description: Report a bug in BallonsTranslator Pro
 labels: [bug]
 body:
   - type: markdown
@@ -10,95 +10,192 @@ body:
 
         🚨 **Please follow these steps before creating an issue** 🚨
 
-        1. Ensure your repository is up-to-date by running one of the following commands:
-          - `.\git\bin\git.exe pull`
-          - `.\PortableGit\bin\git.exe pull`
-          - `git pull`
-          
+        1. Ensure your repository is up-to-date:
+           - `git pull` (or `.\git\bin\git.exe pull` / `.\PortableGit\bin\git.exe pull` on Windows)
         2. Check if a similar issue already exists.
-
         3. Provide as much detail as possible, including crash logs (if applicable).
+
+        **This is the BallonsTranslator Pro fork.** If your issue is about the original BallonsTranslator, please report it upstream.
   - type: textarea
     validations:
       required: true
     attributes:
       label: Version Info
       description: |
-        Please provide the version information of BallonsTranslator. Copy the following details from the console output (if missing, save your project and restart the application):
+        Copy from the console output when the app starts (if missing, save project and restart):
         - Python version and interpreter path
-        - Application version, branch, and Commit Hash
+        - Application version, branch, Commit hash
       placeholder: |
         Example:
-        py version: 3.10.9 (tags/v3.10.9:...)
-        py executable: Path\to\interpreter
-        version: 1.4.0
-        branch: dev
-        Commit hash: 53eee46fd7bef117a4ada9a86843c3bf6e37d953
+        Python version: 3.10.11 (...)
+        Python executable: C:\...\python.exe
+        Version: 1.5.0
+        Branch: main
+        Commit hash: 9a0e75f...
   - type: textarea
     validations:
       required: true
     attributes:
       label: Description of the Problem
       description: |
-        Please describe the bug in detail and provide reproduction steps.
+        Describe the bug in detail and provide steps to reproduce.
   - type: markdown
     attributes:
       value: |
-        ### Affected Modules
-        If your issue is related to specific modules, please select the applicable option for each category (if not applicable, choose "None"):
+        ### Affected Modules (BallonsTranslator Pro)
+        If the issue is related to specific modules, select each that applies. Otherwise choose "Not applicable".
   - type: dropdown
     attributes:
       label: Text Detector
       options:
+        - Not applicable
         - ctd
+        - craft_det
+        - dptext_detr
+        - easyocr_det
+        - hf_object_det
+        - hunyuan_ocr_det
+        - magi_det
+        - mmocr_det
+        - paddle_det
+        - paddle_det_v5
         - stariver_ocr
+        - surya_det
+        - swintextspotter_v2
+        - textmamba_det
+        - ysgyolo
   - type: dropdown
     attributes:
       label: OCR
       options:
-        - google_lens
+        - Not applicable
+        - bing_ocr
+        - chandra_ocr
+        - deepseek_ocr
+        - docowl2_ocr
+        - donut
+        - easyocr_ocr
+        - florence2_ocr
+        - glm_ocr
+        - google_lens_exp
+        - google_vision
+        - got_ocr2
+        - hunyuan_ocr
+        - internvl2_ocr
+        - internvl3_ocr
+        - lighton_ocr
+        - llm_ocr
+        - macos_ocr
         - manga_ocr
+        - manga_ocr_mobile
+        - minicpm_ocr
         - mit32px
-        - mit48px_ctc
         - mit48px
+        - mit48px_ctc
+        - mmocr_ocr
+        - nanonets_ocr
+        - nemotron_ocr
+        - none_ocr
+        - ocean_ocr
+        - ocrflux
+        - one_ocr
+        - paddle_ocr
+        - paddle_rec_v5
+        - PaddleOCRVLManga
+        - paddle_vl
+        - paddleocr_vl_hf
+        - qwen2vl_7b
         - stariver_ocr
-        - windows ocr
+        - surya_ocr
+        - trocr
+        - windows_ocr
   - type: dropdown
     attributes:
-      label: Inpaint
+      label: Inpainter
       options:
+        - Not applicable
+        - aot
+        - cuhk_manga_inpaint
+        - diffusers_sd2_inpaint
+        - diffusers_sd_inpaint
+        - diffusers_sdxl_inpaint
+        - dreamshaper_inpaint
+        - fluently_v4_inpaint
+        - flux_fill
+        - kandinsky_inpaint
+        - lama_large_512px
+        - lama_manga_onnx
+        - lama_mpe
+        - lama_onnx
+        - mat
         - opencv-tela
         - patchmatch
-        - aot
-        - lama_mpe
-        - lama_large_512px
+        - qwen_image_edit
+        - repaint
+        - simple_lama
   - type: dropdown
     attributes:
       label: Translator
       options:
+        - Not applicable
         - Baidu
         - Caiyun
         - ChatGPT
         - ChatGPT_exp
+        - Copy Source
         - DeepL
         - DeepL Free
         - DeepLX API
+        - ezTrans
         - google
+        - LLM_API_Translator
+        - m2m100
+        - nllb200
+        - None
+        - opus_mt
         - Papago
         - Sakura
+        - Sugoi
+        - t5_mt
+        - text-generation-webui
+        - TranslatorsPack
+        - Youdao
+        - Yandex
+        - Yandex-FOSWLY
+  - type: dropdown
+    attributes:
+      label: Dual text detection (secondary detector)
+      description: Only if you use "Run second detector" and the bug involves it.
+      options:
+        - Not applicable / not used
+        - ctd
+        - craft_det
+        - dptext_detr
+        - easyocr_det
+        - hf_object_det
+        - hunyuan_ocr_det
+        - magi_det
+        - mmocr_det
+        - paddle_det
+        - paddle_det_v5
+        - stariver_ocr
+        - surya_det
+        - swintextspotter_v2
+        - textmamba_det
+        - ysgyolo
   - type: textarea
     attributes:
       label: Screenshot
       description: |
-        If possible, attach a screenshot of the issue (you can drag and drop the image).
+        If possible, attach a screenshot (drag and drop image).
   - type: textarea
     attributes:
       label: Logs
       description: |
-        Paste the log output here (it will be auto-formatted as a code block).
+        Paste the log output here (auto-formatted as code block).
       render: shell
   - type: textarea
     attributes:
       label: Additional Information
       description: |
-        Any additional information you would like to provide.
+        Any other relevant details (config, project type, etc.).

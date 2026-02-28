@@ -1,6 +1,6 @@
 name: 功能建议
-title: "Feature Request:" # 默认标题
-description: 提出新功能或优化建议
+title: "功能建议:"
+description: 为 BallonsTranslator Pro 提出新功能或优化建议
 labels: [feature]
 body:
   - type: markdown
@@ -10,28 +10,26 @@ body:
 
         🚨 **请务必按以下步骤操作** 🚨
 
-        1. 请确保在提交建议前更新仓库，运行以下任一命令：
-           - `.\git\bin\git.exe pull`
-           - `.\PortableGit\bin\git.exe pull`
-           - `git pull`
-           
+        1. 请确保在提交建议前更新仓库：`git pull`（Windows 可用 `.\git\bin\git.exe pull` 或 `.\PortableGit\bin\git.exe pull`）
         2. 检查是否已有类似建议存在。
+
+        **本仓库为 BallonsTranslator Pro 分支。** 针对原版 BallonsTranslator 的建议请向上游提交。
   - type: textarea
     validations:
       required: true
     attributes:
       label: 版本信息
       description: |
-        请提供 BallonsTranslator 的版本信息。请复制控制台显示的以下内容（如果信息消失，请保存项目并重启程序）：
+        请从程序启动时控制台输出中复制以下内容（若未显示，请保存项目并重启）：
         - Python 版本及解释器路径
-        - 应用版本、分支及 Commit Hash
+        - 应用版本、分支、Commit hash
       placeholder: |
         示例:
-        py version: 3.10.9 (tags/v3.10.9:...)
-        py executable: 路径\到\解释器
-        version: 1.4.0
-        branch: dev
-        Commit hash: 53eee46fd7bef117a4ada9a86843c3bf6e37d953
+        Python version: 3.10.11 (...)
+        Python executable: C:\...\python.exe
+        Version: 1.5.0
+        Branch: main
+        Commit hash: 9a0e75f...
   - type: dropdown
     validations:
       required: true
@@ -40,6 +38,23 @@ body:
       options:
         - 新功能
         - 功能优化
+  - type: dropdown
+    attributes:
+      label: 相关区域（可选）
+      description: 该建议与 BallonsTranslator Pro 的哪部分相关？
+      options:
+        - 未指定
+        - 文本检测（含双检测）
+        - OCR
+        - 修复/涂鸦 (Inpaint)
+        - 翻译（含 LLM API、上下文、术语表）
+        - 翻译上下文 / 术语表 / 批处理队列
+        - 界面 / 配置面板
+        - 文字橡皮擦 / 绘图工具
+        - 画布 / 文本编辑面板
+        - 漫画源 / 下载
+        - 快捷键 / 工作流
+        - 其他
   - type: textarea
     validations:
       required: true
@@ -56,4 +71,4 @@ body:
     attributes:
       label: 其他信息
       description: |
-        其他你想提供的信息。
+        其他你想提供的信息（使用场景、考虑过的方案等）。
