@@ -373,6 +373,9 @@ class TitleBar(Widget):
         self.exporttstyle_trigger = exportTextStyles.triggered
         self.darkmode_trigger = darkModeAction.triggered
 
+        mergeToolAction = QAction(self.tr('Region merge tool'), self)
+        mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
+
         self._shortcut_actions_title = [
             ("edit.undo", "Ctrl+Z", undoAction),
             ("edit.redo", "Ctrl+Shift+Z", redoAction),
@@ -402,10 +405,8 @@ class TitleBar(Widget):
         self.toolsToolBtn.setText(self.tr('Tools'))
 
         # Region merge tool
-        mergeToolAction = QAction(self.tr('Region merge tool'), self)
-        mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
         self.merge_tool_trigger = mergeToolAction.triggered
-        
+
         reRunDetectAction = QAction(self.tr('Re-run detection only'), self)
         self.re_run_detection_only_trigger = reRunDetectAction.triggered
         reRunOCRAction = QAction(self.tr('Re-run OCR only'), self)

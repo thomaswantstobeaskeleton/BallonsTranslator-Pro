@@ -11,6 +11,7 @@ class TextShadowGroup(QGroupBox):
     def __init__(self, on_param_changed: Callable = None, title=None):
         super().__init__(title=title)
         self.on_param_changed = on_param_changed
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         self.xoffset_box = SmallSizeComboBox([-2, 2], 'shadow_xoffset', self)
         self.xoffset_box.setToolTip(self.tr("Set X offset"))
@@ -59,19 +60,19 @@ class TextShadowGroup(QGroupBox):
         hlayout2.addLayout(strength_layout)
         hlayout2.addLayout(radius_layout)
 
-        yoffset_layout = QHBoxLayout()
-        yoffset_layout.addWidget(self.yoffset_label)
-        yoffset_layout.addWidget(self.yoffset_box)
-
         offset_label = SmallParamLabel(self.tr('Offset'))
         offset_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        offset_row = QHBoxLayout()
-        offset_row.addWidget(offset_label)
-        offset_row.addLayout(xoffset_layout)
-        offset_row.addLayout(yoffset_layout)
+        offset_label.setMinimumWidth(44)
+        offset_row_x = QHBoxLayout()
+        offset_row_x.addWidget(offset_label)
+        offset_row_x.addLayout(xoffset_layout)
+        offset_row_y = QHBoxLayout()
+        offset_row_y.addSpacing(44)
+        offset_row_y.addLayout(yoffset_layout)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(offset_row)
+        layout.addLayout(offset_row_x)
+        layout.addLayout(offset_row_y)
         layout.addLayout(hlayout2)
 
     def on_offset_changed(self, *args, **kwargs):
@@ -83,6 +84,7 @@ class TextGradientGroup(QGroupBox):
         super().__init__()
         self.setTitle(self.tr('Gradient'))
         self.on_param_changed = on_param_changed
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         self.start_picker = SmallColorPickerLabel(self, param_name='gradient_start_color')
         start_picker_label = SmallParamLabel(self.tr('Start Color'), alignment=Qt.AlignmentFlag.AlignCenter)
@@ -106,6 +108,7 @@ class TextGradientGroup(QGroupBox):
         type_layout = QHBoxLayout()
         type_layout.addWidget(type_label)
         type_layout.addWidget(self.type_combobox)
+        type_layout.addStretch(1)
 
         self.angle_box = SmallSizeComboBox([0, 359], 'gradient_angle', self)
         self.angle_box.setToolTip(self.tr("Set Gradient Angle"))
@@ -116,6 +119,7 @@ class TextGradientGroup(QGroupBox):
         angle_layout = QHBoxLayout()
         angle_layout.addWidget(self.angle_label)
         angle_layout.addWidget(self.angle_box)
+        angle_layout.addStretch(1)
 
         self.size_box = SmallSizeComboBox([0.5, 2], 'gradient_size', self)
         self.size_box.setToolTip(self.tr("Set Gradient Size"))
@@ -126,13 +130,15 @@ class TextGradientGroup(QGroupBox):
         size_layout = QHBoxLayout()
         size_layout.addWidget(self.size_label)
         size_layout.addWidget(self.size_box)
+        size_layout.addStretch(1)
 
         hlayout1 = QHBoxLayout()
         hlayout1.addLayout(start_picker_layout)
         hlayout1.addLayout(end_picker_layout)
         hlayout1.addWidget(self.enable_checker)
-        hlayout1.addLayout(type_layout)
-        # hlayout1.addStretch(-1)
+
+        hlayout1b = QHBoxLayout()
+        hlayout1b.addLayout(type_layout)
 
         hlayout2 = QHBoxLayout()
         hlayout2.addLayout(angle_layout)
@@ -140,6 +146,7 @@ class TextGradientGroup(QGroupBox):
 
         layout = QVBoxLayout(self)
         layout.addLayout(hlayout1)
+        layout.addLayout(hlayout1b)
         layout.addLayout(hlayout2)
 
     def on_gradient_type_changed(self):
@@ -168,6 +175,7 @@ class TextAdvancedFormatPanel(PanelArea):
         linespacing_type_layout = QHBoxLayout()
         linespacing_type_layout.addWidget(linespacing_type_label)
         linespacing_type_layout.addWidget(self.linespacing_type_combobox)
+        linespacing_type_layout.addStretch(1)
 
         self.opacity_box = SmallSizeComboBox([0, 1], 'opacity', self, init_value=1.)
         self.opacity_box.setToolTip(self.tr("Set Text Opacity"))
@@ -178,6 +186,7 @@ class TextAdvancedFormatPanel(PanelArea):
         opacity_layout = QHBoxLayout()
         opacity_layout.addWidget(self.opacity_label)
         opacity_layout.addWidget(self.opacity_box)
+        opacity_layout.addStretch(1)
 
         self.font_weight_values = [300, 400, 500, 600, 700]
         self.font_weight_combobox = SmallComboBox(
@@ -190,6 +199,7 @@ class TextAdvancedFormatPanel(PanelArea):
         font_weight_layout = QHBoxLayout()
         font_weight_layout.addWidget(font_weight_label)
         font_weight_layout.addWidget(self.font_weight_combobox)
+        font_weight_layout.addStretch(1)
 
         # self.tate_chu_yoko_checker = QFontChecker()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -201,12 +211,15 @@ class TextAdvancedFormatPanel(PanelArea):
         self.gradient_group = TextGradientGroup(self.on_format_changed)
         self.gradient_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
-        hlayout = QHBoxLayout()
-        hlayout.addLayout(linespacing_type_layout)
-        hlayout.addLayout(opacity_layout)
-        hlayout.addLayout(font_weight_layout)
+        # Allow horizontal scroll when content is wider than panel (e.g. narrow side panel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Stack rows vertically so each control has room; avoids overflow and "pushed left" look
         vlayout = QVBoxLayout()
-        vlayout.addLayout(hlayout)
+        vlayout.addLayout(linespacing_type_layout)
+        vlayout.addLayout(opacity_layout)
+        vlayout.addLayout(font_weight_layout)
         vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         vlayout.addWidget(self.shadow_group)
         vlayout.addWidget(self.gradient_group)
@@ -215,8 +228,8 @@ class TextAdvancedFormatPanel(PanelArea):
         self.vlayout = vlayout
 
     def adjuset_size(self):
-        TEXT_ADVANCED_PANEL_MAXH = 300
-        self.setFixedHeight(min(TEXT_ADVANCED_PANEL_MAXH, self.scrollContent.height()))
+        # Cap height so the panel doesn't grow unbounded; content can scroll vertically if needed
+        self.setMaximumHeight(420)
 
     def on_linespacing_type_changed(self):
         self.on_format_changed('line_spacing_type', self.linespacing_type_combobox.currentIndex())
