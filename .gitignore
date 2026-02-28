@@ -89,3 +89,16 @@ desktop.ini
 *.bak
 *.swp
 *~
+
+# Python / dev artifacts (optional; uncomment if you use these)
+# .python-version
+# .mypy_cache
+# .pytest_cache
+# .coverage
+# htmlcov/
+# *.egg-info
+# dist/
+# build/
+# *.whl
+# .tox/
+# .ruff_cache/

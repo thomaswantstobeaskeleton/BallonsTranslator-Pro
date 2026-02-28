@@ -45,18 +45,31 @@ from .shortcuts_dialog import ShortcutsDialog
 class PageListView(QListWidget):
 
     reveal_file = Signal()
+    remove_images = Signal(list)
+    translate_images = Signal(list)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.setIconSize(QSize(shared.PAGELIST_THUMBNAIL_SIZE, shared.PAGELIST_THUMBNAIL_SIZE))
+        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
     def contextMenuEvent(self, e: QContextMenuEvent):
         menu = QMenu()
         reveal_act = menu.addAction(self.tr('Reveal in File Explorer'))
+        selected_items = self.selectedItems()
+        if selected_items:
+            menu.addSeparator()
+            translate_act = menu.addAction(self.tr('Translate Selected Images'))
+            menu.addSeparator()
+            remove_act = menu.addAction(self.tr('Remove from Project'))
         rst = menu.exec_(e.globalPos())
 
         if rst == reveal_act:
             self.reveal_file.emit()
+        elif selected_items and rst == translate_act:
+            self.translate_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == remove_act:
+            self.remove_images.emit([item.text() for item in selected_items])
 
         return super().contextMenuEvent(e)
 
@@ -162,6 +175,8 @@ class MainWindow(mainwindow_cls):
 
         self.pageList = PageListView()
         self.pageList.reveal_file.connect(self.on_reveal_file)
+        self.pageList.remove_images.connect(self.on_remove_images)
+        self.pageList.translate_images.connect(self.on_translate_images)
         self.pageList.setHidden(True)
         self.pageList.currentItemChanged.connect(self.pageListCurrentItemChanged)
 
@@ -199,6 +214,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.textstack_changed.connect(self.on_textstack_changed)
         self.canvas.run_blktrans.connect(self.on_run_blktrans)
         self.canvas.drop_open_folder.connect(self.dropOpenDir)
+        self.canvas.drop_open_files.connect(self.dropOpenFiles)
         self.canvas.originallayer_trans_slider = self.bottomBar.originalSlider
         self.canvas.textlayer_trans_slider = self.bottomBar.textlayerSlider
         self.canvas.copy_src_signal.connect(self.on_copy_src)
@@ -549,6 +565,55 @@ class MainWindow(mainwindow_cls):
             self.leftBar.updateRecentProjList(directory)
             self.OpenProj(directory)
 
+    def dropOpenFiles(self, file_paths: list):
+        """Open a project from a list of image file paths (e.g. drag-drop or Select Files). Uses first file's directory as project dir and only those files as pages."""
+        if not file_paths:
+            return
+        from utils.logger import logger as LOGGER
+        from utils import create_error_dialog
+        try:
+            if self.imgtrans_proj.directory is not None and self.canvas.projstate_unsaved:
+                self.saveCurrentPage()
+            first_path = osp.normpath(file_paths[0])
+            target_dir = osp.dirname(first_path)
+            image_ext = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif', '.gif'}
+            copied_files = []
+            for p in file_paths:
+                p = osp.normpath(p)
+                if not osp.isfile(p) or osp.splitext(p)[1].lower() not in image_ext:
+                    continue
+                if osp.dirname(p) != target_dir:
+                    continue
+                copied_files.append(osp.basename(p))
+            if not copied_files:
+                return
+            self.leftBar.updateRecentProjList(target_dir)
+            self.imgtrans_proj.directory = target_dir
+            self.imgtrans_proj.proj_path = osp.join(target_dir, self.imgtrans_proj.proj_name() + '.json')
+            if not osp.exists(self.imgtrans_proj.inpainted_dir()):
+                os.makedirs(self.imgtrans_proj.inpainted_dir())
+            if not osp.exists(self.imgtrans_proj.mask_dir()):
+                os.makedirs(self.imgtrans_proj.mask_dir())
+            self.imgtrans_proj.pages = {}
+            self.imgtrans_proj._pagename2idx = {}
+            self.imgtrans_proj._idx2pagename = {}
+            for ii, name in enumerate(copied_files):
+                self.imgtrans_proj.pages[name] = []
+                self.imgtrans_proj._pagename2idx[name] = ii
+                self.imgtrans_proj._idx2pagename[ii] = name
+            if copied_files:
+                self.imgtrans_proj.set_current_img(copied_files[0])
+            self.imgtrans_proj.save()
+            self.st_manager.clearSceneTextitems()
+            self.titleBar.setTitleContent(page_name=osp.basename(target_dir))
+            self.updatePageList()
+            self.canvas.clear_undostack(update_saved_step=True)
+            self.canvas.drop_files = []
+            self.canvas.drop_folder = None
+        except Exception as e:
+            LOGGER.error("Error importing images: %s", str(e))
+            create_error_dialog(e, self.tr('Failed to import images'))
+
     def openJsonProj(self, json_path: str):
         try:
             self.opening_dir = True
@@ -590,6 +655,16 @@ class MainWindow(mainwindow_cls):
         save_config()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        reply = QMessageBox.question(
+            self,
+            self.tr('Confirm exit'),
+            self.tr('Are you sure you want to quit?'),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            event.ignore()
+            return
         if not self.imgtrans_proj.is_empty:
             self.conditional_save(keep_exist_as_backup=True)
         while True:
@@ -1702,7 +1777,7 @@ class MainWindow(mainwindow_cls):
         self._run_imgtrans_wo_textstyle_update = True
         self.run_imgtrans()
 
-    def on_run_imgtrans(self, continue_mode=False):
+    def on_run_imgtrans(self, continue_mode=False, pages_to_process=None):
         self._idle_unload_timer.stop()
         self.backup_blkstyles.clear()
 
@@ -1712,18 +1787,22 @@ class MainWindow(mainwindow_cls):
 
         all_disabled = pcfg.module.all_stages_disabled()
         
-        pages_to_process = []
-        
         # 继续模式：先检查哪些页面需要处理
         if continue_mode:
+            pages_to_process = []
             for page_name in self.imgtrans_proj.pages:
                 if not self.imgtrans_proj.get_page_progress(page_name):
                     pages_to_process.append(page_name)
             if len(pages_to_process) == 0:
                 return
-        else:
+        elif pages_to_process is None:
+            pages_to_process = []
             for page_name in self.imgtrans_proj.pages:
                 self.imgtrans_proj.set_page_progress(page_name, 0)
+        else:
+            for page_name in pages_to_process:
+                if page_name in self.imgtrans_proj.pages:
+                    self.imgtrans_proj.set_page_progress(page_name, 0)
         
         if pcfg.module.enable_detect:
             for page in self.imgtrans_proj.pages:
@@ -1874,6 +1953,67 @@ class MainWindow(mainwindow_cls):
         elif sys.platform == 'darwin':
             p = "\""+current_img_path+"\""
             subprocess.Popen("open -R "+p, shell=True)
+
+    def on_translate_images(self, image_names: list):
+        if not image_names:
+            return
+        self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_remove_images(self, image_names: list):
+        if not image_names:
+            return
+        if len(image_names) == 1:
+            confirm_msg = self.tr('Are you sure you want to remove "{}" from the project?').format(image_names[0])
+        else:
+            confirm_msg = self.tr('Are you sure you want to remove {} images from the project?').format(len(image_names))
+        reply = QMessageBox.question(
+            self, self.tr('Confirm Removal'), confirm_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        current_img = self.imgtrans_proj.current_img
+        need_switch = current_img in image_names
+        next_img = None
+        for img_name in self.imgtrans_proj.pages.keys():
+            if img_name not in image_names:
+                next_img = img_name
+                break
+        if need_switch and next_img:
+            if self.canvas.projstate_unsaved:
+                self.saveCurrentPage()
+            self.imgtrans_proj.set_current_img(next_img)
+        for img_name in image_names:
+            if img_name in self.imgtrans_proj.pages:
+                del self.imgtrans_proj.pages[img_name]
+            if img_name in self.imgtrans_proj._pagename2idx:
+                idx = self.imgtrans_proj._pagename2idx[img_name]
+                del self.imgtrans_proj._pagename2idx[img_name]
+                if idx in self.imgtrans_proj._idx2pagename:
+                    del self.imgtrans_proj._idx2pagename[idx]
+        self.imgtrans_proj._pagename2idx = {}
+        self.imgtrans_proj._idx2pagename = {}
+        for ii, imgname in enumerate(self.imgtrans_proj.pages.keys()):
+            self.imgtrans_proj._pagename2idx[imgname] = ii
+            self.imgtrans_proj._idx2pagename[ii] = imgname
+        if len(self.imgtrans_proj.pages) == 0:
+            self.imgtrans_proj.set_current_img(None)
+            self.canvas.clear_undostack(update_saved_step=True)
+            self.canvas.drop_files = []
+            self.canvas.drop_folder = None
+            self.canvas.updateCanvas()
+            self.st_manager.clearSceneTextitems()
+            self.titleBar.setTitleContent(page_name="")
+        elif need_switch and next_img:
+            self.canvas.clear_undostack(update_saved_step=True)
+            self.canvas.drop_files = []
+            self.canvas.drop_folder = None
+            self.canvas.updateCanvas()
+            self.st_manager.updateSceneTextitems()
+            self.titleBar.setTitleContent(page_name=self.imgtrans_proj.current_img)
+        self.imgtrans_proj.save()
+        self.updatePageList()
 
     def on_set_gsearch_widget(self):
         setup = self.leftBar.globalSearchChecker.isChecked()

@@ -203,6 +203,7 @@ class Canvas(QGraphicsScene):
     proj_savestate_changed = Signal(bool)
     textstack_changed = Signal()
     drop_open_folder = Signal(str)
+    drop_open_files = Signal(list)
     context_menu_requested = Signal(QPoint, bool)
     incanvas_selection_changed = Signal()
     switch_text_item = Signal(int, QKeyEvent)
@@ -301,6 +302,7 @@ class Canvas(QGraphicsScene):
         self.clipboard_blks: List[TextBlock] = []
 
         self.drop_folder: str = None
+        self.drop_files: List[str] = []
         self.block_selection_signal = False
         
         im_rect = QRectF(0, 0, C.SCREEN_W, C.SCREEN_H)
@@ -321,15 +323,23 @@ class Canvas(QGraphicsScene):
     def dragEnterEvent(self, e: QGraphicsSceneDragDropEvent):
         
         self.drop_folder = None
+        self.drop_files = []
         if e.mimeData().hasUrls():
             urls = e.mimeData().urls()
+            image_files = []
             ufolder = None
             for url in urls:
                 furl = url.toLocalFile()
-                if os.path.isdir(furl):
+                if os.path.isfile(furl) and os.path.splitext(furl)[1].lower() in {
+                    '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif', '.gif'
+                }:
+                    image_files.append(furl)
+                elif os.path.isdir(furl) and not image_files:
                     ufolder = furl
-                    break
-            if ufolder is not None:
+            if image_files:
+                e.acceptProposedAction()
+                self.drop_files = image_files
+            elif ufolder is not None:
                 e.acceptProposedAction()
                 self.drop_folder = ufolder
 
@@ -337,6 +347,9 @@ class Canvas(QGraphicsScene):
         if self.drop_folder is not None:
             self.drop_open_folder.emit(self.drop_folder)
             self.drop_folder = None
+        elif self.drop_files:
+            self.drop_open_files.emit(self.drop_files)
+            self.drop_files = []
         return super().dropEvent(event)
 
     def textEditMode(self) -> bool:

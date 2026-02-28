@@ -357,6 +357,11 @@ class ConfigPanel(Widget):
         self.configTable = ConfigTable()
         self.configTable.tableitem_pressed.connect(self.onTableItemPressed)
         self.configContent = ConfigContent()
+        # Ensure content has enough width so Typesetting combos and Test translator/OCR buttons don't get cut off
+        self.configContent.setMinimumWidth(420)
+        w = self.configContent.widget()
+        if w is not None:
+            w.setMinimumWidth(520)
         dlConfigPanel, dltableitem = self.addConfigBlock(self.tr('DL Module'))
         generalConfigPanel, generalTableItem = self.addConfigBlock(self.tr('General'))
         
@@ -493,30 +498,30 @@ class ConfigPanel(Widget):
         self.let_fntsize_combox.activated.connect(self.on_fntsize_flag_changed)
         self.let_fntstroke_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Stroke Size'), parent=self, insert_stretch=True)
         self.let_fntstroke_combox.activated.connect(self.on_fntstroke_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 0, 1)
-        
+        global_fntfmt_layout.addWidget(sublock, 1, 0)
+
         self.let_fntcolor_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Font Color'), parent=self, insert_stretch=True)
         self.let_fntcolor_combox.activated.connect(self.on_fontcolor_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 1, 0)
+        global_fntfmt_layout.addWidget(sublock, 2, 0)
         self.let_fnt_scolor_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Stroke Color'), parent=self, insert_stretch=True)
         self.let_fnt_scolor_combox.activated.connect(self.on_font_scolor_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 1, 1)
+        global_fntfmt_layout.addWidget(sublock, 3, 0)
 
         self.let_effect_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Effect'), parent=self, insert_stretch=True)
         self.let_effect_combox.activated.connect(self.on_effect_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 2, 0)
+        global_fntfmt_layout.addWidget(sublock, 4, 0)
         self.let_alignment_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Alignment'), parent=self, insert_stretch=True)
         self.let_alignment_combox.activated.connect(self.on_alignment_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 2, 1)
+        global_fntfmt_layout.addWidget(sublock, 5, 0)
 
         self.let_writing_mode_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Writing-mode'), parent=self, insert_stretch=True)
         self.let_writing_mode_combox.activated.connect(self.on_writing_mode_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 3, 0)
+        global_fntfmt_layout.addWidget(sublock, 6, 0)
         self.let_family_combox, sublock = combobox_with_label([self.tr('Keep existing'), self.tr('Always use global setting')], self.tr('Font Family'), parent=self, insert_stretch=True)
         self.let_family_combox.activated.connect(self.on_family_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 3, 1)
+        global_fntfmt_layout.addWidget(sublock, 7, 0)
 
-        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 0, 2)
+        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 8, 0)
 
         self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'), 
                 discription=self.tr('Split translation into multi-lines according to the extracted balloon region.'))

@@ -5,7 +5,7 @@ import os.path as osp
 import cv2
 import numpy as np
 from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer
-from qtpy.QtWidgets import QFileDialog
+from qtpy.QtWidgets import QFileDialog, QMessageBox
 from sympy import true
 
 from .funcmaps import get_maskseg_method
@@ -23,8 +23,10 @@ modules.translators.SYSTEM_LANG = QLocale.system().name()
 from utils.textblock import TextBlock, sort_regions, examine_textblk
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
+from utils.translator_test import test_translator
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
+from .ocr_test_dialog import OCRTestDialog
 from utils.proj_imgtrans import ProjImgTrans
 from utils.config import pcfg, RunStatus
 cfg_module = pcfg.module
@@ -681,6 +683,7 @@ class ModuleManager(QObject):
         translator_panel.addModulesParamWidgets(translator_params)
         translator_panel.translator_changed.connect(self.setTranslator)
         translator_panel.paramwidget_edited.connect(self.on_translatorparam_edited)
+        translator_panel.test_translator_clicked.connect(self.on_test_translator)
         from modules.translators.hooks import chs2cht
         BaseTranslator.register_preprocess_hooks({'keyword_sub': translate_preprocess})
         BaseTranslator.register_postprocess_hooks({'chs2cht': chs2cht, 'keyword_sub': translate_postprocess})
@@ -704,6 +707,7 @@ class ModuleManager(QObject):
         ocr_panel.addModulesParamWidgets(ocr_params)
         ocr_panel.paramwidget_edited.connect(self.on_ocrparam_edited)
         ocr_panel.ocr_changed.connect(self.setOCR)
+        ocr_panel.test_ocr_clicked.connect(self.on_test_ocr)
         OCRBase.register_postprocess_hooks(ocr_postprocess)
 
         config_panel.unload_models.connect(self.unload_all_models)
@@ -1000,6 +1004,25 @@ class ModuleManager(QObject):
             self.updateModuleSetupParam(self.translator, param_key, param_content)
             cfg_module.translator_params[self.translator.name] = self.translator.params
 
+    def on_test_translator(self):
+        if self.translator is None:
+            create_error_dialog(ValueError("No translator loaded"), self.tr("Test translator"))
+            return
+        btn = self.translator_panel.testTranslatorBtn
+        btn.setEnabled(False)
+        btn.setText(self.tr("Testing..."))
+        def run():
+            try:
+                success, src_text, result = test_translator(self.translator)
+                if success:
+                    create_info_dialog(self.tr("Success.") + "\n\n" + result)
+                else:
+                    create_error_dialog(RuntimeError(result), self.tr("Test translator"))
+            finally:
+                btn.setEnabled(True)
+                btn.setText(self.tr("Test translator"))
+        QTimer.singleShot(50, run)
+
     def on_inpainterparam_edited(self, param_key: str, param_content: dict):
         if self.inpainter is not None:
             self.updateModuleSetupParam(self.inpainter, param_key, param_content)
@@ -1015,7 +1038,11 @@ class ModuleManager(QObject):
             self.updateModuleSetupParam(self.ocr, param_key, param_content)
             cfg_module.ocr_params[self.ocr.name] = self.ocr.params
 
-    def updateModuleSetupParam(self, 
+    def on_test_ocr(self):
+        parent = self.ocr_panel.window() if self.ocr_panel else None
+        OCRTestDialog(self.ocr, parent).exec()
+
+    def updateModuleSetupParam(self,
                                module: Union[InpainterBase, BaseTranslator],
                                param_key: str, param_content: dict):
             

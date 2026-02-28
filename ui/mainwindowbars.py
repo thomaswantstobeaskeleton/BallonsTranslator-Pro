@@ -93,6 +93,9 @@ class LeftBar(Widget):
         actionOpenProj = QAction(self.tr("Open Project ... *.json"), self)
         actionOpenProj.triggered.connect(self.onOpenProj)
 
+        actionOpenImages = QAction(self.tr("Open Images ..."), self)
+        actionOpenImages.triggered.connect(self.onOpenImages)
+
         actionSaveProj = QAction(self.tr("Save Project"), self)
         self.save_proj = actionSaveProj.triggered
         actionSaveProj.setShortcut(QKeySequence.fromString(get_shortcut("file.save_proj", getattr(pcfg, "shortcuts", None))))
@@ -123,7 +126,7 @@ class LeftBar(Widget):
         self.recentMenu = QMenu(self.tr("Open Recent"), self)
         
         openMenu = QMenu(self)
-        openMenu.addActions([actionOpenFolder, actionOpenProj])
+        openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenProj])
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
         openMenu.addActions([
@@ -261,6 +264,28 @@ class LeftBar(Widget):
         json_path = str(dialog.getOpenFileUrl(self.parent(), self.tr('Import *.docx'), filter="*.json")[0].toLocalFile())
         if osp.exists(json_path):
             self.open_json_proj.emit(json_path)
+
+    def onOpenImages(self) -> None:
+        d = None
+        if len(self.recent_proj_list) > 0:
+            for projp in self.recent_proj_list:
+                if not osp.isdir(projp):
+                    projp = osp.dirname(projp)
+                if osp.exists(projp):
+                    d = projp
+                    break
+        dialog = QFileDialog()
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        dialog.setNameFilter("Images (*.jpg *.jpeg *.png *.bmp *.webp *.tiff *.tif *.gif)")
+        if d:
+            dialog.setDirectory(d)
+        if dialog.exec_():
+            selected = dialog.selectedFiles()
+            if not selected:
+                return
+            image_files = [str(p) for p in selected if osp.isfile(p) and osp.splitext(str(p))[1].lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif', '.gif'}]
+            if image_files:
+                self.mainwindow.dropOpenFiles(image_files)
 
     def stateCheckerChanged(self, checker_type: str):
         if checker_type == 'imgtrans':

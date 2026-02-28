@@ -7,8 +7,8 @@ from .custom_widget import ConfigComboBox, ParamComboBox, NoBorderPushBtn, Param
 from utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from utils.config import pcfg
 
-from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox
+from qtpy.QtCore import Qt, Signal, QTimer
 from qtpy.QtGui import QDoubleValidator
 
 
@@ -380,6 +380,7 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
     show_pre_MT_keyword_window = Signal()
     show_MT_keyword_window = Signal()
     show_OCR_keyword_window = Signal()
+    test_translator_clicked = Signal()
 
     def __init__(self, module_name, scrollWidget: QWidget = None, *args, **kwargs) -> None:
         super().__init__(module_name, GET_VALID_TRANSLATORS, scrollWidget=scrollWidget, *args, **kwargs)
@@ -387,6 +388,9 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
     
         self.source_combobox = ConfigComboBox(scrollWidget=scrollWidget)
         self.target_combobox = ConfigComboBox(scrollWidget=scrollWidget)
+        self.testTranslatorBtn = QPushButton(self.tr("Test translator"), self)
+        self.testTranslatorBtn.setToolTip(self.tr("Test if the current translator is available (e.g. API key, network)."))
+        self.testTranslatorBtn.clicked.connect(self.test_translator_clicked.emit)
         self.replacePreMTkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for machine translation source text"), self)
         self.replacePreMTkeywordBtn.clicked.connect(self.show_pre_MT_keyword_window)
         self.replacePreMTkeywordBtn.setFixedWidth(500)
@@ -406,6 +410,7 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         st_layout.addWidget(self.target_combobox)
         
         self.vlayout.insertLayout(1, st_layout) 
+        self.vlayout.addWidget(self.testTranslatorBtn)
         self.vlayout.addWidget(self.replaceOCRkeywordBtn)
         self.vlayout.addWidget(self.replacePreMTkeywordBtn)
         self.vlayout.addWidget(self.replaceMTkeywordBtn)
@@ -455,6 +460,8 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         
 
 class OCRConfigPanel(ModuleConfigParseWidget):
+    test_ocr_clicked = Signal()
+
     def __init__(self, module_name: str, scrollWidget: QWidget = None, *args, **kwargs) -> None:
         super().__init__(module_name, GET_VALID_OCR, scrollWidget = scrollWidget, *args, **kwargs)
         self.ocr_changed = self.module_changed
@@ -468,6 +475,10 @@ class OCRConfigPanel(ModuleConfigParseWidget):
         self.fontDetectChecker.setChecked(pcfg.module.ocr_font_detect)
         self.fontDetectChecker.clicked.connect(self.on_fontdetect_changed)
         self.vlayout.addWidget(self.fontDetectChecker)
+        self.testOCRBtn = QPushButton(self.tr("Test OCR"), self)
+        self.testOCRBtn.setToolTip(self.tr("Run OCR on a sample image to verify setup and connectivity."))
+        self.testOCRBtn.clicked.connect(self.test_ocr_clicked.emit)
+        self.vlayout.addWidget(self.testOCRBtn)
 
     def on_restore_empty_ocr(self):
         pcfg.restore_ocr_empty = self.restoreEmptyOCRChecker.isChecked()

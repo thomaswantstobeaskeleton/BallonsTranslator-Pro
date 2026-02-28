@@ -8,6 +8,7 @@ import httpx
 import openai
 from pydantic import BaseModel, Field, ValidationError
 
+from utils.proxy_utils import create_httpx_client
 from .base import BaseTranslator, register_translator
 
 
@@ -187,22 +188,13 @@ class LLM_API_Translator(BaseTranslator):
                 endpoint = "https://api.x.ai/v1"
 
         proxy = self.proxy
-        # Timeout: avoid indefinite hang; connection 30s, read 120s for long LLM responses
         timeout = httpx.Timeout(30.0, read=120.0)
-        http_client = None
-        if proxy:
-            try:
-                proxy_mounts = {
-                    "http://": httpx.HTTPTransport(proxy=proxy),
-                    "https://": httpx.HTTPTransport(proxy=proxy),
-                }
-                http_client = httpx.Client(mounts=proxy_mounts, timeout=timeout)
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to initialize proxy '{proxy}': {e}. Proceeding without proxy."
-                )
-                http_client = httpx.Client(timeout=timeout)
-        else:
+        try:
+            http_client = create_httpx_client(proxy, timeout=timeout)
+        except Exception as e:
+            self.logger.error(
+                f"Failed to initialize proxy '{proxy}': {e}. Proceeding without proxy."
+            )
             http_client = httpx.Client(timeout=timeout)
 
         masked_key = (
