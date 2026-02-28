@@ -1,14 +1,21 @@
 from typing import List, Union, Tuple
 
-from qtpy.QtWidgets import QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout, QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit
 from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent
+from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
+    QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit,
+    QSpinBox, QComboBox, QDoubleSpinBox)
 
 from .custom_widget import ConfigComboBox, Widget
 from utils.config import pcfg
 from utils import shared as C
-from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN
+from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .module_parse_widgets import InpaintConfigPanel, TextDetectConfigPanel, TranslatorConfigPanel, OCRConfigPanel
+
+
+def _config_font_size(base_size: float) -> float:
+    """Apply config panel font scale (accessibility)."""
+    return base_size * getattr(pcfg, 'config_panel_font_scale', 1.0)
 
 class CustomIntValidator(QIntValidator):
 
@@ -96,11 +103,11 @@ class ConfigSubBlock(Widget):
             layout = QHBoxLayout(self)
         self.name = name
         if name is not None:
-            textlabel = ConfigTextLabel(name, CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+            textlabel = ConfigTextLabel(name, _config_font_size(CONFIG_FONTSIZE_CONTENT), QFont.Weight.Normal)
             self.name_label = textlabel
             layout.addWidget(textlabel)
         if discription is not None:
-            layout.addWidget(ConfigTextLabel(discription, CONFIG_FONTSIZE_CONTENT-2))
+            layout.addWidget(ConfigTextLabel(discription, _config_font_size(CONFIG_FONTSIZE_CONTENT)-2))
         if insert_stretch:
             layout.insertStretch(-1)
         if isinstance(widget, QWidget):
@@ -130,7 +137,7 @@ def combobox_with_label(sel: List[str], name: str, discription: str = None, vert
     else:
         layout = target_block.layout()
         layout.addSpacing(20)
-        layout.addWidget(ConfigTextLabel(name, CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal))
+        layout.addWidget(ConfigTextLabel(name, _config_font_size(CONFIG_FONTSIZE_CONTENT), QFont.Weight.Normal))
         layout.addWidget(combox)
         return combox, target_block
     
@@ -138,7 +145,7 @@ def checkbox_with_label(name: str, discription: str = None, target_block: QWidge
     checkbox = QCheckBox()
     if discription is not None:
         font = checkbox.font()
-        font.setPointSizeF(max(1.0, CONFIG_FONTSIZE_CONTENT * 0.8))
+        font.setPointSizeF(max(1.0, _config_font_size(CONFIG_FONTSIZE_CONTENT) * 0.8))
         checkbox.setFont(font)
         checkbox.setText(discription)
         vertical_layout = True
@@ -159,7 +166,7 @@ class ConfigBlock(Widget):
 
     def __init__(self, header: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.header = ConfigTextLabel(header, CONFIG_FONTSIZE_HEADER)
+        self.header = ConfigTextLabel(header, _config_font_size(CONFIG_FONTSIZE_HEADER))
         self.vlayout = QVBoxLayout(self)
         self.vlayout.addWidget(self.header)
         self.setContentsMargins(24, 24, 24, 24)
@@ -182,7 +189,7 @@ class ConfigBlock(Widget):
         return le, sublock
 
     def addTextLabel(self, text: str = None):
-        label = ConfigTextLabel(text, CONFIG_FONTSIZE_HEADER)
+        label = ConfigTextLabel(text, _config_font_size(CONFIG_FONTSIZE_HEADER))
         self.vlayout.addWidget(label)
         self.label_list.append(label)
 
@@ -297,7 +304,7 @@ class ConfigTable(QTreeView):
 
     def addHeader(self, header: str) -> TableItem:
         rootNode = self.model().invisibleRootItem()
-        ti = TableItem(header, CONFIG_FONTSIZE_TABLE)
+        ti = TableItem(header, _config_font_size(CONFIG_FONTSIZE_TABLE))
         rootNode.appendRow(ti)
         return ti
 
@@ -341,6 +348,8 @@ class ConfigPanel(Widget):
     unload_models = Signal()
     reload_textstyle = Signal(bool)
     show_only_custom_font = Signal(bool)
+    darkmode_changed = Signal(bool)
+    display_lang_changed = Signal(str)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -361,21 +370,31 @@ class ConfigPanel(Widget):
         label_saladict = self.tr('SalaDict')
     
         dltableitem.appendRows([
-            TableItem(label_text_det, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_text_ocr, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_inpaint, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_translator, CONFIG_FONTSIZE_TABLE),
+            TableItem(label_text_det, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_text_ocr, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_inpaint, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_translator, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
         generalTableItem.appendRows([
-            TableItem(label_startup, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_typesetting, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_save, CONFIG_FONTSIZE_TABLE),
-            TableItem(label_saladict, CONFIG_FONTSIZE_TABLE),
+            TableItem(label_startup, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_typesetting, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_save, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_saladict, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
         
         self.load_model_checker, msublock = checkbox_with_label(self.tr('Load models on demand'), discription=self.tr('Load models on demand to save memory.'))
         self.load_model_checker.stateChanged.connect(self.on_load_model_changed)
         dlConfigPanel.vlayout.addWidget(msublock)
+        self.default_device_combobox = QComboBox()
+        try:
+            from modules.base import AVAILABLE_DEVICES
+            self.default_device_combobox.addItem(self.tr('Default (use module default)'))
+            self.default_device_combobox.addItems(AVAILABLE_DEVICES)
+        except Exception:
+            self.default_device_combobox.addItems([self.tr('Default (use module default)'), 'cpu', 'cuda'])
+        self.default_device_combobox.currentIndexChanged.connect(self.on_default_device_index_changed)
+        sublock = ConfigSubBlock(self.default_device_combobox, self.tr('Default device'), discription=self.tr('Preferred device for DL modules when set to Default.'))
+        dlConfigPanel.vlayout.addWidget(sublock)
         self.empty_runcache_checker, msublock = checkbox_with_label(self.tr('Empty cache after RUN'), discription=self.tr('Empty cache after RUN to save memory.'))
         dlConfigPanel.vlayout.addWidget(msublock)
         self.empty_runcache_checker.stateChanged.connect(self.on_runcache_changed)
@@ -384,6 +403,13 @@ class ConfigPanel(Widget):
         self.unload_model_btn.setText(self.tr('Unload All Models'))
         self.unload_model_btn.clicked.connect(self.unload_models)
         msublock.layout().addWidget(self.unload_model_btn)
+        self.unload_after_idle_spin = QSpinBox()
+        self.unload_after_idle_spin.setRange(0, 120)
+        self.unload_after_idle_spin.setValue(getattr(pcfg, 'unload_after_idle_minutes', 0))
+        self.unload_after_idle_spin.setSpecialValueText(self.tr('Off'))
+        self.unload_after_idle_spin.valueChanged.connect(self.on_unload_after_idle_changed)
+        sublock_idle = ConfigSubBlock(self.unload_after_idle_spin, self.tr('Unload models after idle (minutes)'), discription=self.tr('0 = disabled. Unload DL models after N minutes of no Run or canvas activity.'))
+        dlConfigPanel.vlayout.addWidget(sublock_idle)
 
         dlConfigPanel.addTextLabel(label_text_det)
         self.detect_config_panel = TextDetectConfigPanel(self.tr('Detector'), scrollWidget=self)
@@ -405,6 +431,49 @@ class ConfigPanel(Widget):
         generalConfigPanel.addTextLabel(label_startup)
         self.open_on_startup_checker, _ = generalConfigPanel.addCheckBox(self.tr('Reopen last project on startup'))
         self.open_on_startup_checker.stateChanged.connect(self.on_open_onstartup_changed)
+
+        self.recent_proj_list_max_spin = QSpinBox()
+        self.recent_proj_list_max_spin.setRange(5, 30)
+        self.recent_proj_list_max_spin.setValue(14)
+        sublock = ConfigSubBlock(self.recent_proj_list_max_spin, self.tr('Recent projects limit (5–30)'), discription=self.tr('Maximum number of recent projects in the list.'))
+        generalConfigPanel.addSublock(sublock)
+        self.recent_proj_list_max_spin.valueChanged.connect(self.on_recent_proj_list_max_changed)
+
+        self.logical_dpi_spin = QSpinBox()
+        self.logical_dpi_spin.setRange(0, 300)
+        self.logical_dpi_spin.setValue(0)
+        self.logical_dpi_spin.setSpecialValueText(self.tr('System default'))
+        sublock = ConfigSubBlock(self.logical_dpi_spin, self.tr('Logical DPI (restart to apply)'), discription=self.tr('0 = use system. Use 96 or 72 if font scaling is wrong.'))
+        generalConfigPanel.addSublock(sublock)
+        self.logical_dpi_spin.valueChanged.connect(self.on_logical_dpi_changed)
+
+        self.confirm_before_run_checker, _ = generalConfigPanel.addCheckBox(self.tr('Confirm before Run'), discription=self.tr('Show Run / Continue / Cancel dialog when clicking Run.'))
+        self.confirm_before_run_checker.stateChanged.connect(self.on_confirm_before_run_changed)
+
+        self.darkmode_checker, _ = generalConfigPanel.addCheckBox(self.tr('Dark mode'), discription=self.tr('Use dark theme. Restart or toggle View → Dark Mode to apply fully.'))
+        self.darkmode_checker.stateChanged.connect(self.on_darkmode_checker_changed)
+
+        self.display_lang_combobox = QComboBox()
+        self.display_lang_combobox.addItems(list(DISPLAY_LANGUAGE_MAP.keys()))
+        self.display_lang_combobox.setCurrentText(self._display_lang_to_label(getattr(pcfg, 'display_lang', C.DEFAULT_DISPLAY_LANG)))
+        self.display_lang_combobox.currentTextChanged.connect(self.on_display_lang_combobox_changed)
+        sublock = ConfigSubBlock(self.display_lang_combobox, self.tr('Display language'), discription=self.tr('UI language. Same as View → Display Language.'))
+        generalConfigPanel.addSublock(sublock)
+
+        self.config_font_scale_spin = QDoubleSpinBox()
+        self.config_font_scale_spin.setRange(0.8, 1.5)
+        self.config_font_scale_spin.setSingleStep(0.1)
+        self.config_font_scale_spin.setValue(getattr(pcfg, 'config_panel_font_scale', 1.0))
+        self.config_font_scale_spin.valueChanged.connect(self.on_config_font_scale_changed)
+        sublock = ConfigSubBlock(self.config_font_scale_spin, self.tr('Config panel font scale (0.8–1.5)'), discription=self.tr('Scale font size in this Config panel. Reopen Config to apply.'))
+        generalConfigPanel.addSublock(sublock)
+
+        generalConfigPanel.addTextLabel(self.tr('OCR result'))
+        self.ocr_spell_check_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Spell check / Auto-correct OCR result'),
+            discription=self.tr('After OCR runs, correct misspelled words using a spell checker when there is a single suggestion (e.g. "teh" → "the"). Requires pyenchant and a system dictionary (e.g. en_US). Enable this in General to auto-correct OCR text.')
+        )
+        self.ocr_spell_check_checker.stateChanged.connect(self.on_ocr_spell_check_changed)
 
         generalConfigPanel.addTextLabel(label_typesetting)
         dec_program_str = self.tr('decide by program')
@@ -474,12 +543,17 @@ class ConfigPanel(Widget):
         sublock.layout().insertStretch(-1)
         imsave_sublock.layout().addWidget(sublock)
 
+        self.rst_webp_lossless_checker, _ = generalConfigPanel.addCheckBox(self.tr('WebP lossless'), None, imsave_sublock)
+        self.rst_webp_lossless_checker.setToolTip(self.tr('Use lossless WebP when result format is WebP (ignores quality).'))
+        self.rst_webp_lossless_checker.stateChanged.connect(self.on_webp_lossless_changed)
+        self.rst_imgformat_combobox.currentTextChanged.connect(self._update_webp_lossless_visibility)
+
         self.intermediate_imgformat_combobox, intermediate_imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JXL'], self.tr('Intermediate image format'))
         self.intermediate_imgformat_combobox.activated.connect(self.on_intermediate_imgformat_changed)
 
         generalConfigPanel.addTextLabel(label_saladict)
 
-        sublock = ConfigSubBlock(ConfigTextLabel(self.tr("<a href=\"https://github.com/dmMaze/BallonsTranslator/tree/master/doc/saladict.md\">Installation guide</a>"), CONFIG_FONTSIZE_CONTENT - 2), vertical_layout=False)
+        sublock = ConfigSubBlock(ConfigTextLabel(self.tr("<a href=\"https://github.com/dmMaze/BallonsTranslator/tree/master/doc/saladict.md\">Installation guide</a>"), _config_font_size(CONFIG_FONTSIZE_CONTENT) - 2), vertical_layout=False)
         sublock.layout().insertStretch(-1)
         generalConfigPanel.addSublock(sublock)
 
@@ -537,6 +611,47 @@ class ConfigPanel(Widget):
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
 
+    def on_recent_proj_list_max_changed(self, value: int):
+        pcfg.recent_proj_list_max = value
+
+    def on_logical_dpi_changed(self, value: int):
+        pcfg.logical_dpi = value
+
+    def on_confirm_before_run_changed(self):
+        pcfg.confirm_before_run = self.confirm_before_run_checker.isChecked()
+
+    def on_darkmode_checker_changed(self):
+        pcfg.darkmode = self.darkmode_checker.isChecked()
+        self.darkmode_changed.emit(pcfg.darkmode)
+
+    def _display_lang_to_label(self, code: str) -> str:
+        for label, c in DISPLAY_LANGUAGE_MAP.items():
+            if c == code:
+                return label
+        return list(DISPLAY_LANGUAGE_MAP.keys())[0] if DISPLAY_LANGUAGE_MAP else 'English'
+
+    def on_display_lang_combobox_changed(self, text: str):
+        if text not in DISPLAY_LANGUAGE_MAP:
+            return
+        code = DISPLAY_LANGUAGE_MAP[text]
+        pcfg.display_lang = code
+        self.display_lang_changed.emit(code)
+
+    def on_config_font_scale_changed(self, value: float):
+        pcfg.config_panel_font_scale = value
+
+    def on_ocr_spell_check_changed(self):
+        pcfg.ocr_spell_check = self.ocr_spell_check_checker.isChecked()
+
+    def on_default_device_index_changed(self, index: int):
+        if index == 0:
+            pcfg.default_device = ''
+        else:
+            pcfg.default_device = self.default_device_combobox.currentText()
+
+    def on_unload_after_idle_changed(self, value: int):
+        pcfg.unload_after_idle_minutes = value
+
     def on_fntsize_flag_changed(self):
         pcfg.let_fntsize_flag = self.let_fntsize_combox.currentIndex()
 
@@ -561,6 +676,13 @@ class ConfigPanel(Widget):
 
     def on_edit_quality_changed(self, value: str):
         pcfg.imgsave_quality = int(value)
+
+    def on_webp_lossless_changed(self):
+        pcfg.imgsave_webp_lossless = self.rst_webp_lossless_checker.isChecked()
+
+    def _update_webp_lossless_visibility(self):
+        is_webp = self.rst_imgformat_combobox.currentText().upper() == 'WEBP'
+        self.rst_webp_lossless_checker.setEnabled(is_webp)
 
     def on_selectext_minimenu_changed(self):
         pcfg.textselect_mini_menu = self.selectext_minimenu_checker.isChecked()
@@ -645,8 +767,29 @@ class ConfigPanel(Widget):
         self.rst_imgformat_combobox.setCurrentText(pcfg.imgsave_ext.replace('.', '').upper())
         self.intermediate_imgformat_combobox.setCurrentText(pcfg.intermediate_imgsave_ext.replace('.', '').upper())
         self.rst_imgquality_edit.setText(str(pcfg.imgsave_quality))
+        self.rst_webp_lossless_checker.setChecked(getattr(pcfg, 'imgsave_webp_lossless', False))
+        self._update_webp_lossless_visibility()
         self.load_model_checker.setChecked(pcfg.module.load_model_on_demand)
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
+        self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
+        self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
+        self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
+        self.darkmode_checker.setChecked(pcfg.darkmode)
+        self.display_lang_combobox.blockSignals(True)
+        self.display_lang_combobox.setCurrentText(self._display_lang_to_label(getattr(pcfg, 'display_lang', C.DEFAULT_DISPLAY_LANG)))
+        self.display_lang_combobox.blockSignals(False)
+        self.config_font_scale_spin.setValue(getattr(pcfg, 'config_panel_font_scale', 1.0))
+        self.ocr_spell_check_checker.setChecked(getattr(pcfg, 'ocr_spell_check', False))
+        dd = getattr(pcfg, 'default_device', '') or ''
+        if dd == '':
+            self.default_device_combobox.setCurrentIndex(0)
+        else:
+            idx = self.default_device_combobox.findText(dd)
+            if idx >= 0:
+                self.default_device_combobox.setCurrentIndex(idx)
+            else:
+                self.default_device_combobox.setCurrentIndex(0)
+        self.unload_after_idle_spin.setValue(getattr(pcfg, 'unload_after_idle_minutes', 0))
 
         self.blockSignals(False)

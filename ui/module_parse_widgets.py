@@ -185,12 +185,20 @@ class ParamWidget(QWidget):
                     else:
                         size = size2width(param_size)
 
+                    options_list = list(param_dict['options'])
+                    if param_key == 'device':
+                        default_label = self.tr('Default')
+                        if default_label not in options_list:
+                            options_list = [default_label] + options_list
+                        effective_default = (getattr(pcfg, 'default_device', None) or '').strip() or DEFAULT_DEVICE
+                        if not str(value).strip() or value == effective_default:
+                            value = default_label
                     param_widget = ParamComboBox(
-                        param_key, param_dict['options'], size=size, scrollWidget=scrollWidget, flush_btn=flush_btn, path_selector=path_selector)
+                        param_key, options_list, size=size, scrollWidget=scrollWidget, flush_btn=flush_btn, path_selector=path_selector)
 
                     if param_key == 'device' and DEFAULT_DEVICE == 'cpu':
                         param_dict['value'] = 'cpu'
-                        for ii, device in enumerate(param_dict['options']):
+                        for ii, device in enumerate(options_list):
                             if device in GPUINTENSIVE_SET:
                                 model = param_widget.model()
                                 item = model.item(ii, 0)
@@ -260,6 +268,8 @@ class ParamWidget(QWidget):
         self.paramwidget_edited.emit(paramw.param_key, content_dict)
 
     def on_paramwidget_edited(self, param_key, param_content):
+        if param_key == 'device' and param_content == self.tr('Default'):
+            param_content = (getattr(pcfg, 'default_device', None) or '').strip() or DEFAULT_DEVICE
         content_dict = {'content': param_content}
         self.paramwidget_edited.emit(param_key, content_dict)
 
@@ -454,6 +464,7 @@ class OCRConfigPanel(ModuleConfigParseWidget):
         self.vlayout.addWidget(self.restoreEmptyOCRChecker)
         # 字体检测选项
         self.fontDetectChecker = QCheckBox(self.tr("Font Detection"), self)
+        self.fontDetectChecker.setToolTip(self.tr("Detect font properties (e.g. bold, italic) from the image after OCR. Useful for manga/comics."))
         self.fontDetectChecker.setChecked(pcfg.module.ocr_font_detect)
         self.fontDetectChecker.clicked.connect(self.on_fontdetect_changed)
         self.vlayout.addWidget(self.fontDetectChecker)

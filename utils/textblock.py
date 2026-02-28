@@ -126,6 +126,14 @@ class TextBlock:
         self.fontformat.underline = value
 
     @property
+    def strikethrough(self):
+        return getattr(self.fontformat, 'strikethrough', False)
+
+    @strikethrough.setter
+    def strikethrough(self, value: bool):
+        self.fontformat.strikethrough = value
+
+    @property
     def stroke_width(self):
         return self.fontformat.stroke_width
 

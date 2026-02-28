@@ -164,6 +164,21 @@ class Canvas(QGraphicsScene):
     paste_textblks = Signal(QPointF)
     copy_src_signal = Signal()
     paste_src_signal = Signal()
+    copy_trans_signal = Signal()
+    paste_trans_signal = Signal()
+    clear_src_signal = Signal()
+    clear_trans_signal = Signal()
+    select_all_signal = Signal()
+    spell_check_src_signal = Signal()
+    spell_check_trans_signal = Signal()
+    trim_whitespace_signal = Signal()
+    to_uppercase_signal = Signal()
+    to_lowercase_signal = Signal()
+    toggle_strikethrough_signal = Signal()
+    set_gradient_type_signal = Signal(int)  # 0 = Linear, 1 = Radial
+    merge_selected_blocks_signal = Signal()
+    move_blocks_up_signal = Signal()
+    move_blocks_down_signal = Signal()
 
     format_textblks = Signal()
     layout_textblks = Signal()
@@ -171,6 +186,7 @@ class Canvas(QGraphicsScene):
     squeeze_blk = Signal()
 
     run_blktrans = Signal(int)
+    run_detect_region = Signal(QRectF)
 
     begin_scale_tool = Signal(QPointF)
     scale_tool = Signal(QPointF)
@@ -229,6 +245,7 @@ class Canvas(QGraphicsScene):
         self.rubber_band = self.addWidget(QRubberBand(QRubberBand.Shape.Rectangle))
         self.rubber_band.hide()
         self.rubber_band_origin = None
+        self._last_rubber_band_rect = None  # for "Detect text in region" context menu
 
         self.draw_undo_stack = QUndoStack(self)
         self.text_undo_stack = QUndoStack(self)
@@ -667,7 +684,10 @@ class Canvas(QGraphicsScene):
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         btn = event.button()
-
+        if btn == Qt.MouseButton.RightButton and self.rubber_band.isVisible() and self.rubber_band_origin is not None:
+            r = self.rubber_band.geometry().normalized()
+            if r.width() >= 10 and r.height() >= 10:
+                self._last_rubber_band_rect = QRectF(r)
         self.hide_rubber_band()
 
         Qt.MouseButton.LeftButton
@@ -762,6 +782,8 @@ class Canvas(QGraphicsScene):
             copy_act.setShortcut(QKeySequence.StandardKey.Copy)
             paste_act = menu.addAction(self.tr("Paste"))
             paste_act.setShortcut(QKeySequence.StandardKey.Paste)
+            copy_trans_act = menu.addAction(self.tr("Copy translation"))
+            paste_trans_act = menu.addAction(self.tr("Paste translation"))
             delete_act = menu.addAction(self.tr("Delete"))
             delete_act.setShortcut(QKeySequence("Ctrl+D"))
             copy_src_act = menu.addAction(self.tr("Copy source text"))
@@ -770,7 +792,42 @@ class Canvas(QGraphicsScene):
             paste_src_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
             delete_recover_act = menu.addAction(self.tr("Delete and Recover removed text"))
             delete_recover_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
+            clear_src_act = menu.addAction(self.tr("Clear source text"))
+            clear_trans_act = menu.addAction(self.tr("Clear translation"))
+            select_all_act = menu.addAction(self.tr("Select all"))
+            select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
 
+            spell_check_src_act = menu.addAction(self.tr("Spell check source text"))
+            spell_check_src_act.setToolTip(self.tr("Run spell check / auto-correct on source text of selected blocks (requires pyenchant)."))
+            spell_check_trans_act = menu.addAction(self.tr("Spell check translation"))
+            spell_check_trans_act.setToolTip(self.tr("Run spell check / auto-correct on translation text of selected blocks (requires pyenchant)."))
+            trim_whitespace_act = menu.addAction(self.tr("Trim whitespace"))
+            trim_whitespace_act.setToolTip(self.tr("Remove leading and trailing whitespace from each line in selected blocks."))
+            to_uppercase_act = menu.addAction(self.tr("To uppercase"))
+            to_lowercase_act = menu.addAction(self.tr("To lowercase"))
+            toggle_strikethrough_act = menu.addAction(self.tr("Toggle strikethrough"))
+            toggle_strikethrough_act.setToolTip(self.tr("Toggle strikethrough on selected blocks."))
+            gradient_sub = menu.addMenu(self.tr("Gradient type"))
+            gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
+            gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
+
+            menu.addSeparator()
+            merge_blocks_act = menu.addAction(self.tr("Merge selected blocks"))
+            move_up_act = menu.addAction(self.tr("Move block(s) up"))
+            move_down_act = menu.addAction(self.tr("Move block(s) down"))
+            sel = self.selected_text_items()
+            n_sel = len(sel)
+            n_total = len(self.imgtrans_proj.pages[self.imgtrans_proj.current_img]) if (self.imgtrans_proj and self.imgtrans_proj.current_img and self.imgtrans_proj.current_img in self.imgtrans_proj.pages) else 0
+            merge_blocks_act.setEnabled(n_sel >= 2)
+            move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
+            move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
+            spell_check_src_act.setEnabled(n_sel >= 1)
+            spell_check_trans_act.setEnabled(n_sel >= 1)
+            trim_whitespace_act.setEnabled(n_sel >= 1)
+            to_uppercase_act.setEnabled(n_sel >= 1)
+            to_lowercase_act.setEnabled(n_sel >= 1)
+            toggle_strikethrough_act.setEnabled(n_sel >= 1)
+            gradient_sub.setEnabled(n_sel >= 1)
             menu.addSeparator()
 
             format_act = menu.addAction(self.tr("Apply font formatting"))
@@ -778,13 +835,19 @@ class Canvas(QGraphicsScene):
             angle_act = menu.addAction(self.tr("Reset Angle"))
             squeeze_act = menu.addAction(self.tr("Squeeze"))
             menu.addSeparator()
-            translate_act = menu.addAction(self.tr("translate"))
+            detect_region_act = None
+            if getattr(self, '_last_rubber_band_rect', None) is not None:
+                detect_region_act = menu.addAction(self.tr("Detect text in region"))
+            detect_page_act = menu.addAction(self.tr("Detect text on page"))
+            translate_act = menu.addAction(self.tr("Translate"))
             ocr_act = menu.addAction(self.tr("OCR"))
             ocr_translate_act = menu.addAction(self.tr("OCR and translate"))
             ocr_translate_inpaint_act = menu.addAction(self.tr("OCR, translate and inpaint"))
-            inpaint_act = menu.addAction(self.tr("inpaint"))
+            inpaint_act = menu.addAction(self.tr("Inpaint"))
 
+            saved_rect = getattr(self, '_last_rubber_band_rect', None)
             rst = menu.exec(pos)
+            self._last_rubber_band_rect = None
             
             if rst == delete_act:
                 self.delete_textblks.emit(0)
@@ -794,10 +857,42 @@ class Canvas(QGraphicsScene):
                 self.on_copy()
             elif rst == paste_act:
                 self.on_paste()
+            elif rst == copy_trans_act:
+                self.copy_trans_signal.emit()
+            elif rst == paste_trans_act:
+                self.paste_trans_signal.emit()
             elif rst == copy_src_act:
                 self.copy_src_signal.emit()
             elif rst == paste_src_act:
                 self.paste_src_signal.emit()
+            elif rst == clear_src_act:
+                self.clear_src_signal.emit()
+            elif rst == clear_trans_act:
+                self.clear_trans_signal.emit()
+            elif rst == select_all_act:
+                self.select_all_signal.emit()
+            elif rst == spell_check_src_act:
+                self.spell_check_src_signal.emit()
+            elif rst == spell_check_trans_act:
+                self.spell_check_trans_signal.emit()
+            elif rst == trim_whitespace_act:
+                self.trim_whitespace_signal.emit()
+            elif rst == to_uppercase_act:
+                self.to_uppercase_signal.emit()
+            elif rst == to_lowercase_act:
+                self.to_lowercase_signal.emit()
+            elif rst == toggle_strikethrough_act:
+                self.toggle_strikethrough_signal.emit()
+            elif rst == gradient_linear_act:
+                self.set_gradient_type_signal.emit(0)
+            elif rst == gradient_radial_act:
+                self.set_gradient_type_signal.emit(1)
+            elif rst == merge_blocks_act:
+                self.merge_selected_blocks_signal.emit()
+            elif rst == move_up_act:
+                self.move_blocks_up_signal.emit()
+            elif rst == move_down_act:
+                self.move_blocks_down_signal.emit()
             elif rst == format_act:
                 self.format_textblks.emit()
             elif rst == layout_act:
@@ -806,6 +901,12 @@ class Canvas(QGraphicsScene):
                 self.reset_angle.emit()
             elif rst == squeeze_act:
                 self.squeeze_blk.emit()
+            elif rst == detect_region_act:
+                if saved_rect is not None:
+                    self.run_detect_region.emit(saved_rect)
+            elif rst == detect_page_act:
+                if self.imgtrans_proj is not None and self.imgtrans_proj.img_valid and self.sceneRect().isValid():
+                    self.run_detect_region.emit(self.sceneRect())
             elif rst == translate_act:
                 self.run_blktrans.emit(-1)
             elif rst == ocr_act:

@@ -2,6 +2,7 @@ import numpy as np
 from typing import List
 import os
 import logging
+import inspect
 
 LOGGER = logging.getLogger("BallonTranslator")
 
@@ -194,7 +195,7 @@ if PADDLE_OCR_AVAILABLE:
                 self.logger.info(
                     f"Loading PaddleOCR model for language: {self.language} ({lang_code}), GPU: {use_gpu}"
                 )
-            self.model = PaddleOCR(
+            kwargs = dict(
                 use_angle_cls=self.use_angle_cls,
                 lang=lang_code,
                 use_gpu=use_gpu,
@@ -215,6 +216,20 @@ if PADDLE_OCR_AVAILABLE:
                     else None
                 ),
             )
+            try:
+                sig = inspect.signature(PaddleOCR.__init__)
+                valid = set(sig.parameters)
+                kwargs = {k: v for k, v in kwargs.items() if k in valid}
+            except Exception:
+                pass
+            try:
+                self.model = PaddleOCR(**kwargs)
+            except Exception as e:
+                if "drop_score" in str(e) or "Unknown argument" in str(e):
+                    kwargs.pop("drop_score", None)
+                    self.model = PaddleOCR(**kwargs)
+                else:
+                    raise
 
         def ocr_img(self, img: np.ndarray) -> str:
             if self.debug_mode:

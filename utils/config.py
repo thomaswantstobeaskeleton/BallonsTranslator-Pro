@@ -40,6 +40,7 @@ class ModuleConfig(Config):
     load_model_on_demand: bool = False
     empty_runcache: bool = False
     finish_code: int = 15
+    run_preset_name: str = 'Full'
 
     def get_params(self, module_key: str, for_saving=False) -> dict:
         d = self[module_key + '_params']
@@ -98,15 +99,17 @@ class ModuleConfig(Config):
 
 @nested_dataclass
 class DrawPanelConfig(Config):
-    pentool_color: List = field(default_factory=lambda: [0, 0, 0])
+    pentool_color: List = field(default_factory=lambda: [0, 0, 0, 255])  # [r, g, b, a]
     pentool_width: float = 30.
     pentool_shape: int = 0
     inpainter_width: float = 30.
     inpainter_shape: int = 0
+    inpaint_hardness: int = 100  # 100 = hard edge, 0 = soft/feathered
     current_tool: int = 0
     rectool_auto: bool = False
     rectool_method: int = 0
     recttool_dilate_ksize: int = 0
+    recttool_erode_ksize: int = 0
 
 @nested_dataclass
 class ProgramConfig(Config):
@@ -121,7 +124,10 @@ class ProgramConfig(Config):
     imgtrans_textblock: bool = True
     mask_transparency: float = 0.
     original_transparency: float = 0.
-    open_recent_on_startup: bool = True 
+    open_recent_on_startup: bool = True
+    recent_proj_list_max: int = 14
+    logical_dpi: int = 0
+    confirm_before_run: bool = True
     let_fntsize_flag: int = 0
     let_fntstroke_flag: int = 0
     let_fntcolor_flag: int = 0
@@ -156,6 +162,7 @@ class ProgramConfig(Config):
     mt_sublist: List = field(default_factory=lambda: list())
     display_lang: str = field(default_factory=lambda: shared.DEFAULT_DISPLAY_LANG) # to always apply shared.DEFAULT_DISPLAY_LANG
     imgsave_quality: int = 100
+    imgsave_webp_lossless: bool = False
     imgsave_ext: str = '.png'
     intermediate_imgsave_ext: str = '.png'
     show_text_style_preset: bool = True
@@ -164,6 +171,26 @@ class ProgramConfig(Config):
     expand_teffect_panel: bool = True
     text_advanced_format_panel: bool = True
     expand_tadvanced_panel: bool = True
+    config_panel_font_scale: float = 1.0
+    default_device: str = ''
+    unload_after_idle_minutes: int = 0
+    ocr_spell_check: bool = False
+    manga_source_lang: str = 'en'
+    manga_source_data_saver: bool = False
+    manga_source_download_dir: str = ''
+    manga_source_request_delay: float = 0.3
+    manga_source_open_after_download: bool = False
+    shortcuts: Dict = field(default_factory=dict)
+
+    @staticmethod
+    def default_downloaded_chapters_dir() -> str:
+        """Return the default folder for downloaded chapters; creates it if it does not exist."""
+        path = osp.join(osp.expanduser("~"), "BallonsTranslator", "Downloaded Chapters")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as e:
+            LOGGER.warning("Could not create default download folder %s: %s", path, e)
+        return path
 
     @staticmethod
     def load(cfg_path: str):
@@ -251,6 +278,38 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     
     global pcfg
     pcfg.merge(config)
+    # Ensure all shortcut keys exist (merge defaults for any new action)
+    try:
+        from utils.shortcuts import get_default_shortcuts
+        defaults = get_default_shortcuts()
+        if not isinstance(getattr(pcfg, 'shortcuts', None), dict):
+            pcfg.shortcuts = dict(defaults)
+        else:
+            for k, v in defaults.items():
+                if k not in pcfg.shortcuts:
+                    pcfg.shortcuts[k] = v
+    except Exception:
+        pass
+    # Trim recent projects to configured max
+    max_recent = getattr(pcfg, 'recent_proj_list_max', 14)
+    if max_recent > 0 and len(pcfg.recent_proj_list) > max_recent:
+        pcfg.recent_proj_list = pcfg.recent_proj_list[:max_recent]
+    # Substitute empty module device with global default device
+    try:
+        from modules.base import DEFAULT_DEVICE
+        default_dev = (getattr(pcfg, 'default_device', None) or '').strip() or DEFAULT_DEVICE
+        for param_key in ('textdetector_params', 'ocr_params', 'translator_params', 'inpainter_params'):
+            d = getattr(pcfg.module, param_key, None)
+            if not d:
+                continue
+            for mod_name, mod_params in d.items():
+                if not isinstance(mod_params, dict) or 'device' not in mod_params:
+                    continue
+                dev = mod_params.get('device')
+                if isinstance(dev, dict) and (not (dev.get('value') or '').strip()):
+                    dev['value'] = default_dev
+    except Exception:
+        pass
 
     p = pcfg.text_styles_path
     if not osp.exists(pcfg.text_styles_path):

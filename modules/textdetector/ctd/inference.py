@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import torch
+import torch.nn.functional as F
 from pathlib import Path
 import einops
 
@@ -206,10 +207,13 @@ def model2annotations(model_path, img_dir_list, save_dir, save_json=False):
 def preprocess_img(img, detect_size=(1024, 1024), device='cpu', bgr2rgb=True, half=False, to_tensor=True):
     if isinstance(detect_size, int):
         detect_size = (detect_size, detect_size)
+    # CTD backbone needs spatial dimensions divisible by 64 to avoid encoder/decoder size mismatch (e.g. 75 vs 74)
+    stride = 64
+    detect_size = (max(stride, (detect_size[0] // stride) * stride), max(stride, (detect_size[1] // stride) * stride))
     
     if bgr2rgb:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_in, ratio, (dw, dh) = letterbox(img, new_shape=detect_size, auto=False, stride=64)
+    img_in, ratio, (dw, dh) = letterbox(img, new_shape=detect_size, auto=False, stride=stride)
     if to_tensor:
         img_in = img_in.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img_in = np.array([np.ascontiguousarray(img_in)]).astype(np.float32) / 255
@@ -217,7 +221,17 @@ def preprocess_img(img, detect_size=(1024, 1024), device='cpu', bgr2rgb=True, ha
             img_in = torch.from_numpy(img_in).to(device)
             if half:
                 img_in = img_in.half()
-    return img_in, ratio, int(dw), int(dh)
+    # Ensure spatial dimensions are multiples of stride (safeguard for any letterbox edge case)
+    _, _, h, w = img_in.shape
+    pad_h = (stride - h % stride) % stride
+    pad_w = (stride - w % stride) % stride
+    if pad_h or pad_w:
+        img_in = F.pad(img_in, (0, pad_w, 0, pad_h))
+        dw = int(dw) + pad_w
+        dh = int(dh) + pad_h
+    else:
+        dw, dh = int(dw), int(dh)
+    return img_in, ratio, dw, dh
 
 def postprocess_mask(img: Union[torch.Tensor, np.ndarray], thresh=None):
     # img = img.permute(1, 2, 0)

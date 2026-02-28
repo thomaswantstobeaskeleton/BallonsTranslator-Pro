@@ -11,6 +11,7 @@ from utils.shared import TITLEBAR_HEIGHT, WINDOW_BORDER_WIDTH, BOTTOMBAR_HEIGHT,
 from .framelesswindow import FramelessMoveResize
 from utils.config import pcfg
 from utils import shared as C
+from utils.shortcuts import get_shortcut
 if C.FLAG_QT6:
     from qtpy.QtGui import QAction
 else:
@@ -87,14 +88,19 @@ class LeftBar(Widget):
 
         actionOpenFolder = QAction(self.tr("Open Folder ..."), self)
         actionOpenFolder.triggered.connect(self.onOpenFolder)
-        actionOpenFolder.setShortcut(QKeySequence.Open)
+        actionOpenFolder.setShortcut(QKeySequence.fromString(get_shortcut("file.open_folder", getattr(pcfg, "shortcuts", None))))
 
         actionOpenProj = QAction(self.tr("Open Project ... *.json"), self)
         actionOpenProj.triggered.connect(self.onOpenProj)
 
         actionSaveProj = QAction(self.tr("Save Project"), self)
         self.save_proj = actionSaveProj.triggered
-        actionSaveProj.setShortcut(QKeySequence.StandardKey.Save)
+        actionSaveProj.setShortcut(QKeySequence.fromString(get_shortcut("file.save_proj", getattr(pcfg, "shortcuts", None))))
+
+        self._shortcut_actions_left = [
+            ("file.open_folder", "Ctrl+O", actionOpenFolder),
+            ("file.save_proj", "Ctrl+S", actionSaveProj),
+        ]
 
         actionExportAsDoc = QAction(self.tr("Export as Doc"), self)
         self.export_doc = actionExportAsDoc.triggered
@@ -163,6 +169,13 @@ class LeftBar(Widget):
         self.setGeometry(0, 0, 300, 500)
         self.setMouseTracking(True)
 
+    def apply_shortcuts(self, shortcuts_dict):
+        """Apply keyboard shortcuts from config (action_id -> key string)."""
+        from qtpy.QtGui import QKeySequence
+        for action_id, default_key, action in self._shortcut_actions_left:
+            key = (shortcuts_dict or {}).get(action_id) or default_key
+            action.setShortcut(QKeySequence.fromString(key) if key else QKeySequence())
+
     def initRecentProjMenu(self, proj_list: List[str]):
         self.recent_proj_list = proj_list
         for proj in proj_list:
@@ -206,7 +219,7 @@ class LeftBar(Widget):
             self.recent_proj_list.insert(0, proj)
             topAction = newTop
 
-        MAXIUM_RECENT_PROJ_NUM = 14
+        MAXIUM_RECENT_PROJ_NUM = getattr(pcfg, 'recent_proj_list_max', 14)
         actionlist = self.recentMenu.actions()
         num_to_remove = len(actionlist) - MAXIUM_RECENT_PROJ_NUM
         if num_to_remove > 0:
@@ -288,16 +301,16 @@ class TitleBar(Widget):
 
         undoAction = QAction(self.tr('Undo'), self)
         self.undo_trigger = undoAction.triggered
-        undoAction.setShortcut(QKeySequence.StandardKey.Undo)
+        undoAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.undo", getattr(pcfg, "shortcuts", None))))
         redoAction = QAction(self.tr('Redo'), self)
         self.redo_trigger = redoAction.triggered
-        redoAction.setShortcut(QKeySequence.StandardKey.Redo)
+        redoAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.redo", getattr(pcfg, "shortcuts", None))))
         pageSearchAction = QAction(self.tr('Search'), self)
         self.page_search_trigger = pageSearchAction.triggered
-        pageSearchAction.setShortcut(QKeySequence('Ctrl+F'))
+        pageSearchAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.page_search", getattr(pcfg, "shortcuts", None))))
         globalSearchAction = QAction(self.tr('Global Search'), self)
         self.global_search_trigger = globalSearchAction.triggered
-        globalSearchAction.setShortcut(QKeySequence('Ctrl+G'))
+        globalSearchAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.global_search", getattr(pcfg, "shortcuts", None))))
 
         replacePreMTkeyword = QAction(self.tr("Keyword substitution for machine translation source text"), self)
         self.replacePreMTkeyword_trigger = replacePreMTkeyword.triggered
@@ -331,17 +344,22 @@ class TitleBar(Widget):
         self.displayLanguageMenu.addActions(lang_actions)
 
         drawBoardAction = QAction(self.tr('Drawing Board'), self)
-        drawBoardAction.setShortcut(QKeySequence('P'))
+        drawBoardAction.setShortcut(QKeySequence.fromString(get_shortcut("view.draw_board", getattr(pcfg, "shortcuts", None))))
         texteditAction = QAction(self.tr('Text Editor'), self)
-        texteditAction.setShortcut(QKeySequence('T'))
+        texteditAction.setShortcut(QKeySequence.fromString(get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None))))
         importTextStyles = QAction(self.tr('Import Text Styles'), self)
         exportTextStyles = QAction(self.tr('Export Text Styles'), self)
+        keyboardShortcutsAction = QAction(self.tr('Keyboard Shortcuts...'), self)
+        keyboardShortcutsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.keyboard_shortcuts", getattr(pcfg, "shortcuts", None))))
+        self.keyboard_shortcuts_trigger = keyboardShortcutsAction.triggered
         self.darkModeAction = darkModeAction = QAction(self.tr('Dark Mode'), self)
         darkModeAction.setCheckable(True)
 
         self.viewMenu = viewMenu = QMenu(self.viewToolBtn)
         viewMenu.addMenu(self.displayLanguageMenu)
         viewMenu.addActions([drawBoardAction, texteditAction])
+        viewMenu.addSeparator()
+        viewMenu.addAction(keyboardShortcutsAction)
         viewMenu.addSeparator()
         viewMenu.addAction(importTextStyles)
         viewMenu.addAction(exportTextStyles)
@@ -354,6 +372,17 @@ class TitleBar(Widget):
         self.importtstyle_trigger = importTextStyles.triggered
         self.exporttstyle_trigger = exportTextStyles.triggered
         self.darkmode_trigger = darkModeAction.triggered
+
+        self._shortcut_actions_title = [
+            ("edit.undo", "Ctrl+Z", undoAction),
+            ("edit.redo", "Ctrl+Shift+Z", redoAction),
+            ("edit.page_search", "Ctrl+F", pageSearchAction),
+            ("edit.global_search", "Ctrl+G", globalSearchAction),
+            ("view.draw_board", "P", drawBoardAction),
+            ("view.text_edit", "T", texteditAction),
+            ("view.keyboard_shortcuts", "Ctrl+K", keyboardShortcutsAction),
+            ("edit.merge_tool", "Ctrl+Shift+M", mergeToolAction),
+        ]
 
         self.goToolBtn = TitleBarToolBtn(self)
         self.goToolBtn.setText(self.tr('Go'))
@@ -368,17 +397,39 @@ class TitleBar(Widget):
         self.prevpage_trigger = prevPageAction.triggered
         self.nextpage_trigger = nextPageAction.triggered
 
-        # 工具菜单
+        # Tools menu
         self.toolsToolBtn = TitleBarToolBtn(self)
         self.toolsToolBtn.setText(self.tr('Tools'))
-        
-        # 区域合并工具
-        mergeToolAction = QAction('区域合并工具', self)
-        mergeToolAction.setShortcut(QKeySequence('Ctrl+Shift+M'))
+
+        # Region merge tool
+        mergeToolAction = QAction(self.tr('Region merge tool'), self)
+        mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
         self.merge_tool_trigger = mergeToolAction.triggered
         
+        reRunDetectAction = QAction(self.tr('Re-run detection only'), self)
+        self.re_run_detection_only_trigger = reRunDetectAction.triggered
+        reRunOCRAction = QAction(self.tr('Re-run OCR only'), self)
+        self.re_run_ocr_only_trigger = reRunOCRAction.triggered
+        batchExportAction = QAction(self.tr('Export all pages'), self)
+        self.batch_export_trigger = batchExportAction.triggered
+        validateProjAction = QAction(self.tr('Check project'), self)
+        self.validate_project_trigger = validateProjAction.triggered
+
+        mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
+        self.manga_source_trigger = mangaSourceAction.triggered
+
+        manageModelsAction = QAction(self.tr('Manage models...'), self)
+        manageModelsAction.setToolTip(self.tr('Check which models are downloaded and download selected models.'))
+        self.manage_models_trigger = manageModelsAction.triggered
+
         toolsMenu = QMenu(self.toolsToolBtn)
         toolsMenu.addAction(mergeToolAction)
+        toolsMenu.addAction(reRunDetectAction)
+        toolsMenu.addAction(reRunOCRAction)
+        toolsMenu.addAction(batchExportAction)
+        toolsMenu.addAction(validateProjAction)
+        toolsMenu.addAction(mangaSourceAction)
+        toolsMenu.addAction(manageModelsAction)
         self.toolsToolBtn.setMenu(toolsMenu)
         self.toolsToolBtn.setPopupMode(QToolButton.InstantPopup)
 
@@ -399,8 +450,20 @@ class TitleBar(Widget):
         runAction = QAction(self.tr('Run'), self)
         runWoUpdateTextStyle = QAction(self.tr('Run without update textstyle'), self)
         translatePageAction = QAction(self.tr('Translate page'), self)
+        presetFullAc = QAction(self.tr('Preset: Full'), self)
+        presetDetectOCRAc = QAction(self.tr('Preset: Detect + OCR only'), self)
+        presetTranslateAc = QAction(self.tr('Preset: Translate only'), self)
+        presetInpaintAc = QAction(self.tr('Preset: Inpaint only'), self)
+        self.run_preset_full_trigger = presetFullAc.triggered
+        self.run_preset_detect_ocr_trigger = presetDetectOCRAc.triggered
+        self.run_preset_translate_trigger = presetTranslateAc.triggered
+        self.run_preset_inpaint_trigger = presetInpaintAc.triggered
         runMenu = QMenu(self.runToolBtn)
         runMenu.addActions(stageActions)
+        runMenu.addSeparator()
+        presetMenu = QMenu(self.tr('Pipeline presets'), self)
+        presetMenu.addActions([presetFullAc, presetDetectOCRAc, presetTranslateAc, presetInpaintAc])
+        runMenu.addMenu(presetMenu)
         runMenu.addSeparator()
         runMenu.addActions([runAction, runWoUpdateTextStyle, translatePageAction])
         self.runToolBtn.setMenu(runMenu)
@@ -415,7 +478,7 @@ class TitleBar(Widget):
         else:
             self.iconLabel.setFixedWidth(LEFTBAR_WIDTH + 8)
 
-        self.titleLabel = QLabel('BallonTranslator')
+        self.titleLabel = QLabel('BallonsTranslatorPro')
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -448,6 +511,12 @@ class TitleBar(Widget):
             hlayout.addWidget(self.closeBtn)
             hlayout.setContentsMargins(0, 0, 0, 0)
             hlayout.setSpacing(0)
+
+    def apply_shortcuts(self, shortcuts_dict):
+        """Apply keyboard shortcuts from config (action_id -> key string)."""
+        for action_id, default_key, action in self._shortcut_actions_title:
+            key = (shortcuts_dict or {}).get(action_id) or default_key
+            action.setShortcut(QKeySequence.fromString(key) if key else QKeySequence())
 
     def eventFilter(self, obj, e):
         if obj == self.mainwindow:

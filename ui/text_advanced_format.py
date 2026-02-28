@@ -99,6 +99,14 @@ class TextGradientGroup(QGroupBox):
         self.enable_checker = TextCheckerLabel(self.tr('Enable'))
         self.enable_checker.checkStateChanged.connect(lambda checked: self.on_param_changed('gradient_enabled', checked))
 
+        self.type_combobox = SmallComboBox(parent=self, options=[self.tr('Linear'), self.tr('Radial')])
+        self.type_combobox.setToolTip(self.tr("Gradient type: Linear or Radial"))
+        self.type_combobox.activated.connect(self.on_gradient_type_changed)
+        type_label = SmallParamLabel(self.tr('Type'))
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.type_combobox)
+
         self.angle_box = SmallSizeComboBox([0, 359], 'gradient_angle', self)
         self.angle_box.setToolTip(self.tr("Set Gradient Angle"))
         self.angle_box.param_changed.connect(self.on_param_changed)
@@ -123,6 +131,7 @@ class TextGradientGroup(QGroupBox):
         hlayout1.addLayout(start_picker_layout)
         hlayout1.addLayout(end_picker_layout)
         hlayout1.addWidget(self.enable_checker)
+        hlayout1.addLayout(type_layout)
         # hlayout1.addStretch(-1)
 
         hlayout2 = QHBoxLayout()
@@ -132,6 +141,9 @@ class TextGradientGroup(QGroupBox):
         layout = QVBoxLayout(self)
         layout.addLayout(hlayout1)
         layout.addLayout(hlayout2)
+
+    def on_gradient_type_changed(self):
+        self.on_param_changed('gradient_type', self.type_combobox.currentIndex())
 
 
 class TextAdvancedFormatPanel(PanelArea):
@@ -167,6 +179,18 @@ class TextAdvancedFormatPanel(PanelArea):
         opacity_layout.addWidget(self.opacity_label)
         opacity_layout.addWidget(self.opacity_box)
 
+        self.font_weight_values = [300, 400, 500, 600, 700]
+        self.font_weight_combobox = SmallComboBox(
+            parent=self,
+            options=[self.tr('Light'), self.tr('Normal'), self.tr('Medium'), self.tr('SemiBold'), self.tr('Bold')]
+        )
+        self.font_weight_combobox.setToolTip(self.tr("Font weight (100–900)"))
+        self.font_weight_combobox.activated.connect(self.on_font_weight_changed)
+        font_weight_label = SmallParamLabel(self.tr('Font Weight'))
+        font_weight_layout = QHBoxLayout()
+        font_weight_layout.addWidget(font_weight_label)
+        font_weight_layout.addWidget(self.font_weight_combobox)
+
         # self.tate_chu_yoko_checker = QFontChecker()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self.scrollContent.after_resized.connect(self.adjuset_size)
@@ -180,6 +204,7 @@ class TextAdvancedFormatPanel(PanelArea):
         hlayout = QHBoxLayout()
         hlayout.addLayout(linespacing_type_layout)
         hlayout.addLayout(opacity_layout)
+        hlayout.addLayout(font_weight_layout)
         vlayout = QVBoxLayout()
         vlayout.addLayout(hlayout)
         vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -196,9 +221,21 @@ class TextAdvancedFormatPanel(PanelArea):
     def on_linespacing_type_changed(self):
         self.on_format_changed('line_spacing_type', self.linespacing_type_combobox.currentIndex())
 
+    def on_font_weight_changed(self):
+        idx = self.font_weight_combobox.currentIndex()
+        if 0 <= idx < len(self.font_weight_values):
+            self.on_format_changed('font_weight', self.font_weight_values[idx])
+
     def set_active_format(self, font_format: FontFormat):
         self.active_format = font_format
         self.linespacing_type_combobox.setCurrentIndex(font_format.line_spacing_type)
+
+        # Map font_weight to combo index (closest match)
+        w = font_format.font_weight
+        if w is None:
+            w = 400
+        idx = min(range(len(self.font_weight_values)), key=lambda i: abs(self.font_weight_values[i] - w))
+        self.font_weight_combobox.setCurrentIndex(idx)
 
         self.shadow_group.color_label.setPickerColor(font_format.shadow_color)
         self.shadow_group.strength_box.setValue(font_format.shadow_strength)
@@ -209,6 +246,7 @@ class TextAdvancedFormatPanel(PanelArea):
         self.gradient_group.size_box.setValue(font_format.gradient_size)
         self.gradient_group.angle_box.setValue(font_format.gradient_angle)
         self.gradient_group.enable_checker.setCheckState(font_format.gradient_enabled)
+        self.gradient_group.type_combobox.setCurrentIndex(getattr(font_format, 'gradient_type', 0))
         self.gradient_group.start_picker.setPickerColor(font_format.gradient_start_color)
         self.gradient_group.end_picker.setPickerColor(font_format.gradient_end_color)
         # self.tate_chu_yoko_checker.setChecked(font_format.font)

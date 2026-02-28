@@ -68,3 +68,12 @@ install_venv.bat
 install-BT.cmd
 download_models.bat
 Ultralytics/settings.json
+
+# User / project-specific content (not part of core app)
+Rebirth_of_the_Urban_Immortal_Cultivator/
+
+# Cursor IDE
+.cursor
+
+# Git lock (safety; normally not tracked)
+.git/index.lock

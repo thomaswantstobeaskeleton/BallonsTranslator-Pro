@@ -4,7 +4,8 @@ import ctranslate2, sentencepiece as spm
 import transformers
 import os
 
-CT_MODEL_PATH = 'data/models/m2m100-1.2B-ctranslate2'
+import utils.shared as shared
+CT_MODEL_PATH = os.path.join(shared.PROGRAM_PATH, 'data', 'models', 'm2m100-1.2B-ctranslate2')
 MODEL_BIN = os.path.join(CT_MODEL_PATH, 'model.bin')
 
 @register_translator('m2m100')
@@ -16,12 +17,8 @@ class M2M100Translator(BaseTranslator):
     }
 
     def _setup_translator(self):
-        if not os.path.isfile(MODEL_BIN):
-            raise MissingTranslatorParams(
-                f"m2m100 model not found. Please download the CTranslate2 m2m100-1.2B model and place it in:\n{os.path.normpath(CT_MODEL_PATH)}\n"
-                "The folder must contain model.bin and other CTranslate2 files. "
-                "You can convert the Fairseq m2m100 model to CTranslate2 format or find a pre-converted model (e.g. on Hugging Face)."
-            )
+        self.translator = None
+        self.tokenizer = None
         self.lang_map['Afrikaans'] = 'af'
         self.lang_map['Albanian'] = 'sq'
         self.lang_map['Amharic'] = 'am'
@@ -122,11 +119,26 @@ class M2M100Translator(BaseTranslator):
         self.lang_map['Yiddish'] = 'yi'
         self.lang_map['Yoruba'] = 'yo'
         self.lang_map['Zulu'] = 'zu'
-        
-        self.translator = ctranslate2.Translator(CT_MODEL_PATH, device=self.params['device']['value'])
+        if not os.path.isfile(MODEL_BIN):
+            return  # Defer error to first translate attempt so compatibility check can pass
+        self._load_model()
+
+    def _load_model(self):
+        if not os.path.isfile(MODEL_BIN):
+            raise MissingTranslatorParams(
+                f"m2m100 model not found. Please download the CTranslate2 m2m100-1.2B model and place it in:\n{os.path.normpath(CT_MODEL_PATH)}\n"
+                "The folder must contain model.bin and other CTranslate2 files. "
+                "You can convert the Fairseq m2m100 model to CTranslate2 format or find a pre-converted model (e.g. on Hugging Face)."
+            )
+        device = self.params.get('device')
+        if isinstance(device, dict) and 'value' in device:
+            device = device['value']
+        self.translator = ctranslate2.Translator(CT_MODEL_PATH, device=device or 'cpu')
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(CT_MODEL_PATH, clean_up_tokenization_spaces=True)
 
     def _translate(self, src_list: List[str]) -> List[str]:
+        if self.translator is None:
+            self._load_model()
         self.tokenizer.src_lang = self.lang_map[self.lang_source]
 
         text = [self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(i)) for i in src_list]
@@ -139,10 +151,12 @@ class M2M100Translator(BaseTranslator):
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
-        if param_key == 'device':
-            if hasattr(self, 'translator'):
-                delattr(self, 'translator')
-            self.translator = ctranslate2.Translator(CT_MODEL_PATH, device=self.params['device']['value'])
+        if param_key == 'device' and self.translator is not None and os.path.isfile(MODEL_BIN):
+            device = self.params.get('device')
+            if isinstance(device, dict) and 'value' in device:
+                device = device['value']
+            delattr(self, 'translator')
+            self.translator = ctranslate2.Translator(CT_MODEL_PATH, device=device or 'cpu')
     @property
     def supported_tgt_list(self) -> List[str]:
         return ['Afrikaans', 'Amharic', 'Arabic', 'Asturian', 'Azerbaijani', 'Bashkir', 'Belarusian', 'Bulgarian', 'Bengali', 'Breton', 'Bosnian', 'Catalan', 'Cebuano', 'Czech', 'Welsh', 'Danish', 'German', 'Greeek', 'English', 'Spanish', 'Estonian', 'Persian', 'Fulah', 'Finnish', 'French', 'Western Frisian', 'Irish', 'Gaelic', 'Galician', 'Gujarati', 'Hausa', 'Hebrew', 'Hindi', 'Croatian', 'Haitian', 'Hungarian', 'Armenian', 'Indonesian', 'Igbo', 'Iloko', 'Icelandic', 'Italian', 'Japanese', 'Javanese', 'Georgian', 'Kazakh', 'Central Khmer', 'Kannada', 'Korean', 'Luxembourgish', 'Ganda', 'Lingala', 'Lao', 'Lithuanian', 'Latvian', 'Malagasy', 'Macedonian', 'Malayalam', 'Mongolian', 'Marathi', 'Malay', 'Burmese', 'Nepali', 'Dutch', 'Norwegian', 'Northern Sotho', 'Occitan (post 1500)', 'Oriya', 'Panjabi', 'Polish', 'Pushto', 'Portuguese', 'Romanian', 'Russian', 'Sindhi', 'Sinhala', 'Slovak', 'Slovenian', 'Somali', 'Albanian', 'Serbian', 'Swati', 'Sundanese', 'Swedish', 'Swahili', 'Tamil', 'Thai', 'Tagalog', 'Tswana', 'Turkish', 'Ukrainian', 'Urdu', 'Uzbek', 'Vietnamese', 'Wolof', 'Xhosa', 'Yiddish', 'Yoruba', 'Chinese', 'Zulu']

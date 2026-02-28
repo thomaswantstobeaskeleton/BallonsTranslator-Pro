@@ -47,6 +47,8 @@ langdetect
 translators==5.9.5
 json5
 pillow-jxl-plugin>=1.3.4
+# Optional: OCR spell check (General → Spell check OCR result). Requires system Hunspell/dicts (e.g. libenchant-dev + enchant-2 on Linux).
+pyenchant
 pywin32; sys_platform == 'win32'
 winsdk; sys_platform == 'win32'
 brotlicffi; sys_platform == 'win32'

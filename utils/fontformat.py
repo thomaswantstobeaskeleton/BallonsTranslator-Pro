@@ -65,6 +65,7 @@ class FontFormat(Config):
     srgb: List = field(default_factory=lambda: [0, 0, 0])
     bold: bool = False
     underline: bool = False
+    strikethrough: bool = False
     italic: bool = False
     alignment: int = 0
     vertical: bool = False
@@ -77,6 +78,7 @@ class FontFormat(Config):
     shadow_color: List = field(default_factory=lambda: [0, 0, 0])
     shadow_offset: List = field(default_factory=lambda: [0., 0.])
     gradient_enabled: bool = False
+    gradient_type: int = 0  # 0 = Linear, 1 = Radial
     gradient_start_color: List = field(default_factory=lambda: [0, 0, 0])
     gradient_end_color: List = field(default_factory=lambda: [255, 255, 255])
     gradient_angle: float = 0.

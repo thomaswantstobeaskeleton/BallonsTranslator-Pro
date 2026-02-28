@@ -33,6 +33,12 @@ if shared.ON_WINDOWS:
             'path_k2j(ehnd-kor.dll, Optional)': r"C:\Program Files (x86)\ChangShinSoft\ezTrans XP\ehnd-kor.dll"
         }
 
+        def _get_path(self, key: str) -> str:
+            p = self.params.get(key)
+            if isinstance(p, dict) and 'value' in p:
+                return (p['value'] or '').strip()
+            return (p or '').strip() if isinstance(p, str) else ''
+
         def _setup_translator(self):
             self.textblk_break = '\n'
             self.lang_map['日本語'] = 'j'
@@ -40,10 +46,13 @@ if shared.ON_WINDOWS:
 
             self.j2k_engine, self.k2j_engine = (None, None)
 
-            if os.path.exists(self.params['path_j2k(J2KEngine.dll)']):
-                self.j2k_engine = MyClient(self.params['path_j2k(J2KEngine.dll)'], "J2K", self.params['path_dat'])
-            if os.path.exists(self.params['path_k2j(ehnd-kor.dll, Optional)']):
-                self.k2j_engine = MyClient(self.params['path_k2j(ehnd-kor.dll, Optional)'], "K2J", self.params['path_dat'])
+            path_j2k = self._get_path('path_j2k(J2KEngine.dll)')
+            path_k2j = self._get_path('path_k2j(ehnd-kor.dll, Optional)')
+            path_dat = self._get_path('path_dat')
+            if path_j2k and os.path.exists(path_j2k):
+                self.j2k_engine = MyClient(path_j2k, "J2K", path_dat)
+            if path_k2j and os.path.exists(path_k2j):
+                self.k2j_engine = MyClient(path_k2j, "K2J", path_dat)
 
         def _translate(self, src_list: List[str]) -> List[str]:
             source = self.lang_map[self.lang_source]
@@ -58,10 +67,13 @@ if shared.ON_WINDOWS:
         def updateParam(self, param_key: str, param_content):
             super().updateParam(param_key, param_content)
 
-            if not self.j2k_engine and os.path.exists(self.params['path_j2k(J2KEngine.dll)']):
-                self.j2k_engine = MyClient(self.params['path_j2k(J2KEngine.dll)'], "J2K", self.params['path_dat'])
-            if not self.k2j_engine and os.path.exists(self.params['path_k2j(ehnd-kor.dll, Optional)']):
-                self.k2j_engine = MyClient(self.params['path_k2j(ehnd-kor.dll, Optional)'], "K2J", self.params['path_dat'])
+            path_j2k = self._get_path('path_j2k(J2KEngine.dll)')
+            path_k2j = self._get_path('path_k2j(ehnd-kor.dll, Optional)')
+            path_dat = self._get_path('path_dat')
+            if not self.j2k_engine and path_j2k and os.path.exists(path_j2k):
+                self.j2k_engine = MyClient(path_j2k, "J2K", path_dat)
+            if not self.k2j_engine and path_k2j and os.path.exists(path_k2j):
+                self.k2j_engine = MyClient(path_k2j, "K2J", path_dat)
 
         @property
         def supported_tgt_list(self) -> List[str]:

@@ -638,6 +638,7 @@ class ModuleManager(QObject):
     imgtrans_pipeline_finished = Signal()
     blktrans_pipeline_finished = Signal(int, list)
     page_trans_finished = Signal(int)
+    detect_region_finished = Signal(str, list)  # page_name, new_blk_list
 
     run_canvas_inpaint = False
     is_waiting_th = False
@@ -936,6 +937,43 @@ class ModuleManager(QObject):
             LOGGER.warning('Terminating a running text detection thread.')
             self.textdetect_thread.terminate()
         self.textdetect_thread.setTextDetector(textdetector)
+
+    def run_detect_region(self, rect, img_array, page_name: str):
+        """Run text detection on a cropped region; emit detect_region_finished(page_name, blk_list) with blocks in full-image coordinates."""
+        import numpy as np
+        h, w = img_array.shape[:2]
+        x1 = max(0, int(rect.x()))
+        y1 = max(0, int(rect.y()))
+        x2 = min(w, int(rect.x() + rect.width()))
+        y2 = min(h, int(rect.y() + rect.height()))
+        if x2 <= x1 or y2 <= y1:
+            self.detect_region_finished.emit(page_name, [])
+            return
+        crop = np.ascontiguousarray(img_array[y1:y2, x1:x2])
+        if crop.size == 0 or crop.shape[0] < 2 or crop.shape[1] < 2:
+            self.detect_region_finished.emit(page_name, [])
+            return
+        manager = self
+        def job():
+            try:
+                if manager.textdetector is None:
+                    manager.detect_region_finished.emit(page_name, [])
+                    return
+                mask, blk_list = manager.textdetector.detect(crop, None)
+            except Exception as e:
+                create_error_dialog(e, manager.tr('Detection in region failed.'), 'DetectRegion')
+                manager.detect_region_finished.emit(page_name, [])
+                return
+            for blk in blk_list:
+                blk.xyxy = [blk.xyxy[0] + x1, blk.xyxy[1] + y1, blk.xyxy[2] + x1, blk.xyxy[3] + y1]
+                if getattr(blk, 'lines', None):
+                    for line in blk.lines:
+                        for pt in line:
+                            pt[0] += x1
+                            pt[1] += y1
+            manager.detect_region_finished.emit(page_name, blk_list)
+        self.textdetect_thread.job = job
+        self.textdetect_thread.start()
 
     def setOCR(self, ocr: str = None):
         if ocr is None:

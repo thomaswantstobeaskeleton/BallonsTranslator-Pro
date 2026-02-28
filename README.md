@@ -1,6 +1,6 @@
-# BallonsTranslator – Extended Modifications (README)
+# BallonsTranslatorPro – Extended Modifications (README)
 
-This document describes **everything modified or added** in this fork compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
+This document describes **BallonsTranslatorPro**: everything modified or added compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
 
 ---
 
@@ -17,6 +17,7 @@ This document describes **everything modified or added** in this fork compared t
 9. [New and modified files](#9-new-and-modified-files)
 10. [Fixes and behavior changes](#10-fixes-and-behavior-changes)
 11. [Documentation and references](#11-documentation-and-references)
+12. [UI, workflow, and export enhancements](#12-ui-workflow-and-export-enhancements)
 
 ---
 
@@ -31,7 +32,8 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 | **Inpainting** | Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), **RePaint**, **LaMa ONNX** (general + manga), **Qwen-Image-Edit**, **MAT** (repo+checkpoint), **CUHK Manga**, **Fluently v4**. |
 | **Translation** | No new translators in this fork; existing LLM_API_Translator, Sakura, DeepL, etc. unchanged. |
 | **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). |
-| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this README. |
+| **UI / workflow / export** | **Canvas right-click menu:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all; **Spell check source text** and **Spell check translation** (pyenchant); **Trim whitespace**; **To uppercase** / **To lowercase**. Menu items enabled/disabled by selection. **Lossless WebP** (#1055) in Config → Save when format is WebP; Save and Export all pages respect it. **Manga / Comic source** (Tools menu): search MangaDex by title or by chapter URL, list chapters by language, download as 001/002… pages, optional open folder in app; config persistence and rate limiting. **Default download folder** for chapters: `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty). **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) opens a dialog to view and customize keybinds for file, edit, view, go, canvas, format, and drawing actions; shortcuts persist in config. See [§12](#12-ui-workflow-and-export-enhancements). |
+| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, this README. |
 
 ---
 
@@ -261,6 +263,40 @@ The main application and all other modules work with the versions in `requiremen
 - `modules/base.py`: `MODULE_SCRIPTS` and module discovery unchanged; new modules are picked up by existing `ocr_*.py`, `inpaint_*.py`, `detector_*.py` patterns.
 - `launch.py`, config flow, and UI flow unchanged; new options appear in the same dropdowns.
 
+### New or modified for UI / workflow / export (BallonsTranslatorPro)
+
+- **Manga source:**  
+  `utils/manga_sources/__init__.py`, `utils/manga_sources/mangadex.py` (MangaDex API client: search, feed, chapter-by-ID, at-home, download with 001/002 page naming, rate limiting).  
+  `ui/manga_source_dialog.py` (dialog: search, URL mode, chapters list, download folder with default `~/BallonsTranslator/Downloaded Chapters`, config persistence; worker thread for API and download).
+
+- **Keyboard shortcuts:**  
+  `utils/shortcuts.py` (shortcut schema, default keybinds, `get_shortcut`, `get_shortcut_info`, `get_default_shortcuts`).  
+  `ui/shortcuts_dialog.py` (ShortcutsDialog: filter, category, table with QKeySequenceEdit, reset row/all, apply/cancel; emits `shortcuts_changed`).  
+  `ui/mainwindowbars.py` (LeftBar and TitleBar: `_shortcut_actions_*`, `apply_shortcuts`; View menu **Keyboard Shortcuts...**).  
+  `ui/mainwindow.py` (all QShortcuts and drawing tool shortcuts created from `pcfg.shortcuts`; `apply_shortcuts`, `open_shortcuts_dialog`; View → Keyboard Shortcuts).
+
+- **Canvas and context menu:**  
+  `ui/canvas.py` — New signals: `merge_selected_blocks_signal`, `move_blocks_up_signal`, `move_blocks_down_signal`, `run_detect_region`, `copy_trans_signal`, `paste_trans_signal`, `clear_src_signal`, `clear_trans_signal`, `select_all_signal`, `spell_check_src_signal`, `spell_check_trans_signal`, `trim_whitespace_signal`, `to_uppercase_signal`, `to_lowercase_signal`. Context menu extended with Merge, Move up/down, Detect text in region/on page, Copy/Paste translation, Clear source/translation, Select all, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, **To lowercase**; **Merge** and **Move up/down** enabled only when selection state allows it; spell check, trim, and case actions enabled when at least one block is selected.
+
+- **Main window and bars:**  
+  `ui/mainwindowbars.py` — Tools menu: new action **Manga / Comic source...** (`manga_source_trigger`).  
+  `ui/mainwindow.py` — Handlers: `on_merge_selected_blocks`, `on_move_blocks_up`, `on_move_blocks_down`, `on_run_detect_region`, `on_detect_region_finished`, `on_copy_trans`, `on_paste_trans`, `on_clear_src`, `on_clear_trans`, `on_select_all_canvas`, **`on_spell_check_src`**, **`on_spell_check_trans`**, **`on_trim_whitespace`**, **`on_to_uppercase`**, **`on_to_lowercase`**, `on_open_manga_source`; Save and Export all pages pass `webp_lossless` when WebP + lossless config.
+
+- **Scene text and module manager:**  
+  `ui/scenetext_manager.py` — New method `swap_block_positions(i, j)` to swap two blocks in the project, scene, and text panel order.  
+  `ui/module_manager.py` — New `run_detect_region(rect, img_array, page_name)` and signal `detect_region_finished(page_name, blk_list)` for region-based detection.
+
+- **Config and config panel:**  
+  `utils/config.py` — New `ProgramConfig` fields: `imgsave_webp_lossless`, `manga_source_lang`, `manga_source_data_saver`, `manga_source_download_dir`, `manga_source_request_delay`, `shortcuts`. **`default_downloaded_chapters_dir()`** static method returns and creates `~/BallonsTranslator/Downloaded Chapters` when no download dir is set. Load config merges default shortcuts for any missing action.  
+  `ui/configpanel.py` — WebP lossless checkbox in Save section, visibility tied to result format; load/save of `imgsave_webp_lossless` and manga_source_* (the latter only via the Manga source dialog).  
+  `config/config.example.json` — Example keys for `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts`.
+
+- **I/O:**  
+  `utils/io_utils.py` — `imwrite(..., webp_lossless=False)`; when WebP and `webp_lossless` True, uses quality 101 for lossless.
+
+- **Documentation:**  
+  `docs/SETTINGS_UI_RECOMMENDATIONS.md` — Lists implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu, etc.) and possible future additions.
+
 ---
 
 ## 10. Fixes and behavior changes
@@ -292,6 +328,7 @@ The main application and all other modules work with the versions in `requiremen
 
 - **Config:**  
   - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.
+  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), lossless WebP, and Manga / Comic source (Tools) are documented in [§12](#12-ui-workflow-and-export-enhancements). Config fields `imgsave_webp_lossless` and `manga_source_*` are persisted.
 
 ---
 
@@ -305,8 +342,118 @@ The main application and all other modules work with the versions in `requiremen
 | **docs/OPTIONAL_DEPENDENCIES.md** | craft_det and simple_lama dependency conflicts and workarounds. |
 | **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, hf_object_det); none_ocr usage; detection vs OCR coverage table. |
 | **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
+| **docs/SETTINGS_UI_RECOMMENDATIONS.md** | Implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu items) and possible future additions; references upstream issues (#1055, #1137, etc.). |
 | **Original README** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) – base setup, Windows/Mac, translators, AMD ROCm/ZLUDA. |
 | **doc/加别的翻译器.md** | How to add new translators. |
+
+---
+
+## 12. UI, workflow, and export enhancements
+
+This section describes **all UI, workflow, and export-related changes** added in BallonsTranslatorPro: canvas context menu actions, block reordering and merging, lossless WebP export, and the Manga / Comic source feature. These improvements make editing and exporting faster and support upstream feature requests (e.g. #1055 Lossless WebP, #1137 manual text detection).
+
+### 12.1 Canvas right-click menu (text edit mode)
+
+In **text edit mode**, right-clicking on the canvas (or after right-dragging a rectangle) opens a context menu with the following actions. **Menu items are enabled or disabled based on the current selection** so you only see actions that apply.
+
+| Action | Description | When enabled |
+|--------|-------------|--------------|
+| **Copy** / **Paste** | Standard clipboard copy/paste (source text when blocks are selected). | Always. |
+| **Copy translation** | Copy the translation text of all selected blocks to the clipboard (one block per line, newlines in a block become spaces). | When at least one block is selected. |
+| **Paste translation** | Paste from clipboard into the translation fields of selected blocks; lines are split by newline and assigned to blocks in order (first line → first selected block, etc.). | When at least one block is selected. |
+| **Copy source text** / **Paste source text** | Same as Copy/Paste but for source text (shortcuts Ctrl+Shift+C / Ctrl+Shift+V). | Always. |
+| **Delete** | Delete selected blocks (Ctrl+D). | When at least one block is selected. |
+| **Delete and Recover removed text** | Delete blocks but keep their text in a recover list (Ctrl+Shift+D). | When at least one block is selected. |
+| **Clear source text** / **Clear translation** | Clear the source or translation text of all selected blocks. Marks the project as unsaved. | When at least one block is selected. |
+| **Select all** | Select all text blocks on the current page (same as Ctrl+A in the text panel). | Always. |
+| **Spell check source text** | Run spell check / auto-correct on the **source text** of selected blocks. Uses pyenchant; if a word is misspelled and there is exactly one suggestion, it is replaced (e.g. "teh" → "the"). Requires **pyenchant** and a system dictionary (e.g. en_US). If unavailable, a warning is shown. | When at least one block is selected. |
+| **Spell check translation** | Same as above, applied to the **translation** text of selected blocks. | When at least one block is selected. |
+| **Trim whitespace** | Remove leading and trailing whitespace from each line of source and translation in selected blocks. | When at least one block is selected. |
+| **To uppercase** / **To lowercase** | Convert all source and translation text in selected blocks to uppercase or lowercase. | When at least one block is selected. |
+| **Merge selected blocks** | Merge all selected blocks into a single block: source texts and translations are concatenated (with newlines), the first block (by index) is updated, and the other selected blocks are removed from the project and scene. | **Only when two or more blocks are selected.** |
+| **Move block(s) up** | Move the selected block one position up in the block list (and in the right-hand text panel). Implemented by swapping the block with the one above. | **Only when exactly one block is selected and it is not the first block.** |
+| **Move block(s) down** | Move the selected block one position down. | **Only when exactly one block is selected and it is not the last block.** |
+| **Apply font formatting** / **Auto layout** / **Reset Angle** / **Squeeze** | Existing formatting and layout actions. | As before. |
+| **Detect text in region** | Run the current **text detector** only on the region you drew: right-drag a rectangle on the canvas, then right-click and choose this item. New text blocks are added in full-image coordinates and appended to the current page. No OCR or translation is run. Useful for adding bubbles in one area without re-running the full pipeline (addresses upstream #1137). | **Only when a rubber-band rectangle was drawn** (right-drag before right-click). |
+| **Detect text on page** | Run the text detector on the **entire page** (same as running the pipeline with only detection enabled). New blocks are appended. Convenience alternative to opening the Run menu. | Always (when in text edit mode). |
+| **Translate** / **OCR** / **OCR and translate** / **OCR, translate and inpaint** / **Inpaint** | Existing pipeline actions. | As before. |
+
+**Implementation notes:**
+
+- **Merge:** The first selected block (by index) keeps its position; source and translation strings of all selected blocks are joined with newlines. Other selected blocks are removed from `imgtrans_proj.pages[page_name]` in **descending index order** (to avoid index shift), then removed from the scene and text panel via `SceneTextManager.deleteTextblkItemList`.
+- **Move up/down:** Implemented in `SceneTextManager.swap_block_positions(i, j)`: the two blocks are swapped in the project page list, in `textblk_item_list`, and in `pairwidget_list`; `.idx` is updated on both blocks and their pair widgets; the two widgets are removed from and re-inserted into the text panel layout so the on-screen order matches the new block order.
+- **Detect in region:** The canvas stores the last rubber-band rect. When you choose “Detect text in region”, that rect is passed to `ModuleManager.run_detect_region(rect, img_array, page_name)`, which crops the image, runs the detector, and offsets the resulting block coordinates back to full-image space. `detect_region_finished` is emitted; the main window appends the new blocks to the project and scene.
+
+**Files:** `ui/canvas.py` (signals, menu build, enable/disable logic), `ui/mainwindow.py` (handlers: merge, move up/down, copy/paste translation, clear, select all, **spell check source/translation**, **trim whitespace**, **to uppercase/lowercase**, detect region), `ui/module_manager.py` (`run_detect_region`, `detect_region_finished`), `ui/scenetext_manager.py` (`swap_block_positions`). Spell check uses **utils/ocr_spellcheck.py** (`spell_check_line`); if pyenchant is not installed, the spell-check actions show a warning dialog.
+
+---
+
+### 12.2 Lossless WebP export (#1055)
+
+When saving or exporting result images in **WebP** format, you can enable **lossless** encoding so the quality setting is ignored and no lossy compression is applied.
+
+- **Config:** In **Config panel → General → Save**, when **Result image format** is set to **WebP**, a **“WebP lossless”** checkbox appears. It is stored in `ProgramConfig.imgsave_webp_lossless` and persisted in `config.json`.
+- **Visibility:** The checkbox is only enabled when the format dropdown is WebP; for PNG/JPG/JXL it is disabled.
+- **Save path:** When you **Save** the current page or use **Tools → Export all pages**, the save logic checks `pcfg.imgsave_ext == '.webp'` and `pcfg.imgsave_webp_lossless`; if both are true, it passes `webp_lossless=True` into the save call.
+- **Backend:** `utils/io_utils.imwrite()` accepts a `webp_lossless` argument; when True and format is WebP, it sets `quality=101` so OpenCV uses lossless WebP encoding.
+
+**Files:** `utils/config.py` (`imgsave_webp_lossless`), `ui/configpanel.py` (checkbox, `_update_webp_lossless_visibility`, load/save), `ui/mainwindow.py` (save and export all pages pass `webp_lossless`), `utils/io_utils.py` (`webp_lossless` and quality 101 for WebP).
+
+---
+
+### 12.3 Manga / Comic source (search, chapters, download)
+
+A full **Manga / Comic source** workflow is available from **Tools → Manga / Comic source...**. It opens a dialog where you can search for manga/manhua/manhwa by title, list chapters by language, select chapters to download, and optionally open the downloaded folder in BallonsTranslator to translate. This uses the **MangaDex** public API only (no scraping of other sites).
+
+#### Features
+
+- **Two sources in one dialog:**
+  - **MangaDex:** Search by title → results list → select a title → **Load chapters** (with language filter) → chapter list with checkboxes → **Download selected chapters**.
+  - **MangaDex (by chapter URL):** Paste a MangaDex chapter URL (or raw chapter UUID) → **Load chapter** → one chapter appears in the list → download as above.
+- **Page numbering for correct order:** Downloaded chapter images are saved as **001.ext**, **002.ext**, … (e.g. 001.png, 002.png) so that BallonsTranslator’s natural sort loads them in reading order. The original MangaDex filenames are not used for the saved files.
+- **Language:** Choose translation language for the chapter feed (e.g. English, Japanese, Chinese Simplified/Traditional, Korean). Stored in config.
+- **Quality:** **Use data-saver (smaller images)** uses MangaDex’s data-saver image set (smaller files, lower resolution); unchecked uses original quality. Stored in config.
+- **Download folder:** Choose a base folder; each manga is saved in a subfolder named after the title, and each chapter in a subfolder named after the chapter (e.g. `Ch.1 – Vol.1`). **Default:** When no folder has been set, downloads use **`~/BallonsTranslator/Downloaded Chapters`** (e.g. `C:\Users\<You>\BallonsTranslator\Downloaded Chapters` on Windows); this folder is created automatically the first time the Manga source dialog is used. All preferences are persisted.
+- **Request delay (rate limiting):** A **Request delay** spinbox (0–2 seconds) inserts a delay between each API request (search, feed, at-home, image fetches) to avoid overloading MangaDex. Default 0.3 s. Stored in config.
+- **Open in BallonsTranslator:** After download, **Open folder in BallonsTranslator** opens the **first chapter folder** (so the project has images) via **Open project**, so you can run detection/OCR/translate immediately.
+
+#### Config fields (persisted)
+
+- `manga_source_lang` — Language code for chapter feed (e.g. `en`, `ja`, `zh-hans`).
+- `manga_source_data_saver` — Use data-saver images when True.
+- `manga_source_download_dir` — Last chosen download base directory; **if empty, default is `~/BallonsTranslator/Downloaded Chapters`** (created automatically).
+- `manga_source_request_delay` — Seconds to wait between API requests (0–2).
+
+These are saved when you change them in the dialog or when you close the dialog.
+
+#### Implementation summary
+
+- **MangaDex client** (`utils/manga_sources/mangadex.py`): `search(title)`, `get_feed(manga_id, lang)`, `get_chapter_by_id(chapter_id)` for URL mode, `get_chapter_urls(chapter_id, data_saver)`, `download_chapter(...)` which saves pages as 001.ext, 002.ext, … . All HTTP calls go through `_get()` which applies `_throttle()` (rate limit). Uses the public API only (e.g. `/manga`, `/manga/{id}/feed`, `/chapter/{id}`, `/at-home/server/{id}`).
+- **Dialog** (`ui/manga_source_dialog.py`): Search/URL UI, results list, chapter list with checkboxes, language/quality/delay/folder controls, progress bar. A **worker** object runs in a **QThread** so API and download work do not block the UI; triggers are done via signals (`run_search`, `run_feed`, `run_download`, `run_load_chapter_url`). URL mode: paste URL → extract UUID with a regex → `get_chapter_by_id` → feed_finished with one chapter; dialog sets a synthetic “Chapter from URL” as selected manga so download works the same way.
+- **Main window:** **Tools** menu has **Manga / Comic source...**; the handler creates/shows the dialog and connects `open_folder_requested(path)` to `OpenProj(path)` so the chosen chapter folder opens as a project.
+
+**Files:** `utils/manga_sources/__init__.py`, `utils/manga_sources/mangadex.py`, `ui/manga_source_dialog.py`, `ui/mainwindowbars.py` (Tools action), `ui/mainwindow.py` (`on_open_manga_source`, `OpenProj` connection), `utils/config.py` (manga_source_*, `default_downloaded_chapters_dir()`), `config/config.example.json` (example keys). See also **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a short reference.
+
+---
+
+### 12.4 Keyboard shortcuts (customizable keybinds)
+
+A **Keyboard Shortcuts** dialog lets you view and customize keybinds for common actions. Shortcuts are stored in config and applied to the main window, title bar, left bar, and drawing panel.
+
+- **Opening the dialog:** **View → Keyboard Shortcuts...** or default shortcut **Ctrl+K** (configurable in the same dialog).
+- **Dialog features:** Filter by text or category; table of Category, Action, Shortcut (editable with **QKeySequenceEdit**); per-row **Reset** to default; **Reset all to default**; **Apply** (saves to config and updates all shortcuts immediately); **Cancel**.
+- **Actions covered:** File (Open folder, Save project); Edit (Undo, Redo, Page search, Global search, Merge tool); View (Drawing Board, Text Editor, Keyboard Shortcuts); Go (Prev/Next page, alternate keys); Canvas (Textblock mode, Zoom in/out, Delete, Space, Select all, Escape, Delete line); Format (Bold, Italic, Underline); Drawing tools (Hand, Inpaint, Pen, Rect). Keys are stored in portable form (e.g. `Ctrl+S`) and applied via `QKeySequence.fromString()`.
+- **Config:** `ProgramConfig.shortcuts` is a dict `action_id → key string`. On load, any missing action is filled from defaults so all schema actions always have a binding. **Apply** in the dialog writes to `pcfg.shortcuts`, calls `save_config()`, and emits `shortcuts_changed`; the main window’s `apply_shortcuts()` updates all QShortcuts, QActions (title bar, left bar), and drawing panel tool tips.
+
+**Files:** `utils/shortcuts.py` (schema, `get_default_shortcuts`, `get_shortcut_info`, `get_shortcut`), `utils/config.py` (`shortcuts` field, load_config shortcut merge), `ui/shortcuts_dialog.py` (ShortcutsDialog), `ui/mainwindowbars.py` (LeftBar and TitleBar `_shortcut_actions_*`, `apply_shortcuts`; View menu **Keyboard Shortcuts...**), `ui/mainwindow.py` (shortcut creation from config, `_shortcuts_list`, `_draw_shortcut_tools`, `apply_shortcuts`, `open_shortcuts_dialog`, connection to dialog’s `shortcuts_changed`).
+
+---
+
+### 12.5 Other small behavior and UI details
+
+- **Config panel – WebP lossless:** The WebP lossless checkbox is shown in the Save section only when the result format is WebP; its **enabled** state is toggled by `_update_webp_lossless_visibility()` when the format combo changes, so you cannot turn on lossless when the format is not WebP.
+- **Canvas – context menu state:** Before showing the context menu, the canvas computes the number of selected blocks and total blocks, then sets `setEnabled(True/False)` on the **Merge selected blocks**, **Move block(s) up**, **Move block(s) down**, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, and **To lowercase** actions so they appear grayed out when not applicable (e.g. merge when fewer than 2 selected, move up when none or first block selected; spell check, trim, and case when no blocks selected).
+- **Export all pages:** Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path, so Export all pages also respects the lossless WebP option when format is WebP.
 
 ---
 

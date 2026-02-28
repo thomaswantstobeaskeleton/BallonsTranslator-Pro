@@ -5,7 +5,7 @@ from typing import List, Union, Tuple
 from qtpy.QtWidgets import QGraphicsItem, QWidget, QGraphicsSceneHoverEvent, QGraphicsTextItem, QStyleOptionGraphicsItem, QStyle, QGraphicsSceneMouseEvent
 from qtpy.QtCore import Qt, QRect, QRectF, QPointF, Signal, QSizeF
 from qtpy.QtGui import (QGradient, QKeyEvent, QFont, QTextCursor, QPixmap, QPainterPath, QTextDocument, 
-                       QInputMethodEvent, QPainter, QPen, QColor, QTextCharFormat, QTextDocument, QLinearGradient, 
+                       QInputMethodEvent, QPainter, QPen, QColor, QTextCharFormat, QTextDocument, QLinearGradient, QRadialGradient,
                        QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat)
 
 from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingType
@@ -657,9 +657,11 @@ class TextBlkItem(QGraphicsTextItem):
             fontformat.font_size = self.minFontSize()
         fontformat.bold = font.bold()
         fontformat.underline = font.underline()
+        fontformat.strikethrough = font.strikeOut()
         fontformat.italic = font.italic()
         # Preserve gradient settings
         fontformat.gradient_enabled = self.fontformat.gradient_enabled
+        fontformat.gradient_type = getattr(self.fontformat, 'gradient_type', 0)
         fontformat.gradient_start_color = self.fontformat.gradient_start_color
         fontformat.gradient_end_color = self.fontformat.gradient_end_color
         fontformat.gradient_angle = self.fontformat.gradient_angle
@@ -699,6 +701,7 @@ class TextBlkItem(QGraphicsTextItem):
             format.setFontWeight(fweight)
         format.setFontItalic(ffmat.italic)
         format.setFontUnderline(ffmat.underline)
+        format.setFontStrikeOut(getattr(ffmat, 'strikethrough', False))
         if not ffmat.vertical:
             format.setFontLetterSpacingType(QFont.SpacingType.PercentageSpacing)
             format.setFontLetterSpacing(ffmat.letter_spacing * 100)
@@ -731,6 +734,7 @@ class TextBlkItem(QGraphicsTextItem):
         
         # Preserve gradient properties
         self.fontformat.gradient_enabled = ffmat.gradient_enabled
+        self.fontformat.gradient_type = getattr(ffmat, 'gradient_type', 0)
         self.fontformat.gradient_start_color = ffmat.gradient_start_color
         self.fontformat.gradient_end_color = ffmat.gradient_end_color
         self.fontformat.gradient_angle = ffmat.gradient_angle
@@ -879,6 +883,14 @@ class TextBlkItem(QGraphicsTextItem):
         self.set_cursor_cfmt(cursor, cfmt, True)
         self._after_set_ffmt(cursor, repaint_background, restore_cursor, **after_kwargs)
 
+    def setFontStrikethrough(self, value: bool, repaint_background: bool = True, set_selected: bool = False, restore_cursor: bool = False):
+        self.fontformat.strikethrough = value
+        cursor, after_kwargs = self._before_set_ffmt(set_selected, restore_cursor)
+        cfmt = QTextCharFormat()
+        cfmt.setFontStrikeOut(value)
+        self.set_cursor_cfmt(cursor, cfmt, True)
+        self._after_set_ffmt(cursor, repaint_background, restore_cursor, **after_kwargs)
+
     def setGradientEnabled(self, value: bool, repaint_background: bool = True, set_selected: bool = False, restore_cursor: bool = False):
         self.fontformat.gradient_enabled = value
         cursor, after_kwargs = self._before_set_ffmt(set_selected, restore_cursor)
@@ -893,24 +905,29 @@ class TextBlkItem(QGraphicsTextItem):
         self._after_set_ffmt(cursor, repaint_background, restore_cursor, **after_kwargs)
 
     def get_text_gradient(self, fontformat: FontFormat = None):
-        gradient = QLinearGradient()
         if fontformat is None:
             fontformat = self.fontformat
+        gradient_type = getattr(fontformat, 'gradient_type', 0)
+        rect = self.boundingRect()
+        center = rect.center()
+        radius = max(rect.width(), rect.height()) * fontformat.gradient_size * 0.5
+        start_color = QColor(*fontformat.gradient_start_color)
+        end_color = QColor(*fontformat.gradient_end_color)
+        if gradient_type == 1:
+            # Radial: center to edge
+            gradient = QRadialGradient(center, radius, center)
+            gradient.setColorAt(0, start_color)
+            gradient.setColorAt(1, end_color)
+            return gradient
+        # Linear
+        gradient = QLinearGradient()
         angle = fontformat.gradient_angle
         rad = math.radians(angle)
         dx = math.cos(rad)
         dy = math.sin(rad)
-        
-        # Set gradient points with size adjustment
-        rect = self.boundingRect()
-        center = rect.center()
-        radius = max(rect.width(), rect.height()) * fontformat.gradient_size
-        gradient.setStart(center.x() - dx * radius, center.y() - dy * radius)
-        gradient.setFinalStop(center.x() + dx * radius, center.y() + dy * radius)
-        
-        # Set gradient colors
-        start_color = QColor(*fontformat.gradient_start_color)
-        end_color = QColor(*fontformat.gradient_end_color)
+        r = max(rect.width(), rect.height()) * fontformat.gradient_size
+        gradient.setStart(center.x() - dx * r, center.y() - dy * r)
+        gradient.setFinalStop(center.x() + dx * r, center.y() + dy * r)
         gradient.setColorAt(0, start_color)
         gradient.setColorAt(1, end_color)
         return gradient

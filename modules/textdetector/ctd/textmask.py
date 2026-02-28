@@ -53,6 +53,8 @@ def get_otsuthresh_masklist(img, pred_mask, per_channel=False) -> List[np.ndarra
         return [mask_list[0]]
 
 def get_topk_masklist(im_grey, pred_mask):
+    if im_grey is None or im_grey.size == 0 or im_grey.shape[0] == 0 or im_grey.shape[1] == 0:
+        return []
     if len(im_grey.shape) == 3 and im_grey.shape[-1] == 3:
         im_grey = cv2.cvtColor(im_grey, cv2.COLOR_RGB2GRAY)
     msk = np.ascontiguousarray(pred_mask)
@@ -162,6 +164,8 @@ def refine_mask(img: np.ndarray, pred_mask: np.ndarray, blk_list: List[TextBlock
         bx1, by1, bx2, by2 = enlarge_window(blk.xyxy, img.shape[1], img.shape[0])
         im = np.ascontiguousarray(img[by1: by2, bx1: bx2])
         msk = np.ascontiguousarray(pred_mask[by1: by2, bx1: bx2])
+        if im.size == 0 or msk.size == 0:
+            continue
         mask_list = get_topk_masklist(im, msk)
         mask_list += get_otsuthresh_masklist(im, msk, per_channel=False)
         mask_merged = merge_mask_list(mask_list, msk, blk=blk, text_window=[bx1, by1, bx2, by2], refine_mode=refine_mode)

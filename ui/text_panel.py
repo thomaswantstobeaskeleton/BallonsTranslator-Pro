@@ -118,10 +118,14 @@ class FormatGroupBtn(QFrame):
         self.underlineBtn = QFontChecker(self)
         self.underlineBtn.setObjectName("FontUnderlineChecker")
         self.underlineBtn.clicked.connect(self.setUnderline)
+        self.strikethroughBtn = QFontChecker(self)
+        self.strikethroughBtn.setObjectName("FontStrikethroughChecker")
+        self.strikethroughBtn.clicked.connect(self.setStrikethrough)
         hlayout = QHBoxLayout(self)
         hlayout.addWidget(self.boldBtn)
         hlayout.addWidget(self.italicBtn)
         hlayout.addWidget(self.underlineBtn)
+        hlayout.addWidget(self.strikethroughBtn)
         hlayout.setSpacing(0)
 
     def setBold(self):
@@ -132,6 +136,9 @@ class FormatGroupBtn(QFrame):
 
     def setUnderline(self):
         self.param_changed.emit('underline', self.underlineBtn.isChecked())
+
+    def setStrikethrough(self):
+        self.param_changed.emit('strikethrough', self.strikethroughBtn.isChecked())
     
 
 class FontSizeBox(QFrame):
@@ -245,6 +252,8 @@ class FontFamilyComboBox(QFontComboBox):
 
 class FontFormatPanel(Widget):
     
+    apply_global_to_all_blocks_requested = Signal()
+    set_default_format_requested = Signal()
     textblk_item: TextBlkItem = None
     text_cursor: QTextCursor = None
     global_format: FontFormat = None
@@ -335,6 +344,19 @@ class FontFormatPanel(Widget):
         lettersp_hlayout.addWidget(self.letterSpacingLabel)
         lettersp_hlayout.addWidget(self.letterSpacingBox)
         lettersp_hlayout.setSpacing(shared.WIDGET_SPACING_CLOSE)
+
+        self.opacityMainLabel = SizeControlLabel(self, direction=1, transparent_bg=False, text=self.tr('Opacity'))
+        self.opacityMainLabel.setObjectName("opacityMainLabel")
+        self.opacityMainBox = SizeComboBox([0, 1], 'opacity', self, init_value=1.)
+        self.opacityMainBox.addItems(["0.5", "0.75", "1.0"])
+        self.opacityMainBox.setToolTip(self.tr("Text opacity (quick access)"))
+        self.opacityMainBox.param_changed.connect(self.on_param_changed)
+        self.opacityMainLabel.size_ctrl_changed.connect(lambda x: self.opacityMainBox.changeByDelta(x, multiplier=0.02))
+        self.opacityMainLabel.btn_released.connect(lambda : self.on_param_changed('opacity', self.opacityMainBox.value()))
+        opacity_hlayout = QHBoxLayout()
+        opacity_hlayout.addWidget(self.opacityMainLabel)
+        opacity_hlayout.addWidget(self.opacityMainBox)
+        opacity_hlayout.setSpacing(shared.WIDGET_SPACING_CLOSE)
         
         self.global_fontfmt_str = self.tr("Global Font Format")
         self.textstyle_panel = TextStylePresetPanel(
@@ -344,6 +366,13 @@ class FontFormatPanel(Widget):
         )
         self.textstyle_panel.active_text_style_label_changed.connect(self.on_active_textstyle_label_changed)
         self.textstyle_panel.active_stylename_edited.connect(self.on_active_stylename_edited)
+
+        self.applyToAllBlocksBtn = QPushButton(self.tr("Apply to all blocks"))
+        self.applyToAllBlocksBtn.setToolTip(self.tr("Apply current global font format to every text block on this page."))
+        self.applyToAllBlocksBtn.clicked.connect(self.apply_global_to_all_blocks_requested.emit)
+        self.saveAsDefaultBtn = QPushButton(self.tr("Save as default"))
+        self.saveAsDefaultBtn.setToolTip(self.tr("Save current global font format as the default for new projects and sessions."))
+        self.saveAsDefaultBtn.clicked.connect(self.set_default_format_requested.emit)
 
         self.textadvancedfmt_panel = TextAdvancedFormatPanel(
             self.tr('Advanced Text Format'),
@@ -374,6 +403,8 @@ class FontFormatPanel(Widget):
 
         vl0 = QVBoxLayout()
         vl0.addWidget(self.textstyle_panel.view_widget)
+        vl0.addWidget(self.applyToAllBlocksBtn)
+        vl0.addWidget(self.saveAsDefaultBtn)
         vl0.addWidget(self.textadvancedfmt_panel.view_widget)
         vl0.setSpacing(0)
         vl0.setContentsMargins(0, 0, 0, 0)
@@ -396,6 +427,7 @@ class FontFormatPanel(Widget):
         hl3.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl3.addLayout(stroke_hlayout)
         hl3.addLayout(lettersp_hlayout)
+        hl3.addLayout(opacity_hlayout)
         hl3.setContentsMargins(3, 0, 3, 0)
         hl3.setSpacing(13)
         hl4 = QHBoxLayout()
@@ -488,8 +520,10 @@ class FontFormatPanel(Widget):
         self.lineSpacingBox.setValue(font_format.line_spacing)
         self.letterSpacingBox.setValue(font_format.letter_spacing)
         self.verticalChecker.setChecked(font_format.vertical)
+        self.opacityMainBox.setValue(font_format.opacity)
         self.formatBtnGroup.boldBtn.setChecked(font_format.bold)
         self.formatBtnGroup.underlineBtn.setChecked(font_format.underline)
+        self.formatBtnGroup.strikethroughBtn.setChecked(font_format.strikethrough)
         self.formatBtnGroup.italicBtn.setChecked(font_format.italic)
         self.alignBtnGroup.setAlignment(font_format.alignment)
         

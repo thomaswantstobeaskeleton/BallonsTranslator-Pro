@@ -197,7 +197,7 @@ def main():
 
     if sys.platform == 'win32':
         import ctypes
-        myappid = u'BalloonsTranslator' # arbitrary string
+        myappid = u'BallonsTranslatorPro'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
     import qtpy
@@ -225,7 +225,7 @@ def main():
     if args.headless:
         app_args = sys.argv + ['-platform', 'offscreen']
     app = QApplication(app_args)
-    app.setApplicationName('BalloonsTranslator')
+    app.setApplicationName('BallonsTranslatorPro')
     app.setApplicationVersion(VERSION)
 
     # import msl.loadlib (required by translators/trans_eztrans) before init QApplication
@@ -285,8 +285,10 @@ def main():
     shared.APP_DEFAULT_FONT = app_font.family()
     # Note: Qt6 removed QFont/QFontDatabase insertSubstitution; use a CJK-capable font in text style if you see empty squares (□).
 
-    if args.ldpi:
+    if args.ldpi is not None:
         shared.LDPI = args.ldpi
+    elif getattr(config, 'logical_dpi', 0) > 0:
+        shared.LDPI = float(config.logical_dpi)
 
     setup_locks()
 

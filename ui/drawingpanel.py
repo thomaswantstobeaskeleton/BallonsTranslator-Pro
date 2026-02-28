@@ -88,6 +88,16 @@ class InpaintPanel(Widget):
         shape_layout.addWidget(shape_label)
         shape_layout.addWidget(self.shapeCombobox)
 
+        hardness_label = ToolNameLabel(100, self.tr('Hardness'))
+        self.hardnessSlider = PaintQSlider()
+        self.hardnessSlider.setRange(0, 100)
+        self.hardnessSlider.setValue(100)
+        self.hardnessSlider.setToolTip(self.tr("Brush edge hardness: 100 = hard, 0 = soft/feathered."))
+        self.hardnessSlider.valueChanged.connect(self.on_hardness_changed)
+        hardness_layout = QHBoxLayout()
+        hardness_layout.addWidget(hardness_label)
+        hardness_layout.addWidget(self.hardnessSlider)
+
         self.inpaint_layout = inpaint_layout = QHBoxLayout()
         inpaint_layout.addWidget(ToolNameLabel(100, self.tr('Inpainter')))
         self.inpainter_panel = inpainter_panel
@@ -97,11 +107,16 @@ class InpaintPanel(Widget):
         layout.addLayout(inpaint_layout)
         layout.addLayout(thickness_layout)
         layout.addLayout(shape_layout)
+        layout.addLayout(hardness_layout)
         layout.setSpacing(14)
 
     def on_thickness_changed(self):
         if self.thicknessSlider.hasFocus():
             self.thicknessChanged.emit(self.thicknessSlider.value())
+
+    def on_hardness_changed(self):
+        from utils.config import pcfg
+        pcfg.drawpanel.inpaint_hardness = self.hardnessSlider.value()
 
     def showEvent(self, e) -> None:
         self.inpaint_layout.addWidget(self.inpainter_panel.module_combobox)
@@ -191,20 +206,27 @@ class RectPanel(Widget):
     method_changed = Signal(int)
     delete_btn_clicked = Signal()
     inpaint_btn_clicked = Signal()
+    fill_btn_clicked = Signal()
     def __init__(self, inpainter_panel: InpaintConfigPanel, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.dilate_label = ToolNameLabel(100, self.tr('Dilate'))
         self.dilate_slider = PaintQSlider()
         self.dilate_slider.setRange(0, 100)
+        self.dilate_slider.setToolTip(self.tr("Expand mask boundary (enlarge selection)."))
         self.dilate_slider.valueChanged.connect(self.dilate_ksize_changed)
+        self.erode_label = ToolNameLabel(100, self.tr('Erode'))
+        self.erode_slider = PaintQSlider()
+        self.erode_slider.setRange(0, 100)
+        self.erode_slider.setToolTip(self.tr("Shrink mask boundary (use after Dilate to fine-tune)."))
+        self.erode_slider.valueChanged.connect(self.dilate_ksize_changed)
         self.methodComboBox = QComboBox()
         self.methodComboBox.setFixedHeight(CONFIG_COMBOBOX_HEIGHT)
         self.methodComboBox.setFixedWidth(CONFIG_COMBOBOX_SHORT)
         self.methodComboBox.addItems([
-            self.tr('method 1'), 
-            self.tr('method 2'),
-            self.tr('Use Existing Mask')
+            self.tr('Canny + flood'),
+            self.tr('Connected Canny'),
+            self.tr('Use existing mask')
         ])
         self.methodComboBox.activated.connect(self.on_inpaint_seg_method_changed)
         self.autoChecker = QCheckBox(self.tr("Auto"))
@@ -213,11 +235,15 @@ class RectPanel(Widget):
         self.inpaint_btn = QPushButton(self.tr("Inpaint"))
         self.inpaint_btn.setToolTip(self.tr("Space"))
         self.inpaint_btn.clicked.connect(self.inpaint_btn_clicked)
+        self.fill_btn = QPushButton(self.tr("Fill"))
+        self.fill_btn.setToolTip(self.tr("Fill selection with detected background (no inpainter model)."))
+        self.fill_btn.clicked.connect(self.fill_btn_clicked)
         self.delete_btn = QPushButton(self.tr("Delete"))
         self.delete_btn.setToolTip(self.tr('Ctrl+D'))
         self.delete_btn.clicked.connect(self.delete_btn_clicked)
         self.btnlayout = QHBoxLayout()
         self.btnlayout.addWidget(self.inpaint_btn)
+        self.btnlayout.addWidget(self.fill_btn)
         self.btnlayout.addWidget(self.delete_btn)
 
         self.inpaint_layout = inpaint_layout = QHBoxLayout()
@@ -227,8 +253,10 @@ class RectPanel(Widget):
         glayout = QGridLayout()
         glayout.addWidget(self.dilate_label, 0, 0)
         glayout.addWidget(self.dilate_slider, 0, 1)
-        glayout.addWidget(self.autoChecker, 1, 0)
-        glayout.addWidget(self.methodComboBox, 1, 1)
+        glayout.addWidget(self.erode_label, 1, 0)
+        glayout.addWidget(self.erode_slider, 1, 1)
+        glayout.addWidget(self.autoChecker, 2, 0)
+        glayout.addWidget(self.methodComboBox, 2, 1)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -251,11 +279,13 @@ class RectPanel(Widget):
     def on_auto_changed(self):
         if self.autoChecker.isChecked():
             self.inpaint_btn.hide()
+            self.fill_btn.hide()
             self.delete_btn.hide()
             pcfg.drawpanel.rectool_auto = True
         else:
             pcfg.drawpanel.rectool_auto = False
             self.inpaint_btn.show()
+            self.fill_btn.show()
             self.delete_btn.show()
 
     def auto(self) -> bool:
@@ -265,10 +295,14 @@ class RectPanel(Widget):
         if mask is None:
             return None
         ksize = self.dilate_slider.value()
-        if ksize == 0:
-            return mask
-        element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ksize + 1, 2 * ksize + 1),(ksize, ksize))
-        return cv2.dilate(mask, element)
+        if ksize > 0:
+            element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ksize + 1, 2 * ksize + 1),(ksize, ksize))
+            mask = cv2.dilate(mask, element)
+        erode_ksize = self.erode_slider.value()
+        if erode_ksize > 0:
+            element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * erode_ksize + 1, 2 * erode_ksize + 1), (erode_ksize, erode_ksize))
+            mask = cv2.erode(mask, element)
+        return mask
 
 
 class DrawingPanel(Widget):
@@ -300,10 +334,12 @@ class DrawingPanel(Widget):
         self.currentTool: DrawToolCheckBox = None
         self.handTool = DrawToolCheckBox()
         self.handTool.setObjectName("DrawHandTool")
+        self.handTool.setToolTip(self.tr("Hand (H) – Pan canvas"))
         self.handTool.checked.connect(self.on_use_handtool)
         self.handTool.stateChanged.connect(self.on_handchecker_changed)
         self.inpaintTool = DrawToolCheckBox()
         self.inpaintTool.setObjectName("DrawInpaintTool")
+        self.inpaintTool.setToolTip(self.tr("Inpaint brush (J) – Draw region to inpaint"))
         self.inpaintTool.checked.connect(self.on_use_inpainttool)
         self.inpaintConfigPanel = InpaintPanel(inpainter_panel)
         self.inpaintConfigPanel.thicknessChanged.connect(self.setInpaintToolWidth)
@@ -311,15 +347,18 @@ class DrawingPanel(Widget):
 
         self.rectTool = DrawToolCheckBox()
         self.rectTool.setObjectName("DrawRectTool")
+        self.rectTool.setToolTip(self.tr("Rectangle (R) – Select region to inpaint or delete"))
         self.rectTool.checked.connect(self.on_use_recttool)
         self.rectTool.stateChanged.connect(self.on_rectchecker_changed)
         self.rectPanel = RectPanel(inpainter_panel)
         self.rectPanel.inpaint_btn_clicked.connect(self.on_rect_inpaintbtn_clicked)
+        self.rectPanel.fill_btn_clicked.connect(self.on_rect_fill_btn_clicked)
         self.rectPanel.delete_btn_clicked.connect(self.on_rect_deletebtn_clicked)
         self.rectPanel.dilate_ksize_changed.connect(self.on_rectool_ksize_changed)
 
         self.penTool = DrawToolCheckBox()
         self.penTool.setObjectName("DrawPenTool")
+        self.penTool.setToolTip(self.tr("Pen (B) – Draw or erase on canvas"))
         self.penTool.checked.connect(self.on_use_pentool)
         self.penConfigPanel = PenConfigPanel()
         self.penConfigPanel.thicknessChanged.connect(self.setPenToolWidth)
@@ -408,6 +447,9 @@ class DrawingPanel(Widget):
 
     def setPenToolColor(self, color: Union[QColor, Tuple, List]):
         if not isinstance(color, QColor):
+            color = list(color)
+            if len(color) == 3:
+                color.append(255)
             color = QColor(*color)
         self.pentool_pen.setColor(color)
         pcfg.drawpanel.pentool_color = [color.red(), color.green(), color.blue(), color.alpha()]
@@ -468,16 +510,22 @@ class DrawingPanel(Widget):
         self.setCrossCursor()
 
     def set_config(self, config: DrawPanelConfig):
+        # Support legacy 3-component pentool_color
+        pentool_color = list(config.pentool_color) if config.pentool_color else [0, 0, 0, 255]
+        if len(pentool_color) == 3:
+            pentool_color.append(255)
         self.setPenToolWidth(config.pentool_width)
-        self.setPenToolColor(config.pentool_color)
+        self.setPenToolColor(pentool_color)
         self.penConfigPanel.thicknessSlider.setValue(int(config.pentool_width))
         self.penConfigPanel.shapeCombobox.setCurrentIndex(config.pentool_shape)
         
         self.setInpaintToolWidth(config.inpainter_width)
         self.inpaintConfigPanel.thicknessSlider.setValue(int(config.inpainter_width))
         self.inpaintConfigPanel.shapeCombobox.setCurrentIndex(config.inpainter_shape)
+        self.inpaintConfigPanel.hardnessSlider.setValue(getattr(config, 'inpaint_hardness', 100))
         
         self.rectPanel.dilate_slider.setValue(config.recttool_dilate_ksize)
+        self.rectPanel.erode_slider.setValue(config.recttool_erode_ksize)
         self.rectPanel.autoChecker.setChecked(config.rectool_auto)
         self.rectPanel.methodComboBox.setCurrentIndex(config.rectool_method)
         if config.current_tool == ImageEditMode.HandTool:
@@ -662,6 +710,15 @@ class DrawingPanel(Widget):
             inpaint_dict = {'img': img, 'mask': mask, 'inpaint_rect': inpaint_rect}
 
         self.canvas.image_edit_mode = ImageEditMode.NONE
+        if pcfg.drawpanel.inpaint_hardness < 100:
+            mask = inpaint_dict['mask']
+            sigma = (100 - pcfg.drawpanel.inpaint_hardness) / 100.0 * 12
+            ksize = max(3, int(2 * round(3 * sigma) + 1))
+            if ksize % 2 == 0:
+                ksize += 1
+            if mask.dtype == np.uint8 and mask.ndim == 2:
+                mask = cv2.GaussianBlur(mask, (ksize, ksize), sigma)
+                inpaint_dict['mask'] = mask
         self.module_manager.canvas_inpaint(inpaint_dict)
 
     def on_inpaint_finished(self, inpaint_dict):
@@ -818,11 +875,32 @@ class DrawingPanel(Widget):
         if self.rect_inpaint_dict is not None:
             self.inpaintRect(self.rect_inpaint_dict)
 
+    def on_rect_fill_btn_clicked(self):
+        """Fill selection with detected background color without running the inpainter model."""
+        if self.rect_inpaint_dict is None:
+            return
+        inpaint_dict = self.rect_inpaint_dict
+        img = np.copy(inpaint_dict['img'])
+        mask = inpaint_dict['mask']
+        bground_rgb = inpaint_dict['bground_rgb']
+        ballon_mask = inpaint_dict['ballon_mask']
+        balloon_areas = np.where(ballon_mask > 0)
+        bg_pixel_value = [bground_rgb[ii] for ii in range(3)]
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            avg_alpha = np.mean(img[balloon_areas][..., 3])
+            avg_alpha = 0 if avg_alpha < 127 else avg_alpha
+            bg_pixel_value.append(avg_alpha)
+        bg_pixel_value = np.array(np.round(bg_pixel_value), dtype=np.uint8)
+        img[balloon_areas] = bg_pixel_value
+        self.canvas.push_undo_command(InpaintUndoCommand(self.canvas, img, mask, inpaint_dict['inpaint_rect'], merge_existing_mask=True))
+        self.clearInpaintItems()
+
     def on_rect_deletebtn_clicked(self):
         self.clearInpaintItems()
 
     def on_rectool_ksize_changed(self):
         pcfg.drawpanel.recttool_dilate_ksize = self.rectPanel.dilate_slider.value()
+        pcfg.drawpanel.recttool_erode_ksize = self.rectPanel.erode_slider.value()
         if self.currentTool != self.rectTool or self.inpaint_mask_array is None or self.inpaint_mask_item is None:
             return
         mask = self.rectPanel.post_process_mask(self.inpaint_mask_array)

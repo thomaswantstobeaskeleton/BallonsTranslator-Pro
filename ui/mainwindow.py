@@ -9,18 +9,19 @@ import cv2
 
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit
-from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal
+from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
-from utils.textblock import TextBlock, TextAlignment
+from utils.textblock import TextBlock, TextAlignment, examine_textblk
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat
+from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from .canvas import Canvas
 from .configpanel import ConfigPanel
@@ -38,6 +39,8 @@ from .drawing_commands import RunBlkTransCommand
 from .keywordsubwidget import KeywordSubWidget
 from . import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox
+from .model_manager_dialog import ModelManagerDialog
+from .shortcuts_dialog import ShortcutsDialog
 
 class PageListView(QListWidget):
 
@@ -84,6 +87,10 @@ class MainWindow(mainwindow_cls):
         self.app = app
         self.backup_blkstyles = []
         self._run_imgtrans_wo_textstyle_update = False
+        self._detection_only_restore = None
+        self._idle_unload_timer = QTimer(self)
+        self._idle_unload_timer.setSingleShot(True)
+        self._idle_unload_timer.timeout.connect(self._on_idle_unload_timeout)
 
         self.setupThread()
         self.setupUi()
@@ -196,6 +203,22 @@ class MainWindow(mainwindow_cls):
         self.canvas.textlayer_trans_slider = self.bottomBar.textlayerSlider
         self.canvas.copy_src_signal.connect(self.on_copy_src)
         self.canvas.paste_src_signal.connect(self.on_paste_src)
+        self.canvas.copy_trans_signal.connect(self.on_copy_trans)
+        self.canvas.paste_trans_signal.connect(self.on_paste_trans)
+        self.canvas.clear_src_signal.connect(self.on_clear_src)
+        self.canvas.clear_trans_signal.connect(self.on_clear_trans)
+        self.canvas.select_all_signal.connect(self.on_select_all_canvas)
+        self.canvas.spell_check_src_signal.connect(self.on_spell_check_src)
+        self.canvas.spell_check_trans_signal.connect(self.on_spell_check_trans)
+        self.canvas.trim_whitespace_signal.connect(self.on_trim_whitespace)
+        self.canvas.to_uppercase_signal.connect(self.on_to_uppercase)
+        self.canvas.to_lowercase_signal.connect(self.on_to_lowercase)
+        self.canvas.toggle_strikethrough_signal.connect(self.on_toggle_strikethrough)
+        self.canvas.set_gradient_type_signal.connect(self.on_set_gradient_type)
+        self.canvas.run_detect_region.connect(self.on_run_detect_region)
+        self.canvas.merge_selected_blocks_signal.connect(self.on_merge_selected_blocks)
+        self.canvas.move_blocks_up_signal.connect(self.on_move_blocks_up)
+        self.canvas.move_blocks_down_signal.connect(self.on_move_blocks_down)
 
         self.bottomBar.originalSlider.valueChanged.connect(self.canvas.setOriginalTransparencyBySlider)
         self.bottomBar.textlayerSlider.valueChanged.connect(self.canvas.setTextLayerTransparencyBySlider)
@@ -207,6 +230,7 @@ class MainWindow(mainwindow_cls):
         self.textPanel.formatpanel.transBtn.checkStateChanged.connect(self.show_trans_text)
         self.textPanel.formatpanel.textstyle_panel.export_style.connect(self.export_tstyles)
         self.textPanel.formatpanel.textstyle_panel.import_style.connect(self.import_tstyles)
+        self.textPanel.formatpanel.set_default_format_requested.connect(self.on_set_default_format_requested)
 
         self.ocrSubWidget = KeywordSubWidget(self.tr("Keyword substitution for source text"))
         self.ocrSubWidget.setParent(self)
@@ -366,6 +390,7 @@ class MainWindow(mainwindow_cls):
         module_manager.setupThread(self.configPanel, self.imgtrans_progress_msgbox, self.ocr_postprocess, self.translate_preprocess, self.translate_postprocess)
         module_manager.progress_msgbox.showed.connect(self.on_imgtrans_progressbox_showed)
         module_manager.blktrans_pipeline_finished.connect(self.on_blktrans_finished)
+        module_manager.detect_region_finished.connect(self.on_detect_region_finished)
         module_manager.imgtrans_thread.post_process_mask = self.drawingPanel.rectPanel.post_process_mask
         module_manager.inpaint_thread.finish_set_module.connect(self.on_finish_setinpainter)
         module_manager.translate_thread.finish_set_module.connect(self.on_finish_settranslator)
@@ -391,6 +416,8 @@ class MainWindow(mainwindow_cls):
         self.configPanel.save_config.connect(self.save_config)
         self.configPanel.reload_textstyle.connect(self.load_textstyle_from_proj_dir)
         self.configPanel.show_only_custom_font.connect(self.on_show_only_custom_font)
+        self.configPanel.darkmode_changed.connect(self.on_config_darkmode_changed)
+        self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
         if pcfg.let_show_only_custom_fonts_flag:
             self.on_show_only_custom_font(True)
 
@@ -598,6 +625,10 @@ class MainWindow(mainwindow_cls):
     def save_config(self):
         save_config()
 
+    def on_set_default_format_requested(self):
+        """Save current global font format to config so it is used as default for new projects/sessions."""
+        save_config()
+
     def onHideCanvas(self):
         self.canvas.clearToolStates()
 
@@ -646,48 +677,74 @@ class MainWindow(mainwindow_cls):
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
         self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
         self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
+        self.titleBar.re_run_detection_only_trigger.connect(self.on_re_run_detection_only)
+        self.titleBar.re_run_ocr_only_trigger.connect(self.on_re_run_ocr_only)
+        self.titleBar.batch_export_trigger.connect(self.on_batch_export)
+        self.titleBar.validate_project_trigger.connect(self.on_validate_project)
+        self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
+        self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
+        self.titleBar.run_preset_full_trigger.connect(self.on_run_preset_full)
+        self.titleBar.run_preset_detect_ocr_trigger.connect(self.on_run_preset_detect_ocr)
+        self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
+        self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
+        self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
 
-        shortcutA = QShortcut(QKeySequence("A"), self)
-        shortcutA.activated.connect(self.shortcutBefore)
-        shortcutPageUp = QShortcut(QKeySequence(QKeySequence.StandardKey.MoveToPreviousPage), self)
-        shortcutPageUp.activated.connect(self.shortcutBefore)
+        sc = getattr(pcfg, "shortcuts", None) or {}
+        self._shortcuts_list = []  # (action_id, default_key, QShortcut)
 
-        shortcutD = QShortcut(QKeySequence("D"), self)
-        shortcutD.activated.connect(self.shortcutNext)
-        shortcutPageDown = QShortcut(QKeySequence(QKeySequence.StandardKey.MoveToNextPage), self)
-        shortcutPageDown.activated.connect(self.shortcutNext)
+        def _mk_shortcut(action_id: str, default_key: str, slot):
+            key = get_shortcut(action_id, sc) or default_key
+            q = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
+            q.activated.connect(slot)
+            self._shortcuts_list.append((action_id, default_key, q))
+            return q
 
-        shortcutTextblock = QShortcut(QKeySequence("W"), self)
-        shortcutTextblock.activated.connect(self.shortcutTextblock)
-        shortcutZoomIn = QShortcut(QKeySequence.StandardKey.ZoomIn, self)
-        shortcutZoomIn.activated.connect(self.canvas.gv.scale_up_signal)
-        shortcutZoomOut = QShortcut(QKeySequence.StandardKey.ZoomOut, self)
-        shortcutZoomOut.activated.connect(self.canvas.gv.scale_down_signal)
-        shortcutCtrlD = QShortcut(QKeySequence("Ctrl+D"), self)
-        shortcutCtrlD.activated.connect(self.shortcutCtrlD)
-        shortcutSpace = QShortcut(QKeySequence("Space"), self)
-        shortcutSpace.activated.connect(self.shortcutSpace)
-        shortcutSelectAll = QShortcut(QKeySequence.StandardKey.SelectAll, self)
-        shortcutSelectAll.activated.connect(self.shortcutSelectAll)
+        _mk_shortcut("go.prev_page_alt", "A", self.shortcutBefore)
+        _mk_shortcut("go.prev_page", "PgUp", self.shortcutBefore)
+        _mk_shortcut("go.next_page_alt", "D", self.shortcutNext)
+        _mk_shortcut("go.next_page", "PgDown", self.shortcutNext)
+        _mk_shortcut("canvas.textblock_mode", "W", self.shortcutTextblock)
+        _mk_shortcut("canvas.zoom_in", "Ctrl++", self.canvas.gv.scale_up_signal.emit)
+        _mk_shortcut("canvas.zoom_out", "Ctrl+-", self.canvas.gv.scale_down_signal.emit)
+        _mk_shortcut("canvas.delete", "Ctrl+D", self.shortcutCtrlD)
+        _mk_shortcut("canvas.space", "Space", self.shortcutSpace)
+        _mk_shortcut("canvas.select_all", "Ctrl+A", self.shortcutSelectAll)
+        _mk_shortcut("canvas.escape", "Escape", self.shortcutEscape)
+        _mk_shortcut("format.bold", "Ctrl+B", self.shortcutBold)
+        _mk_shortcut("format.italic", "Ctrl+I", self.shortcutItalic)
+        _mk_shortcut("format.underline", "Ctrl+U", self.shortcutUnderline)
+        _mk_shortcut("canvas.delete_line", "Delete", self.shortcutDelete)
 
-        shortcutEscape = QShortcut(QKeySequence("Escape"), self)
-        shortcutEscape.activated.connect(self.shortcutEscape)
-
-        shortcutBold = QShortcut(QKeySequence.StandardKey.Bold, self)
-        shortcutBold.activated.connect(self.shortcutBold)
-        shortcutItalic = QShortcut(QKeySequence.StandardKey.Italic, self)
-        shortcutItalic.activated.connect(self.shortcutItalic)
-        shortcutUnderline = QShortcut(QKeySequence.StandardKey.Underline, self)
-        shortcutUnderline.activated.connect(self.shortcutUnderline)
-
-        shortcutDelete = QShortcut(QKeySequence.StandardKey.Delete, self)
-        shortcutDelete.activated.connect(self.shortcutDelete)
-
-        drawpanel_shortcuts = {'hand': 'H', 'rect': 'R', 'inpaint': 'J', 'pen': 'B'}
-        for tool_name, shortcut_key in drawpanel_shortcuts.items():
-            shortcut = QShortcut(QKeySequence(shortcut_key), self)
+        drawpanel_shortcuts = [
+            ("draw.hand", "H", "hand"),
+            ("draw.inpaint", "J", "inpaint"),
+            ("draw.pen", "B", "pen"),
+            ("draw.rect", "R", "rect"),
+        ]
+        for action_id, default_key, tool_name in drawpanel_shortcuts:
+            key = get_shortcut(action_id, sc) or default_key
+            shortcut = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
             shortcut.activated.connect(partial(self.drawingPanel.shortcutSetCurrentToolByName, tool_name))
-            self.drawingPanel.setShortcutTip(tool_name, shortcut_key)
+            self.drawingPanel.setShortcutTip(tool_name, key or default_key)
+            self._shortcuts_list.append((action_id, default_key, shortcut))
+        self._draw_shortcut_tools = drawpanel_shortcuts
+
+    def apply_shortcuts(self, shortcuts_dict=None):
+        """Apply keyboard shortcuts from config (action_id -> key string)."""
+        sc = shortcuts_dict if shortcuts_dict is not None else getattr(pcfg, "shortcuts", None) or {}
+        for action_id, default_key, qshortcut in self._shortcuts_list:
+            key = sc.get(action_id) or default_key
+            qshortcut.setKey(QKeySequence.fromString(key) if key else QKeySequence())
+        for action_id, default_key, tool_name in self._draw_shortcut_tools:
+            key = sc.get(action_id) or default_key
+            self.drawingPanel.setShortcutTip(tool_name, key or default_key)
+        self.leftBar.apply_shortcuts(sc)
+        self.titleBar.apply_shortcuts(sc)
+
+    def open_shortcuts_dialog(self):
+        dlg = ShortcutsDialog(self)
+        dlg.shortcuts_changed.connect(self.apply_shortcuts)
+        dlg.show()
 
     def shortcutNext(self):
         sender: QShortcut = self.sender()
@@ -840,7 +897,7 @@ class MainWindow(mainwindow_cls):
         self.ocrSubWidget.show()
 
     def on_open_merge_tool(self):
-        """打开区域合并工具对话框"""
+        """Open the region merge tool dialog."""
         if not hasattr(self, 'merge_dialog') or self.merge_dialog is None:
             from .merge_dialog import MergeDialog
             from qtpy.QtCore import QThread
@@ -857,44 +914,61 @@ class MainWindow(mainwindow_cls):
         else:
             self.merge_dialog.show()
 
+    def on_open_manga_source(self):
+        """Open the Manga / Comic source dialog (search, chapters, download)."""
+        if not hasattr(self, 'manga_source_dialog') or self.manga_source_dialog is None:
+            from .manga_source_dialog import MangaSourceDialog
+            self.manga_source_dialog = MangaSourceDialog(self)
+            self.manga_source_dialog.open_folder_requested.connect(self.OpenProj)
+        if self.manga_source_dialog.isVisible():
+            self.manga_source_dialog.raise_()
+            self.manga_source_dialog.activateWindow()
+        else:
+            self.manga_source_dialog.show()
+
+    def on_open_manage_models(self):
+        """Open the Manage models dialog (check downloaded models, download selected)."""
+        dlg = ModelManagerDialog(self)
+        dlg.exec()
+
     def run_merge_task(self, on_current=False):
-        """执行区域合并任务"""
+        """Run the region merge task."""
         from utils import merger
         from qtpy.QtWidgets import QMessageBox
         
         if self.imgtrans_proj.is_empty:
-            QMessageBox.warning(self, "警告", "请先打开一个项目")
+            QMessageBox.warning(self, "Warning", "Please open a project first.")
             return
         
         config = self.merge_dialog.get_config()
         
         if on_current:
-            # 对当前文件运行 - 直接在内存中操作，不读写文件
+            # Run on current page — operate in memory, no file I/O
             from utils.textblock import TextBlock
             
             current_img = self.imgtrans_proj.current_img
             if not current_img:
-                QMessageBox.warning(self, "警告", "没有当前文件")
+                QMessageBox.warning(self, "Warning", "No current page.")
                 return
-            
-            # 直接从内存获取当前页面的文本框
+
+            # Get text blocks for current page from memory
             if current_img not in self.imgtrans_proj.pages:
-                QMessageBox.warning(self, "警告", "当前页面数据不存在")
+                QMessageBox.warning(self, "Warning", "Current page data not found.")
                 return
-            
+
             textblocks = self.imgtrans_proj.pages[current_img]
             if not textblocks:
-                QMessageBox.warning(self, "提示", "当前页面没有文本框")
+                QMessageBox.warning(self, "Info", "Current page has no text blocks.")
                 return
             
-            # 将 TextBlock 对象转换为字典格式（merger 需要字典）
+            # Convert to dict format (merger expects dicts)
             initial_shapes = [blk.to_dict() for blk in textblocks]
             
             initial_count = len(initial_shapes)
             mode = config.get("MERGE_MODE", "NONE")
             total_merged = 0
             
-            # 在内存中执行合并
+            # Perform merge in memory
             if mode == "VERTICAL":
                 final_shapes, count = merger.perform_merge(initial_shapes, "VERTICAL", config)
                 total_merged += count
@@ -913,72 +987,67 @@ class MainWindow(mainwindow_cls):
                 final_shapes = initial_shapes
             
             if total_merged > 0:
-                # 将字典转回 TextBlock 对象并更新内存
+                # Convert dicts back to TextBlock and update memory
                 self.imgtrans_proj.pages[current_img] = [TextBlock(**blk_dict) for blk_dict in final_shapes]
-                # 刷新画布
                 self.canvas.updateCanvas()
                 self.st_manager.updateSceneTextitems()
                 final_count = len(final_shapes)
-                QMessageBox.information(self, "成功", f"合并完成: 框数 {initial_count} -> {final_count} (减少了 {initial_count - final_count} 个)")
+                QMessageBox.information(self, "Success", f"Merge done: {initial_count} -> {final_count} blocks (reduced by {initial_count - final_count})")
             else:
-                # 提供更详细的提示
                 labels = set(s.get('label', '') for s in initial_shapes)
-                detail_msg = f"未发生任何合并。\n共有 {initial_count} 个文本框。\n标签类型: {', '.join(labels) or '无'}\n\n"
-                detail_msg += "建议：\n"
-                detail_msg += "1. 尝试增大最大间隙值（如 100-200）\n"
-                detail_msg += "2. 降低最小重叠比例（如 50-70%）\n"
-                detail_msg += "3. 取消勾选'启用排除合并的标签'\n"
-                detail_msg += "4. 检查标签是否在黑名单中"
-                QMessageBox.warning(self, "提示", detail_msg)
+                detail_msg = f"No blocks were merged.\nTotal: {initial_count} text blocks.\nLabel types: {', '.join(labels) or 'none'}\n\n"
+                detail_msg += "Suggestions:\n"
+                detail_msg += "1. Try increasing max gap (e.g. 100–200)\n"
+                detail_msg += "2. Lower min overlap ratio (e.g. 50–70%)\n"
+                detail_msg += "3. Uncheck 'Enable exclude-from-merge labels'\n"
+                detail_msg += "4. Check if labels are in the blacklist"
+                QMessageBox.warning(self, "Info", detail_msg)
         else:
-            # 对所有文件运行
+            # Run on all pages
             img_list = list(self.imgtrans_proj.pages.keys())
             if not img_list:
-                QMessageBox.warning(self, "警告", "项目中没有图片")
+                QMessageBox.warning(self, "Warning", "Project has no images.")
                 return
-            
-            # 使用项目的 JSON 文件路径
+
             json_path = self.imgtrans_proj.proj_path
             if not json_path or not osp.exists(json_path):
-                QMessageBox.warning(self, "警告", f"找不到项目 JSON 文件: {json_path}")
+                QMessageBox.warning(self, "Warning", f"Project JSON not found: {json_path}")
                 return
-            
-            # 使用后台线程执行合并
+
             self.run_merge_all_async(json_path, img_list, config)
     
     def run_merge_all_async(self, json_path, img_list, config):
-        """异步执行所有文件的合并"""
+        """Run merge on all pages in a background thread."""
         from .io_thread import MergeThread
         
-        # 创建合并线程（如果不存在）
+        # Create merge thread if needed
         if not hasattr(self, 'merge_thread'):
             self.merge_thread = MergeThread()
             self.merge_thread.progress_changed.connect(self.on_merge_progress)
             self.merge_thread.merge_finished.connect(self.on_merge_finished)
             self.merge_thread.progress_bar.stop_clicked.connect(self.on_merge_stop)
         
-        # 启动合并
+        # Start merge
         if self.merge_thread.runMerge(json_path, img_list, config):
-            # 显示进度对话框
             self.merge_thread.progress_bar.zero_progress()
             self.merge_thread.progress_bar.show()
-    
+
     def on_merge_progress(self, current, total):
-        """合并进度更新"""
+        """Update merge progress."""
         progress = int(current / total * 100)
         self.merge_thread.progress_bar.updateTaskProgress(progress, f' {current}/{total}')
     
     def on_merge_stop(self):
-        """停止合并"""
+        """Stop merge."""
         if hasattr(self, 'merge_thread'):
             self.merge_thread.requestStop()
             self.merge_thread.progress_bar.hide()
     
     def on_merge_finished(self, success_count, fail_count):
-        """合并完成"""
+        """Merge finished."""
         self.merge_thread.progress_bar.hide()
         
-        # 重新加载整个项目
+        # Reload project
         try:
             json_path = self.imgtrans_proj.proj_path
             current_img = self.imgtrans_proj.current_img
@@ -990,9 +1059,161 @@ class MainWindow(mainwindow_cls):
         except:
             pass
         
-        # 显示结果
+        # Show result
         total = success_count + fail_count
-        QMessageBox.information(self, "完成", f"区域合并完成\n成功: {success_count}/{total}\n失败: {fail_count}/{total}")
+        QMessageBox.information(self, "Done", f"Region merge finished\nSuccess: {success_count}/{total}\nFailed: {fail_count}/{total}")
+
+    def on_re_run_detection_only(self):
+        """Run pipeline with only detection enabled (OCR, translate, inpaint disabled)."""
+        if self.imgtrans_proj.is_empty:
+            return
+        self._detection_only_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = True
+        pcfg.module.enable_ocr = False
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        self.on_run_imgtrans()
+
+    def on_re_run_ocr_only(self):
+        """Run pipeline with only OCR enabled (re-recognize text, keep detection boxes)."""
+        if self.imgtrans_proj.is_empty:
+            return
+        self._detection_only_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = True
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        self.on_run_imgtrans()
+
+    def _on_idle_unload_timeout(self):
+        if getattr(pcfg, 'unload_after_idle_minutes', 0) <= 0:
+            return
+        self.module_manager.unload_all_models()
+        LOGGER.info('Models unloaded after idle timeout.')
+
+    def _reset_idle_unload_timer(self):
+        self._idle_unload_timer.stop()
+        mins = getattr(pcfg, 'unload_after_idle_minutes', 0)
+        if mins > 0:
+            self._idle_unload_timer.start(mins * 60 * 1000)
+
+    def on_run_preset_full(self):
+        pcfg.module.enable_detect = True
+        pcfg.module.enable_ocr = True
+        pcfg.module.enable_translate = True
+        pcfg.module.enable_inpaint = True
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(True)
+        pcfg.module.run_preset_name = 'Full'
+
+    def on_run_preset_detect_ocr(self):
+        pcfg.module.enable_detect = True
+        pcfg.module.enable_ocr = True
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        pcfg.module.run_preset_name = 'Detect+OCR'
+
+    def on_run_preset_translate(self):
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = False
+        pcfg.module.enable_translate = True
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        pcfg.module.run_preset_name = 'Translate'
+
+    def on_run_preset_inpaint(self):
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = False
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = True
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        pcfg.module.run_preset_name = 'Inpaint'
+
+    def on_batch_export(self):
+        """Export all pages as images (and optionally PDF) to a chosen folder."""
+        if self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        out_dir = QFileDialog.getExistingDirectory(self, self.tr('Select output folder'))
+        if not out_dir:
+            return
+        try:
+            from utils.io_utils import imread, imwrite
+            result_dir = self.imgtrans_proj.result_dir()
+            exported = 0
+            missing = []
+            for pagename in self.imgtrans_proj.pages:
+                result_path = self.imgtrans_proj.get_result_path(pagename)
+                if osp.exists(result_path):
+                    ext = osp.splitext(result_path)[1]
+                    dest = osp.join(out_dir, osp.splitext(pagename)[0] + ext)
+                    img = imread(result_path)
+                    kw = {'ext': ext if ext in ('.png', '.jpg', '.jpeg', '.webp', '.jxl') else '.png', 'quality': pcfg.imgsave_quality}
+                    if kw['ext'] == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
+                        kw['webp_lossless'] = True
+                    imwrite(dest, img, **kw)
+                    exported += 1
+                else:
+                    missing.append(pagename)
+            msg = self.tr('Exported {0} page(s) to {1}.').format(exported, out_dir)
+            if missing:
+                msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
+            QMessageBox.information(self, self.tr('Export'), msg)
+        except Exception as e:
+            LOGGER.exception(e)
+            create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
+
+    def on_validate_project(self):
+        """Check project: missing images, invalid JSON, duplicate blocks."""
+        if self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Check project'), self.tr('Open a project first.'))
+            return
+        report = []
+        proj_dir = self.imgtrans_proj.directory
+        json_path = self.imgtrans_proj.proj_path
+        if not osp.exists(json_path):
+            report.append(self.tr('Project JSON not found: {}').format(json_path))
+        else:
+            try:
+                import json
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                pages = data.get('pages') or data.get('image_info') or {}
+                if not pages:
+                    report.append(self.tr('No pages in project JSON.'))
+            except Exception as e:
+                report.append(self.tr('Invalid project JSON: {}').format(str(e)))
+        for pagename in list(self.imgtrans_proj.pages.keys()):
+            img_path = osp.join(proj_dir, pagename)
+            if not osp.exists(img_path):
+                report.append(self.tr('Missing image: {}').format(pagename))
+        if not report:
+            report.append(self.tr('No issues found.'))
+        msg = '\n'.join(report)
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle(self.tr('Check project'))
+        dlg.setText(msg)
+        dlg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dlg.exec()
+
 
     def on_req_update_pagetext(self):
         if self.canvas.text_change_unsaved():
@@ -1127,7 +1348,10 @@ class MainWindow(mainwindow_cls):
         try:
             img = self.canvas.render_result_img()
             imsave_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)
-            self.imsave_thread.saveImg(imsave_path, img, self.imgtrans_proj.current_img, save_params={'ext': pcfg.imgsave_ext, 'quality': pcfg.imgsave_quality}, keep_alpha=self.imgtrans_proj.current_has_alpha())
+            save_params = {'ext': pcfg.imgsave_ext, 'quality': pcfg.imgsave_quality}
+            if pcfg.imgsave_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
+                save_params['webp_lossless'] = True
+            self.imsave_thread.saveImg(imsave_path, img, self.imgtrans_proj.current_img, save_params=save_params, keep_alpha=self.imgtrans_proj.current_has_alpha())
         except Exception as e:
             LOGGER.error(f"Failed to render and save result image: {e}")
             
@@ -1271,11 +1495,22 @@ class MainWindow(mainwindow_cls):
             self.st_manager.updateTranslation()
 
     def on_imgtrans_pipeline_finished(self):
+        if getattr(self, '_detection_only_restore', None) is not None:
+            det, ocr, trans, inp = self._detection_only_restore
+            pcfg.module.enable_detect = det
+            pcfg.module.enable_ocr = ocr
+            pcfg.module.enable_translate = trans
+            pcfg.module.enable_inpaint = inp
+            for idx, sa in enumerate(self.titleBar.stageActions):
+                sa.setChecked(pcfg.module.stage_enabled(idx))
+            self._detection_only_restore = None
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
         self.postprocess_mt_toggle = True
         if pcfg.module.empty_runcache and not shared.HEADLESS:
             self.module_manager.unload_all_models()
+        else:
+            self._reset_idle_unload_timer()
         if shared.args.export_translation_txt:
             self.on_export_txt('translation')
         if shared.args.export_source_txt:
@@ -1367,6 +1602,7 @@ class MainWindow(mainwindow_cls):
                     blk.italic = gf.italic
                     blk.bold = gf.bold
                     blk.underline = gf.underline
+                    blk.strikethrough = getattr(gf, 'strikethrough', False)
                     sw = blk.stroke_width
                     if sw > 0 and pcfg.module.enable_ocr and pcfg.module.enable_detect and not override_fnt_size:
                         blk.font_size = blk.font_size / (1 + sw)
@@ -1441,28 +1677,25 @@ class MainWindow(mainwindow_cls):
     
     def run_imgtrans(self):
         if not self.imgtrans_proj.is_all_pages_no_text and not pcfg.module.keep_exist_textlines:
-            # 创建自定义消息框，添加"继续运行"选项
-            msgBox = QMessageBox(self)
-            msgBox.setIcon(QMessageBox.Question)
-            msgBox.setWindowTitle(self.tr('Confirmation'))
-            msgBox.setText(self.tr('\"Run\" will clear previous results, \"Continue\" will try to run from previous progress'))
-            
-            # 添加三个按钮（直接使用中文）
-            restart_btn = msgBox.addButton(self.tr('Run'), QMessageBox.YesRole)
-            continue_btn = msgBox.addButton(self.tr('Continue'), QMessageBox.AcceptRole)
-            cancel_btn = msgBox.addButton(self.tr('Cancel'), QMessageBox.RejectRole)
-            
-            msgBox.setDefaultButton(continue_btn)
-            msgBox.exec_()
-            
-            clicked_button = msgBox.clickedButton()
-            if clicked_button == cancel_btn:
-                return  # 取消，不执行任何操作
-            elif clicked_button == continue_btn:
-                # 继续运行：只处理没有文本的页面
-                self.on_run_imgtrans(continue_mode=True)
-                return
-            # 如果是 restart_btn，继续执行下面的代码（重新运行）
+            if getattr(pcfg, 'confirm_before_run', True):
+                msgBox = QMessageBox(self)
+                msgBox.setIcon(QMessageBox.Question)
+                msgBox.setWindowTitle(self.tr('Confirmation'))
+                msgBox.setText(self.tr('"Run" will clear previous results, "Continue" will try to run from previous progress'))
+
+                restart_btn = msgBox.addButton(self.tr('Run'), QMessageBox.YesRole)
+                continue_btn = msgBox.addButton(self.tr('Continue'), QMessageBox.AcceptRole)
+                cancel_btn = msgBox.addButton(self.tr('Cancel'), QMessageBox.RejectRole)
+
+                msgBox.setDefaultButton(continue_btn)
+                msgBox.exec_()
+
+                clicked_button = msgBox.clickedButton()
+                if clicked_button == cancel_btn:
+                    return
+                elif clicked_button == continue_btn:
+                    self.on_run_imgtrans(continue_mode=True)
+                    return
         self.on_run_imgtrans()
 
     def run_imgtrans_wo_textstyle_update(self):
@@ -1470,6 +1703,7 @@ class MainWindow(mainwindow_cls):
         self.run_imgtrans()
 
     def on_run_imgtrans(self, continue_mode=False):
+        self._idle_unload_timer.stop()
         self.backup_blkstyles.clear()
 
         if self.bottomBar.textblockChecker.isChecked():
@@ -1669,7 +1903,11 @@ class MainWindow(mainwindow_cls):
 
     def on_darkmode_triggered(self):
         pcfg.darkmode = self.titleBar.darkModeAction.isChecked()
-        self.resetStyleSheet(reverse_icon=True)
+        self.resetStyleSheet()
+
+    def on_config_darkmode_changed(self, checked: bool):
+        self.titleBar.darkModeAction.setChecked(checked)
+        self.resetStyleSheet()
         self.save_config()
 
     def ocr_postprocess(self, textblocks: List[TextBlock], img, ocr_module=None, **kwargs):
@@ -1741,6 +1979,237 @@ class MainWindow(mainwindow_cls):
         text_list = text_list[:n_paragraph]
 
         self.canvas.push_undo_command(PasteSrcItemsCommand(src_widget_list, text_list))
+
+    def on_copy_trans(self):
+        blks = self.canvas.selected_text_items()
+        if len(blks) == 0:
+            return
+        trans_list = [self.st_manager.pairwidget_list[blk.idx].e_trans.toPlainText().strip().replace('\n', ' ') for blk in blks]
+        self.st_manager.app_clipborad.setText('\n'.join(trans_list), QClipboard.Mode.Clipboard)
+
+    def on_paste_trans(self):
+        blks = self.canvas.selected_text_items()
+        if len(blks) == 0:
+            return
+        trans_widget_list = [self.st_manager.pairwidget_list[blk.idx].e_trans for blk in blks]
+        text_list = self.st_manager.app_clipborad.text().split('\n')
+        n_paragraph = min(len(trans_widget_list), len(text_list))
+        if n_paragraph < 1:
+            return
+        trans_widget_list = trans_widget_list[:n_paragraph]
+        text_list = text_list[:n_paragraph]
+        for w, t in zip(trans_widget_list, text_list):
+            w.setPlainText(t)
+        self.canvas.setProjSaveState(False)
+
+    def on_clear_src(self):
+        blks = self.canvas.selected_text_items()
+        for blk in blks:
+            self.st_manager.pairwidget_list[blk.idx].e_source.setPlainText('')
+        if blks:
+            self.canvas.setProjSaveState(False)
+
+    def on_clear_trans(self):
+        blks = self.canvas.selected_text_items()
+        for blk in blks:
+            self.st_manager.pairwidget_list[blk.idx].e_trans.setPlainText('')
+        if blks:
+            self.canvas.setProjSaveState(False)
+
+    def on_select_all_canvas(self):
+        for blk in self.st_manager.textblk_item_list:
+            blk.setSelected(True)
+        self.st_manager.on_incanvas_selection_changed()
+
+    def on_spell_check_src(self):
+        """Run spell check on source text of selected blocks."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        try:
+            from utils.ocr_spellcheck import spell_check_line
+        except Exception:
+            QMessageBox.warning(
+                self,
+                self.tr("Spell check"),
+                self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
+            )
+            return
+        for blkitem in blks:
+            blk = blkitem.blk
+            if getattr(blk, "text", None) and isinstance(blk.text, list):
+                blk.text = [spell_check_line(line) for line in blk.text]
+                self.st_manager.pairwidget_list[blkitem.idx].e_source.setPlainText("\n".join(blk.text))
+        if blks:
+            self.canvas.setProjSaveState(False)
+
+    def on_spell_check_trans(self):
+        """Run spell check on translation text of selected blocks."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        try:
+            from utils.ocr_spellcheck import spell_check_line
+        except Exception:
+            QMessageBox.warning(
+                self,
+                self.tr("Spell check"),
+                self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
+            )
+            return
+        for blkitem in blks:
+            blk = blkitem.blk
+            trans = (getattr(blk, "translation", None) or "") or self.st_manager.pairwidget_list[blkitem.idx].e_trans.toPlainText()
+            lines = trans.split("\n")
+            corrected = [spell_check_line(line) for line in lines]
+            new_trans = "\n".join(corrected)
+            blk.translation = new_trans
+            self.st_manager.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_trans)
+        if blks:
+            self.canvas.setProjSaveState(False)
+
+    def on_trim_whitespace(self):
+        """Trim leading/trailing whitespace from each line in selected blocks (source and translation)."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        for blkitem in blks:
+            blk = blkitem.blk
+            pw = self.st_manager.pairwidget_list[blkitem.idx]
+            src = pw.e_source.toPlainText()
+            trans = pw.e_trans.toPlainText()
+            src_trimmed = "\n".join(line.strip() for line in src.split("\n"))
+            trans_trimmed = "\n".join(line.strip() for line in trans.split("\n"))
+            if getattr(blk, "text", None) and isinstance(blk.text, list):
+                blk.text = [line.strip() for line in blk.text]
+            blk.translation = trans_trimmed
+            pw.e_source.setPlainText(src_trimmed)
+            pw.e_trans.setPlainText(trans_trimmed)
+        self.canvas.setProjSaveState(False)
+
+    def on_to_uppercase(self):
+        """Convert source and translation of selected blocks to uppercase."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        for blkitem in blks:
+            blk = blkitem.blk
+            pw = self.st_manager.pairwidget_list[blkitem.idx]
+            src = pw.e_source.toPlainText().upper()
+            trans = pw.e_trans.toPlainText().upper()
+            if getattr(blk, "text", None) and isinstance(blk.text, list):
+                blk.text = [line.upper() for line in blk.text]
+            blk.translation = trans
+            pw.e_source.setPlainText(src)
+            pw.e_trans.setPlainText(trans)
+        self.canvas.setProjSaveState(False)
+
+    def on_to_lowercase(self):
+        """Convert source and translation of selected blocks to lowercase."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        for blkitem in blks:
+            blk = blkitem.blk
+            pw = self.st_manager.pairwidget_list[blkitem.idx]
+            src = pw.e_source.toPlainText().lower()
+            trans = pw.e_trans.toPlainText().lower()
+            if getattr(blk, "text", None) and isinstance(blk.text, list):
+                blk.text = [line.lower() for line in blk.text]
+            blk.translation = trans
+            pw.e_source.setPlainText(src)
+            pw.e_trans.setPlainText(trans)
+        self.canvas.setProjSaveState(False)
+
+    def on_toggle_strikethrough(self):
+        """Toggle strikethrough on selected text blocks."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        gf = self.textPanel.formatpanel.global_format
+        new_val = not getattr(blks[0].fontformat, 'strikethrough', False)
+        from ui import fontformat_commands as FC
+        FC.ffmt_change_strikethrough('strikethrough', new_val, gf, True, blks)
+        self.textPanel.formatpanel.formatBtnGroup.strikethroughBtn.setChecked(new_val)
+        self.st_manager.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
+
+    def on_set_gradient_type(self, gradient_type: int):
+        """Set gradient type (0=Linear, 1=Radial) on selected text blocks."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        gf = self.textPanel.formatpanel.global_format
+        from ui import fontformat_commands as FC
+        FC.ffmt_change_gradient_type('gradient_type', gradient_type, gf, True, blks)
+        self.st_manager.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
+
+    def on_run_detect_region(self, rect):
+        if not self.imgtrans_proj.img_valid or self.imgtrans_proj.img_array is None:
+            return
+        page_name = self.imgtrans_proj.current_img
+        if not page_name:
+            return
+        self.module_manager.run_detect_region(rect, self.imgtrans_proj.img_array, page_name)
+
+    def on_detect_region_finished(self, page_name: str, blk_list: List):
+        if page_name != self.imgtrans_proj.current_img or not blk_list:
+            return
+        im_h, im_w = self.imgtrans_proj.img_array.shape[:2]
+        for blk in blk_list:
+            if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                examine_textblk(blk, im_w, im_h, sort=True)
+        self.imgtrans_proj.pages[page_name].extend(blk_list)
+        for blk in blk_list:
+            self.st_manager.addTextBlock(blk)
+        self.canvas.setProjSaveState(False)
+        self.global_search_widget.set_document_edited()
+
+    def on_merge_selected_blocks(self):
+        blks = self.canvas.selected_text_items()
+        if len(blks) < 2:
+            return
+        blks = sorted(blks, key=lambda b: b.idx)
+        first = blks[0]
+        page_name = self.imgtrans_proj.current_img
+        if not page_name:
+            return
+        src_parts = [self.st_manager.pairwidget_list[b.idx].e_source.toPlainText() for b in blks]
+        trans_parts = [self.st_manager.pairwidget_list[b.idx].e_trans.toPlainText() for b in blks]
+        first.blk.text = ['\n'.join(src_parts)]
+        first.blk.translation = '\n'.join(trans_parts)
+        self.st_manager.pairwidget_list[first.idx].e_source.setPlainText('\n'.join(src_parts))
+        self.st_manager.pairwidget_list[first.idx].e_trans.setPlainText('\n'.join(trans_parts))
+        indices_to_remove = sorted([b.idx for b in blks[1:]], reverse=True)
+        for i in indices_to_remove:
+            self.imgtrans_proj.pages[page_name].pop(i)
+        to_remove_items = blks[1:]
+        to_remove_widgets = [self.st_manager.pairwidget_list[b.idx] for b in blks[1:]]
+        self.st_manager.deleteTextblkItemList(to_remove_items, to_remove_widgets)
+        self.canvas.setProjSaveState(False)
+        self.global_search_widget.set_document_edited()
+
+    def on_move_blocks_up(self):
+        blks = self.canvas.selected_text_items()
+        if len(blks) != 1:
+            return
+        idx = blks[0].idx
+        if idx <= 0:
+            return
+        self.st_manager.swap_block_positions(idx - 1, idx)
+        self.canvas.setProjSaveState(False)
+
+    def on_move_blocks_down(self):
+        blks = self.canvas.selected_text_items()
+        if len(blks) != 1:
+            return
+        idx = blks[0].idx
+        n = len(self.st_manager.textblk_item_list)
+        if idx >= n - 1:
+            return
+        self.st_manager.swap_block_positions(idx, idx + 1)
+        self.canvas.setProjSaveState(False)
     
     def run_batch(self, exec_dirs: Union[List, str], **kwargs):
         if not isinstance(exec_dirs, List):

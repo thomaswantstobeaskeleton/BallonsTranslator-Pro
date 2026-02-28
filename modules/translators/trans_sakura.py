@@ -449,7 +449,10 @@ class SakuraTranslator(BaseTranslator):
 
     @property
     def dict_path(self) -> str:
-        return self.params['dict path']
+        p = self.params.get('dict path')
+        if isinstance(p, dict) and 'value' in p:
+            return (p['value'] or '').strip()
+        return (p or '').strip() if isinstance(p, str) else ''
 
     @property
     def force_apply_dict(self) -> bool:
@@ -477,9 +480,18 @@ class SakuraTranslator(BaseTranslator):
         super().updateParam(param_key, param_content)
 
         if param_key == 'dict path' or param_key == 'version':
-            self.set_dict_path(self.params['dict path'])
+            path = self.params.get('dict path')
+            if isinstance(path, dict) and 'value' in path:
+                path = (path['value'] or '').strip()
+            elif not isinstance(path, str):
+                path = ''
+            self.set_dict_path(path)
 
     def set_dict_path(self, path: str):
+        if isinstance(path, dict) and 'value' in path:
+            path = (path['value'] or '').strip()
+        elif not isinstance(path, str):
+            path = ''
         self.params['dict path'] = path
         self.sakura_dict = SakuraDict(path, self.logger, self.sakura_version)
         self.logger.debug(f'更新Sakura字典路径为: {path}')

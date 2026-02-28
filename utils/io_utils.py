@@ -188,7 +188,7 @@ def imread(imgpath, read_type=cv2.IMREAD_COLOR, max_retry_limit=5, retry_interva
     return img
 
 
-def imwrite(img_path, img, ext='.png', quality=100, jxl_encode_effort=3):
+def imwrite(img_path, img, ext='.png', quality=100, jxl_encode_effort=3, webp_lossless=False):
     # cv2 writing is faster than PIL
     suffix = Path(img_path).suffix
     ext = ext.lower()
@@ -200,6 +200,8 @@ def imwrite(img_path, img, ext='.png', quality=100, jxl_encode_effort=3):
 
     if ext != '.webp':
         quality = min(quality, 100) # for webp quality above 100 the lossless compression is used
+    elif webp_lossless:
+        quality = 101  # OpenCV WebP: quality > 100 enables lossless
     
     # Ensure directory exists
     save_dir = osp.dirname(img_path)

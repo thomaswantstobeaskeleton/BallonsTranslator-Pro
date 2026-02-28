@@ -90,6 +90,12 @@ def ffmt_change_underline(param_name: str, values: str, act_ffmt: FontFormat, is
         blkitem.setFontUnderline(value, **set_kwargs)
 
 @font_formating()
+def ffmt_change_strikethrough(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    set_kwargs = global_default_set_kwargs if is_global else local_default_set_kwargs
+    for blkitem, value in zip(blkitems, values):
+        blkitem.setFontStrikethrough(value, **set_kwargs)
+
+@font_formating()
 def ffmt_change_font_weight(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     set_kwargs = global_default_set_kwargs if is_global else local_default_set_kwargs
     for blkitem, value in zip(blkitems, values):
@@ -192,3 +198,4 @@ ffmt_change_gradient_start_color = ffmt_change_gradient_enabled
 ffmt_change_gradient_end_color = ffmt_change_gradient_enabled
 ffmt_change_gradient_angle = ffmt_change_gradient_enabled
 ffmt_change_gradient_size = ffmt_change_gradient_enabled
+ffmt_change_gradient_type = ffmt_change_gradient_enabled

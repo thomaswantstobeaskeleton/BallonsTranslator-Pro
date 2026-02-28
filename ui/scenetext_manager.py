@@ -355,6 +355,7 @@ class SceneTextManager(QObject):
         self.textEditList.rearrange_blks.connect(self.on_rearrange_blks)
         self.formatpanel = textpanel.formatpanel
         self.formatpanel.textstyle_panel.apply_fontfmt.connect(self.onFormatTextblks)
+        self.formatpanel.apply_global_to_all_blocks_requested.connect(self.apply_global_format_to_all_blocks)
 
         self.imgtrans_proj = self.canvas.imgtrans_proj
         self.textblk_item_list: List[TextBlkItem] = []
@@ -536,6 +537,28 @@ class SceneTextManager(QObject):
         if selection_changed:
             # it must be called after updateTextBlkItemIdx if blk.idx changed
             self.on_incanvas_selection_changed()
+
+    def swap_block_positions(self, i: int, j: int):
+        """Swap two text blocks (and their pair widgets) at indices i and j. Updates project page list and scene."""
+        if i == j or i < 0 or j < 0 or i >= len(self.textblk_item_list) or j >= len(self.textblk_item_list):
+            return
+        page_name = self.canvas.imgtrans_proj.current_img
+        if not page_name or page_name not in self.canvas.imgtrans_proj.pages:
+            return
+        pages = self.canvas.imgtrans_proj.pages[page_name]
+        if len(pages) != len(self.textblk_item_list):
+            return
+        pages[i], pages[j] = pages[j], pages[i]
+        self.textblk_item_list[i], self.textblk_item_list[j] = self.textblk_item_list[j], self.textblk_item_list[i]
+        self.pairwidget_list[i], self.pairwidget_list[j] = self.pairwidget_list[j], self.pairwidget_list[i]
+        self.textblk_item_list[i].idx = i
+        self.textblk_item_list[j].idx = j
+        self.pairwidget_list[i].idx = i
+        self.pairwidget_list[j].idx = j
+        self.textEditList.removeWidget(self.pairwidget_list[i])
+        self.textEditList.removeWidget(self.pairwidget_list[j])
+        self.textEditList.insertPairWidget(self.pairwidget_list[i], i)
+        self.textEditList.insertPairWidget(self.pairwidget_list[j], j)
 
     def recoverTextblkItemList(self, blkitem_list: List[TextBlkItem], p_widget_list: List[TransPairWidget]):
         self.canvas.block_selection_signal = True
@@ -1126,6 +1149,15 @@ class SceneTextManager(QObject):
                 self.formatpanel.on_active_textstyle_label_changed()
             else:
                 self.formatpanel.set_active_format(fontformat)
+
+    def apply_global_format_to_all_blocks(self):
+        """Apply current global font format to every text block on this page."""
+        if len(self.textblk_item_list) == 0:
+            return
+        all_blks = list(self.textblk_item_list)
+        trans_widget_list = [self.pairwidget_list[blk.idx].e_trans for blk in all_blks]
+        self.canvas.push_undo_command(ApplyFontformatCommand(all_blks, trans_widget_list, self.formatpanel.global_format))
+        self.formatpanel.on_active_textstyle_label_changed()
 
     def on_transwidget_selection_changed(self):
         selitems = self.canvas.selected_text_items()

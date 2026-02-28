@@ -48,6 +48,7 @@ class OCRBase(BaseModule):
             blk.text = [normalize_line_breaks(t) for t in blk.text]
             # Avoid empty squares: replace Unicode replacement char with visible placeholder (all OCRs)
             blk.text = [t.replace("\uFFFD", "\u25A1") for t in blk.text]
+        self._register_spell_check_hook()
         for callback_name, callback in self._postprocess_hooks.items():
             callback(textblocks=blk_list, img=img, ocr_module=self)
 
@@ -58,6 +59,17 @@ class OCRBase(BaseModule):
 
     def ocr_img(self, img: np.ndarray) -> str:
         raise NotImplementedError
+
+    @classmethod
+    def _register_spell_check_hook(cls):
+        if 'spell_check' in cls._postprocess_hooks:
+            return
+        try:
+            from utils.ocr_spellcheck import spell_check_textblocks
+            cls._postprocess_hooks['spell_check'] = spell_check_textblocks
+        except ImportError:
+            pass
+
 
     def offload_to_cpu(self) -> None:
         """Move OCR model to CPU and free GPU memory. Used before inpainting when both OCR and inpainting use GPU."""

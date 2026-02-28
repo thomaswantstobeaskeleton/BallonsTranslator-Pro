@@ -65,6 +65,7 @@
   "mt_sublist": [],
   "display_lang": "en",
   "imgsave_quality": 100,
+  "imgsave_webp_lossless": false,
   "imgsave_ext": ".png",
   "intermediate_imgsave_ext": ".png",
   "show_text_style_preset": true,
@@ -72,5 +73,10 @@
   "show_text_effect_panel": true,
   "expand_teffect_panel": true,
   "text_advanced_format_panel": true,
-  "expand_tadvanced_panel": true
+  "expand_tadvanced_panel": true,
+  "manga_source_lang": "en",
+  "manga_source_data_saver": false,
+  "manga_source_download_dir": "",
+  "manga_source_request_delay": 0.3,
+  "manga_source_open_after_download": false
 }
