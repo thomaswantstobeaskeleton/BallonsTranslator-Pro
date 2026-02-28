@@ -53,7 +53,8 @@ pip
 *.aff
 *.exc
 
-fonts/*
+# Fonts: include font files so they push to repo (remove /* to track contents)
+# fonts/*
 !fonts/put fonts here.txt
 
 #venv and autoinstaller folders
