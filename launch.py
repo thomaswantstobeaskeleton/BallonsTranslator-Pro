@@ -5,7 +5,14 @@ import os.path as osp
 import os
 import importlib
 import subprocess
+import warnings
 from platform import platform
+
+# Suppress requests' urllib3/chardet version mismatch warning (harmless for typical use)
+warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*")
+
+# Disable Paddle oneDNN before any Paddle import (avoids ConvertPirAttribute2RuntimeAttribute error on Windows)
+os.environ["FLAGS_use_mkldnn"] = "0"
 
 BRANCH = 'dev'
 VERSION = '1.4.0'
@@ -276,7 +283,8 @@ def main():
     QGuiApplication.setFont(app_font)
     shared.DEFAULT_FONT_FAMILY = app_font.family()
     shared.APP_DEFAULT_FONT = app_font.family()
-    
+    # Note: Qt6 removed QFont/QFontDatabase insertSubstitution; use a CJK-capable font in text style if you see empty squares (□).
+
     if args.ldpi:
         shared.LDPI = args.ldpi
 

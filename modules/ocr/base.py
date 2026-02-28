@@ -9,6 +9,7 @@ OCR = Registry('OCR')
 register_OCR = OCR.register_module
 
 from ..base import BaseModule, DEFAULT_DEVICE, DEVICE_SELECTOR, LOGGER
+from utils.io_utils import normalize_line_breaks
 
 class OCRBase(BaseModule):
 
@@ -43,6 +44,10 @@ class OCRBase(BaseModule):
                 blk.text = []
                 
         self._ocr_blk_list(img, blk_list, *args, **kwargs)
+        for blk in blk_list:
+            blk.text = [normalize_line_breaks(t) for t in blk.text]
+            # Avoid empty squares: replace Unicode replacement char with visible placeholder (all OCRs)
+            blk.text = [t.replace("\uFFFD", "\u25A1") for t in blk.text]
         for callback_name, callback in self._postprocess_hooks.items():
             callback(textblocks=blk_list, img=img, ocr_module=self)
 
@@ -53,3 +58,19 @@ class OCRBase(BaseModule):
 
     def ocr_img(self, img: np.ndarray) -> str:
         raise NotImplementedError
+
+    def offload_to_cpu(self) -> None:
+        """Move OCR model to CPU and free GPU memory. Used before inpainting when both OCR and inpainting use GPU."""
+        model = getattr(self, "model", None)
+        if model is not None and hasattr(model, "to"):
+            import torch
+            model.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    def restore_to_device(self) -> None:
+        """Move OCR model back to its configured device. Call before running OCR again after offload_to_cpu."""
+        model = getattr(self, "model", None)
+        device = getattr(self, "device", None)
+        if model is not None and device is not None and hasattr(model, "to"):
+            model.to(device)

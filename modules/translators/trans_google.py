@@ -14,23 +14,23 @@ class TranslateError(ProviderError):
 
 
 # --- Constants for Google Translate ---
+# Do NOT put API keys in source. Set "api_key" in translator params (saved in config.json, which is gitignored).
 USER_AGENT_BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
-# Use the API key from your example as a constant
-GOOGLE_API_KEY = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520"
 GOOGLE_API_URL_BASE = "https://translate-pa.googleapis.com/v1"  # Base API URL
 
 
 class GoogleTranslateProviderPython:
     """
-    Провайдер для взаимодействия с неофициальным Google Translate API (translateHtml).
-    Использует предопределенный API ключ.
+    Provider for unofficial Google Translate API (translateHtml).
+    Uses API key from params (set in app settings; config.json is gitignored).
     """
 
     api_url_path_segment = "/translateHtml"  # Path to the translation endpoint
 
-    def __init__(self, timeout: int = 10):
+    def __init__(self, api_key: str = "", timeout: int = 10):
+        self.api_key = (api_key or "").strip()
         self.base_headers = {
-            "X-Goog-API-Key": GOOGLE_API_KEY,  # Use the constant
+            "X-Goog-API-Key": self.api_key,
             "Content-Type": "application/json+protobuf",
             "User-Agent": USER_AGENT_BROWSER,
         }
@@ -129,11 +129,13 @@ class TransGoogle(BaseTranslator):
 
     concate_text = False
     params: Dict = {
+        "api_key": "",
         "delay": 0.0,
     }
 
     def _setup_translator(self):
-        self.internal_google_translator = GoogleTranslateProviderPython()
+        api_key = (self.get_param_value("api_key") or "").strip()
+        self.internal_google_translator = GoogleTranslateProviderPython(api_key=api_key)
 
         self.lang_map["Auto"] = "auto"
         self.lang_map["简体中文"] = "zh-CN"

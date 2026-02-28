@@ -2,6 +2,7 @@ import time
 from typing import Union, List, Dict, Callable
 import os.path as osp
 
+import cv2
 import numpy as np
 from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer
 from qtpy.QtWidgets import QFileDialog
@@ -13,13 +14,13 @@ from utils.registry import Registry
 from utils.imgproc_utils import enlarge_window, get_block_mask
 from utils.io_utils import imread, text_is_empty
 from modules.translators import MissingTranslatorParams
-from modules.base import BaseModule, soft_empty_cache
+from modules.base import BaseModule, soft_empty_cache, GPUINTENSIVE_SET
 from modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, \
     GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, \
     BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
 import modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
-from utils.textblock import TextBlock, sort_regions
+from utils.textblock import TextBlock, sort_regions, examine_textblk
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
@@ -373,8 +374,14 @@ class ImgtransThread(QThread):
                     im = np.copy(tgt_img[y1: y2, x1: x2])
                     maskseg_method = get_maskseg_method()
                     inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=tgt_mask[y1: y2, x1: x2])
+                    # Dilate mask slightly so original text (e.g. Chinese) is fully covered and erased
+                    if inpaint_mask_array is not None and inpaint_mask_array.size > 0:
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                        inpaint_mask_array = cv2.dilate(
+                            (inpaint_mask_array > 127).astype(np.uint8) * 255, kernel, iterations=1
+                        )
                     mask = self.post_process_mask(inpaint_mask_array)
-                    if mask.sum() > 0:
+                    if mask is not None and mask.sum() > 0:
                         inpainted = self.inpaint_thread.inpainter.inpaint(im, mask)
                         blk.region_inpaint_dict = {'img': im, 'mask': mask, 'inpaint_rect': [x1, y1, x2, y2], 'inpainted': inpainted}
                     self.finish_blktrans_stage.emit('inpaint', int((ii+1) * progress_prod))
@@ -417,13 +424,16 @@ class ImgtransThread(QThread):
         if self.parallel_trans and cfg_module.enable_translate:
             self.translate_thread.runTranslatePipeline(self.imgtrans_proj)
 
+        page_num = 0
         for imgname in pages_to_iterate:
-            
+            page_num += 1
             # 检查是否请求停止
             if self.stop_requested:
                 LOGGER.info('Image translation pipeline stopped by user')
                 break
-                
+            LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)} ({imgname}): starting')
+            if cfg_module.enable_ocr and hasattr(self.ocr, 'restore_to_device'):
+                self.ocr.restore_to_device()
             img = self.imgtrans_proj.read_img(imgname)
             mask = blk_list = None
             need_save_mask = False
@@ -432,6 +442,11 @@ class ImgtransThread(QThread):
                 try:
                     mask, blk_list = self.textdetector.detect(img, self.imgtrans_proj)
                     need_save_mask = True
+                    # Normalize font size and angle so text fits bubbles and is never sideways
+                    im_h, im_w = img.shape[:2]
+                    for blk in blk_list:
+                        if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                            examine_textblk(blk, im_w, im_h, sort=True)
                 except Exception as e:
                     create_error_dialog(e, self.tr('Text Detection Failed.'), 'TextDetectFailed')
                     blk_list = []
@@ -450,11 +465,13 @@ class ImgtransThread(QThread):
                     
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
                 self.update_detect_progress.emit(self.detect_counter)
+                LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: detection done')
 
             if blk_list is None:
                 blk_list = self.imgtrans_proj.pages[imgname] if imgname in self.imgtrans_proj.pages else []
 
             if cfg_module.enable_ocr:
+                LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR running')
                 try:
                     self.ocr.run_ocr(img, blk_list)
                 except Exception as e:
@@ -498,6 +515,10 @@ class ImgtransThread(QThread):
 
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
                 self.update_ocr_progress.emit(self.ocr_counter)
+                LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR done')
+                if cfg_module.enable_inpaint and getattr(self.ocr, 'device', None) in GPUINTENSIVE_SET and hasattr(self.ocr, 'offload_to_cpu'):
+                    self.ocr.offload_to_cpu()
+                    soft_empty_cache()
 
             if need_save_mask and mask is not None:
                 self.imgtrans_proj.save_mask(imgname, mask)
@@ -512,6 +533,7 @@ class ImgtransThread(QThread):
                     self.update_translate_progress.emit(self.translate_counter)
                         
             if cfg_module.enable_inpaint:
+                LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: inpainting (loading model if needed)')
                 if mask is None:
                     mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
                     
@@ -525,6 +547,7 @@ class ImgtransThread(QThread):
                 self.inpaint_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
                 self.update_inpaint_progress.emit(self.inpaint_counter)
+                LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: inpainting done')
             else:
                 if len(blk_removed) > 0:
                     self.imgtrans_proj.load_mask_by_imgname
@@ -900,6 +923,15 @@ class ModuleManager(QObject):
     def setTextDetector(self, textdetector: str = None):
         if textdetector is None:
             textdetector = cfg_module.textdetector
+        valid = GET_VALID_TEXTDETECTORS()
+        if textdetector not in valid:
+            fallback = "ctd" if "ctd" in valid else (valid[0] if valid else "paddle_det")
+            LOGGER.warning(
+                "Text detector '%s' is not available (e.g. not yet integrated). Using '%s'.",
+                textdetector, fallback,
+            )
+            textdetector = fallback
+            cfg_module.textdetector = fallback
         if self.textdetect_thread.isRunning():
             LOGGER.warning('Terminating a running text detection thread.')
             self.textdetect_thread.terminate()

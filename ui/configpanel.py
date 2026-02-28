@@ -75,7 +75,7 @@ class ConfigTextLabel(QLabel):
         font = self.font()
         if font_weight is not None:
             font.setWeight(font_weight)
-        font.setPointSizeF(fontsize)
+        font.setPointSizeF(max(1, fontsize) if fontsize <= 0 else fontsize)
         self.setFont(font)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         self.setOpenExternalLinks(True)
@@ -138,7 +138,7 @@ def checkbox_with_label(name: str, discription: str = None, target_block: QWidge
     checkbox = QCheckBox()
     if discription is not None:
         font = checkbox.font()
-        font.setPointSizeF(CONFIG_FONTSIZE_CONTENT * 0.8)
+        font.setPointSizeF(max(1.0, CONFIG_FONTSIZE_CONTENT * 0.8))
         checkbox.setFont(font)
         checkbox.setText(discription)
         vertical_layout = True
@@ -257,7 +257,7 @@ class TableItem(QStandardItem):
     def __init__(self, text, fontsize):
         super().__init__()
         font = self.font()
-        font.setPointSizeF(fontsize)
+        font.setPointSizeF(max(1, fontsize) if fontsize <= 0 else fontsize)
         self.setFont(font)
         self.setText(text)
         self.setEditable(False)
@@ -276,7 +276,7 @@ class TreeModel(QStandardItemModel):
         if role == Qt.ItemDataRole.SizeHintRole:
             size = QSize()
             item = self.itemFromIndex(index)
-            size.setHeight(item.font().pointSize()+20)
+            size.setHeight(max(1, item.font().pointSize()) + 20)
             return size
         else:
             return super().data(index, role)

@@ -9,7 +9,8 @@ urllib3
 jaconv
 torch
 torchvision
-transformers==4.57.1
+# >=4.56 for core; >=5.0 needed for GLM-OCR and some HF modules. Do not pin to 4.57.1 or install will downgrade and break them.
+transformers>=4.56
 mecab-python3; sys_platform == 'darwin'
 fugashi
 unidic_lite
@@ -56,3 +57,4 @@ pyobjc-framework-coreml; sys_platform == 'darwin'
 pyobjc-framework-quartz; sys_platform == 'darwin'
 pyobjc-framework-vision; sys_platform == 'darwin'
 betterproto
+protobuf>=3.20.0

@@ -88,7 +88,8 @@ class FontFormat(Config):
 
     @property
     def size_pt(self):
-        return px2pt(self.font_size)
+        pt = px2pt(self.font_size)
+        return max(1.0, pt) if pt <= 0 else pt
 
     def __post_init__(self):
         da = self.deprecated_attributes

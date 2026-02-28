@@ -25,6 +25,12 @@ tmp
 logs
 ballontrans_pylibs_win
 config/config.json
+config/config.local.json
+.env
+.env.*
+!.env.example
+*.key
+secrets/
 localtmp*
 
 .vscode

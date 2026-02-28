@@ -86,6 +86,19 @@ class InpainterBase(BaseModule):
         if not self.all_model_loaded():
             self.load_model()
         
+        # Dilate mask so stroke edges, punctuation, and anti-aliased text are fully covered (reduces leftover/ghost text in bubbles)
+        # Use a small kernel (3×3) to avoid overdoing small bubbles; iterations configurable via mask_dilation_iterations
+        mask = np.copy(mask)
+        if mask.ndim == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        binary = (mask > 127).astype(np.uint8) * 255
+        dilate_iter = getattr(self, 'mask_dilation_iterations', 2)
+        if dilate_iter > 0:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            mask = cv2.dilate(binary, kernel, iterations=dilate_iter)
+        else:
+            mask = binary
+        
         # Handle RGBA images by preserving alpha channel
         original_alpha = None
         if len(img.shape) == 3 and img.shape[2] == 4:
@@ -100,12 +113,16 @@ class InpainterBase(BaseModule):
                 if ballon_msk is not None:
                     non_text_region = np.where(non_text_msk > 0)
                     non_text_px = img_rgb[non_text_region]
-                    average_bg_color = np.median(non_text_px, axis=0)
+                    average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
                     std_rgb = np.std(non_text_px - average_bg_color, axis=0)
                     std_max = np.max(std_rgb)
                     inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
-                    if std_max < inpaint_thresh:
+                    ballon_area = np.sum(ballon_msk > 0)
+                    min_ballon_area_for_median = 40000
+                    if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
                         result_rgb = img_rgb.copy()
+                        if np.all(average_bg_color >= 220):
+                            average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
                         result_rgb[np.where(ballon_msk > 0)] = average_bg_color
                         # Recombine with alpha if original was RGBA
                         if original_alpha is not None:
@@ -135,12 +152,18 @@ class InpainterBase(BaseModule):
                     if ballon_msk is not None:
                         non_text_region = np.where(non_text_msk > 0)
                         non_text_px = im[non_text_region]
-                        average_bg_color = np.median(non_text_px, axis=0)
+                        average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
                         std_rgb = np.std(non_text_px - average_bg_color, axis=0)
                         std_max = np.max(std_rgb)
                         inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
-                        if std_max < inpaint_thresh:
+                        ballon_area = np.sum(ballon_msk > 0)
+                        # Skip median fill for small balloons so they get proper inpainting
+                        min_ballon_area_for_median = 40000  # ~200x200
+                        if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
                             need_inpaint = False
+                            # Use pure white for speech bubbles when median is already near white
+                            if np.all(average_bg_color >= 220):
+                                average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
                             im[np.where(ballon_msk > 0)] = average_bg_color
                         # cv2.imshow('im', im)
                         # cv2.imshow('ballon', ballon_msk)
@@ -370,7 +393,14 @@ class LamaInpainterMPE(InpainterBase):
         mask_original[mask_original >= 127] = 1
         mask_original = mask_original[:, :, None]
 
-        new_shape = self.inpaint_size if max(img.shape[0: 2]) > self.inpaint_size else None
+        max_side = max(img.shape[0:2])
+        if max_side > self.inpaint_size:
+            new_shape = self.inpaint_size
+        elif max_side < 400:
+            # Small bubbles: normalize to 512 max to reduce over-strong inpainting and artifacts
+            new_shape = min(self.inpaint_size, 512)
+        else:
+            new_shape = None
         # high resolution input could produce cloudy artifacts
         img = resize_keepasp(img, new_shape, stride=64)
         mask = resize_keepasp(mask, new_shape, stride=64)
@@ -454,6 +484,10 @@ class LamaInpainterMPE(InpainterBase):
 @register_inpainter('lama_large_512px')
 class LamaLarge(LamaInpainterMPE):
 
+    mask_dilation_iterations = 1
+    # Always run LaMa; skip median fill to avoid "weird box of a certain color" in speech bubbles
+    check_need_inpaint = False
+
     params = {
         'inpaint_size': {
             'type': 'selector',
@@ -464,7 +498,13 @@ class LamaLarge(LamaInpainterMPE):
                 1536, 
                 2048
             ], 
-            'value': 1536,
+            'value': 1024,
+        },
+        'mask_dilation': {
+            'type': 'selector',
+            'options': [0, 1, 2, 3, 4, 5],
+            'value': 2,
+            'description': 'Mask dilation (0–5). Lower = less small-bubble distortion; higher = better coverage for dots/smudges.',
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone']),
         'precision': {
@@ -486,6 +526,10 @@ class LamaLarge(LamaInpainterMPE):
     def __init__(self, **params) -> None:
         super().__init__(**params)
         self.precision = self.params['precision']['value']
+        self._update_mask_dilation()
+
+    def _update_mask_dilation(self):
+        self.mask_dilation_iterations = int(self.params.get('mask_dilation', {}).get('value', 1))
 
     def _load_model(self):
         device = self.params['device']['value']
@@ -493,6 +537,11 @@ class LamaLarge(LamaInpainterMPE):
 
         self.model = load_lama_mpe(r'data/models/lama_large_512px.ckpt', device='cpu', use_mpe=False, large_arch=True)
         self.moveToDevice(device, precision=precision)
+
+    def updateParam(self, param_key: str, param_content):
+        super().updateParam(param_key, param_content)
+        if param_key == 'mask_dilation':
+            self._update_mask_dilation()
 
 
 # LAMA_ORI: LamaFourier = None

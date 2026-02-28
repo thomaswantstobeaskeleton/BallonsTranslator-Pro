@@ -268,18 +268,18 @@ if PADDLE_OCR_AVAILABLE:
                                 f"Processed text from block ({x1}, {y1}, {x2}, {y2}): {text}"
                             )
 
-                        blk.text = text if text else ""
+                        blk.text = [text] if text else [""]
 
                     except Exception as e:
                         if self.debug_mode:
                             self.logger.error(f"Error recognizing block: {str(e)}")
-                        blk.text = ""
+                        blk.text = [""]
                 else:
                     if self.debug_mode:
                         self.logger.warning(
                             "Invalid text block coordinates for target image"
                         )
-                    blk.text = ""
+                    blk.text = [""]
 
         def _process_result(self, result):
             try:

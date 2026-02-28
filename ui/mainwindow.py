@@ -104,6 +104,8 @@ class MainWindow(mainwindow_cls):
 
         if shared.HEADLESS:
             self.run_batch(**exec_args)
+        elif exec_args.get('exec_dirs') and str(exec_args.get('exec_dirs')).strip():
+            self.run_batch(**exec_args)
 
         if shared.ON_MACOS:
             # https://bugreports.qt.io/browse/QTBUG-133215
@@ -1278,7 +1280,7 @@ class MainWindow(mainwindow_cls):
             self.on_export_txt('translation')
         if shared.args.export_source_txt:
             self.on_export_txt('source')
-        if shared.HEADLESS:
+        if shared.HEADLESS or getattr(self, 'exec_dirs', None) is not None:
             self.run_next_dir()
 
     def postprocess_translations(self, blk_list: List[TextBlock]) -> None:
@@ -1742,7 +1744,7 @@ class MainWindow(mainwindow_cls):
     
     def run_batch(self, exec_dirs: Union[List, str], **kwargs):
         if not isinstance(exec_dirs, List):
-            exec_dirs = exec_dirs.split(',')
+            exec_dirs = [x.strip() for x in exec_dirs.split(',') if x.strip()]
         valid_dirs = []
         for d in exec_dirs:
             if osp.exists(d):
@@ -1756,8 +1758,9 @@ class MainWindow(mainwindow_cls):
         if len(self.exec_dirs) == 0:
             while self.imsave_thread.isRunning():
                 time.sleep(0.1)
-            LOGGER.info(f'finished translating all dirs, quit app...')
-            self.app.quit()
+            LOGGER.info('finished translating all dirs.')
+            if shared.HEADLESS:
+                self.app.quit()
             return
         d = self.exec_dirs.pop(0)
         

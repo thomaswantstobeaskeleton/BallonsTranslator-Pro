@@ -1,4 +1,11 @@
-from transformers import AutoModelForCausalLM, AutoProcessor
+"""
+PaddleOCR-VL For Manga – manga/comics-tuned OCR (jzhang533/PaddleOCR-VL-For-Manga).
+Uses local/data model; chat-style image + "OCR:" -> text. Compatible with transformers 5.x via shims.
+
+Comparison with paddleocr_vl_hf: This module uses a manga-specific model (smaller, tuned for comics).
+paddleocr_vl_hf uses general PaddleOCR-VL 0.9B from HF (109 languages, document parsing) and offers
+model id, bf16, crop padding, and chinese_only prompt option.
+"""
 import numpy as np
 import torch
 from typing import List
@@ -6,6 +13,113 @@ from typing import List
 from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBlock
 
 MODEL_PATH = 'data/models/PaddleOCR-VL-For-Manga'
+
+
+def _ensure_sliding_window_cache():
+    """Inject SlidingWindowCache into transformers.cache_utils if missing (e.g. transformers 5.x moved/renamed it)."""
+    import transformers.cache_utils as cache_utils
+    if getattr(cache_utils, 'SlidingWindowCache', None) is not None:
+        return
+    try:
+        from transformers.cache_utils import SlidingWindowCache  # noqa: F401
+        return
+    except ImportError:
+        pass
+    # Stub class so the model's import works. We must NOT use DynamicCache here: the model does
+    # target_length = past_key_values.get_max_cache_shape() when isinstance(cache, SlidingWindowCache),
+    # and DynamicCache.get_max_cache_shape() returns -1, causing torch.full(..., [N, -1]). The model
+    # uses DynamicCache() at runtime, so with a stub SlidingWindowCache, isinstance is False and
+    # target_length is taken from attention_mask instead.
+    from transformers.cache_utils import Cache
+
+    class _SlidingWindowCacheStub(Cache):
+        def get_max_cache_shape(self):
+            return 0
+
+        def lazy_initialization(self, key_states, value_states):
+            pass
+
+        def update(self, key_states, value_states, cache_kwargs=None):
+            return key_states, value_states
+
+        def get_mask_sizes(self, cache_position):
+            return (0, 0)
+
+        def get_seq_length(self):
+            return 0
+
+    cache_utils.SlidingWindowCache = _SlidingWindowCacheStub
+
+
+def _ensure_check_model_inputs():
+    """Inject check_model_inputs into transformers.utils.generic if missing (removed in transformers 5.x)."""
+    import transformers.utils.generic as generic
+    if getattr(generic, 'check_model_inputs', None) is not None:
+        return
+    def check_model_inputs(f):
+        return f  # no-op decorator for forward(); model works without input checks
+    generic.check_model_inputs = check_model_inputs
+
+
+def _ensure_rope_default():
+    """Inject 'default' into ROPE_INIT_FUNCTIONS if missing (transformers 5.x only has scaling types)."""
+    from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+    if "default" in ROPE_INIT_FUNCTIONS:
+        return
+
+    def _compute_default_rope_parameters(config, device=None, seq_len=None, **kwargs):
+        # Support both new (rope_parameters) and old (rope_theta on config) formats (e.g. PaddleOCR-VL).
+        if hasattr(config, "rope_parameters") and config.rope_parameters is not None:
+            rp = config.rope_parameters
+            base = rp.get("rope_theta", getattr(config, "rope_theta", 10000.0))
+            partial = rp.get("partial_rotary_factor", 1.0)
+        else:
+            base = getattr(config, "rope_theta", 10000.0)
+            partial = 1.0
+        head_dim = getattr(config, "head_dim", None) or (
+            config.hidden_size // config.num_attention_heads
+        )
+        dim = int(head_dim * partial)
+        # Use a real device for creating tensors; "meta" device has no storage (lazy loading)
+        if device is None or str(device) == "meta":
+            device = torch.device("cpu")
+        inv_freq = 1.0 / (
+            base ** (torch.arange(0, dim, 2, dtype=torch.int64, device=device).float() / dim)
+        )
+        return inv_freq, 1.0
+
+    ROPE_INIT_FUNCTIONS["default"] = _compute_default_rope_parameters
+
+
+def _ensure_rope_init_patch():
+    """Patch PreTrainedModel._init_weights so RotaryEmbedding without compute_default_rope_parameters uses ROPE_INIT_FUNCTIONS['default']."""
+    from transformers.modeling_utils import PreTrainedModel
+    from transformers import initialization as init
+    from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+
+    if getattr(PreTrainedModel._init_weights, "_paddle_ocr_rope_patched", False):
+        return
+
+    _orig_init_weights = PreTrainedModel._init_weights
+
+    def _patched_init_weights(self, module):
+        if (
+            "RotaryEmbedding" in module.__class__.__name__
+            and hasattr(module, "original_inv_freq")
+            and hasattr(module, "rope_type")
+            and module.rope_type == "default"
+            and not hasattr(module, "compute_default_rope_parameters")
+        ):
+            rope_fn = ROPE_INIT_FUNCTIONS.get("default")
+            if rope_fn is not None:
+                buffer_value, _ = rope_fn(module.config)
+                init.copy_(module.inv_freq, buffer_value)
+                init.copy_(module.original_inv_freq, buffer_value)
+                return
+        _orig_init_weights(self, module)
+
+    _patched_init_weights._paddle_ocr_rope_patched = True  # type: ignore[attr-defined]
+    PreTrainedModel._init_weights = _patched_init_weights
 
 
 @register_OCR('PaddleOCRVLManga')
@@ -106,15 +220,38 @@ class PaddleOCRVLManga(OCRBase):
 
     def _load_model(self):
         if self.model is None:
-            model = AutoModelForCausalLM.from_pretrained(
-                MODEL_PATH,
-                trust_remote_code=True,
-                dtype=torch.float16 if self.device == "cuda" else torch.float32
-            ).to(self.device).eval()
+            try:
+                from transformers import AutoModelForCausalLM, AutoProcessor
+            except ImportError as e:
+                raise ImportError(
+                    f"PaddleOCRVLManga requires transformers. Install: pip install transformers. {e}"
+                ) from e
+            _ensure_sliding_window_cache()
+            _ensure_check_model_inputs()
+            _ensure_rope_default()
+            _ensure_rope_init_patch()
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    MODEL_PATH,
+                    trust_remote_code=True,
+                    dtype=torch.float16 if self.device == "cuda" else torch.float32
+                ).to(self.device).eval()
 
-            processor = AutoProcessor.from_pretrained(
-                MODEL_PATH, trust_remote_code=True, use_fast=True
-            )
+                processor = AutoProcessor.from_pretrained(
+                    MODEL_PATH, trust_remote_code=True, use_fast=True
+                )
+            except ImportError as e:
+                if "SlidingWindowCache" in str(e):
+                    try:
+                        import transformers
+                        ver = getattr(transformers, "__version__", "unknown")
+                    except Exception:
+                        ver = "unknown"
+                    raise ImportError(
+                        f"PaddleOCRVLManga's model code needs SlidingWindowCache from transformers. "
+                        f"Your version: {ver}. Try: pip install --upgrade \"transformers>=4.47\""
+                    ) from e
+                raise
 
             # Set pad_token_id to avoid warning during generation
             if model.generation_config.pad_token_id is None:

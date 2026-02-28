@@ -229,7 +229,8 @@ class TextBlkShapeControl(QGraphicsRectItem):
         
         self.previewPixmap = QGraphicsPixmapItem(self)
         self.previewPixmap.setVisible(False)
-        pen = QPen(QColor(69, 71, 87), 2, Qt.PenStyle.SolidLine)
+        # Visible on light bubbles; avoid RasterOp_NotDestination which caused red/orange artifacts
+        pen = QPen(QColor(55, 58, 68), 2, Qt.PenStyle.SolidLine)
         pen.setDashPattern([7, 14])
         self.setPen(pen)
         self.setVisible(False)
@@ -301,7 +302,8 @@ class TextBlkShapeControl(QGraphicsRectItem):
             self.blk_item.endEdit()
 
     def paint(self, painter: QPainter, option: 'QStyleOptionGraphicsItem', widget = ...) -> None:
-        painter.setCompositionMode(QPainter.CompositionMode.RasterOp_NotDestination)
+        # Draw with normal composition; RasterOp_NotDestination inverts destination and produced
+        # red/orange dashed artifacts on light backgrounds
         super().paint(painter, option, widget)
 
     def hideControls(self):

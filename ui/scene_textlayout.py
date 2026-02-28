@@ -44,7 +44,8 @@ def vertical_force_aligncentel(char: str) -> bool:
 
 @lru_cache(maxsize=512)
 def _font_metrics(ffamily: str, size: float, weight: int, italic: bool) -> QFontMetricsF:
-    font = QFont(ffamily, int(size), weight, italic)
+    size = max(1.0, size) if size <= 0 else size
+    font = QFont(ffamily, max(1, int(size)), weight, italic)
     font.setPointSizeF(size)
     return QFontMetricsF(font)
 
@@ -132,7 +133,8 @@ class CharFontFormat:
 
     @property
     def size(self) -> float:
-        return self.font.pointSizeF()
+        pt = self.font.pointSizeF()
+        return max(1.0, pt) if pt <= 0 else pt
 
     def punc_actual_rect(self, line: QTextLine, char: str, cache=False, stroke_width=0, h=None, w=None, space_shift=0) -> List[int]:
         if cache:
@@ -319,6 +321,7 @@ class SceneTextLayout(QAbstractTextDocumentLayout):
 
     def max_font_size(self, to_px=False) -> float:
         fs = self._max_font_size if self._max_font_size > 0 else self.document().defaultFont().pointSizeF()
+        fs = max(1.0, fs) if fs <= 0 else fs
         if to_px:
             fs = pt2px(fs)
         return fs
@@ -886,6 +889,10 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
 
     def reLayout(self):
         doc = self.document()
+        # Ensure block lists are populated (e.g. setMaxSize can call reLayout before documentChanged)
+        if len(self.block_ideal_height) != doc.blockCount():
+            self.reLayoutEverything()
+            return
         doc_margin = self.document().documentMargin()
         self.text_padding = 0
         self.shrink_height = 0
@@ -957,9 +964,11 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
         # fm = QFontMetrics(font)
         doc_margin = self.document().documentMargin()
 
-        block_height = self.block_ideal_height[block.blockNumber()]
+        blk_no = block.blockNumber()
+        block_height = self.block_ideal_height[blk_no] if blk_no < len(self.block_ideal_height) else 0
         if block_height == 0:
-            tbr, br = get_punc_rect('木fg', font.family(), font.pointSizeF(), font.weight(), font.italic())
+            pt_size = max(1.0, font.pointSizeF())
+            tbr, br = get_punc_rect('木fg', font.family(), pt_size, font.weight(), font.italic())
             block_height = tbr.height()
         if block == doc.firstBlock():
             self.x_offset_lst = []
@@ -974,7 +983,6 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
         tl.beginLayout()
         shrink_width = 0
         char_idx = 0
-        blk_no = block.blockNumber()
         is_last_block = blk_no == self.document().blockCount() - 1
         is_first_block = blk_no == 0
         text_padding = 0
@@ -1003,7 +1011,8 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
                         tgt_cfmt = cfmt
                 if tgt_cfmt is not None:
                     font = tgt_cfmt.font
-                    tbr, br = get_punc_rect('木fg', font.family(), font.pointSizeF(), font.weight(), font.italic())
+                    pt_size = max(1.0, font.pointSizeF())
+                    tbr, br = get_punc_rect('木fg', font.family(), pt_size, font.weight(), font.italic())
                     dy = -tbr.top() - line.ascent()
                     idea_height = tbr.height()
 

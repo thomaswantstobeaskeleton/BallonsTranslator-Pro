@@ -1,8 +1,11 @@
 from .base import *
+from .exceptions import MissingTranslatorParams
 import ctranslate2, sentencepiece as spm
 import transformers
+import os
 
 CT_MODEL_PATH = 'data/models/m2m100-1.2B-ctranslate2'
+MODEL_BIN = os.path.join(CT_MODEL_PATH, 'model.bin')
 
 @register_translator('m2m100')
 class M2M100Translator(BaseTranslator):
@@ -13,6 +16,12 @@ class M2M100Translator(BaseTranslator):
     }
 
     def _setup_translator(self):
+        if not os.path.isfile(MODEL_BIN):
+            raise MissingTranslatorParams(
+                f"m2m100 model not found. Please download the CTranslate2 m2m100-1.2B model and place it in:\n{os.path.normpath(CT_MODEL_PATH)}\n"
+                "The folder must contain model.bin and other CTranslate2 files. "
+                "You can convert the Fairseq m2m100 model to CTranslate2 format or find a pre-converted model (e.g. on Hugging Face)."
+            )
         self.lang_map['Afrikaans'] = 'af'
         self.lang_map['Albanian'] = 'sq'
         self.lang_map['Amharic'] = 'am'

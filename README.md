@@ -1,233 +1,313 @@
-> [!IMPORTANT]  
-> **如打算公开分享本工具的机翻结果，且没有有经验的译者进行过完整的翻译或校对，请在显眼位置注明机翻。**
+# BallonsTranslator – Extended Modifications (README)
 
-# BallonTranslator
-简体中文 | [English](/README_EN.md) | [pt-BR](doc/README_PT-BR.md) | [Русский](doc/README_RU.md) | [日本語](doc/README_JA.md) | [Indonesia](doc/README_ID.md) | [Tiếng Việt](doc/README_VI.md) | [한국어](doc/README_KO.md) | [Español](doc/README_ES.md) | [Français](doc/README_FR.md)
+This document describes **everything modified or added** in this fork compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
 
-深度学习辅助漫画翻译工具，支持一键机翻和简单的图像/文本编辑  
+---
 
-<img src="doc/src/ui0.jpg" div align=center>
+## Table of contents
 
-<p align=center>
-界面预览
-</p>
+1. [Summary of modifications](#1-summary-of-modifications)
+2. [How to run the application](#2-how-to-run-the-application)
+3. [Text detection – all modules and how to run](#3-text-detection--all-modules-and-how-to-run)
+4. [OCR – all modules and how to run](#4-ocr--all-modules-and-how-to-run)
+5. [Inpainting – all modules and how to run](#5-inpainting--all-modules-and-how-to-run)
+6. [Translation modules](#6-translation-modules)
+7. [Settings reference: inpaint size, mask dilation, detection, OCR, formatting](#7-settings-reference-inpaint-size-mask-dilation-detection-ocr-formatting)
+8. [Optional dependency conflicts and workarounds](#8-optional-dependency-conflicts-and-workarounds)
+9. [New and modified files](#9-new-and-modified-files)
+10. [Fixes and behavior changes](#10-fixes-and-behavior-changes)
+11. [Documentation and references](#11-documentation-and-references)
 
-# Features
-* 一键机翻  
-  - 译文回填参考对原文排版的估计，包括颜色，轮廓，角度，朝向，对齐方式等
-  - 最后效果取决于文本检测，识别，抹字，机翻四个模块的整体表现  
-  - 支持日漫和美漫
-  - 英译中，日译英排版已优化，文本布局以提取到的背景泡为参考，中文基于 pkuseg 进行断句，日译中竖排待改善
-  
-* 图像编辑  
-  支持掩膜编辑和修复画笔
-  
-* 文本编辑  
-  - 支持所见即所得地富文本编辑和一些基础排版格式调整、[字体样式预设](https://github.com/dmMaze/BallonsTranslator/pull/311)
-  - 支持全文/原文/译文查找替换
-  - 支持导入导出 word 文档
+---
 
-* 适用于条漫
+## 1. Summary of modifications
 
-# 使用说明
+This fork adds **many new optional modules** and applies **fixes and setting improvements**. Original behavior and defaults are unchanged unless noted. New modules are discovered automatically via the existing registry (no changes to core launch or config flow). You only install extra dependencies for the modules you use.
 
-## Windows
-如果用 Windows 而且不想自己手动配置环境，而且能正常访问互联网:  
-从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载 BallonsTranslator_dev_src_with_gitpython.7z，解压并运行 launch_win.bat 启动程序。如果无法自动下载库和模型，手动下载 data 和 ballontrans_pylibs_win.7z 并解压到程序目录下。  
-运行 scripts/local_gitpull.bat 获取更新。 
-注意这些打包版无法在 Windows 7 上运行，win 7 用户需要自行安装 [Python 3.8](https://www.python.org/downloads/release/python-3810/) 运行源码。
+| Category | What was added / changed |
+|----------|---------------------------|
+| **Text detection** | MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), **CRAFT** (standalone), **HF object-detection** (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2 (optional repos). |
+| **OCR** | 20+ new OCR backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, **HunyuanOCR**, **Manga OCR Mobile** (TFLite), **Nemotron Parse** (full-page). |
+| **Inpainting** | Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), **RePaint**, **LaMa ONNX** (general + manga), **Qwen-Image-Edit**, **MAT** (repo+checkpoint), **CUHK Manga**, **Fluently v4**. |
+| **Translation** | No new translators in this fork; existing LLM_API_Translator, Sakura, DeepL, etc. unchanged. |
+| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). |
+| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this README. |
 
-## 运行源码
+---
 
-安装 [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (别用微软应用商店版) 和 [Git](https://git-scm.com/downloads)
+## 2. How to run the application
+
+### Base setup (same as original)
+
+- **Python:** 3.10 or 3.11 (≤ 3.12; avoid Microsoft Store Python).
+- **Git:** Installed and in PATH.
 
 ```bash
-# 克隆仓库
-$ git clone https://github.com/dmMaze/BallonsTranslator.git ; cd BallonsTranslator
+# Clone the repository (or your fork)
+git clone https://github.com/dmMaze/BallonsTranslator.git
+cd BallonsTranslator
 
-# 启动程序
-$ python3 launch.py
+# First run: installs base deps and downloads default models into data/
+python launch.py
 
-# 更新程序
-python3 launch.py --update
+# Update dependencies and code
+python launch.py --update
 ```
 
-第一次运行会自动安装 torch 等依赖项并下载所需模型和文件，如果模型下载失败，需要手动从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载 data 文件夹(或者报错里提到缺失的文件)，并保存到源码目录下的对应位置。
+If model downloads fail, use the original README links (MEGA / Google Drive) and place the `data` folder in the project root.
 
-## 构建 macOS 应用(适用 apple silicon 芯片)
-[参考](doc/macOS_app_CN.md)  
-可能会有各种问题，目前还是推荐跑源码
+### Running
 
-## 一键翻译
-**建议在命令行终端下运行程序**，首次运行请先配置好源语言/目标语言，打开一个带图片的文件夹，点击 Run 等待翻译完成  
-<img src="doc/src/run.gif">  
+- **GUI:**  
+  `python launch.py`  
+  Then open the **settings panel** and choose **Text detection**, **OCR**, **Inpainting**, and **Translation** from the dropdowns. New modules appear automatically. Set **device** (CPU/CUDA) and any model-specific options there.
 
-一键机翻嵌字格式如大小、颜色等默认是由程序决定的，可以在设置面板->嵌字菜单中改用全局设置。全局字体格式就是未编辑任何文本块时右侧字体面板显示的格式:  
-<img src="doc/src/global_font_format.png"> 
+- **Headless (no GUI):**  
+  `python launch.py --headless --exec_dirs "[DIR_1],[DIR_2]..."`  
+  Settings are read from `config/config.json`. Ensure the chosen detector, OCR, and inpainter are installed and configured in that config.
 
-## 画板
+- **Logical DPI (font/rendering):**  
+  If rendered font size is wrong, use `--ldpi 96` (or 72) as needed:  
+  `python launch.py --ldpi 96`
 
-## 修复画笔
-<img src="doc/src/imgedit_inpaint.gif">
-<p align = "center">
-修复画笔
-</p>
+---
 
-### 矩形工具
-<img src="doc/src/rect_tool.gif">
-<p align = "center">
-矩形工具
-</p>
+## 3. Text detection – all modules and how to run
 
-按下鼠标左键拖动矩形框抹除框内文字，按下右键拉框清除框内修复结果。  
-抹除结果取决于算法(gif 中的"方法1"和"方法2")对文字区域估算的准确程度，一般拉的框最好稍大于需要抹除的文本块。两种方法都比较玄学，能够应付绝大多数简单文字简单背景，部分复杂背景简单文字/简单背景复杂文字，少数复杂背景复杂文字，可以多拉几次试试。  
-勾选"自动"拉完框立即修复，否则需要按下"修复"或者空格键才进行修复，或 ```Ctrl+D``` 删除矩形选框。 
+Select the detector from the **Text detection** dropdown in the settings panel. Pair detection-only modules with an OCR (see [INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md) for which work with **none_ocr**).
 
-## 文本编辑
-<img src="doc/src/textedit.gif">
+### Original / built-in
 
+| Module | How to run | Notes |
+|--------|-------------|--------|
+| **ctd** | Select **ctd**; set device, detect_size, box score threshold, merge tolerance, etc. | ComicTextDetector; primary manga detector. See [Settings](#71-ctd-comictextdetector) below. |
+| **paddle_det** | Select **paddle_det**; needs `paddlepaddle`, `paddleocr`. | Paddle OCR detection; pair with paddle_ocr or paddle_rec_v5. |
+| **easyocr_det** | Select **easyocr_det**; needs `easyocr`. | CRAFT-based; pair with easyocr_ocr. |
+| **ysgyolo** | Select **ysgyolo**; put YOLO `.pt` in `data/models/` with name starting with `ysgyolo` (e.g. `ysgyolo_comic_speech_bubble_v8m.pt`). | For comic bubble detection; pair with any OCR. |
+| **stariver_ocr** | Select **stariver_ocr**; fill User/Password in params. | API returns boxes+text; set OCR to **none_ocr**. |
 
-<p align = "center">
-文本编辑
-</p>
+### New in this fork
 
-<img src="doc/src/multisel_autolayout.gif" div align=center>
-<p align=center>
-批量文本格式调整及自动排版
-</p>
+| Module | Dependencies | How to run |
+|--------|--------------|------------|
+| **hf_object_det** | `pip install transformers torch` | Select **hf_object_det**. Default **model_id** is `ogkalu/comic-text-and-bubble-detector` (bubble, text_bubble, text_free). Change **model_id** for other HF object-detection models; use **score_threshold** and **labels_include** (comma-separated) to filter. |
+| **mmocr_det** | `pip install openmim` then `mim install mmengine mmcv mmdet mmocr` (see `doc/INSTALL_MMOCR.md` for Windows). | Select **mmocr_det**; pair with mmocr_ocr. |
+| **paddle_det_v5** | `pip install paddlepaddle paddleocr` (3.x). | Select **paddle_det_v5**; pair with paddle_rec_v5. |
+| **surya_det** | `pip install surya-ocr` | Select **surya_det**; pair with surya_ocr. |
+| **magi_det** | `pip install transformers torch einops` | Select **magi_det**; model downloads from HF (ragavsachdeva/magi) on first use; pair with any OCR. |
+| **craft_det** | `pip install craft-text-detector torch` | Select **craft_det**; outputs 4-point quads for merge; pair with any OCR. **Conflict:** needs opencv<4.5.4.62; see [Optional dependencies](#8-optional-dependency-conflicts-and-workarounds). |
+| **dptext_detr** | Clone [DPText-DETR](https://github.com/ymy-k/DPText-DETR), install its deps. | Select **dptext_detr**; set **repo_path** to your clone; pair with any OCR. |
+| **swintextspotter_v2** | Clone [SwinTextSpotterv2](https://github.com/mxin262/SwinTextSpotterv2), install its deps. | Select **swintextspotter_v2**; set **repo_path**; use **none_ocr** if demo outputs text. |
+| **hunyuan_ocr_det** | Same as hunyuan_ocr (transformers, etc.). | Select **hunyuan_ocr_det**; set OCR to **none_ocr** to keep spotter text. |
+| **textmamba_det** | None (stub) | Selecting it raises an error until official code is released; use mmocr_det or surya_det meanwhile. |
 
-<img src="doc/src/ocrselected.gif" div align=center>
-<p align=center>
-OCR并翻译选中文本框
-</p>
+---
 
-## 界面说明及快捷键
-* Ctrl+Z，Ctrl+Y 可以撤销重做大部分操作，注意翻页后撤消重做栈会清空
-* A/D 或 pageUp/Down 翻页，如果当前页面未保存会自动保存
-* T 切换到文本编辑模式下(底部最右"T"图标)，W激活文本块创建模式后在画布右键拉文本框
-* P 切换到画板模式，右下角滑条改原图透明度
-* 标题栏->运行 可以启用/禁用任意自动化模块，全部禁用后Run会根据全局字体样式和嵌字设置重新渲染文本  
-* 设置面板配置各自动化模块参数
-* Ctrl++/- 或滚轮缩放画布
-* Ctrl+A 可选中界面中所有文本块
-* Ctrl+F 查找当前页，Ctrl+G全局查找
-* 0-9调整嵌字/原图透明度
-* 文本编辑下 ```Ctrl+B``` 加粗，```Ctrl+U``` 下划线，```Ctrl+I``` 斜体
-* 字体样式面板-"特效"修改透明度添加阴影
-* ```Alt+Arrow Keys``` 或 ```Alt+WASD``` (正在编辑文本块时 ```pageDown``` 或 ```pageUp```) 在文本块间切换
+## 4. OCR – all modules and how to run
 
-<img src="doc/src/configpanel.png">  
+Select the OCR from the **OCR** dropdown. Install only the dependencies for the modules you use.
 
-## 命令行模式 (无GUI)
-``` python
-python launch.py --headless --exec_dirs "[DIR_1],[DIR_2]..."
-```
-所有设置 (如检测模型, 原语言目标语言等) 会从 config/config.json 导入。  
-如果渲染字体大小不对, 通过 ```--ldpi ``` 指定 Logical DPI 大小, 通常为 96 和 72。
+### Original / built-in
 
-# 自动化模块
-本项目重度依赖 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)，在线服务器和模型训练需要费用，有条件请考虑支持一下
-- Ko-fi: <https://ko-fi.com/voilelabs>
-- Patreon: <https://www.patreon.com/voilelabs>
-- 爱发电: <https://afdian.net/@voilelabs>
+| Module | How to run |
+|--------|-------------|
+| **paddle_rec_v5**, **paddle_ocr** | Paddle stack; select and set language, device. |
+| **PaddleOCRVLManga**, **paddle_vl** | VLM manga or server; select and configure. |
+| **manga_ocr** | Select **manga_ocr**; model in `data/models/manga-ocr-base` (auto-download). |
+| **easyocr_ocr**, **mmocr_ocr** | Pair with corresponding detector. |
+| **mit32px**, **mit48px**, **mit48px_ctc** | From manga-image-translator; select as needed. |
+| **google_vision**, **bing_ocr**, **one_ocr**, **windows_ocr**, **macos_ocr**, **llm_ocr**, **stariver_ocr**, **none_ocr** | Select and configure (API keys, etc.). **none_ocr** = no OCR (use with spotters). |
 
-Sugoi 翻译器作者: [mingshiba](https://www.patreon.com/mingshiba)
-  
-### 文本检测
- * 暂时仅支持日文(方块字都差不多)和英文检测，训练代码和说明见https://github.com/dmMaze/comic-text-detector
- * 支持使用 [星河云(团子漫画OCR)](https://cloud.stariver.org.cn/)的文本检测，需要填写用户名和密码，每次启动时会自动登录。
-   * 详细说明见 [团子OCR说明](doc/团子OCR说明.md)
- * `YSGDetector` 是由 [lhj5426](https://github.com/lhj5426) 训练的模型，能更好地过滤日漫/CG里的拟声词。需要手动从 [YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) 下载模型放到 data/models 目录下。
+### New in this fork
 
+| Module | Dependencies | How to run |
+|--------|--------------|------------|
+| **paddleocr_vl_hf** | `transformers` 5.x | Select **paddleocr_vl_hf**; use prompt "OCR:"; 109 languages, SOTA document. |
+| **surya_ocr** | `pip install surya-ocr` | Select **surya_ocr**; set language (e.g. Chinese (Simplified)), **Fix Latin misread** True for CJK; crop_padding 6–8. |
+| **trocr** | `transformers`, `torch`, `PIL` | Select **trocr**; good for printed/handwritten English. |
+| **got_ocr2** | `transformers`, `torch` | Select **got_ocr2**; unified OCR, tables/formulas. |
+| **glm_ocr** | `transformers` (e.g. 5.x) | Select **glm_ocr**; 0.9B document. |
+| **donut** | `transformers`, `torch` | Select **donut**; DocVQA/CORD task prompts. |
+| **qwen2vl_7b** | `transformers`, `torch`, `accelerate` | Select **qwen2vl_7b**; ~16GB+ VRAM. |
+| **deepseek_ocr** | `transformers`, `trust_remote_code` | Select **deepseek_ocr**; document, layout. |
+| **lighton_ocr** | `transformers`, `torch` | Select **lighton_ocr**; 1B, strong per-parameter. |
+| **chandra_ocr** | `pip install chandra-ocr` | Select **chandra_ocr**; 9B, layout/tables. |
+| **docowl2_ocr** | `transformers`, `trust_remote_code` | Select **docowl2_ocr**; document understanding. |
+| **nanonets_ocr** | `transformers`, `torch` | Select **nanonets_ocr**; 3B VLM, chat-style. |
+| **ocean_ocr** | `transformers`, `torch`, `einops` | Select **ocean_ocr**; 3B MLLM, quality-focused. |
+| **internvl2_ocr**, **internvl3_ocr** | `transformers`, `torch` | Select and choose model size (2B/8B etc.); trust_remote_code. |
+| **hunyuan_ocr** | `transformers`, `torch` (see HunyuanOCR repo) | Select **hunyuan_ocr**; SOTA <3B class. |
+| **florence2_ocr** | `transformers`, `torch` | Select **florence2_ocr**; Microsoft vision, base/large. |
+| **minicpm_ocr** | `transformers`, `torch` | Select **minicpm_ocr**; compact VLM. |
+| **ocrflux** | `transformers`, `torch` | Select **ocrflux**; document OCR. |
+| **manga_ocr_mobile** | `pip install tflite-runtime huggingface_hub transformers` (optional) | Select **manga_ocr_mobile**; TFLite Japanese manga; lighter than manga_ocr. |
+| **nemotron_ocr** | `transformers`, `accelerate`, `torch`, `albumentations`, `timm`; postprocessing from HF repo. | Select **nemotron_ocr**; full-page document parsing; assigns text to blocks by bbox overlap; set **min_resolution** (e.g. 1024), **iou_threshold**. |
 
-### OCR
- * 所有 mit 模型来自 manga-image-translator，支持日英汉识别和颜色提取
- * [manga_ocr](https://github.com/kha-white/manga-ocr) 来自 [kha-white](https://github.com/kha-white)，支持日语识别，注意选用该模型程序不会提取颜色
- * [PaddleOCRVLManga](https://huggingface.co/jzhang533/PaddleOCR-VL-For-Manga) 支持日语识别，选用该模型程序不会提取颜色
- * 支持使用 [星河云(团子漫画OCR)](https://cloud.stariver.org.cn/)的OCR，需要填写用户名和密码，每次启动时会自动登录。
-   * 目前的实现方案是逐个textblock进行OCR，速度较慢，准确度没有明显提升，不推荐使用。如果有需要，请使用团子Detector。
-   * 推荐文本检测设置为团子Detector时，将OCR设为none_ocr，直接读取文本，节省时间和请求次数。
-   * 详细说明见 [团子OCR说明](doc/团子OCR说明.md)
- * OCR设置项: 字体识别。把[字体识别模型（YuzuMarker.FontDetection）](https://github.com/JeffersonQin/YuzuMarker.FontDetection)下载下来放在data\models\YuzuMarker.FontDetection目录下。
-  需要的三个文件分别是```data\models\YuzuMarker.FontDetection\font_dataset``` ，  ```data\models\YuzuMarker.FontDetection\name=4x-epoch=18-step=368676.ckpt```，  ```data\font_demo_cache.bin```  
-  识别到的置信率大于60%的字体名称会保存在json文件的```_detected_font_name```字段中。目前没做可视化外显，使用[脚本](scripts/BTjson_to_LPtxt.pyw)导出LabelPlus txt时可选带上字体字号信息，导入到其他软件（如PS/ID）嵌字用。
+---
 
-### 图像修复
-  * AOT 修复模型来自 manga-image-translator
-  * patchmatch 是非深度学习算法，也是PS修复画笔背后的算法，实现来自 [PyPatchMatch](https://github.com/vacancy/PyPatchMatch)，本程序用的是我的[修改版](https://github.com/dmMaze/PyPatchMatchInpaint)
-  * lama* 是微调过的[lama](https://github.com/advimman/lama)
-  
+## 5. Inpainting – all modules and how to run
 
-### 翻译器
+Select the inpainter from the **Inpainting** dropdown. Key settings: **inpaint_size** (max side before resize), **mask_dilation** (for lama_large_512px only). See [Settings reference](#7-settings-reference-inpaint-size-mask-dilation-detection-ocr-formatting) below.
 
- * 谷歌翻译器已经关闭中国服务，大陆再用需要设置全局代理，并在设置面板把 url 换成*.com
- * 彩云，需要申请 [token](https://dashboard.caiyunapp.com/)
- * papago  
- * DeepL 和 Sugoi (及它的 CT2 Translation 转换)翻译器，感谢 [Snowad14](https://github.com/Snowad14)，如果要使用Sugoi翻译器(仅日译英)，下载[离线模型](https://drive.google.com/drive/folders/1KnDlfUM9zbnYFTo6iCbnBaBKabXfnVJm)，将 ```sugoi_translator``` 移入 BallonsTranslator/ballontranslator/data/models。 
- * 支持 [Sakura-13B-Galgame](https://github.com/SakuraLLM/Sakura-13B-Galgame)。如果在本地单卡上运行且显存不足，可以在设置面板里勾选 ```low vram mode``` (默认启用)。
- * DeepLX 请参考[Vercel](https://github.com/bropines/Deeplx-vercel) 或 [deeplx](https://github.com/OwO-Network/DeepLX)
- * 支持两个版本的 OpenAI 兼容翻译器，支持兼容 OpenAI API 的官方或第三方LLM提供商，需要在设置面板里配置。
-   * 无后缀版本token消耗更小，但分句稳定性稍差，长文本翻译可能有问题。
-   * exp后缀版本token消耗更大，但稳定性更好，且在Prompt中进行了“越狱”，适合长文本翻译。
- * [m2m100](https://huggingface.co/facebook/m2m100_1.2B): 下载并将 m2m100-1.2B-ctranslate2 移到 data/models 目录下
+### Original / built-in
 
-其它优秀的离线英文翻译模型请参考[这条讨论](https://github.com/dmMaze/BallonsTranslator/discussions/515)  
-如需添加新的翻译器请参考[加别的翻译器](doc/加别的翻译器.md)，本程序添加新翻译器只需要继承基类实现两个接口即可不需要理会代码其他部分，欢迎大佬提 pr
+| Module | How to run |
+|--------|-------------|
+| **aot** | Select **aot**; **inpaint_size** 1024 or 2048; device cuda/cpu. |
+| **lama_mpe** | Select **lama_mpe**; **inpaint_size** 1024 or 2048; device cuda. |
+| **lama_large_512px** | Select **lama_large_512px**; **inpaint_size** 512/768/1024/1536/2048; **mask_dilation** 0–5; device cuda; precision bf16/fp32. Best for manga text removal. |
+| **patchmatch**, **opencv-tela** | Select for CPU/lightweight inpainting. |
 
-## 杂
-* 电脑带 Nvidia 显卡或 Apple silicon 默认启用 GPU 加速
-* 感谢 [bropines](https://github.com/bropines) 提供俄语翻译
-* 第三方输入法可能会造成右侧编辑框显示 bug，见[#76](https://github.com/dmMaze/BallonsTranslator/issues/76)，暂时不打算修
-* 选中文本迷你菜单支持*聚合词典专业划词翻译*[沙拉查词](https://saladict.crimx.com): [安装说明](doc/saladict_chs.md)
-<details>
-  <summary><i>启用 AMD ROCm 显卡加速方法</i></summary>
+### New in this fork
 
-### 通用方案 ZLUDA (ROCm6)
+| Module | Dependencies | How to run |
+|--------|--------------|------------|
+| **simple_lama** | `pip install simple-lama` or `simple-lama-inpainting` | Select **simple_lama**. **Conflict:** pillow<10 required; see [Optional dependencies](#8-optional-dependency-conflicts-and-workarounds). |
+| **lama_onnx** | `pip install onnxruntime`; download ONNX from Hugging Face opencv/inpainting_lama. | Select **lama_onnx**; set **model_path** to the `.onnx` file; **inpaint_size** 512/768/1024. |
+| **lama_manga_onnx** | `pip install onnxruntime`; download mayocream/lama-manga-onnx. | Select **lama_manga_onnx**; set **model_path**; **inpaint_size** (e.g. 1024). |
+| **diffusers_sd_inpaint** | `pip install diffusers transformers accelerate` | Select **diffusers_sd_inpaint**; **inpaint_size** (e.g. 512); device; prompt-based. |
+| **diffusers_sd2_inpaint** | Same | Select **diffusers_sd2_inpaint**; 768 default. |
+| **diffusers_sdxl_inpaint** | Same | Select **diffusers_sdxl_inpaint**; 1024; heavier. |
+| **dreamshaper_inpaint** | Same | Select **dreamshaper_inpaint**; 512. |
+| **flux_fill** | Same | Select **flux_fill**; enable **CPU offload** if VRAM limited. |
+| **kandinsky_inpaint** | Same | Select **kandinsky_inpaint**. |
+| **fluently_v4_inpaint** | Same | Select **fluently_v4_inpaint**; anime/comic style. |
+| **cuhk_manga_inpaint** | Clone MangaInpainting repo, download checkpoints. | Select **cuhk_manga_inpaint**; set **repo_path** and **checkpoints_path**; line map auto-generated. |
+| **repaint** | Same Diffusers stack | Select **repaint**; e.g. google/ddpm-ema-celebahq-256; 256×256. |
+| **qwen_image_edit** | Same | Select **qwen_image_edit**; Qwen/Qwen-Image-Edit; heavy; **inpaint_size** (e.g. 1024). |
+| **mat** | Clone [MAT](https://github.com/fenglinglwb/MAT), download checkpoint. | Select **mat**; set **repo_path** and **checkpoint_path** to `.pth`; **inpaint_size** 512. |
 
-**优点:**
-文本和文本框识别速度比社区预览版快，当然比 CPU 更快
+---
 
-**缺点:**
-需要额外安装并进行相关配置才可工作，首次启动以及更换识别模型和驱动都需要长时间预热缓存
+## 6. Translation modules
 
-**安装步骤:**
+No new translators were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. See original README and `doc/加别的翻译器.md` for adding new translators.
 
-1. 更新显卡驱动至最新版 (建议 24.12.1 及以上，下载并安装 [AMD HIP SDK 6.2](https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html)  )
-2. 下载 [ZLUDA](https://github.com/lshqqytiger/ZLUDA/releases)(ROCm6版本)并解压到 zluda 文件夹内，复制 zluda 文件夹到系统盘下: 比如c盘 (C:\zluda)  
-3. 配置系统环境变量，以 windows 10 系统为例:设置 - 系统属性 - 高级系统设置 - 环境变量 - 系统变量 - 找到 path 变量，点击编辑，在最后添加 `C:\zluda` 和 `%HIP_PATH_62%bin` 两项  
-4. 替换 CUDA 库的动态链接文件: 将 `C:\zluda` 文件夹内的 `cublas.dll` `cusparse.dll` 和 `nvrtc.dll` 复制出一份到桌面，按如下规则重命名复制出来的文件  
+---
 
-**注意: (AMD 驱动 25.5.1 务必更新 ZLUDA 版本到 3.9.5 及以上)**
+## 7. Settings reference: inpaint size, mask dilation, detection, OCR, formatting
 
-```
-  原文件名 → 新文件名
+### 7.1 CTD (ComicTextDetector)
 
-  cublas.dll → cublas64_11.dll
+- **detect_size:** e.g. 1280 (higher = better quality, slower). Up to 2400 supported.
+- **box score threshold:** 0.35–0.48 typical; lower = more boxes (e.g. 0.42–0.45 for manhua).
+- **merge font size tolerance:** e.g. 3.0; higher = merge more lines into one bubble.
+- **mask dilate size:** 2 default; kernel for mask dilation at detection stage.
+- **min box area:** 0 or 100–200 to drop tiny noise.
+- **custom_onnx_path:** Optional path to alternate ONNX (e.g. mayocream comic-text-detector); leave empty for default CTD ONNX.
 
-  cusparse.dll → cusparse64_11.dll
+### 7.2 Inpaint size (all inpainters)
 
-  nvrtc.dll → nvrtc64_112_0.dll
-```
-  将已经重命名的文件替换掉 `BallonsTranslator\ballontrans_pylibs_win\Lib\site-packages\torch\lib\` 目录中的同名文件
+- **lama_large_512px:** Options 512, 768, 1024, 1536, 2048. Default 1024. Smaller = less VRAM, gentler on small bubbles; larger = more detail on big regions. Avoid 2048 unless needed (risk of artifacts).
+- **lama_mpe, aot:** 1024 or 2048.
+- **Diffusers-based (SD, SD2, SDXL, DreamShaper, Fluently, Kandinsky, RePaint, Qwen-Image-Edit):** Each has an **inpaint_size** (or similar) in params; 512/768/1024 typical. Match to model native resolution when possible.
+- **lama_onnx:** 512 (model is 512×512); param controls max side before resize.
+- **lama_manga_onnx:** Often 1024 default; stride 64 for alignment.
+- **mat:** 512 typical.
 
-5. 启动程序并设置 OCR 和文本检测 为 Cuda **(图像修复请继续使用 CPU)**
-6. 运行 OCR 并等待 ZLUDA 编译 PTX 文件 **(首次编译大概需要 5-10 分钟，取决于 CPU 性能)**,**下次运行无需编译**
+### 7.3 Mask dilation (kernel)
 
-### 原生社区预览方案 (ROCm7)
+- **lama_large_512px** exposes **mask_dilation** (0–5). It sets **mask_dilation_iterations** for a 3×3 morphological dilation on the mask before inpainting. **0** = no dilation; **2** = default (balanced); **3–5** = more coverage for dots/smudges; **0–1** = minimal distortion on tiny bubbles.
+- Base inpainter (`modules/inpaint/base.py`) applies this dilation in `inpaint()` so all block-based inpainters that inherit (e.g. lama_large_512px) use it. Other inpainters (AOT, lama_mpe, Diffusers, etc.) do not expose a separate mask_dilation param; the base applies a configurable **mask_dilation_iterations** only when the inpainter sets it (lama_large_512px).
 
-**优点:**
-无需额外安装，开箱即用。且图像修复工具可以正常使用 CUDA 加速。
+### 7.4 OCR crop padding
 
-**缺点:**
-由于社区版尚未集成FA2等注意力优化框架，速度不如 ZLUDA。
+Many OCRs have **crop_padding** (pixels to add around each detected box when cropping for OCR). Typical range 0–24. **6–8** is a good default to reduce clipped text at edges (e.g. with CTD). **manga_ocr**, **surya_ocr**, **trocr**, **manga_ocr_mobile**, etc. expose this in params.
 
-而且对显卡限制大，对Python版本也有要求
+### 7.5 Text and box formatting
 
-**安装步骤:**
+- **Global font format:** In settings panel → **嵌字** (typesetting), the “global font format” is the format used when no text block is selected; you can set default font, size, color, alignment, etc.
+- **Per-block formatting:** In text edit mode, select a block and use the right-hand font/format panel (bold, italic, underline, alignment, letter spacing, line spacing, vertical text). Supports rich text and presets.
+- **Box/block layout:** Detection produces boxes (quadrilaterals); the app keeps **lines** (polygon points) per block. Merge/split and reading order depend on detector and post-processing (e.g. CTD merge tolerance, Paddle strict bubble mode). No changes to core box data format in this fork; new detectors return the same `(mask, List[TextBlock])` interface.
 
-1. 检查显卡架构是否为 RDNA3 和 RDNA4, 目前社区预览版 ROCm7 仅支持这两种架构的显卡 既 RX7000 和 9000系列,以及对应的专业卡
-2. 确保 Python 版本不低于 3.12.x
-3. 使用 [launch_win_amd_nightly.bat](launch_win_amd_nightly.bat) 启动程序
-4. 检查　OCR 和文本检测、图像修复设置是否为　CUDA
-  
-</details>
+### 7.6 Paddle detection (strict bubble mode)
+
+For **paddle_det**, **Strict bubble mode** applies stricter thresholds and filters (min_detection_area, max_aspect_ratio, box_shrink_px, merge_same_line_only, merge_line_overlap_ratio). Useful for comics so different bubbles are not merged. **det_limit_side_len** can be set (e.g. 960 when using Ocean OCR on CPU to avoid timeout).
+
+---
+
+## 8. Optional dependency conflicts and workarounds
+
+Some optional modules require dependency versions that **conflict** with the main `requirements.txt`. See **docs/OPTIONAL_DEPENDENCIES.md** for full detail.
+
+| Module | Conflict | Workaround |
+|--------|----------|------------|
+| **craft_det** | `craft-text-detector` needs **opencv-python<4.5.4.62**; main app uses **opencv≥4.8**. | Use **easyocr_det** or **mmocr_det** instead; or install in a separate venv with older opencv. If you keep main opencv, **craft_det** may not register (version check in code) or fail at runtime. |
+| **simple_lama** | `simple-lama-inpainting` needs **pillow<10**; project uses **Pillow 10.x**. | Use **lama_large_512px**, **lama_onnx**, or **lama_manga_onnx** instead; or downgrade Pillow in a separate venv. |
+
+The main application and all other modules work with the versions in `requirements.txt`.
+
+---
+
+## 9. New and modified files
+
+### New files (no removals of original files)
+
+- **Text detection:**  
+  `modules/textdetector/detector_mmocr.py`, `detector_paddle_v5.py`, `detector_surya.py`, `detector_magi.py`, `detector_textmamba.py`, `detector_craft.py`, `detector_hf_object_detection.py`, `detector_dptext_detr.py`, `detector_swintextspotter_v2.py` (existing in original may differ; this fork adds or modifies as listed).
+
+- **OCR:**  
+  `modules/ocr/ocr_trocr.py`, `ocr_got_ocr2.py`, `ocr_glm_ocr.py`, `ocr_donut.py`, `ocr_paddleocr_vl_hf.py`, `ocr_qwen2vl.py`, `ocr_deepseek.py`, `ocr_lighton.py`, `ocr_chandra.py`, `ocr_docowl2.py`, `ocr_nanonets.py`, `ocr_ocean.py`, `ocr_internvl2.py`, `ocr_internvl3.py`, `ocr_florence2.py`, `ocr_minicpm.py`, `ocr_ocrflux.py`, `ocr_hunyuan.py`, `ocr_manga_mobile.py`, `ocr_nemotron.py`.
+
+- **Inpainting:**  
+  `modules/inpaint/inpaint_simple_lama.py`, `inpaint_diffusers_sd.py`, `inpaint_sd2.py`, `inpaint_sdxl.py`, `inpaint_dreamshaper.py`, `inpaint_flux_fill.py`, `inpaint_kandinsky.py`, `inpaint_fluently.py`, `inpaint_cuhk_manga.py`, `inpaint_repaint.py`, `inpaint_lama_onnx.py`, `inpaint_lama_manga_onnx.py`, `inpaint_qwen_image_edit.py`, `inpaint_mat.py`.
+
+- **Documentation:**  
+  `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this file `README_MODIFICATIONS.md`.  
+  `doc/INSTALL_MMOCR.md` (if present).
+
+### Unchanged (behavior and discovery)
+
+- `modules/base.py`: `MODULE_SCRIPTS` and module discovery unchanged; new modules are picked up by existing `ocr_*.py`, `inpaint_*.py`, `detector_*.py` patterns.
+- `launch.py`, config flow, and UI flow unchanged; new options appear in the same dropdowns.
+
+---
+
+## 10. Fixes and behavior changes
+
+- **lama_large_512px:**  
+  - **check_need_inpaint = False** so the model always runs (no median fill skip); avoids “weird solid-color box” in speech bubbles.  
+  - **mask_dilation** is configurable (0–5) via params; stored in **mask_dilation_iterations** and applied in base `inpaint()` with a 3×3 kernel.
+
+- **lama_mpe:**  
+  - Small-bubble normalization: when max side < 400, input is resized to at most 512 before inpainting to reduce over-strong inpainting and artifacts.
+
+- **Base inpainter:**  
+  - Mask dilation before inpainting uses **mask_dilation_iterations** (default 2) and a 3×3 kernel; only inpainters that set this (e.g. lama_large_512px) override the default.
+
+- **hf_object_det:**  
+  - Default **model_id** set to **ogkalu/comic-text-and-bubble-detector**; default **labels_include** = **bubble,text_bubble,text_free** so all three classes are used out of the box.
+
+- **craft_det:**  
+  - OpenCV version check: if opencv ≥ 4.5.4.62, **craft_det** is not registered and a warning points to **docs/OPTIONAL_DEPENDENCIES.md** and alternatives (easyocr_det, mmocr_det).
+
+- **textmamba_det:**  
+  - Implemented as a **stub**: registered and visible, but ** _load_model** and **_detect** raise a clear error until official code is released; message suggests mmocr_det or surya_det.
+
+- **OCR crop_padding:**  
+  - Multiple OCRs (e.g. manga_ocr, surya_ocr, paddle_rec_v5, trocr, manga_ocr_mobile) expose **crop_padding** (0–24) to add pixels around each box when cropping for OCR, reducing clipped text at edges.
+
+- **Paddle det:**  
+  - Strict bubble mode and params (det_limit_side_len, merge_same_line_only, merge_line_overlap_ratio, etc.) documented and used for comic workflows; see MANHUA_BEST_SETTINGS.md.
+
+- **Config:**  
+  - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.
+
+---
+
+## 11. Documentation and references
+
+| Document | Description |
+|----------|-------------|
+| **docs/QUALITY_RANKINGS.md** | Tier-based quality/accuracy rankings for all detection, OCR, and translation modules; task-based SOTA (document vs manga vs multilingual); sanity-check notes. |
+| **docs/MODELS_REFERENCE.md** | Map of recommended models to BallonsTranslator modules; quick reference and “not integrated” list. |
+| **docs/BEST_MODELS_RESEARCH.md** | Detailed research on OCR, detection, inpainting; benchmarks and recommendations. |
+| **docs/OPTIONAL_DEPENDENCIES.md** | craft_det and simple_lama dependency conflicts and workarounds. |
+| **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, hf_object_det); none_ocr usage; detection vs OCR coverage table. |
+| **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
+| **Original README** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) – base setup, Windows/Mac, translators, AMD ROCm/ZLUDA. |
+| **doc/加别的翻译器.md** | How to add new translators. |
+
+---
+
+If a module is missing from the dropdown or fails to load, check the console/log for import errors and install the dependencies listed in the tables above. For quality-focused choices, use **docs/QUALITY_RANKINGS.md** and **docs/MANHUA_BEST_SETTINGS.md**.

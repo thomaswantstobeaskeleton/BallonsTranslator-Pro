@@ -501,9 +501,11 @@ class TextBlock:
         else:
             self.alignment = TextAlignment.Center
 
-    def recalulate_stroke_width(self, color_diff_tol = 15, stroke_width: float = 0.2):
+    def recalulate_stroke_width(self, color_diff_tol=15, stroke_width: float = 0.2, min_stroke_on_bg: float = 0.12):
+        """Set stroke so text is readable on background. When fg/bg are similar (e.g. text on art),
+        use a minimum outline so text outside bubbles still has an outline."""
         if color_difference(*self.get_font_colors()) < color_diff_tol:
-            self.stroke_width = 0.
+            self.stroke_width = max(0.0, min_stroke_on_bg)  # was 0.; use min outline for text on similar bg
         else:
             self.stroke_width = stroke_width
 
@@ -603,8 +605,24 @@ def examine_textblk(blk: TextBlock, im_w: int, im_h: int, sort: bool = False) ->
     blk.angle = rotation_angle
     if vertical:
         blk.angle -= 90
-    if abs(blk.angle) < 3:
+    # Force horizontal text to 0° so it never renders slanted/sideways
+    if not vertical:
         blk.angle = 0
+    elif abs(blk.angle) < 3:
+        blk.angle = 0
+    # Normalize font_size so text fits inside bubbles and rarely overflows.
+    max_dim = max(im_w, im_h)
+    num_lines = max(1, len(lines))
+    if max_dim > 800:
+        scale = 700.0 / max_dim
+        font_size = max(11, min(60, int(round(font_size * scale))))
+    bx1, by1, bx2, by2 = blk.xyxy
+    block_h = by2 - by1
+    if block_h > 0:
+        # ~22% of (block height / num lines) so text stays inside bubble
+        block_based_size = 0.22 * block_h / num_lines
+        font_size = max(font_size, min(60, int(round(block_based_size))))
+    font_size = max(11, min(60, font_size))
     blk.font_size = font_size
     blk.vec = primary_vec
     blk.norm = primary_norm
@@ -636,12 +654,15 @@ def try_merge_textline(blk: TextBlock, blk2: TextBlock, fntsize_tol=1.7, distanc
     l1, l2 = Polygon(blk.lines[-1]), Polygon(blk2.lines[0])
     if not l1.intersects(l2):
         if blk.vertical:
-            if distance_y > 0:
-                return False
             if distance_x > fntsz_avg * 0.8:
                 return False
-            if abs(distance_y) / min(h1, h2) < 0.4:
-                return False
+            # Allow blk2 below blk (distance_y > 0) if gap is small so clipped bottom line merges into one box
+            if distance_y > 0:
+                if distance_y > fntsz_avg * 1.5:
+                    return False
+            else:
+                if abs(distance_y) / min(h1, h2) < 0.4:
+                    return False
         else:
             if distance_x > 0:
                 return False
@@ -717,7 +738,7 @@ def split_textblk(blk: TextBlock):
             current_blk.adjust_bbox(with_bbox=False)
     return textblock_splitted, sub_blk_list
 
-def group_output(blks, lines, im_w, im_h, mask=None, sort_blklist=True, canvas=None) -> List[TextBlock]:
+def group_output(blks, lines, im_w, im_h, mask=None, sort_blklist=True, canvas=None, merge_fntsize_tol_hor=None, merge_fntsize_tol_ver=None) -> List[TextBlock]:
     blk_list: List[TextBlock] = []
     scattered_lines = {'ver': [], 'hor': []}
     for bbox, cls, conf in zip(*blks):
@@ -798,10 +819,10 @@ def group_output(blks, lines, im_w, im_h, mask=None, sort_blklist=True, canvas=N
     # step3: merge scattered lines, sort textblocks by "grid"
     scattered_lines['ver'].sort(key=lambda blk: blk.center()[0], reverse=True)
     scattered_lines['hor'].sort(key=lambda blk: blk.center()[1])
-    # c = visualize_textblocks(canvas, scattered_lines['hor'])
-    # cv2.imwrite('local_tst.jpg', c)
-    final_blk_list += merge_textlines(scattered_lines['hor'], canvas=canvas, fntsize_tol=2.0)
-    final_blk_list += merge_textlines(scattered_lines['ver'])
+    fntsize_tol_hor = merge_fntsize_tol_hor if merge_fntsize_tol_hor is not None else 2.0
+    fntsize_tol_ver = merge_fntsize_tol_ver if merge_fntsize_tol_ver is not None else 1.7
+    final_blk_list += merge_textlines(scattered_lines['hor'], canvas=canvas, fntsize_tol=fntsize_tol_hor)
+    final_blk_list += merge_textlines(scattered_lines['ver'], fntsize_tol=fntsize_tol_ver)
     if sort_blklist:
         final_blk_list = sort_regions(final_blk_list, )
     for blk in final_blk_list:
@@ -829,6 +850,38 @@ def group_output(blks, lines, im_w, im_h, mask=None, sort_blklist=True, canvas=N
             if keep_blk:
                 _final_blks.append(blk)
         final_blk_list = _final_blks
+
+    # Merge vertical blocks stacked in same column (e.g. main block + clipped bottom fragment)
+    ver_blks = [b for b in final_blk_list if b.vertical and len(b.lines) > 0]
+    if len(ver_blks) >= 2:
+        ver_blks.sort(key=lambda b: b.center()[0], reverse=True)
+        merged_ver = []
+        used = set()
+        for i, a in enumerate(ver_blks):
+            if i in used:
+                continue
+            ax1, ay1, ax2, ay2 = a.xyxy
+            ca_x = (ax1 + ax2) / 2
+            fnt = max(getattr(a, '_detected_font_size', a.font_size), 8)
+            for j, b in enumerate(ver_blks):
+                if j <= i or j in used:
+                    continue
+                bx1, by1, bx2, by2 = b.xyxy
+                cb_x = (bx1 + bx2) / 2
+                if abs(ca_x - cb_x) > fnt * 1.5:
+                    continue
+                gap = by1 - ay2 if by1 >= ay2 else by2 - ay1
+                if 0 <= gap <= fnt * 2.2:
+                    for line in b.lines:
+                        a.lines.append(line)
+                    used.add(j)
+                    a.adjust_bbox(with_bbox=True)
+            merged_ver.append(a)
+        if merged_ver:
+            others = [b for b in final_blk_list if not b.vertical]
+            final_blk_list = others + merged_ver
+            if sort_blklist:
+                final_blk_list = sort_regions(final_blk_list)
 
     for blk in final_blk_list:
         if blk.language != 'ja' and not blk.vertical:

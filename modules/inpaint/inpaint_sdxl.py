@@ -1,0 +1,169 @@
+"""
+SDXL inpainting – 1024×1024 quality-focused inpainting via Hugging Face Diffusers.
+Uses diffusers/stable-diffusion-xl-1.0-inpainting-0.1. Heavier and slower; prefer quality over speed.
+Install: pip install diffusers transformers accelerate
+"""
+import numpy as np
+import cv2
+from typing import List
+
+from ..base import DEVICE_SELECTOR
+from .base import InpainterBase, register_inpainter, TextBlock
+
+_DIFFUSERS_AVAILABLE = False
+try:
+    from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_inpaint import StableDiffusionXLInpaintPipeline
+    import torch
+    from PIL import Image
+    _DIFFUSERS_AVAILABLE = True
+except ImportError:
+    import logging
+    logging.getLogger("BallonTranslator").debug(
+        "SDXL inpainting not available. Install: pip install diffusers transformers accelerate"
+    )
+
+
+if _DIFFUSERS_AVAILABLE:
+
+    @register_inpainter("diffusers_sdxl_inpaint")
+    class DiffusersSDXLInpainter(InpainterBase):
+        """
+        Stable Diffusion XL inpainting (1024). Quality over speed.
+        Uses strength=0.99 and higher step count by default.
+        """
+        inpaint_by_block = False
+        check_need_inpaint = True
+
+        params = {
+            "model_name": {
+                "type": "line_editor",
+                "value": "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
+                "description": "SDXL inpainting model (1024).",
+            },
+            "device": DEVICE_SELECTOR(),
+            "inpaint_size": {
+                "type": "line_editor",
+                "value": 1024,
+                "description": "Max side for SDXL (1024 recommended; 512/768 faster, lower quality).",
+            },
+            "prompt": {
+                "type": "line_editor",
+                "value": "clean background, solid color, no text, seamless",
+                "description": "Prompt for inpainting.",
+            },
+            "negative_prompt": {
+                "type": "line_editor",
+                "value": "text, letters, words, watermark, blurry",
+                "description": "Negative prompt.",
+            },
+            "num_inference_steps": {
+                "type": "line_editor",
+                "value": 40,
+                "description": "Denoising steps (30–50 for quality).",
+            },
+            "strength": {
+                "type": "line_editor",
+                "value": 0.99,
+                "description": "Inpaint strength (0.95–1.0).",
+            },
+            "guidance_scale": {
+                "type": "line_editor",
+                "value": 7.5,
+                "description": "Classifier-free guidance scale.",
+            },
+            "description": "SDXL inpainting 1024 (quality-focused). Install: pip install diffusers accelerate",
+        }
+        _load_model_keys = {"pipeline"}
+
+        def __init__(self, **params) -> None:
+            super().__init__(**params)
+            self.device = self.params["device"]["value"]
+            self.pipeline = None
+            self._model_name = None
+
+        def _load_model(self):
+            model_name = (self.params.get("model_name") or {}).get("value", "diffusers/stable-diffusion-xl-1.0-inpainting-0.1") or "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+            if self.pipeline is not None and self._model_name == model_name:
+                return
+            self._model_name = model_name
+            dtype = torch.float16 if self.device == "cuda" else torch.float32
+            self.pipeline = StableDiffusionXLInpaintPipeline.from_pretrained(model_name, torch_dtype=dtype)
+            self.pipeline = self.pipeline.to(self.device)
+            if self.device == "cuda":
+                try:
+                    self.pipeline.enable_attention_slicing()
+                except Exception:
+                    pass
+
+        def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
+            if img.ndim == 3 and img.shape[2] == 4:
+                img = img[:, :, :3]
+            if mask.ndim == 3:
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            mask_bin = (mask > 127).astype(np.uint8) * 255
+            h, w = img.shape[:2]
+            try:
+                size = 1024
+                vs = self.params.get("inpaint_size", {})
+                if isinstance(vs, dict):
+                    try:
+                        size = max(512, min(1024, int(vs.get("value", 1024))))
+                    except (TypeError, ValueError):
+                        pass
+                pil_img = Image.fromarray(img)
+                pil_mask = Image.fromarray(mask_bin).convert("L")
+                if max(h, w) != size:
+                    scale = size / max(h, w)
+                    new_w = max(64, int(w * scale))
+                    new_h = max(64, int(h * scale))
+                    pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    pil_mask = pil_mask.resize((new_w, new_h), Image.Resampling.NEAREST)
+                prompt = (self.params.get("prompt") or {}).get("value", "clean background, no text") or "clean background, no text"
+                negative = (self.params.get("negative_prompt") or {}).get("value", "text, letters") or "text, letters"
+                steps = 40
+                st = self.params.get("num_inference_steps", {})
+                if isinstance(st, dict):
+                    try:
+                        steps = max(20, min(50, int(st.get("value", 40))))
+                    except (TypeError, ValueError):
+                        pass
+                strength = 0.99
+                sval = self.params.get("strength", {})
+                if isinstance(sval, dict):
+                    try:
+                        strength = max(0.8, min(1.0, float(sval.get("value", 0.99))))
+                    except (TypeError, ValueError):
+                        pass
+                guidance = 7.5
+                gval = self.params.get("guidance_scale", {})
+                if isinstance(gval, dict):
+                    try:
+                        guidance = max(1.0, min(20.0, float(gval.get("value", 7.5))))
+                    except (TypeError, ValueError):
+                        pass
+                out = self.pipeline(
+                    prompt=prompt,
+                    image=pil_img,
+                    mask_image=pil_mask,
+                    negative_prompt=negative,
+                    num_inference_steps=steps,
+                    strength=strength,
+                    guidance_scale=guidance,
+                ).images[0]
+                out = np.array(out)
+                if out.shape[0] != h or out.shape[1] != w:
+                    out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LANCZOS4)
+                return out.astype(np.uint8)
+            except Exception as e:
+                self.logger.error(f"SDXL inpainting failed: {e}")
+                return img.copy()
+
+        def updateParam(self, param_key: str, param_content):
+            super().updateParam(param_key, param_content)
+            if param_key == "device":
+                self.device = self.params["device"]["value"]
+                if self.pipeline is not None:
+                    self.pipeline = self.pipeline.to(self.device)
+            elif param_key == "model_name":
+                self.pipeline = None
+                self._model_name = None

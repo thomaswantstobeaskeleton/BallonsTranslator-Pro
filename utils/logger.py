@@ -37,7 +37,12 @@ class ColoredFormatter(logging.Formatter):
                 )
 
             record.levelname2 = colored("{:<7}".format(record.levelname))
-            record.message2 = colored(record.getMessage())
+            try:
+                record.message2 = colored(record.getMessage())
+            except TypeError:
+                # e.g. transformers passes (FutureWarning,) as args; msg % args then fails
+                record.message2 = colored(record.msg if record.args is None else (record.msg + " " + str(record.args)))
+                record.args = ()  # so parent Formatter.format()'s getMessage() won't raise
 
             asctime2 = datetime.datetime.fromtimestamp(record.created)
             record.asctime2 = termcolor.colored(asctime2, color="green")

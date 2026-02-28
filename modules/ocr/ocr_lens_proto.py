@@ -172,6 +172,10 @@ class OCRLensAPI_exp(OCRBase):
             "value": "",
             "description": 'Proxy (requests format: e.g., http://user:pass@host:port or {"http": ..., "https": ...})',
         },
+        "api_key": {
+            "value": "",
+            "description": "Google API key for Lens (leave empty to skip; do NOT commit real keys to git).",
+        },
         "description": "OCR using Google Lens Protobuf API (requests backend)",
     }
 
@@ -246,7 +250,7 @@ class OCRLensAPI_exp(OCRBase):
         super().__init__(**params)
         self.last_request_time: float = 0
         self._api_url = "https://lensfrontend-pa.googleapis.com/v1/crupload"
-        self._api_key = "AIzaSyDr2UxVnv_U85AbhhY8XSHSIavUW0DC-sY"
+        self._api_key = (self.get_param_value("api_key") or "").strip()
         self._api_headers = {
             "Host": "lensfrontend-pa.googleapis.com",
             "Connection": "keep-alive",

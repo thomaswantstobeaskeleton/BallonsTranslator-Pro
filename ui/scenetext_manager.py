@@ -23,6 +23,15 @@ from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_bloc
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
 
+# Layout tuning: keep text inside bubbles and avoid overflow/tiny text (see layout_textblk)
+LAYOUT_FIT_RATIO = 0.80  # fit text to this fraction of region (strict = no overflow)
+LAYOUT_FIT_RATIO_MIN = 0.50  # minimum scale when fitting (avoid illegible text; was 0.35)
+LAYOUT_MIN_FONT_PT = 10.0  # minimum font size in points (was 7; raise so text stays readable)
+LAYOUT_HEIGHT_PADDING = 1.06  # multiplier for block height (bottom margin)
+LAYOUT_WIDTH_STROKE_FACTOR = 1.28  # width = max line width * this (stroke/outline clearance)
+LAYOUT_SCALE_UP_MAX = 1.4  # allow scaling font up to this when bubble is large and text is short
+LAYOUT_SCALE_UP_FILL = 0.78  # target fill ratio when scaling up in large bubbles
+
 
 class CreateItemCommand(QUndoCommand):
     def __init__(self, blk_item: TextBlkItem, ctrl, parent=None):
@@ -731,6 +740,8 @@ class SceneTextManager(QObject):
         img = self.imgtrans_proj.img_array
         if img is None:
             return
+        im_h, im_w = img.shape[:2]
+        img_area = im_h * im_w
 
         src_is_cjk = is_cjk(pcfg.module.translate_source)
         tgt_is_cjk = is_cjk(pcfg.module.translate_target)
@@ -757,20 +768,52 @@ class SceneTextManager(QObject):
         if not text.strip():
             return
 
+        original_block_area = None  # used later to cap resize for huge blocks
         if mask is None:
-            im_h, im_w = img.shape[:2]
             bounding_rect = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
             if bounding_rect[2] <= 0 or bounding_rect[3] <= 0:
                 blkitem.setPlainText(text)
                 if len(self.pairwidget_list) > blkitem.idx:
                     self.pairwidget_list[blkitem.idx].e_trans.setPlainText(text)
                 return
+            # Constrain only clearly abnormal blocks (>50% image) so normal bubbles keep good size
+            block_area = bounding_rect[2] * bounding_rect[3]
+            original_block_area = block_area
+            if img_area > 0 and block_area > 0.5 * img_area:
+                max_w = max(80, int(0.5 * im_w))
+                max_h = max(60, int(0.5 * im_h))
+                cx = bounding_rect[0] + bounding_rect[2] / 2
+                cy = bounding_rect[1] + bounding_rect[3] / 2
+                bounding_rect = [
+                    int(cx - max_w / 2),
+                    int(cy - max_h / 2),
+                    max_w,
+                    max_h,
+                ]
+                bounding_rect[0] = max(0, min(bounding_rect[0], im_w - max_w))
+                bounding_rect[1] = max(0, min(bounding_rect[1], im_h - max_h))
             if tgt_is_cjk:
                 max_enlarge_ratio = 2.5
             else:
                 max_enlarge_ratio = 3
             enlarge_ratio = min(max(bounding_rect[2] / bounding_rect[3], bounding_rect[3] / bounding_rect[2]) * 1.5, max_enlarge_ratio)
             mask, ballon_area, mask_xyxy, region_rect = extract_ballon_region(img, bounding_rect, enlarge_ratio=enlarge_ratio, cal_region_rect=True)
+            # Shrink text region strictly so text stays well inside bubble (no overflow/clipping)
+            if region_rect is not None and len(region_rect) >= 4:
+                rw, rh = region_rect[2], region_rect[3]
+                if rw > 0 and rh > 0:
+                    ar = min(rw, rh) / max(rw, rh)
+                    if ar >= 0.5:  # round or oval: strict inset so text stays inside curve
+                        inset = 0.72  # 28% shrink
+                    else:  # elongated: margin so text doesn't touch edges
+                        inset = 0.85  # 15% shrink
+                    new_w, new_h = rw * inset, rh * inset
+                    region_rect = [
+                        region_rect[0] + (rw - new_w) / 2,
+                        region_rect[1] + (rh - new_h) / 2,
+                        new_w,
+                        new_h,
+                    ]
         else:
             mask_xyxy = [bounding_rect[0], bounding_rect[1], bounding_rect[0]+bounding_rect[2], bounding_rect[1]+bounding_rect[3]]
         
@@ -803,7 +846,8 @@ class SceneTextManager(QObject):
 
             else:
                 if not src_is_cjk:
-                    resize_ratio_ballon = max(ballon_area / 1.2 / text_area, 0.7)
+                    # Stricter scale-down so text stays inside bubble with margin (avoid overflow)
+                    resize_ratio_ballon = max(ballon_area / 1.70 / text_area, 0.4)
                     if ref_src_lines:
                         _, src_width = blkitem.blk.normalizd_width_list(normalize=False)
                         resize_ratio_src = src_width / (sum(wl_list) + max((len(wl_list) - 1 - len(blkitem.blk.lines_array())), 0) * delimiter_len)
@@ -813,11 +857,23 @@ class SceneTextManager(QObject):
                 elif not blkitem.blk.src_is_vertical and ref_src_lines:
                     _, src_width = blkitem.blk.normalizd_width_list(normalize=False)
                     resize_ratio_src = src_width / (sum(wl_list) + max((len(wl_list) - 1 - len(blkitem.blk.lines_array())), 0) * delimiter_len)
-                    resize_ratio = max(resize_ratio_src * 1.5, 0.5)
-                resize_ratio = min(max(resize_ratio, 0.6), 1)
+                    resize_ratio = max(resize_ratio_src * 1.5, 0.4)
+                # Minimum scale so text fits but isn't too small; only cap for truly huge blocks
+                resize_ratio = min(max(resize_ratio, 0.5), 1.0)
+                area_for_cap = (original_block_area if original_block_area is not None else bounding_rect[2] * bounding_rect[3])
+                if img_area > 0 and area_for_cap > 0.5 * img_area:
+                    resize_ratio = min(resize_ratio, 0.5)
+                # When region is much larger than text: scale UP so short text in big bubbles is readable (was: cap only)
+                if region_rect is not None and len(region_rect) >= 4 and text_area > 0:
+                    region_area = region_rect[2] * region_rect[3]
+                    if region_area > 2.5 * text_area:
+                        scale_up = np.sqrt(LAYOUT_SCALE_UP_FILL * region_area / text_area)
+                        scale_up = min(scale_up, LAYOUT_SCALE_UP_MAX)
+                        resize_ratio = max(resize_ratio, min(scale_up, LAYOUT_SCALE_UP_MAX))
 
         if resize_ratio != 1:
-            new_font_size = blk_font.pointSizeF() * resize_ratio   
+            new_font_size = max(1.0, blk_font.pointSizeF() * resize_ratio)
+            new_font_size = max(new_font_size, LAYOUT_MIN_FONT_PT)
             blk_font.setPointSizeF(new_font_size)
             wl_list = (np.array(wl_list, np.float64) * resize_ratio).astype(np.int32).tolist()
             line_height = int(line_height * resize_ratio)
@@ -858,14 +914,25 @@ class SceneTextManager(QObject):
             tgt_is_cjk=tgt_is_cjk,
             ref_src_lines=ref_src_lines
         )
+        if not (new_text and new_text.strip()):
+            return
 
-        # font size post adjustment
+        # font size post adjustment: force text to stay inside bubble/region
         post_resize_ratio = 1
         if adaptive_fntsize:
             downscale_constraint = 0.5
             w = xywh[2]
             post_resize_ratio = np.clip(max(region_rect[2] / w, downscale_constraint), 0, 1)
             resize_ratio *= post_resize_ratio
+        elif region_rect is not None and len(region_rect) >= 4:
+            # If laid-out text overflows region, scale down so it fits inside bubble with margin
+            rw, rh = region_rect[2], region_rect[3]
+            w, h = xywh[2], xywh[3]
+            if rw > 0 and rh > 0 and (w > rw or h > rh):
+                fit_ratio = min(rw / w, rh / h) * LAYOUT_FIT_RATIO
+                fit_ratio = max(fit_ratio, LAYOUT_FIT_RATIO_MIN)
+                post_resize_ratio = fit_ratio
+                resize_ratio *= post_resize_ratio
 
         if post_resize_ratio != 1:
             cx, cy = xywh[0] + xywh[2] / 2, xywh[1] + xywh[3] / 2
@@ -873,7 +940,10 @@ class SceneTextManager(QObject):
             xywh = [int(cx - w / 2), int(cy - h / 2), int(w), int(h)]
 
         if resize_ratio != 1:
-            new_font_size = blkitem.font().pointSizeF() * resize_ratio
+            new_font_size = max(1.0, blkitem.font().pointSizeF() * resize_ratio)
+            if new_font_size < LAYOUT_MIN_FONT_PT:
+                new_font_size = LAYOUT_MIN_FONT_PT
+                resize_ratio = new_font_size / max(1.0, blkitem.font().pointSizeF())
             blkitem.textCursor().clearSelection()
             blkitem.setFontSize(new_font_size)
             blk_font.setPointSizeF(new_font_size)
@@ -883,13 +953,25 @@ class SceneTextManager(QObject):
         
         ffmt = QFontMetricsF(blk_font)
         maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
-        blkitem.set_size(maxw * 1.5, xywh[3], set_layout_maxsize=True)
+        # Height: ensure minimum (single-line/descenders) and add bottom padding so last line doesn't sit on edge
+        layout_h = max(int(xywh[3]), line_height)
+        layout_h = int(layout_h * LAYOUT_HEIGHT_PADDING)
+        blkitem.set_size(maxw * LAYOUT_WIDTH_STROKE_FACTOR, layout_h, set_layout_maxsize=True)
         blkitem.setPlainText(new_text)
+        blkitem._ensure_transparent_document_background()
         if len(self.pairwidget_list) > blkitem.idx:
             self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
         if restore_charfmts:
             self.restore_charfmts(blkitem, text, new_text, char_fmts)
         blkitem.squeezeBoundingRect()
+        # Clamp block to image bounds so text never draws outside the panel
+        abr = blkitem.absBoundingRect(qrect=True)
+        x, y, w, h = abr.x(), abr.y(), abr.width(), abr.height()
+        if w > 0 and h > 0:
+            x2 = max(0, min(x, im_w - w))
+            y2 = max(0, min(y, im_h - h))
+            if x2 != x or y2 != y:
+                blkitem.setRect([x2, y2, w, h], repaint=True)
         return True
     
     def restore_charfmts(self, blkitem: TextBlkItem, text: str, new_text: str, char_fmts: List[QTextCharFormat]):

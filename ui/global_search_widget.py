@@ -29,7 +29,10 @@ class HTMLDelegate( QStyledItemDelegate ):
         options = QStyleOptionViewItem(option)
         self.initStyleOption(options, index)
         painter.save()
-        self.doc.setDefaultFont(options.font)
+        font = options.font
+        if font.pointSizeF() <= 0:
+            font.setPointSizeF(1.0)
+        self.doc.setDefaultFont(font)
         self.doc.setHtml(options.text)
         
         options.text = ''
@@ -53,7 +56,7 @@ def get_rstitem_renderhtml(text: str, span: Tuple[int, int], font: QFont = None)
     doc = QTextDocument()
     if font is None:
         font = doc.defaultFont()
-    font.setPointSizeF(SEARCHRST_FONTSIZE)
+    font.setPointSizeF(max(1.0, SEARCHRST_FONTSIZE))
     doc.setDefaultFont(font)
     doc.setPlainText(text.replace('\n', ' '))
     cursor = QTextCursor(doc)
@@ -92,7 +95,7 @@ class PageSeachResultItem(QStandardItem):
         self.setText(str(result_counter) + ' - ' + pagename)
         self.blkid2match = blkid2match
         font = self.font()
-        font.setPointSizeF(SEARCHRST_FONTSIZE)
+        font.setPointSizeF(max(1.0, SEARCHRST_FONTSIZE))
         self.setFont(font)
         self.setEditable(False)
 
@@ -124,7 +127,7 @@ class SearchResultModel(QStandardItemModel):
         if role == Qt.ItemDataRole.SizeHintRole:
             size = QSize()
             item = self.itemFromIndex(index)
-            size.setHeight(item.font().pointSize()+14)
+            size.setHeight(max(1, item.font().pointSize()) + 14)
             return size
         else:
             return super().data(index, role)
@@ -143,7 +146,7 @@ class SearchResultTree(QTreeView):
         self.root_item = sm.invisibleRootItem()
         self.setModel(sm)
         font = self.font()
-        font.setPointSizeF(SEARCHRST_FONTSIZE)
+        font.setPointSizeF(max(1.0, SEARCHRST_FONTSIZE))
         self.setFont(font)
         self.setUniformRowHeights(True)
         self.selected: SearchResultItem = None

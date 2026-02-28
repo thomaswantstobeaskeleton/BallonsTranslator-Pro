@@ -303,7 +303,7 @@ class FontFormatPanel(Widget):
         self.fontStrokeLabel = SizeControlLabel(self, 0, self.tr("Stroke"))
         self.fontStrokeLabel.setObjectName("fontStrokeLabel")
         font = self.fontStrokeLabel.font()
-        font.setPointSizeF(shared.CONFIG_FONTSIZE_CONTENT * 0.95)
+        font.setPointSizeF(max(1.0, shared.CONFIG_FONTSIZE_CONTENT * 0.95))
         self.fontStrokeLabel.setFont(font)
         self.fontStrokeLabel.size_ctrl_changed.connect(self.strokeWidthBox.changeByDelta)
         self.fontStrokeLabel.btn_released.connect(lambda : self.on_param_changed('stroke_width', self.strokeWidthBox.value()))

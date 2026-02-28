@@ -114,7 +114,7 @@ def make_deepl_request(url, postDataStr, proxy_mounts):  # Изменено: pro
             LOGGER.error(
                 f"Request failed with status code: {resp.status_code}, response text: {resp.text}"
             )
-            return {"error": resp.text}
+            return {"error": resp.text, "status_code": resp.status_code}
         try:
             return resp.json()
         except json.JSONDecodeError:
@@ -188,6 +188,9 @@ def translate_core(
         text, tagHandling in ("html", "xml"), proxy_mounts
     )  # Изменено: proxy_mounts
     if "error" in split_result_json:
+        status = split_result_json.get("status_code", 0)
+        if status == 429:
+            return {"code": 429, "message": split_result_json["error"]}
         return {"code": 503, "message": split_result_json["error"]}
 
     if sourceLang == "auto" or not sourceLang:
@@ -271,6 +274,9 @@ def translate_core(
     )  # Изменено: proxy_mounts
 
     if "error" in translate_result_json:
+        status = translate_result_json.get("status_code", 0)
+        if status == 429:
+            return {"code": 429, "message": translate_result_json["error"]}
         return {"code": 503, "message": translate_result_json["error"]}
 
     deeplx_result = deepl_response_to_deeplx(translate_result_json)
@@ -309,6 +315,7 @@ class DeepLX(BaseTranslator):
     cht_require_convert = True
     params: Dict = {
         "delay": 0.0,
+        "429_retry_seconds": 60.0,
         "proxy": {
             "value": "",
             "description": "Proxy address (e.g., http(s)://user:password@host:port or socks4/5://user:password@host:port)",
@@ -393,17 +400,39 @@ class DeepLX(BaseTranslator):
         target = self.lang_map[self.lang_target]
         proxy_mounts = self.proxy  # Используем property proxy, чтобы получить mounts
 
+        delay_sec = float(self.params.get("delay", {}).get("value", 0) or 0)
+        retry_429_sec = float(self.params.get("429_retry_seconds", {}).get("value", 60) or 60)
+        retry_429_sec = max(10.0, min(300.0, retry_429_sec))
+
         for text_block in src_list:
             translated_lines = []
             lines = text_block.split("\n")
             for line in lines:
-                try:
-                    tl = translate(
-                        line, source, target, proxy_mounts=proxy_mounts
-                    )  # Передаем proxy_mounts
-                    translated_lines.append(tl)
-                except Exception as e:
-                    LOGGER.error(f"Translation failed for line: '{line}'. Error: {e}")
-                    translated_lines.append("")
+                if delay_sec > 0:
+                    time.sleep(delay_sec)
+                last_err = None
+                for attempt in range(2):
+                    try:
+                        tl = translate(
+                            line, source, target, proxy_mounts=proxy_mounts
+                        )
+                        translated_lines.append(tl)
+                        break
+                    except Exception as e:
+                        is_429 = (
+                            "429" in str(e)
+                            or "Too many requests" in str(e).lower()
+                        )
+                        if is_429 and attempt == 0:
+                            LOGGER.warning(
+                                f"DeepL 429 Too Many Requests; waiting {retry_429_sec:.0f}s then retrying."
+                            )
+                            time.sleep(retry_429_sec)
+                        else:
+                            LOGGER.error(
+                                f"Translation failed for line: '{line}'. Error: {e}"
+                            )
+                            translated_lines.append("")
+                            break
             result.append("\n".join(translated_lines))
         return result

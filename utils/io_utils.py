@@ -1,4 +1,4 @@
-import json, os, sys, time, io
+import json, os, re, sys, time, io
 import os.path as osp
 from pathlib import Path
 import importlib
@@ -230,6 +230,56 @@ def show_img_by_dict(imgdicts):
     for keyname in imgdicts.keys():
         cv2.imshow(keyname, imgdicts[keyname])
     cv2.waitKey(0)
+
+def normalize_line_breaks(text: str) -> str:
+    """Replace HTML <br> tags with newline. Use for OCR and translation output."""
+    if not text or not isinstance(text, str):
+        return text
+    return re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+
+
+def trim_ocr_repetition(text: str, max_repeat: int = 2, max_iterations: int = 15) -> str:
+    """Trim stuck repetition in OCR output (e.g. Surya repeating '成都是一个人' many times)."""
+    if not text or not isinstance(text, str) or len(text) < 4:
+        return text
+    text = text.rstrip()
+    for _ in range(max_iterations):
+        changed = False
+        # Trim trailing repetition: find shortest unit repeating too much at the end
+        for unit_len in range(1, min(len(text) // 2, 31)):
+            unit = text[-unit_len:]
+            if not unit.strip():
+                continue
+            count = 0
+            i = len(text)
+            while i >= unit_len and text[i - unit_len:i] == unit:
+                count += 1
+                i -= unit_len
+            if count > max_repeat:
+                text = text[:i + unit_len * max_repeat].rstrip()
+                changed = True
+                break
+        # Collapse long runs of the same phrase in the middle (e.g. "A，A，A，A，A，" -> "A，A，")
+        for unit_len in range(2, min(20, len(text) // 4)):
+            i = 0
+            while i <= len(text) - unit_len:
+                unit = text[i:i + unit_len]
+                if unit.strip():
+                    run_end = i + unit_len
+                    while run_end + unit_len <= len(text) and text[run_end:run_end + unit_len] == unit:
+                        run_end += unit_len
+                    run_count = (run_end - i) // unit_len
+                    if run_count > max_repeat:
+                        text = text[:i] + unit * max_repeat + text[run_end:]
+                        changed = True
+                        break
+                i += 1
+            if changed:
+                break
+        if not changed:
+            break
+    return text
+
 
 def text_is_empty(text) -> bool:
     if isinstance(text, str):

@@ -6,7 +6,7 @@ from qtpy.QtWidgets import QGraphicsItem, QWidget, QGraphicsSceneHoverEvent, QGr
 from qtpy.QtCore import Qt, QRect, QRectF, QPointF, Signal, QSizeF
 from qtpy.QtGui import (QGradient, QKeyEvent, QFont, QTextCursor, QPixmap, QPainterPath, QTextDocument, 
                        QInputMethodEvent, QPainter, QPen, QColor, QTextCharFormat, QTextDocument, QLinearGradient, 
-                       QBrush, QPalette, QAbstractTextDocumentLayout)
+                       QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat)
 
 from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingType
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
@@ -69,6 +69,7 @@ class TextBlkItem(QGraphicsTextItem):
 
         self.layout: Union[VerticalTextDocumentLayout, HorizontalTextDocumentLayout] = None
         self.document().setDocumentMargin(0)
+        self._ensure_transparent_document_background()
         self.initTextBlock(blk, set_format=set_format)
         self.setBoundingRegionGranularity(0)
         self.setFlags(QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable)
@@ -87,6 +88,18 @@ class TextBlkItem(QGraphicsTextItem):
         
     def is_editting(self):
         return self.textInteractionFlags() == Qt.TextInteractionFlag.TextEditorInteraction
+
+    def _ensure_transparent_document_background(self):
+        """Force document and root frame to transparent so no gray box appears behind text."""
+        doc = self.document()
+        doc.setDefaultStyleSheet("body, html { background-color: transparent; }")
+        try:
+            root = doc.rootFrame()
+            fmt = root.frameFormat()
+            fmt.setBackground(QBrush(Qt.GlobalColor.transparent))
+            root.setFrameFormat(fmt)
+        except Exception:
+            pass
 
     def on_content_changed(self):
         if (self.hasFocus() or self.is_formatting) and not self.pre_editing and not self.block_change_signal:   
@@ -127,7 +140,18 @@ class TextBlkItem(QGraphicsTextItem):
         doc = QTextDocument()
         doc.setUndoRedoEnabled(False)
         doc.setDocumentMargin(self.document().documentMargin())
-        doc.setDefaultFont(self.document().defaultFont())
+        doc.setDefaultStyleSheet("body, html { background-color: transparent; }")
+        try:
+            root = doc.rootFrame()
+            fmt = root.frameFormat()
+            fmt.setBackground(QBrush(Qt.GlobalColor.transparent))
+            root.setFrameFormat(fmt)
+        except Exception:
+            pass
+        default_font = self.document().defaultFont()
+        if default_font.pointSizeF() <= 0:
+            default_font.setPointSizeF(1.0)
+        doc.setDefaultFont(default_font)
         doc.setHtml(self.document().toHtml())
         doc.setDefaultTextOption(self.document().defaultTextOption())
         cursor = QTextCursor(doc)
@@ -245,6 +269,7 @@ class TextBlkItem(QGraphicsTextItem):
             self.setGradientEnabled(True)
         self.setShadow(font_fmt, repaint=False)
         self.setStrokeWidth(font_fmt.stroke_width, repaint_background=False)
+        self._ensure_transparent_document_background()
         self.repaint_background()
 
     def setCenterTransform(self):
@@ -453,15 +478,26 @@ class TextBlkItem(QGraphicsTextItem):
             return self.scale()
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget) -> None:
-        # subpixel antialiasing is enabled for super().paint upon drawing on some non-transparent background https://github.com/dmMaze/BallonsTranslator/issues/919
-        # which can be avoided by calling super().paint first, but it results in disappeared background in editting mode
-        # so the checking logic lies here
-        
+        # Clear any default gray/opaque background only when not editing (editing draws accessories first; clearing would wipe them)
+        if not self.is_editting():
+            br = self.boundingRect()
+            painter.save()
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(br, Qt.GlobalColor.transparent)
+            painter.restore()
         if self.is_editting():
             self._draw_accessories(painter)
-
         option.state = QStyle.State_None
-        super().paint(painter, option, widget)
+        # Prevent base class from filling with palette Base (e.g. brown/beige on some themes)
+        painter.save()
+        painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+        painter.setPen(Qt.PenStyle.NoPen)
+        pal = QPalette(option.palette)
+        pal.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
+        option.palette = pal
+        if not self.document().isEmpty():
+            super().paint(painter, option, widget)
+        painter.restore()
 
         if not self.is_editting():
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
@@ -641,7 +677,8 @@ class TextBlkItem(QGraphicsTextItem):
         font = self.document().defaultFont()
         
         font.setFamily(ffmat.font_family)
-        font.setPointSizeF(ffmat.size_pt)
+        pt = ffmat.size_pt
+        font.setPointSizeF(max(1.0, pt) if pt <= 0 else pt)
         font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.NoSubpixelAntialias)
 
@@ -722,7 +759,10 @@ class TextBlkItem(QGraphicsTextItem):
         cursor.clearSelection()
         self.setTextCursor(cursor)
         if doc_is_empty:
-            self.document().setDefaultFont(cursor.blockCharFormat().font())
+            font = cursor.blockCharFormat().font()
+            if font.pointSizeF() <= 0:
+                font.setPointSizeF(1.0)
+            self.document().setDefaultFont(font)
 
     def _before_set_ffmt(self, set_selected: bool, restore_cursor: bool):
         self.is_formatting = True
@@ -777,6 +817,8 @@ class TextBlkItem(QGraphicsTextItem):
             cursor.selectionEnd() == lastpos:
             font = doc.defaultFont()
             font.setFamily(value)
+            if font.pointSizeF() <= 0:
+                font.setPointSizeF(1.0)
             doc.setDefaultFont(font)
 
         sel_start = cursor.selectionStart()
@@ -795,8 +837,12 @@ class TextBlkItem(QGraphicsTextItem):
                     cfmt = fragment.charFormat()
                     under_line = cfmt.fontUnderline()
                     cfont = cfmt.font()
-                    font = QFont(value, cfont.pointSize(), cfont.weight(), cfont.italic())
-                    font.setPointSizeF(cfont.pointSizeF())
+                    pt_int = cfont.pointSize()
+                    pt_float = cfont.pointSizeF()
+                    pt_int = max(1, pt_int) if pt_int <= 0 else pt_int
+                    pt_float = max(1.0, pt_float) if pt_float <= 0 else pt_float
+                    font = QFont(value, pt_int, cfont.weight(), cfont.italic())
+                    font.setPointSizeF(pt_float)
                     font.setBold(font.bold())
                     font.setWordSpacing(cfont.wordSpacing())
                     font.setLetterSpacing(cfont.letterSpacingType(), cfont.letterSpacing())
@@ -943,7 +989,7 @@ class TextBlkItem(QGraphicsTextItem):
             while not it.atEnd():
                 fragment = it.fragment()
                 old_font_size = fragment.charFormat().fontPointSize()
-                new_font_size = round(old_font_size * value,2)
+                new_font_size = max(1.0, round(old_font_size * value, 2)) if old_font_size <= 0 or old_font_size * value <= 0 else round(old_font_size * value, 2)
                 cfmt = fragment.charFormat()
                 cfmt.setFontPointSize(new_font_size)
                 pos1 = fragment.position()
@@ -977,7 +1023,8 @@ class TextBlkItem(QGraphicsTextItem):
                 self.setPadding(fs * (self.fontformat.stroke_width + 0.05) / 2)
             self.layout.relayout_on_changed = True
         cfmt = QTextCharFormat()
-        cfmt.setFontPointSize(value)
+        pt = max(1.0, value) if value <= 0 else value
+        cfmt.setFontPointSize(pt)
         self.set_cursor_cfmt(cursor, cfmt, True)
         self.layout.relayout_on_changed = True
         self.layout.reLayoutEverything()

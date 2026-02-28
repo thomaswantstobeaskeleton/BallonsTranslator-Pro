@@ -173,7 +173,7 @@ class ParamNameLabel(QLabel):
             self.setAlignment(alignment)
 
         font = self.font()
-        font.setPointSizeF(CONFIG_FONTSIZE_CONTENT-2)
+        font.setPointSizeF(max(1.0, CONFIG_FONTSIZE_CONTENT - 2))
         self.setFont(font)
         self.setText(param_name)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)

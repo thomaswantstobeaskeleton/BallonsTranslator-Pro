@@ -8,13 +8,39 @@ from .exceptions import InvalidSourceOrTargetLanguage, TranslatorSetupFailure, M
 from utils.textblock import TextBlock
 from ..base import BaseModule, DEVICE_SELECTOR
 from utils.registry import Registry
-from utils.io_utils import text_is_empty
+from utils.io_utils import text_is_empty, normalize_line_breaks
 from utils.logger import logger as LOGGER
 
 TRANSLATORS = Registry('translators')
 register_translator = TRANSLATORS.register_module
 
 PROXY = urllib.request.getproxies()
+
+
+def sanitize_translation_text(text: str) -> str:
+    """Normalize HTML line breaks and trim excessive trailing repetition from LLM/API output."""
+    if not text or not isinstance(text, str):
+        return text
+    # Unescape literal \n and \r\n from API (e.g. "Mortal\nworld" as two chars -> real newline)
+    text = text.replace("\\n", "\n").replace("\\r\\n", "\n").replace("\\r", "\n")
+    text = normalize_line_breaks(text)
+    # Trim excessive trailing repetition (e.g. "one one one one one" or "一个一个..." from stuck generation)
+    text = text.rstrip()
+    if len(text) < 4:
+        return text
+    max_repeat = 3  # allow at most this many repetitions of the same unit at the end
+    for unit_len in range(1, min(len(text) // 2, 21)):  # unit from 1 to ~20 chars
+        unit = text[-unit_len:]
+        if not unit.strip():  # skip all-whitespace units
+            continue
+        count = 0
+        i = len(text)
+        while i >= unit_len and text[i - unit_len:i] == unit:
+            count += 1
+            i -= unit_len
+        if count > max_repeat:
+            return text[:i + unit_len * max_repeat].rstrip()
+    return text
 
 LANGMAP_GLOBAL = {
     'Auto': '',
@@ -207,7 +233,7 @@ class BaseTranslator(BaseModule):
             callback(translations = translations, textblocks = textblk_lst, translator = self)
 
         for tr, blk in zip(translations, textblk_lst):
-            blk.translation = tr
+            blk.translation = sanitize_translation_text(tr)
 
     def supported_languages(self) -> List[str]:
         return self.valid_lang_list

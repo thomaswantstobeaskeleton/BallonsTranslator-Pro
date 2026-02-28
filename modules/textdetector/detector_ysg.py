@@ -127,9 +127,16 @@ class YSGYoloDetector(TextDetectorBase):
         valid_labels = set(self.get_valid_labels())
         valid_ids = [idx for idx, name in result.names.items() if name in valid_labels]
 
+        # If none of the YOLO class names match our configured labels (e.g. using a
+        # generic bubble model with different class names), fall back to accepting
+        # all classes instead of dropping everything.
+        if not valid_ids and len(result.names) > 0:
+            valid_ids = list(result.names.keys())
+
         mask = np.zeros_like(img[..., 0])
         if not valid_ids:
-            return [], mask
+            # No detections from the model at all.
+            return mask, []
 
         im_h, im_w = img.shape[:2]
         detected_items = []

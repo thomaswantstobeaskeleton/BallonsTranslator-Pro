@@ -77,8 +77,19 @@ class LLM_API_Translator(BaseTranslator):
         },
         "system_prompt": {
             "type": "editor",
-            "value": 'You are an expert translator. Your task is to accurately translate the given text snippets. You MUST provide the output strictly in the specified JSON format, without any additional explanations or markdown formatting. The JSON object must have a single key \'translations\', which is a list of objects, each with an \'id\' (integer) and a \'translation\' (string).\n\nExample Output Schema:\n{"translations": [{"id": 1, "translation": "Translated text here."}]}',
-            "description": "System message to instruct the LLM on its role and required output format.",
+            "value": (
+                "You are an expert translator for comics and dialogue. Translate the given text snippets naturally and concisely. "
+                "Use consistent terminology for the same concept (e.g. stick to one term for recurring ideas). "
+                "Output MUST be valid JSON only: a single object with key 'translations', a list of objects with 'id' (integer) and 'translation' (string). "
+                "No markdown, no code fences, no extra text.\n"
+                "Example: {\"translations\": [{\"id\": 1, \"translation\": \"Translated text.\"}]}"
+            ),
+            "description": "System message for the LLM. For z-ai/glm-4.5-air and similar: keep it short; emphasize JSON-only output and consistent terms.",
+        },
+        "keyword_replacements": {
+            "type": "editor",
+            "value": "",
+            "description": "Post-translation word substitutions (one per line). Format: original -> replacement. Whole-word only, e.g. 'powers' becomes 'abilities' but 'superpowers' is unchanged. Add more lines as needed.",
         },
         "invalid repeat count": {
             "value": 2,
@@ -111,6 +122,10 @@ class LLM_API_Translator(BaseTranslator):
         "retry timeout": {
             "value": 15,
             "description": "Timeout between retry attempts (seconds).",
+        },
+        "rate limit delay": {
+            "value": 45,
+            "description": "Extra wait (seconds) when API returns 429 rate limit, then retry. Increase if free-tier limits persist.",
         },
         "proxy": {
             "value": "",
@@ -172,6 +187,8 @@ class LLM_API_Translator(BaseTranslator):
                 endpoint = "https://api.x.ai/v1"
 
         proxy = self.proxy
+        # Timeout: avoid indefinite hang; connection 30s, read 120s for long LLM responses
+        timeout = httpx.Timeout(30.0, read=120.0)
         http_client = None
         if proxy:
             try:
@@ -179,14 +196,14 @@ class LLM_API_Translator(BaseTranslator):
                     "http://": httpx.HTTPTransport(proxy=proxy),
                     "https://": httpx.HTTPTransport(proxy=proxy),
                 }
-                http_client = httpx.Client(mounts=proxy_mounts)
+                http_client = httpx.Client(mounts=proxy_mounts, timeout=timeout)
             except Exception as e:
                 self.logger.error(
                     f"Failed to initialize proxy '{proxy}': {e}. Proceeding without proxy."
                 )
-                http_client = httpx.Client()
+                http_client = httpx.Client(timeout=timeout)
         else:
-            http_client = httpx.Client()
+            http_client = httpx.Client(timeout=timeout)
 
         masked_key = (
             api_key_to_use[:4] + "..." + api_key_to_use[-4:]
@@ -260,6 +277,10 @@ class LLM_API_Translator(BaseTranslator):
         return int(self.get_param_value("retry timeout"))
 
     @property
+    def rate_limit_delay(self) -> int:
+        return max(15, int(self.get_param_value("rate limit delay") or 45))
+
+    @property
     def proxy(self) -> str:
         return self.get_param_value("proxy")
 
@@ -302,6 +323,34 @@ class LLM_API_Translator(BaseTranslator):
         )
 
         yield prompt, len(queries)
+
+    def _translate_single_item_fallback(
+        self, src_list: List[str], to_lang: str, error_placeholder: str
+    ) -> List[str]:
+        """When batch request fails after retries, try translating each snippet one-by-one."""
+        results = []
+        for src in src_list:
+            self._respect_delay()
+            try:
+                for prompt, num_src in self._assemble_prompts([src], to_lang=to_lang):
+                    parsed = self._request_translation(prompt)
+                    if (
+                        parsed
+                        and parsed.translations
+                        and len(parsed.translations) >= 1
+                    ):
+                        results.append(
+                            self._apply_keyword_substitutions(
+                                parsed.translations[0].translation
+                            )
+                        )
+                    else:
+                        results.append(error_placeholder)
+                    break
+            except Exception:
+                results.append(error_placeholder)
+            time.sleep(max(0, self.global_delay))
+        return results
 
     def _respect_delay(self):
         current_time = time.time()
@@ -382,6 +431,102 @@ class LLM_API_Translator(BaseTranslator):
         self.logger.error("All available API keys are currently rate-limited.")
         return None
 
+    def _get_keyword_replacements(self) -> List[tuple]:
+        """Parse keyword_replacements param into list of (original, replacement) for whole-word substitution."""
+        raw = self.get_param_value("keyword_replacements") or ""
+        out = []
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for sep in ("->", "→", "=", ":"):
+                if sep in line:
+                    parts = line.split(sep, 1)
+                    if len(parts) == 2:
+                        k, v = parts[0].strip(), parts[1].strip()
+                        if k and v:
+                            out.append((k, v))
+                        break
+        return out
+
+    def _apply_keyword_substitutions(self, text: str) -> str:
+        """Apply keyword_replacements to text (whole-word match)."""
+        if not text:
+            return text
+        for original, replacement in self._get_keyword_replacements():
+            # Whole-word: \b so "powers" matches but "superpowers" does not
+            text = re.sub(r"\b" + re.escape(original) + r"\b", replacement, text)
+        return text
+
+    def _first_json_object(self, s: str) -> str:
+        """Extract the first complete {...} object (brace-balanced). Handles 'Extra data' when model returns concatenated JSON."""
+        start = s.find("{")
+        if start == -1:
+            return s
+        depth = 0
+        for i in range(start, len(s)):
+            if s[i] == "{":
+                depth += 1
+            elif s[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[start : i + 1]
+        return s[start:]
+
+    def _repair_json_unescaped_quotes(self, s: str) -> str:
+        """Escape unescaped double-quotes inside \"translation\": \"...\" values so json.loads can parse."""
+        out = []
+        i = 0
+        key = '"translation": "'
+        while i < len(s):
+            if s[i:i + len(key)] == key:
+                out.append(key)
+                i += len(key)
+                while i < len(s):
+                    if s[i] == "\\":
+                        out.append(s[i])
+                        i += 1
+                        if i < len(s):
+                            out.append(s[i])
+                            i += 1
+                        continue
+                    if s[i] == '"':
+                        j = i + 1
+                        while j < len(s) and s[j] in " \t\n\r":
+                            j += 1
+                        if j < len(s) and s[j] in "},]":
+                            out.append('"')
+                            i += 1
+                            break
+                        out.append('\\"')
+                        i += 1
+                        continue
+                    out.append(s[i])
+                    i += 1
+                continue
+            out.append(s[i])
+            i += 1
+        return "".join(out)
+
+    def _extract_translations_from_broken_json(self, raw: str) -> List[dict]:
+        """Extract id/translation pairs when JSON is malformed (e.g. unescaped \" inside strings)."""
+        out = []
+        patterns = [
+            (re.compile(r'"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"(.*?)"\s*}\s*(?:,\s*|\s*])', re.DOTALL), True),   # id first
+            (re.compile(r'"translation"\s*:\s*"(.*?)"\s*,\s*"id"\s*:\s*(\d+)\s*}\s*(?:,\s*|\s*])', re.DOTALL), False),  # translation first
+        ]
+        for pattern, id_first in patterns:
+            for m in pattern.finditer(raw):
+                if id_first:
+                    tid, text = int(m.group(1)), m.group(2)
+                else:
+                    text, tid = m.group(1), int(m.group(2))
+                text = text.replace("\\\"", "\"").replace("\\\\", "\\")
+                out.append({"id": tid, "translation": text})
+            if out:
+                break
+        return out if out else []
+
     def _request_translation(self, prompt: str) -> Optional[TranslationResponse]:
         current_api_key = "lm-studio"
         if self.provider != "LLM Studio":
@@ -433,8 +578,26 @@ class LLM_API_Translator(BaseTranslator):
         try:
             completion = self.client.chat.completions.create(**api_args)
         except Exception as e:
-            self.logger.error(f"API request failed: {e}")
-            raise
+            err_str = str(e).lower()
+            # Some models (e.g. StepFun via OpenRouter) don't support response_format json_object; retry without it
+            if (
+                self.provider in ["OpenAI", "Grok", "Google", "OpenRouter"]
+                and "response_format" in err_str
+                and "not supported" in err_str
+                and "response_format" in api_args
+            ):
+                self.logger.warning(
+                    f"Model does not support json_object response_format. Retrying without it."
+                )
+                api_args = {k: v for k, v in api_args.items() if k != "response_format"}
+                try:
+                    completion = self.client.chat.completions.create(**api_args)
+                except Exception as e2:
+                    self.logger.error(f"API request failed: {e2}")
+                    raise
+            else:
+                self.logger.error(f"API request failed: {e}")
+                raise
 
         if (
             completion.choices
@@ -463,42 +626,89 @@ class LLM_API_Translator(BaseTranslator):
                     data_to_validate
                 )
             except (ValidationError, json.JSONDecodeError) as e:
+                validated_response = None
                 self.logger.warning(
-                    f"Initial Pydantic validation failed: {e}. Attempting to fix simple dictionary or list format."
+                    f"Initial Pydantic validation failed: {e}. Attempting repair and fallbacks."
                 )
-                try:
-                    simple_data = json.loads(json_to_parse)
-                    fixed_translations = []
-
-                    if isinstance(simple_data, dict) and all(
-                        k.isdigit() for k in simple_data.keys()
-                    ):
-                        fixed_translations = [
-                            {"id": int(k), "translation": v}
-                            for k, v in simple_data.items()
-                        ]
-                    elif isinstance(simple_data, list):
-                        fixed_translations = simple_data
-
-                    if fixed_translations:
-                        fixed_data = {"translations": fixed_translations}
-                        self.logger.debug(
-                            f"Transformed simple response to: {fixed_data}"
-                        )
+                # 0) If "Extra data", model likely returned concatenated JSON; use first object only
+                if "Extra data" in str(e):
+                    try:
+                        first_only = self._first_json_object(json_to_parse)
+                        if first_only != json_to_parse:
+                            data_to_validate = json.loads(first_only)
+                            validated_response = TranslationResponse.model_validate(
+                                data_to_validate
+                            )
+                            self.logger.info(
+                                "Parsed first JSON object only (response had extra concatenated data)."
+                            )
+                    except (ValidationError, json.JSONDecodeError):
+                        pass
+                # 1) Try repairing unescaped quotes inside "translation": " values
+                if validated_response is None:
+                    try:
+                        repaired = self._repair_json_unescaped_quotes(json_to_parse)
+                        data_to_validate = json.loads(repaired)
                         validated_response = TranslationResponse.model_validate(
-                            fixed_data
+                            data_to_validate
                         )
                         self.logger.info(
-                            "Successfully parsed response after fixing simple format."
+                            "Successfully parsed response after repairing unescaped quotes in JSON."
                         )
-                    else:
+                    except (ValidationError, json.JSONDecodeError):
+                        pass
+                # 2) Try simple format (e.g. {"1": "text"} or list of items)
+                if validated_response is None:
+                    try:
+                        simple_data = json.loads(json_to_parse)
+                        fixed_translations = []
+                        if isinstance(simple_data, dict) and all(
+                            k.isdigit() for k in simple_data.keys()
+                        ):
+                            fixed_translations = [
+                                {"id": int(k), "translation": v}
+                                for k, v in simple_data.items()
+                            ]
+                        elif isinstance(simple_data, list):
+                            fixed_translations = simple_data
+                        if fixed_translations:
+                            fixed_data = {"translations": fixed_translations}
+                            validated_response = TranslationResponse.model_validate(
+                                fixed_data
+                            )
+                            self.logger.info(
+                                "Successfully parsed response after fixing simple format."
+                            )
+                    except (ValidationError, json.JSONDecodeError):
+                        pass
+                # 3) Last resort: regex extraction (handles unescaped " in values)
+                if validated_response is None:
+                    try:
+                        fixed_translations = self._extract_translations_from_broken_json(
+                            self._repair_json_unescaped_quotes(json_to_parse)
+                        )
+                        if not fixed_translations:
+                            fixed_translations = self._extract_translations_from_broken_json(
+                                json_to_parse
+                            )
+                        if fixed_translations:
+                            fixed_data = {"translations": fixed_translations}
+                            validated_response = TranslationResponse.model_validate(
+                                fixed_data
+                            )
+                            self.logger.info(
+                                "Successfully parsed response after regex extraction (malformed JSON repaired)."
+                            )
+                        else:
+                            raise e
+                    except Exception as repair_err:
+                        self.logger.error(
+                            f"Pydantic validation or JSON parsing failed even after attempting fix: {repair_err}"
+                        )
+                        self.logger.debug(f"Raw JSON content from API: {raw_content}")
                         raise e
-                except (ValidationError, json.JSONDecodeError, Exception) as final_e:
-                    self.logger.error(
-                        f"Pydantic validation or JSON parsing failed even after attempting fix: {final_e}"
-                    )
-                    self.logger.debug(f"Raw JSON content from API: {raw_content}")
-                    raise
+                if validated_response is None:
+                    raise e
         else:
             self.logger.warning("No valid message content in API response.")
             return None
@@ -540,11 +750,6 @@ class LLM_API_Translator(BaseTranslator):
                             "Received empty or invalid parsed response from API."
                         )
 
-                    if len(parsed_response.translations) != num_src:
-                        raise InvalidNumTranslations(
-                            f"Expected {num_src}, got {len(parsed_response.translations)}"
-                        )
-
                     translations_dict = {
                         item.id: item.translation
                         for item in parsed_response.translations
@@ -552,45 +757,111 @@ class LLM_API_Translator(BaseTranslator):
                     ordered_translations = [
                         translations_dict.get(i, "") for i in range(1, num_src + 1)
                     ]
+                    got = len(parsed_response.translations)
+                    if got != num_src:
+                        self.logger.warning(
+                            f"Translation count mismatch: expected {num_src}, got {got}. Using available entries (missing filled with empty)."
+                        )
+                        # If we got 1 and expected N, try newline split as improvement over empty slots
+                        if got == 1 and num_src > 1:
+                            one = parsed_response.translations[0].translation
+                            lines = [s.strip() for s in one.split("\n") if s.strip()]
+                            if len(lines) >= num_src:
+                                ordered_translations = lines[:num_src]
+                                self.logger.info(
+                                    "Recovered from single newline-separated response."
+                                )
+                            elif len(lines) > 0:
+                                # Use lines we have, pad rest with ""
+                                ordered_translations = lines[:num_src] + [""] * (
+                                    num_src - len(lines)
+                                )
 
+                    # Apply keyword substitutions (e.g. powers -> abilities)
+                    ordered_translations = [
+                        self._apply_keyword_substitutions(t) for t in ordered_translations
+                    ]
                     translations.extend(ordered_translations)
                     self.logger.info(
                         f"Successfully translated batch of {num_src}. Tokens used: {self.token_count_last}"
                     )
                     break
 
-                except InvalidNumTranslations as e:
-                    mismatch_retry_attempt += 1
-                    self.logger.warning(
-                        f"Translation structure mismatch: {e}. Attempt {mismatch_retry_attempt}/{self.invalid_repeat_count}."
-                    )
-                    if mismatch_retry_attempt >= self.invalid_repeat_count:
-                        self.logger.error(
-                            "Fatal Error: Failed to get correct translation structure after retries."
-                        )
-                        translations.extend(["[ERROR: Structure Mismatch]"] * num_src)
-                        break
-                    time.sleep(self.retry_timeout / 2)
-
                 except RETRYABLE_EXCEPTIONS as e:
                     api_retry_attempt += 1
+                    err_msg = str(e)
                     self.logger.warning(
                         f"API Error (retryable): {type(e).__name__} - {e}. Attempt {api_retry_attempt}/{self.retry_attempts}."
                     )
+                    if isinstance(e, (openai.APIConnectionError, httpx.RequestError)):
+                        self.logger.info(
+                            "Connection error: check firewall/proxy, VPN, or DNS. If behind a proxy, set 'Proxy' in translator settings (e.g. http://proxy:port). Test: curl -I https://openrouter.ai"
+                        )
+                    if self.provider == "OpenRouter" and "404" in err_msg and "data policy" in err_msg.lower():
+                        self.logger.info(
+                            "OpenRouter 404: enable 'Free model publication' (or your model) at https://openrouter.ai/settings/privacy"
+                        )
+                    is_rate_limit = self.provider == "OpenRouter" and "429" in err_msg and ("rate limit" in err_msg.lower() or "Rate limit" in err_msg)
+                    if is_rate_limit:
+                        self.logger.info(
+                            "Rate limit (429). Waiting %s s then retrying (%s/%s).",
+                            self.rate_limit_delay, api_retry_attempt, self.retry_attempts,
+                        )
                     if api_retry_attempt >= self.retry_attempts:
                         self.logger.error(
-                            f"Fatal Error: Failed to connect to API after {self.retry_attempts} attempts."
+                            "Fatal Error: Failed to connect to API after %s attempts.",
+                            self.retry_attempts,
                         )
                         translations.extend([f"[ERROR: API Failed]"] * num_src)
+                        break
+                    # Use longer delay for rate limit so upstream can recover
+                    delay = self.rate_limit_delay if is_rate_limit else self.retry_timeout
+                    time.sleep(delay)
+
+                except ValueError as e:
+                    if "empty or invalid parsed response" in str(e):
+                        api_retry_attempt += 1
+                        self.logger.warning(
+                            f"Empty or invalid API response. Attempt {api_retry_attempt}/{self.retry_attempts}."
+                        )
+                        if api_retry_attempt >= self.retry_attempts:
+                            self.logger.warning(
+                                "Batch failed after retries. Trying each snippet one-by-one (single-item fallback)."
+                            )
+                            fallback = self._translate_single_item_fallback(
+                                src_list, to_lang, "[ERROR: Empty Response]"
+                            )
+                            translations.extend(fallback)
+                            break
+                        time.sleep(self.retry_timeout)
+                    else:
+                        self.logger.error(
+                            f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"
+                        )
+                        self.logger.debug(traceback.format_exc())
+                        translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)
+                        break
+
+                except json.JSONDecodeError as e:
+                    api_retry_attempt += 1
+                    self.logger.warning(
+                        f"Malformed JSON from API (retrying). Attempt {api_retry_attempt}/{self.retry_attempts}."
+                    )
+                    if api_retry_attempt >= self.retry_attempts:
+                        self.logger.warning(
+                            "Malformed JSON after retries. Trying each snippet one-by-one (single-item fallback)."
+                        )
+                        fallback = self._translate_single_item_fallback(
+                            src_list, to_lang, "[ERROR: Invalid JSON]"
+                        )
+                        translations.extend(fallback)
                         break
                     time.sleep(self.retry_timeout)
 
                 except (
                     ValidationError,
-                    json.JSONDecodeError,
                     openai.BadRequestError,
                     openai.AuthenticationError,
-                    ValueError,
                 ) as e:
                     self.logger.error(
                         f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"

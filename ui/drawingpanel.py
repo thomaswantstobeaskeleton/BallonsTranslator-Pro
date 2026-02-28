@@ -54,7 +54,7 @@ class ToolNameLabel(QLabel):
             text_width = fmt.width(self.text())
             if text_width > fix_width * 0.95:
                 font_size = TOOLNAME_POINT_SIZE * fix_width * 0.95 / text_width
-                font.setPointSizeF(font_size)
+                font.setPointSizeF(max(1.0, font_size))
         self.setFont(font)
             
 

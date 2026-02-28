@@ -7,6 +7,8 @@ import translators as ts
 
 @register_translator('TranslatorsPack')
 class GeneralTranslator(BaseTranslator):
+    concate_text = False  # one-to-one so result length matches input
+
     def __init__(self, lang_source, lang_target, *args, **kwargs):
         self.lang_source = lang_source
         self.lang_target = lang_target
@@ -16,14 +18,15 @@ class GeneralTranslator(BaseTranslator):
         self._setup_translator()
 
     def _setup_translator(self):
-        self.lang_map['简体中文'] = 'zh'
+        # Use codes supported by the translators library (e.g. 'en', 'zh-CN', not 'EN-US')
+        self.lang_map['简体中文'] = 'zh-CN'
         self.lang_map['日本語'] = 'ja'
-        self.lang_map['English'] = 'EN-US'
+        self.lang_map['English'] = 'en'
         self.lang_map['Français'] = 'fr'
         self.lang_map['Deutsch'] = 'de'
         self.lang_map['Italiano'] = 'it'
         self.lang_map['Português'] = 'pt'
-        self.lang_map['Brazilian Portuguese'] = 'pt-br'
+        self.lang_map['Brazilian Portuguese'] = 'pt'  # library has 'pt', 'pt-PT'
         self.lang_map['русский язык'] = 'ru'
         self.lang_map['Español'] = 'es'
         self.lang_map['български език'] = 'bg'
@@ -68,7 +71,7 @@ class GeneralTranslator(BaseTranslator):
                 continue
 
             try:
-                translator = self.params['translator']['value']
+                translator = self.params.get("translator provider", self.params.get("translator", {})).get("value", "bing")
                 source_language = self.lang_map.get(self.lang_source, 'auto')
                 target_language = self.lang_map.get(self.lang_target, 'en')
 

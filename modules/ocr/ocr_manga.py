@@ -44,7 +44,12 @@ def post_process(text):
 @register_OCR('manga_ocr')
 class MangaOCR(OCRBase):
     params = {
-        'device': DEVICE_SELECTOR()
+        'device': DEVICE_SELECTOR(),
+        'crop_padding': {
+            'type': 'line_editor',
+            'value': 6,
+            'description': 'Pixels to add around each box when cropping for OCR (0–24). Reduces clipped text at edges (e.g. with CTD).',
+        },
     }
     device = DEFAULT_DEVICE
 
@@ -71,13 +76,31 @@ class MangaOCR(OCRBase):
 
     def _ocr_blk_list(self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs):
         im_h, im_w = img.shape[:2]
+        pad = 0
+        cp = self.params.get('crop_padding', {})
+        if isinstance(cp, dict):
+            val = cp.get('value', 0)
+        else:
+            val = 0
+        try:
+            pad = max(0, min(24, int(val)))
+        except (TypeError, ValueError):
+            pass
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
-            if y2 < im_h and x2 < im_w and \
-                x1 > 0 and y1 > 0 and x1 < x2 and y1 < y2: 
-                # Extract region and convert RGBA to RGB if necessary for model input
+            if pad > 0:
+                x1a = max(0, x1 - pad)
+                y1a = max(0, y1 - pad)
+                x2a = min(im_w, x2 + pad)
+                y2a = min(im_h, y2 + pad)
+                # Vertical text is often clipped at bottom; add extra padding there
+                if getattr(blk, 'src_is_vertical', False):
+                    extra_bottom = max(pad, min(int((y2 - y1) * 0.12), 24))
+                    y2a = min(im_h, y2a + extra_bottom)
+                x1, y1, x2, y2 = x1a, y1a, x2a, y2a
+            if y2 <= im_h and x2 <= im_w and x1 >= 0 and y1 >= 0 and x1 < x2 and y1 < y2:
                 region = img[y1:y2, x1:x2]
-                blk.text = self.model(region)
+                blk.text = [self.model(region)]
             else:
                 self.logger.warning('invalid textbbox to target img')
                 blk.text = ['']

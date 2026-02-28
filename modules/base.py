@@ -68,11 +68,19 @@ def patch_module_params(cfg_param, module_params, module_name: str = ''):
                     v = cparam
                 valid = True
                 if tgt_type != type(v):
-                    try:
-                        v = tgt_type(v)
-                    except:
-                        valid = False
-                        LOGGER.warning(f'Invalid param value {v} for defined dtype: {tgt_type}, it will be set to default value: {mparam}')
+                    if isinstance(v, str):
+                        v = v.strip()
+                        if v == '':
+                            v = mparam['value']
+                            valid = True
+                        elif tgt_type is float and ',' in v:
+                            v = v.replace(',', '.')
+                    if valid and type(v) is not tgt_type:
+                        try:
+                            v = tgt_type(v)
+                        except (ValueError, TypeError):
+                            valid = False
+                            v = mparam['value']
                 if valid:
                     mparam['value'] = v
                 cfg_param[mk] = mparam
@@ -169,20 +177,28 @@ class BaseModule:
         p = self.params[param_key]
         if isinstance(p, dict):
             if convert_dtype:
-                try:
-                    val_type = p.get('data_type', type(p['value']))
-                    param_value = val_type(param_value)
-                except ValueError:
-                    dtype = type(p['value'])
-                    self.logger.warning(f'Invalid param value {param_value} for defined dtype: {dtype}')
+                val_type = p.get('data_type', type(p['value']))
+                if isinstance(param_value, str):
+                    param_value = param_value.strip()
+                    if param_value == '':
+                        param_value = p['value']
+                    elif val_type is float and ',' in param_value:
+                        param_value = param_value.replace(',', '.')
+                if param_value != p['value'] or type(param_value) is not val_type:
+                    try:
+                        param_value = val_type(param_value)
+                    except (ValueError, TypeError):
+                        param_value = p['value']
             p['value'] = param_value
         else:
             if convert_dtype:
-                try:
-                    param_value = type(p)(param_value)
-                except ValueError:
-                    self.logger.warning(f'Invalid param value {param_value} for defined dtype: {type(p)}, revert to original value {p}')
-                    param_value = p
+                if isinstance(param_value, str):
+                    param_value = param_value.strip() or p
+                if param_value != p:
+                    try:
+                        param_value = type(p)(param_value)
+                    except (ValueError, TypeError):
+                        param_value = p
             self.params[param_key] = param_value
 
     def updateParam(self, param_key: str, param_content):

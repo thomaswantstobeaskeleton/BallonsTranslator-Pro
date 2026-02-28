@@ -271,6 +271,10 @@ class TextDetector:
         self.load_model(model_path)
 
         self.det_rearrange_max_batches = det_rearrange_max_batches
+        self.merge_fntsize_tol_hor = 2.0
+        self.merge_fntsize_tol_ver = 1.7
+        self.box_thresh = 0.45
+        self.min_box_area = 0
 
     def load_model(self, model_path: str):
         if Path(model_path).suffix == '.onnx':
@@ -335,9 +339,14 @@ class TextDetector:
 
         mask = postprocess_mask(mask)
         lines, scores = self.seg_rep(None, lines_map, height=im_h, width=im_w)
-        box_thresh = 0.6
+        box_thresh = getattr(self, 'box_thresh', 0.45)
         idx = np.where(scores[0] > box_thresh)
         lines, scores = lines[0][idx], scores[0][idx]
+        min_area = getattr(self, 'min_box_area', 0)
+        if min_area > 0 and lines.size > 0:
+            areas = np.array([cv2.contourArea(line.astype(np.float32)) for line in lines])
+            keep = areas >= min_area
+            lines, scores = lines[keep], scores[keep]
 
         # map output to input img
         mask = cv2.resize(mask, (im_w, im_h), interpolation=cv2.INTER_LINEAR)
@@ -345,7 +354,9 @@ class TextDetector:
             lines = []
         else:
             lines = lines.astype(np.int64)
-        blk_list = group_output([], lines, im_w, im_h, mask, canvas=img)
+        blk_list = group_output([], lines, im_w, im_h, mask, canvas=img,
+                                merge_fntsize_tol_hor=getattr(self, 'merge_fntsize_tol_hor', None),
+                                merge_fntsize_tol_ver=getattr(self, 'merge_fntsize_tol_ver', None))
         # print(lines)
         # blk_list = mit_merge_textlines(lines, im_w, im_w)
         mask_refined = refine_mask(img, mask, blk_list, refine_mode=refine_mode)
