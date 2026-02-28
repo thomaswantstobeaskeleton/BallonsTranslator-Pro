@@ -77,3 +77,15 @@ Rebirth_of_the_Urban_Immortal_Cultivator/
 
 # Git lock (safety; normally not tracked)
 .git/index.lock
+
+# Internal / maintainer-only (not for end-user downloads)
+GITHUB_UPLOAD.md
+docs/CONNECT_GITHUB_AND_AUTO_PUSH.md
+
+# Local / OS cruft (keep repo clean for public clones)
+Thumbs.db
+desktop.ini
+*.backup
+*.bak
+*.swp
+*~
