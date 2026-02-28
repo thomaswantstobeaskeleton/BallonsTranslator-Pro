@@ -1,6 +1,6 @@
-# BallonsTranslatorPro – Extended Modifications (README)
+# BallonsTranslatorPro
 
-This document describes **BallonsTranslatorPro**: everything modified or added compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
+**BallonsTranslatorPro**: everything modified or added compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
 
 ---
 
@@ -31,7 +31,7 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 | **OCR** | 20+ new OCR backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, **HunyuanOCR**, **Manga OCR Mobile** (TFLite), **Nemotron Parse** (full-page). |
 | **Inpainting** | Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), **RePaint**, **LaMa ONNX** (general + manga), **Qwen-Image-Edit**, **MAT** (repo+checkpoint), **CUHK Manga**, **Fluently v4**. |
 | **Translation** | No new translators in this fork; existing LLM_API_Translator, Sakura, DeepL, etc. unchanged. |
-| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). |
+| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). **Config panel (General, Save, DL Module):** Logical DPI, display language, dark mode, config panel font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, default device, unload after idle, and more — all in UI and persisted. |
 | **UI / workflow / export** | **Canvas right-click menu:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all; **Spell check source text** and **Spell check translation** (pyenchant); **Trim whitespace**; **To uppercase** / **To lowercase**. Menu items enabled/disabled by selection. **Lossless WebP** (#1055) in Config → Save when format is WebP; Save and Export all pages respect it. **Manga / Comic source** (Tools menu): search MangaDex by title or by chapter URL, list chapters by language, download as 001/002… pages, optional open folder in app; config persistence and rate limiting. **Default download folder** for chapters: `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty). **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) opens a dialog to view and customize keybinds for file, edit, view, go, canvas, format, and drawing actions; shortcuts persist in config. See [§12](#12-ui-workflow-and-export-enhancements). |
 | **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, this README. |
 
@@ -45,9 +45,9 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Git:** Installed and in PATH.
 
 ```bash
-# Clone the repository (or your fork)
-git clone https://github.com/dmMaze/BallonsTranslator.git
-cd BallonsTranslator
+# Clone the repository
+git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git
+cd BallonsTranslator-Pro
 
 # First run: installs base deps and downloads default models into data/
 python launch.py
@@ -69,8 +69,7 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
   Settings are read from `config/config.json`. Ensure the chosen detector, OCR, and inpainter are installed and configured in that config.
 
 - **Logical DPI (font/rendering):**  
-  If rendered font size is wrong, use `--ldpi 96` (or 72) as needed:  
-  `python launch.py --ldpi 96`
+  Set in **Config panel → General**: **Logical DPI (restart to apply)** — 0 = system default; use 96 or 72 if font scaling is wrong. Persisted in config and applied on next launch. You can still override once via the command line: `python launch.py --ldpi 96`.
 
 ---
 
@@ -226,6 +225,19 @@ Many OCRs have **crop_padding** (pixels to add around each detected box when cro
 
 For **paddle_det**, **Strict bubble mode** applies stricter thresholds and filters (min_detection_area, max_aspect_ratio, box_shrink_px, merge_same_line_only, merge_line_overlap_ratio). Useful for comics so different bubbles are not merged. **det_limit_side_len** can be set (e.g. 960 when using Ocean OCR on CPU to avoid timeout).
 
+### 7.7 Config panel (General, Save, DL Module)
+
+Most behavior and display options are set in the **Config panel** (left bar → gear icon). All of the following are persisted in `config.json`.
+
+- **General → Startup:** Reopen last project on startup; **Recent projects limit** (5–30); **Logical DPI** (0 = system, 96/72 for font scaling; restart to apply); **Confirm before Run** (show Run/Continue/Cancel dialog); **Dark mode** (synced with View → Dark Mode); **Display language** (UI language, same as View → Display Language); **Config panel font scale** (0.8–1.5, for this panel only).
+- **General → OCR result:** **Spell check / Auto-correct OCR result** — after OCR, correct misspelled words when there is a single suggestion (e.g. "teh" → "the"); requires pyenchant and a system dictionary.
+- **General → Typesetting:** Defaults for new/unchanged blocks: font size, stroke, color, alignment, writing mode, font family, effect (decide by program vs use global); **Auto layout**; **To uppercase**; **Independent text styles per project**; **Show only custom fonts**.
+- **General → Save:** Result image format (PNG, JPG, WebP, JXL); **Quality**; **WebP lossless** (when format is WebP); Intermediate image format (PNG, JXL).
+- **General → Saladict / search:** Show mini menu when selecting text; Saladict shortcut; Search engine URL for lookups.
+- **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel.
+
+Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a concise list of implemented UI settings and possible future additions.
+
 ---
 
 ## 8. Optional dependency conflicts and workarounds
@@ -255,7 +267,7 @@ The main application and all other modules work with the versions in `requiremen
   `modules/inpaint/inpaint_simple_lama.py`, `inpaint_diffusers_sd.py`, `inpaint_sd2.py`, `inpaint_sdxl.py`, `inpaint_dreamshaper.py`, `inpaint_flux_fill.py`, `inpaint_kandinsky.py`, `inpaint_fluently.py`, `inpaint_cuhk_manga.py`, `inpaint_repaint.py`, `inpaint_lama_onnx.py`, `inpaint_lama_manga_onnx.py`, `inpaint_qwen_image_edit.py`, `inpaint_mat.py`.
 
 - **Documentation:**  
-  `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this file `README_MODIFICATIONS.md`.  
+  `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this README.  
   `doc/INSTALL_MMOCR.md` (if present).
 
 ### Unchanged (behavior and discovery)
@@ -328,7 +340,8 @@ The main application and all other modules work with the versions in `requiremen
 
 - **Config:**  
   - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.
-  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), lossless WebP, and Manga / Comic source (Tools) are documented in [§12](#12-ui-workflow-and-export-enhancements). Config fields `imgsave_webp_lossless` and `manga_source_*` are persisted.
+  - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).
+  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), lossless WebP, Manga / Comic source (Tools), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
 
 ---
 
@@ -451,6 +464,7 @@ A **Keyboard Shortcuts** dialog lets you view and customize keybinds for common 
 
 ### 12.5 Other small behavior and UI details
 
+- **Tools menu:** In addition to **Manga / Comic source...** and **Keyboard Shortcuts** (View), the **Tools** menu includes: **Manage models** (download/remove detection, OCR, inpainting models), **Batch export** (export all result images to a folder), **Check project** (validate project: missing images, invalid JSON), **Re-run detection only** / **Re-run OCR only** (run pipeline with only that stage, then restore previous stage flags), **Region merge tool** (dialog for merging), and **Export all pages**. Display language and dark mode can also be toggled from **View**.
 - **Config panel – WebP lossless:** The WebP lossless checkbox is shown in the Save section only when the result format is WebP; its **enabled** state is toggled by `_update_webp_lossless_visibility()` when the format combo changes, so you cannot turn on lossless when the format is not WebP.
 - **Canvas – context menu state:** Before showing the context menu, the canvas computes the number of selected blocks and total blocks, then sets `setEnabled(True/False)` on the **Merge selected blocks**, **Move block(s) up**, **Move block(s) down**, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, and **To lowercase** actions so they appear grayed out when not applicable (e.g. merge when fewer than 2 selected, move up when none or first block selected; spell check, trim, and case when no blocks selected).
 - **Export all pages:** Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path, so Export all pages also respects the lossless WebP option when format is WebP.
