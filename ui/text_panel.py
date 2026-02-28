@@ -2,7 +2,7 @@ import copy
 import sys
 from typing import List
 
-from qtpy.QtWidgets import QLineEdit, QSizePolicy, QHBoxLayout, QVBoxLayout, QFrame, QFontComboBox, QApplication, QPushButton, QLabel, QGroupBox, QCheckBox, QSlider
+from qtpy.QtWidgets import QLineEdit, QSizePolicy, QHBoxLayout, QVBoxLayout, QFrame, QFontComboBox, QApplication, QPushButton, QLabel, QGroupBox, QCheckBox, QSlider, QComboBox, QDoubleSpinBox
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtGui import QFocusEvent, QMouseEvent, QTextCursor, QKeyEvent
 
@@ -70,7 +70,7 @@ class AlignmentBtnGroup(QFrame):
         hlayout.addWidget(self.alignLeftChecker)
         hlayout.addWidget(self.alignCenterChecker)
         hlayout.addWidget(self.alignRightChecker)
-        hlayout.setSpacing(0)
+        hlayout.setSpacing(2)
 
     def alignBtnPressed(self):
         btn = self.sender()
@@ -126,7 +126,7 @@ class FormatGroupBtn(QFrame):
         hlayout.addWidget(self.italicBtn)
         hlayout.addWidget(self.underlineBtn)
         hlayout.addWidget(self.strikethroughBtn)
-        hlayout.setSpacing(0)
+        hlayout.setSpacing(8)
 
     def setBold(self):
         self.param_changed.emit('bold', self.boldBtn.isChecked())
@@ -154,8 +154,8 @@ class FontSizeBox(QFrame):
         self.fcombobox = SizeComboBox([1, 1000], 'font_size', self)
         self.fcombobox.addItems([
             "5", "5.5", "6.5", "7.5", "8", "9", "10", "10.5",
-            "11", "12", "14", "16", "18", "20", '22', "26", "28",
-            "36", "48", "56", "72", "93", "123", "163"
+            "11", "12", "14", "16", "18", "20", "22", "26", "28",
+            "30", "32", "34", "36", "40", "44", "48", "56", "72", "93", "123", "163"
         ])
         self.fcombobox.param_changed.connect(self.param_changed)
 
@@ -304,6 +304,38 @@ class FontFormatPanel(Widget):
         self.verticalChecker.setObjectName("FontVerticalChecker")
         self.verticalChecker.clicked.connect(lambda : self.on_param_changed('vertical', self.verticalChecker.isChecked()))
 
+        self.textOnPathCombo = QComboBox(self)
+        self.textOnPathCombo.setObjectName("TextOnPathCombo")
+        self.textOnPathCombo.addItems([self.tr("Text on path: None"), self.tr("Circular"), self.tr("Arc")])
+        self.textOnPathCombo.setToolTip(self.tr("Draw text along a circle or arc (e.g. for balloons, SFX)."))
+        self.textOnPathCombo.currentIndexChanged.connect(self._on_text_on_path_combo_changed)
+
+        self.textOnPathArcDegreesSpinBox = QDoubleSpinBox(self)
+        self.textOnPathArcDegreesSpinBox.setObjectName("TextOnPathArcDegrees")
+        self.textOnPathArcDegreesSpinBox.setRange(30, 360)
+        self.textOnPathArcDegreesSpinBox.setValue(180)
+        self.textOnPathArcDegreesSpinBox.setSuffix("°")
+        self.textOnPathArcDegreesSpinBox.setToolTip(self.tr("Arc span in degrees (for Arc text on path)."))
+        self.textOnPathArcDegreesSpinBox.setMinimumWidth(70)
+        self.textOnPathArcDegreesSpinBox.valueChanged.connect(self._on_text_on_path_arc_degrees_changed)
+
+        self.warpStyleCombo = QComboBox(self)
+        self.warpStyleCombo.setObjectName("WarpStyleCombo")
+        self.warpStyleCombo.addItems([
+            self.tr("Warp: None"), self.tr("Arc"), self.tr("Arch"), self.tr("Bulge"), self.tr("Flag")
+        ])
+        self.warpStyleCombo.setToolTip(self.tr("Photoshop-like text warp (#1093)."))
+        self.warpStyleCombo.currentIndexChanged.connect(self._on_warp_style_changed)
+
+        self.warpStrengthSpinBox = QDoubleSpinBox(self)
+        self.warpStrengthSpinBox.setObjectName("WarpStrength")
+        self.warpStrengthSpinBox.setRange(0.1, 1.0)
+        self.warpStrengthSpinBox.setSingleStep(0.1)
+        self.warpStrengthSpinBox.setValue(0.5)
+        self.warpStrengthSpinBox.setToolTip(self.tr("Warp intensity."))
+        self.warpStrengthSpinBox.setMinimumWidth(55)
+        self.warpStrengthSpinBox.valueChanged.connect(self._on_warp_strength_changed)
+
         self.strokeWidthBox = SizeComboBox([0, 10], 'stroke_width', self)
         self.strokeWidthBox.addItems(["0.1"])
         self.strokeWidthBox.setToolTip(self.tr("Change stroke width"))
@@ -347,6 +379,7 @@ class FontFormatPanel(Widget):
 
         self.opacityMainLabel = SizeControlLabel(self, direction=1, transparent_bg=False, text=self.tr('Opacity'))
         self.opacityMainLabel.setObjectName("opacityMainLabel")
+        self.opacityMainLabel.setMinimumWidth(52)
         self.opacityMainBox = SizeComboBox([0, 1], 'opacity', self, init_value=1.)
         self.opacityMainBox.addItems(["0.5", "0.75", "1.0"])
         self.opacityMainBox.setToolTip(self.tr("Text opacity (quick access)"))
@@ -399,7 +432,7 @@ class FontFormatPanel(Widget):
         self.sourceBtn = TextCheckerLabel(self.tr("Source"))
         self.transBtn = TextCheckerLabel(self.tr("Translation"))
 
-        FONTFORMAT_SPACING = 6
+        FONTFORMAT_SPACING = 10
 
         vl0 = QVBoxLayout()
         vl0.addWidget(self.textstyle_panel.view_widget)
@@ -422,14 +455,22 @@ class FontFormatPanel(Widget):
         hl2.addWidget(self.formatBtnGroup)
         hl2.addWidget(self.verticalChecker)
         hl2.setSpacing(FONTFORMAT_SPACING)
-        hl2.setContentsMargins(0, 0, 0, 0)
+        hl2.setContentsMargins(4, 0, 4, 0)
+        hl2b = QHBoxLayout()
+        hl2b.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hl2b.addWidget(self.textOnPathCombo)
+        hl2b.addWidget(self.textOnPathArcDegreesSpinBox)
+        hl2b.addWidget(self.warpStyleCombo)
+        hl2b.addWidget(self.warpStrengthSpinBox)
+        hl2b.setSpacing(FONTFORMAT_SPACING)
+        hl2b.setContentsMargins(4, 4, 4, 0)
         hl3 = QHBoxLayout()
         hl3.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl3.addLayout(stroke_hlayout)
         hl3.addLayout(lettersp_hlayout)
         hl3.addLayout(opacity_hlayout)
-        hl3.setContentsMargins(3, 0, 3, 0)
-        hl3.setSpacing(13)
+        hl3.setContentsMargins(6, 0, 6, 0)
+        hl3.setSpacing(16)
         hl4 = QHBoxLayout()
         hl4.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl4.addWidget(self.foldTextBtn)
@@ -444,6 +485,7 @@ class FontFormatPanel(Widget):
         self.vlayout.addLayout(vl0)
         self.vlayout.addLayout(hl1)
         self.vlayout.addLayout(hl2)
+        self.vlayout.addLayout(hl2b)
         self.vlayout.addLayout(hl3)
         self.vlayout.addLayout(hl4)
         self.vlayout.setContentsMargins(0, 0, 7, 0)
@@ -475,6 +517,20 @@ class FontFormatPanel(Widget):
             self.update_text_style_label()
         else:
             func(param_name, value, C.active_format, is_global=False, blkitems=self.textblk_item, set_focus=True, **func_kwargs)
+
+    def _on_text_on_path_combo_changed(self, index: int):
+        self.textOnPathArcDegreesSpinBox.setVisible(index == 2)
+        self.on_param_changed('text_on_path', index)
+
+    def _on_text_on_path_arc_degrees_changed(self, value: float):
+        self.on_param_changed('text_on_path_arc_degrees', value)
+
+    def _on_warp_style_changed(self, index: int):
+        self.on_param_changed('warp_style', index)
+        self.warpStrengthSpinBox.setVisible(index > 0)
+
+    def _on_warp_strength_changed(self, value: float):
+        self.on_param_changed('warp_strength', value)
 
     def update_text_style_label(self):
         if self.global_mode():
@@ -521,6 +577,22 @@ class FontFormatPanel(Widget):
         self.letterSpacingBox.setValue(font_format.letter_spacing)
         self.verticalChecker.setChecked(font_format.vertical)
         self.opacityMainBox.setValue(font_format.opacity)
+        text_on_path = getattr(font_format, 'text_on_path', 0)
+        self.textOnPathCombo.blockSignals(True)
+        self.textOnPathCombo.setCurrentIndex(min(2, max(0, int(text_on_path))))
+        self.textOnPathCombo.blockSignals(False)
+        self.textOnPathArcDegreesSpinBox.blockSignals(True)
+        self.textOnPathArcDegreesSpinBox.setValue(float(getattr(font_format, 'text_on_path_arc_degrees', 180.0)))
+        self.textOnPathArcDegreesSpinBox.blockSignals(False)
+        self.textOnPathArcDegreesSpinBox.setVisible(text_on_path == 2)
+        warp_style = getattr(font_format, 'warp_style', 0)
+        self.warpStyleCombo.blockSignals(True)
+        self.warpStyleCombo.setCurrentIndex(min(4, max(0, int(warp_style))))
+        self.warpStyleCombo.blockSignals(False)
+        self.warpStrengthSpinBox.blockSignals(True)
+        self.warpStrengthSpinBox.setValue(float(getattr(font_format, 'warp_strength', 0.5)))
+        self.warpStrengthSpinBox.blockSignals(False)
+        self.warpStrengthSpinBox.setVisible(warp_style > 0)
         self.formatBtnGroup.boldBtn.setChecked(font_format.bold)
         self.formatBtnGroup.underlineBtn.setChecked(font_format.underline)
         self.formatBtnGroup.strikethroughBtn.setChecked(font_format.strikethrough)

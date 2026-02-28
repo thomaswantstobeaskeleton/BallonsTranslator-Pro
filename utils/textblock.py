@@ -44,6 +44,8 @@ class TextBlock:
 
     region_mask: np.ndarray = None
     region_inpaint_dict: Dict = None
+    # Text eraser mask (#1093): same size as block in px, 255=show 0=erase (hole)
+    text_mask: np.ndarray = None
 
     fontformat: FontFormat = field(default_factory=lambda: FontFormat())
 
@@ -212,6 +214,8 @@ class TextBlock:
             self.distance = np.array(self.distance, np.float32)
         if self.vec is not None:
             self.vec = np.array(self.vec, np.float32)
+        if self.text_mask is not None and isinstance(self.text_mask, (list, tuple)):
+            self.text_mask = np.array(self.text_mask, dtype=np.uint8)
         if self.src_is_vertical is None:
             self.src_is_vertical = self.vertical
         

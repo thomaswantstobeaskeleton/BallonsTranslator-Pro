@@ -15,6 +15,9 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **Config panel font scale** — Spinbox 0.8–1.5. Scales font size in the Config panel for accessibility.
 - **Spell check OCR result** — Checkbox under **General → OCR result**: "Spell check / Auto-correct OCR result". When enabled, after OCR runs, each word is checked with a spell checker (pyenchant); if a word is misspelled and there is exactly one suggestion, it is replaced (e.g. "teh" → "the"). Requires `pyenchant` and a system dictionary (e.g. en_US). This is the **auto-correct** for OCR text.
 
+### General → Typesetting
+- **Text in box** — Dropdown ([#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077)): **Auto fit to box** (program scales font size so text fits the balloon, line structure unchanged) or **Fixed size (use font size list)**. Syncs with Font Size ("decide by program") and **Auto layout** so one control sets both. More font sizes in the list (30, 32, 34, 40, 44).
+
 ### DL Module
 - **Default device** — Dropdown: "Default (use module default)" or a specific device (CPU, CUDA, etc.). Used when a module’s device param is set to "Default". Empty device params are filled from this when loading config.
 - **Run pipeline presets** — Run menu → Pipeline presets: "Full", "Detect + OCR only", "Translate only", "Inpaint only". Apply and sync the four stage toggles.
@@ -22,7 +25,7 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **Unload after idle** — Spinbox (0–120 minutes, 0 = off). Unloads DL models after N minutes with no Run or pipeline activity; timer resets when pipeline finishes.
 
 ### Tools menu
-- **Region merge tool** — Dialog fully translated to English.
+- **Batch queue (#1020)** — **Tools → Batch queue...** opens a dialog to add multiple folders to a queue and run the pipeline on each in sequence (same behavior as headless `--exec_dirs`). **Add folder(s)...** adds one folder; **Add folder (include subfolders)** adds the selected folder and each of its immediate subfolders as separate items. **Pause** / **Resume** temporarily halt the pipeline; **Cancel queue** stops the current job and clears the remaining queue. The list shrinks as each folder is processed.
 - **Re-run detection only** — Runs pipeline with only detection enabled; restores previous stage flags when done.
 - **Re-run OCR only** — Runs pipeline with only OCR enabled (re-recognize text, keep boxes); restores previous stage flags when done.
 - **Export all pages** — Exports all result images to a chosen folder (pages that have no result yet are reported as missing).
@@ -46,6 +49,7 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **To uppercase** / **To lowercase** — Convert source and translation text in selected blocks to uppercase or lowercase.
 - **Toggle strikethrough** — Toggle strikethrough on selected blocks (same as the format panel button).
 - **Gradient type** — Submenu: **Linear** or **Radial** to set gradient type on selected blocks.
+- **Text on path** ([#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)) — Submenu: **None**, **Circular**, or **Arc** to draw text along a circle or arc on selected blocks (for balloons and SFX).
 - Existing: Copy, Paste, Delete, Copy/Paste source text, Delete and Recover, Apply font formatting, Auto layout, Reset Angle, Squeeze, Translate, OCR, OCR and translate, OCR+translate+inpaint, Inpaint.
 
 ---
@@ -54,7 +58,7 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 
 ### Font format (global + advanced)
 
-Implemented in this codebase: **Quick opacity** in main row (Opacity label + combobox); **Apply to all blocks** button; **Save as default** button (writes global format to config); **Font weight** in Advanced panel (Light/Normal/Medium/SemiBold/Bold). **Strikethrough** in main format row (button + right-click "Toggle strikethrough"). **Gradient type** (Linear / Radial) in Advanced gradient group + right-click "Gradient type" submenu. Rect panel: **Fill** button (fill with background, no model), **Erode** slider, descriptive method names (Canny + flood, etc.), tool shortcut hints in tooltips; **pen alpha** persisted (`pentool_color` [r,g,b,a]); **Inpaint brush hardness** slider (0–100, soft to hard edge).
+Implemented in this codebase: **Quick opacity** in main row (Opacity label + combobox); **Apply to all blocks** button; **Save as default** button (writes global format to config); **Font weight** in Advanced panel (Light/Normal/Medium/SemiBold/Bold). **Strikethrough** in main format row (button + right-click "Toggle strikethrough"). **Gradient type** (Linear / Radial) in Advanced gradient group + right-click "Gradient type" submenu. **Text on path** ([#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)): format panel dropdown **Text on path** (None / Circular / Arc) and **Arc degrees** spinbox when Arc is selected; right-click canvas submenu **Text on path → None / Circular / Arc**. Circular draws text along a full circle; Arc uses the arc span (e.g. 180°). **Text warp** ([#1093](https://github.com/dmMaze/BallonsTranslator/issues/1093)): format panel **Warp** dropdown (None / Arc / Arch / Bulge / Flag) and **Warp strength** (0.1–1) for Photoshop-like distortion. **Text eraser** ([#1093](https://github.com/dmMaze/BallonsTranslator/issues/1093)): Drawing panel **Text eraser** tool — select text block(s), choose Text eraser, draw on canvas to erase parts of the text (creates depth effect so text appears behind objects). Rect panel: **Fill** button (fill with background, no model), **Erode** slider, descriptive method names (Canny + flood, etc.), tool shortcut hints in tooltips; **pen alpha** persisted (`pentool_color` [r,g,b,a]); **Inpaint brush hardness** slider (0–100, soft to hard edge).
 
 **Current:** Global format (typesetting panel): font family, size, line/letter spacing, opacity (quick), color, alignment, bold/italic/underline/**strikethrough**, vertical, stroke width/color. Advanced: line spacing type, opacity (full), font weight, shadow, **gradient type (Linear/Radial)**, gradient start/end color, angle, size. Style presets for named formats.
 
@@ -96,7 +100,7 @@ Implemented in this codebase: Tool shortcut hints (Hand H, Inpaint J, Pen B, Rec
 
 - **#591 Spell checking for OCR** — Implemented via optional pyenchant + Config checkbox (auto-correct after OCR). **Manual spell check** is also available: right-click on selected blocks → **Spell check source text** or **Spell check translation** (same engine; works on already-edited text).
 - **#1055 Lossless WebP** — Implemented via Config "WebP lossless" checkbox when result format is WebP.
-- **#1137 Manual text detection** — Implemented via "Detect text in region" on canvas (right-drag rectangle → right-click → Detect text in region).
+- **#1077 Text in box / font sizes** — **Text in box** dropdown in Config → General → Typesetting: "Auto fit to box" (program decides font size so text fits the balloon; keeps line structure) or "Fixed size (use font size list)". More font sizes in the list (30, 32, 34, 40, 44). Drag-and-drop of folder/images onto canvas to open project (if unavailable, use File → Open).
 - **#867, #854** — Addressed by this fork’s extra detectors and Paddle v5.
 - **#685 / #554 Google OCR** — Fork uses params for api_key (no hardcoded keys).
 - **#733 Inpainting gray** — See MANHUA_BEST_SETTINGS.md (inpaint size, mask dilation).

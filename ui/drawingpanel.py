@@ -14,13 +14,14 @@ from .funcmaps import get_maskseg_method
 from .module_manager import ModuleManager
 from .image_edit import ImageEditMode, PenShape, PixmapItem, StrokeImgItem
 from .configpanel import InpaintConfigPanel
+from .textitem import TextBlkItem
 from .custom_widget import Widget, SeparatorWidget, PaintQSlider, ColorPickerLabel
 from .canvas import Canvas
 from .misc import ndarray2pixmap
 from utils.config import DrawPanelConfig, pcfg
 from utils.shared import CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from utils.logger import logger as LOGGER
-from .drawing_commands import InpaintUndoCommand, StrokeItemUndoCommand
+from .drawing_commands import InpaintUndoCommand, StrokeItemUndoCommand, TextEraserUndoCommand
 
 INPAINT_BRUSH_COLOR = QColor(127, 0, 127, 127)
 MAX_PEN_SIZE = 1000
@@ -365,17 +366,24 @@ class DrawingPanel(Widget):
         self.penConfigPanel.colorChanged.connect(self.setPenToolColor)
         self.penConfigPanel.shapeChanged.connect(self.setPenShape)
 
+        self.textEraserTool = DrawToolCheckBox()
+        self.textEraserTool.setObjectName("DrawTextEraserTool")
+        self.textEraserTool.setToolTip(self.tr("Text eraser (#1093) – Erase parts of selected text (depth effect)"))
+        self.textEraserTool.checked.connect(self.on_use_texterasertool)
+
         toolboxlayout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         toolboxlayout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         toolboxlayout.addWidget(self.handTool)
         toolboxlayout.addWidget(self.inpaintTool)
         toolboxlayout.addWidget(self.penTool)
+        toolboxlayout.addWidget(self.textEraserTool)
         toolboxlayout.addWidget(self.rectTool)
 
         self.canvas.painting_pen = self.pentool_pen = \
             QPen(Qt.GlobalColor.black, 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         self.canvas.erasing_pen = self.erasing_pen = QPen(Qt.GlobalColor.black, 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         self.inpaint_pen = QPen(INPAINT_BRUSH_COLOR, 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        self.text_eraser_pen = QPen(QColor(255, 120, 120, 200), 20, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         
         # self.setPenToolWidth(10)
         # self.setPenToolColor([0, 0, 0, 127])
@@ -464,6 +472,8 @@ class DrawingPanel(Widget):
         pcfg.drawpanel.pentool_shape = shape
 
     def on_use_handtool(self) -> None:
+        if self.currentTool == self.textEraserTool:
+            self.canvas.textLayer.hide()
         if self.currentTool is not None and self.currentTool != self.handTool:
             self.currentTool.setChecked(False)
         self.currentTool = self.handTool
@@ -472,6 +482,8 @@ class DrawingPanel(Widget):
         self.canvas.image_edit_mode = ImageEditMode.HandTool
 
     def on_use_inpainttool(self) -> None:
+        if self.currentTool == self.textEraserTool:
+            self.canvas.textLayer.hide()
         if self.currentTool is not None and self.currentTool != self.inpaintTool:
             self.currentTool.setChecked(False)
         self.currentTool = self.inpaintTool
@@ -486,6 +498,8 @@ class DrawingPanel(Widget):
             self.setInpaintCursor()
 
     def on_use_pentool(self) -> None:
+        if self.currentTool == self.textEraserTool:
+            self.canvas.textLayer.hide()
         if self.currentTool is not None and self.currentTool != self.penTool:
             self.currentTool.setChecked(False)
         self.currentTool = self.penTool
@@ -499,7 +513,24 @@ class DrawingPanel(Widget):
             self.canvas.gv.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.setPenCursor()
 
+    def on_use_texterasertool(self) -> None:
+        if self.currentTool is not None and self.currentTool != self.textEraserTool:
+            self.currentTool.setChecked(False)
+        self.currentTool = self.textEraserTool
+        pcfg.drawpanel.current_tool = ImageEditMode.TextEraserTool
+        self.canvas.image_edit_mode = ImageEditMode.TextEraserTool
+        self.text_eraser_pen.setWidthF(self.inpaint_pen.widthF())
+        self.canvas.painting_pen = self.text_eraser_pen
+        self.canvas.painting_shape = self.inpaintConfigPanel.shape
+        self.toolConfigStackwidget.setCurrentWidget(self.inpaintConfigPanel)
+        self.canvas.textLayer.show()
+        if self.isVisible():
+            self.canvas.gv.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setInpaintCursor()
+
     def on_use_recttool(self) -> None:
+        if self.currentTool == self.textEraserTool:
+            self.canvas.textLayer.hide()
         if self.currentTool is not None and self.currentTool != self.rectTool:
             self.currentTool.setChecked(False)
         self.currentTool = self.rectTool
@@ -534,6 +565,8 @@ class DrawingPanel(Widget):
             self.inpaintTool.setChecked(True)
         elif config.current_tool == ImageEditMode.PenTool:
             self.penTool.setChecked(True)
+        elif config.current_tool == ImageEditMode.TextEraserTool:
+            self.textEraserTool.setChecked(True)
         elif config.current_tool == ImageEditMode.RectTool:
             self.rectTool.setChecked(True)
 
@@ -629,6 +662,11 @@ class DrawingPanel(Widget):
         if not self.canvas.imgtrans_proj.img_valid:
             self.canvas.removeItem(stroke_item)
             return
+        if self.currentTool == self.textEraserTool:
+            self._apply_text_eraser_stroke(stroke_item)
+            self.canvas.removeItem(stroke_item)
+            self.canvas.stroke_img_item = None
+            return
         if self.currentTool == self.penTool:
             rect, _, qimg = stroke_item.clip()
             if rect is not None:
@@ -640,6 +678,54 @@ class DrawingPanel(Widget):
                 return
             else:
                 self.runInpaint()
+
+    def _apply_text_eraser_stroke(self, stroke_item: StrokeImgItem):
+        """Apply stroke to selected text blocks' text_mask (#1093). Use scene coordinates so stroke and text align regardless of scale/transform."""
+        rect, stroke_alpha, _ = stroke_item.clip(mask_only=True)
+        if rect is None or stroke_alpha is None or stroke_alpha.size == 0:
+            return
+        sx, sy, sw, sh = rect[0], rect[1], rect[2], rect[3]
+        stroke_scene_rect = stroke_item.mapToScene(QRectF(sx, sy, sw, sh))
+        sel = getattr(self.canvas, '_text_eraser_selected_blocks', None) or self.canvas.selected_text_items()
+        if getattr(self.canvas, '_text_eraser_selected_blocks', None) is not None:
+            self.canvas._text_eraser_selected_blocks = None
+        if not sel:
+            all_text = [i for i in self.canvas.items() if isinstance(i, TextBlkItem)]
+            sel = [i for i in all_text if stroke_scene_rect.intersects(i.sceneBoundingRect())]
+            sel.sort(key=lambda x: x.idx)
+        if not sel:
+            return
+        for item in sel:
+            if not stroke_scene_rect.intersects(item.sceneBoundingRect()):
+                continue
+            blk = getattr(item, 'blk', None)
+            if blk is None:
+                continue
+            pos, br = item.pos(), item.boundingRect()
+            bx_im, by_im = pos.x(), pos.y()
+            bw_im, bh_im = br.width(), br.height()
+            if bw_im < 1 or bh_im < 1:
+                continue
+            mh, mw = int(round(bh_im)), int(round(bw_im))
+            if mh < 1 or mw < 1:
+                continue
+            mask = blk.text_mask
+            if mask is None or mask.shape[0] != mh or mask.shape[1] != mw:
+                mask = np.full((mh, mw), 255, dtype=np.uint8)
+            for j in range(mh):
+                for c in range(mw):
+                    pt_item = QPointF(c + 0.5, j + 0.5)
+                    pt_scene = item.mapToScene(pt_item)
+                    pt_stroke = stroke_item.mapFromScene(pt_scene)
+                    lx, ly = pt_stroke.x(), pt_stroke.y()
+                    si = int(round(lx - sx))
+                    sj = int(round(ly - sy))
+                    if 0 <= si < sw and 0 <= sj < sh and stroke_alpha[sj, si] > 127:
+                        mask[j, c] = 0
+            blk.text_mask = mask
+            item.repaint_background()
+            item.update()
+        self.canvas.setProjSaveState(False)
 
     def on_finish_erasing(self, stroke_item: StrokeImgItem):
         stroke_item.finishPainting()

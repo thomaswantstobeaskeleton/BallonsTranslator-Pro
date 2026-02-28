@@ -10,7 +10,7 @@ import cv2
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
-from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage
+from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
@@ -25,6 +25,7 @@ from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from .canvas import Canvas
 from .configpanel import ConfigPanel
+from .translation_context_dialog import TranslationContextDialog
 from .module_manager import ModuleManager
 from .textedit_area import SourceTextEdit, SelectTextMiniMenu, TransTextEdit
 from .drawingpanel import DrawingPanel
@@ -41,6 +42,7 @@ from . import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox
 from .model_manager_dialog import ModelManagerDialog
 from .shortcuts_dialog import ShortcutsDialog
+from .batch_queue_dialog import BatchQueueDialog
 
 class PageListView(QListWidget):
 
@@ -87,9 +89,14 @@ class MainWindow(mainwindow_cls):
     restart_signal = Signal()
     create_errdialog = Signal(str, str, str)
     create_infodialog = Signal(dict)
-    
+    batch_queue_empty = Signal()
+    batch_queue_cancelled = Signal()
+    batch_queue_item_started = Signal(str)
+
     def __init__(self, app: QApplication, config: ProgramConfig, open_dir='', **exec_args) -> None:
         super().__init__()
+        self._batch_cancelled = False
+        self._batch_queue_dialog = None
 
         shared.create_errdialog_in_mainthread = self.create_errdialog.emit
         self.create_errdialog.connect(self.on_create_errdialog)
@@ -156,6 +163,7 @@ class MainWindow(mainwindow_cls):
         self.configPanel.trans_config_panel.show_pre_MT_keyword_window.connect(self.show_pre_MT_keyword_window)
         self.configPanel.trans_config_panel.show_MT_keyword_window.connect(self.show_MT_keyword_window)
         self.configPanel.trans_config_panel.show_OCR_keyword_window.connect(self.show_OCR_keyword_window)
+        self.configPanel.trans_config_panel.show_translation_context_requested.connect(self.show_translation_context_dialog)
 
         self.leftBar = LeftBar(self)
         self.leftBar.showPageListLabel.clicked.connect(self.pageLabelStateChanged)
@@ -231,6 +239,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.to_lowercase_signal.connect(self.on_to_lowercase)
         self.canvas.toggle_strikethrough_signal.connect(self.on_toggle_strikethrough)
         self.canvas.set_gradient_type_signal.connect(self.on_set_gradient_type)
+        self.canvas.set_text_on_path_signal.connect(self.on_set_text_on_path)
         self.canvas.run_detect_region.connect(self.on_run_detect_region)
         self.canvas.merge_selected_blocks_signal.connect(self.on_merge_selected_blocks)
         self.canvas.move_blocks_up_signal.connect(self.on_move_blocks_up)
@@ -299,6 +308,10 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.setStretchFactor(0, 1)
         self.comicTransSplitter.setStretchFactor(1, 10)
         self.comicTransSplitter.setStretchFactor(2, 1)
+        # Allow user to resize the right panel by dragging the splitter (wider or narrower)
+        self.rightComicTransStackPanel.setMinimumWidth(320)
+        self.rightComicTransStackPanel.setMaximumWidth(900)
+        self._comic_trans_splitter_initialized = False
         self.imgtrans_progress_msgbox = ImgtransProgressMessageBox()
         self.resetStyleSheet()
 
@@ -654,6 +667,18 @@ class MainWindow(mainwindow_cls):
         pcfg.show_page_list = setup
         save_config()
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not getattr(self, '_comic_trans_splitter_initialized', False):
+            self._comic_trans_splitter_initialized = True
+            total = self.comicTransSplitter.width()
+            if total > 400:
+                s = self.comicTransSplitter.sizes()
+                right_default = 322
+                left = s[0] if s else 200
+                center = max(100, total - left - right_default)
+                self.comicTransSplitter.setSizes([left, center, right_default])
+
     def closeEvent(self, event: QCloseEvent) -> None:
         reply = QMessageBox.question(
             self,
@@ -744,6 +769,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.replacePreMTkeyword_trigger.connect(self.show_pre_MT_keyword_window)
         self.titleBar.replaceMTkeyword_trigger.connect(self.show_MT_keyword_window)
         self.titleBar.replaceOCRkeyword_trigger.connect(self.show_OCR_keyword_window)
+        self.titleBar.translation_context_trigger.connect(self.show_translation_context_dialog)
         self.titleBar.run_trigger.connect(self.leftBar.runImgtransBtn.click)
         self.titleBar.run_woupdate_textstyle_trigger.connect(self.run_imgtrans_wo_textstyle_update)
         self.titleBar.translate_page_trigger.connect(self.on_transpagebtn_pressed)
@@ -757,6 +783,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_export_trigger.connect(self.on_batch_export)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
+        self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.run_preset_full_trigger.connect(self.on_run_preset_full)
         self.titleBar.run_preset_detect_ocr_trigger.connect(self.on_run_preset_detect_ocr)
@@ -967,6 +994,19 @@ class MainWindow(mainwindow_cls):
     def show_MT_keyword_window(self):
         self.mtSubWidget.show()
 
+    def show_translation_context_dialog(self):
+        """Open dialog to edit project series context path and glossary."""
+        proj = self.imgtrans_proj
+        if proj is None or getattr(proj, "directory", None) is None:
+            create_info_dialog(
+                self.tr("Open a project first (File → Open Folder / Open Project) to set project translation context."),
+                self.tr("Translation context"),
+                "TranslationContext",
+            )
+            return
+        dlg = TranslationContextDialog(proj, self)
+        dlg.exec()
+
 
     def show_OCR_keyword_window(self):
         self.ocrSubWidget.show()
@@ -1000,6 +1040,37 @@ class MainWindow(mainwindow_cls):
             self.manga_source_dialog.activateWindow()
         else:
             self.manga_source_dialog.show()
+
+    def on_open_batch_queue(self):
+        """Open the Batch queue dialog (multiple folders, Pause/Cancel)."""
+        if self._batch_queue_dialog is None:
+            self._batch_queue_dialog = BatchQueueDialog(self)
+            self._batch_queue_dialog.start_queue_requested.connect(self._on_batch_start)
+            self._batch_queue_dialog.pause_requested.connect(self.module_manager.requestPausePipeline)
+            self._batch_queue_dialog.resume_requested.connect(self.module_manager.requestResumePipeline)
+            self._batch_queue_dialog.cancel_requested.connect(self._on_batch_cancel)
+            self.batch_queue_empty.connect(self._batch_queue_dialog.set_queue_empty)
+            self.batch_queue_cancelled.connect(self._batch_queue_dialog.set_queue_cancelled)
+            self.batch_queue_item_started.connect(self._on_batch_item_started)
+        if self._batch_queue_dialog.isVisible():
+            self._batch_queue_dialog.raise_()
+            self._batch_queue_dialog.activateWindow()
+        else:
+            self._batch_queue_dialog.show()
+
+    def _on_batch_start(self, paths: list):
+        self.run_batch(paths)
+
+    def _on_batch_cancel(self):
+        self._batch_cancelled = True
+        self.exec_dirs = []
+        self.module_manager.stopImgtransPipeline()
+
+    def _on_batch_item_started(self, path: str):
+        if self._batch_queue_dialog is not None:
+            self._batch_queue_dialog.set_running_state(True, paused=False, current_path=path)
+            if self._batch_queue_dialog.list_widget.count() > 0:
+                self._batch_queue_dialog.list_widget.takeItem(0)
 
     def on_open_manage_models(self):
         """Open the Manage models dialog (check downloaded models, download selected)."""
@@ -1592,6 +1663,30 @@ class MainWindow(mainwindow_cls):
             self.on_export_txt('source')
         if shared.HEADLESS or getattr(self, 'exec_dirs', None) is not None:
             self.run_next_dir()
+            return
+        self.maybe_auto_run_region_merge()
+
+    def maybe_auto_run_region_merge(self):
+        """If configured, run Region merge after pipeline (all pages or current page)."""
+        mode = getattr(pcfg, 'auto_region_merge_after_run', 'never')
+        if mode == 'never' or self.imgtrans_proj.is_empty:
+            return
+        if not hasattr(self, 'merge_dialog') or self.merge_dialog is None:
+            from .merge_dialog import MergeDialog
+            self.merge_dialog = MergeDialog(self)
+            self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True))
+            self.merge_dialog.run_all_clicked.connect(lambda: self.run_merge_task(on_current=False))
+        config = self.merge_dialog.get_config()
+        if mode == 'all_pages':
+            img_list = list(self.imgtrans_proj.pages.keys())
+            if not img_list:
+                return
+            json_path = self.imgtrans_proj.proj_path
+            if not json_path or not osp.exists(json_path):
+                return
+            self.run_merge_all_async(json_path, img_list, config)
+        elif mode == 'current_page':
+            self.run_merge_task(on_current=True)
 
     def postprocess_translations(self, blk_list: List[TextBlock]) -> None:
         src_is_cjk = is_cjk(pcfg.module.translate_source)
@@ -2285,6 +2380,17 @@ class MainWindow(mainwindow_cls):
         self.st_manager.updateSceneTextitems()
         self.canvas.setProjSaveState(False)
 
+    def on_set_text_on_path(self, mode: int):
+        """Set text on path (0=None, 1=Circular, 2=Arc) on selected text blocks."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        gf = self.textPanel.formatpanel.global_format
+        from ui import fontformat_commands as FC
+        FC.ffmt_change_text_on_path('text_on_path', [mode] * len(blks), gf, True, blks)
+        self.st_manager.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
+
     def on_run_detect_region(self, rect):
         if not self.imgtrans_proj.img_valid or self.imgtrans_proj.img_array is None:
             return
@@ -2357,10 +2463,11 @@ class MainWindow(mainwindow_cls):
         valid_dirs = []
         for d in exec_dirs:
             if osp.exists(d):
-                valid_dirs.append(d)
+                valid_dirs.append(osp.normpath(osp.abspath(d)))
             else:
                 LOGGER.warning(f'target directory {d} does not exist.')
         self.exec_dirs = valid_dirs
+        self._batch_cancelled = False
         self.run_next_dir()
 
     def run_next_dir(self):
@@ -2368,11 +2475,16 @@ class MainWindow(mainwindow_cls):
             while self.imsave_thread.isRunning():
                 time.sleep(0.1)
             LOGGER.info('finished translating all dirs.')
+            if self._batch_cancelled:
+                self.batch_queue_cancelled.emit()
+                self._batch_cancelled = False
+            else:
+                self.batch_queue_empty.emit()
             if shared.HEADLESS:
                 self.app.quit()
             return
         d = self.exec_dirs.pop(0)
-        
+        self.batch_queue_item_started.emit(d)
         LOGGER.info(f'translating {d} ...')
         self.openDir(d)
         shared.pbar = {}

@@ -1,4 +1,5 @@
 import time
+import threading
 from typing import Union, List, Dict, Callable
 import os.path as osp
 
@@ -6,12 +7,11 @@ import cv2
 import numpy as np
 from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer
 from qtpy.QtWidgets import QFileDialog, QMessageBox
-from sympy import true
 
 from .funcmaps import get_maskseg_method
 from utils.logger import logger as LOGGER
 from utils.registry import Registry
-from utils.imgproc_utils import enlarge_window, get_block_mask
+from utils.imgproc_utils import enlarge_window, get_block_mask, union_area
 from utils.io_utils import imread, text_is_empty
 from modules.translators import MissingTranslatorParams
 from modules.base import BaseModule, soft_empty_cache, GPUINTENSIVE_SET
@@ -24,9 +24,9 @@ from utils.textblock import TextBlock, sort_regions, examine_textblk
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from utils.translator_test import test_translator
+from utils.series_context_store import DEFAULT_SERIES_ID
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
-from .ocr_test_dialog import OCRTestDialog
 from utils.proj_imgtrans import ProjImgTrans
 from utils.config import pcfg, RunStatus
 cfg_module = pcfg.module
@@ -211,10 +211,45 @@ class TranslateThread(ModuleThread):
 
     def _translate_page(self, page_dict, page_key: str, emit_finished=True):
         page = page_dict[page_key]
+        proj = getattr(self, "imgtrans_proj", None)
+        series_path = ""
+        if proj is not None:
+            series_path = (getattr(proj, "series_context_path", None) or "").strip()
+        if not series_path and getattr(self.translator, "get_param_value", None):
+            series_path = (self.translator.get_param_value("series_context_path") or "").strip()
+        if not series_path:
+            series_path = DEFAULT_SERIES_ID
+        if proj is not None and hasattr(self.translator, "set_translation_context"):
+            ordered = list(proj.pages.keys())
+            if page_key in ordered:
+                idx = ordered.index(page_key)
+                n = getattr(
+                    self.translator,
+                    "context_previous_pages_count",
+                    0,
+                )
+                prev_keys = ordered[max(0, idx - n) : idx]
+                previous_pages = []
+                for k in prev_keys:
+                    blks = proj.pages.get(k, [])
+                    previous_pages.append({
+                        "sources": [blk.get_text() for blk in blks],
+                        "translations": [getattr(blk, "translation", "") or "" for blk in blks],
+                    })
+                self.translator.set_translation_context(
+                    previous_pages,
+                    getattr(proj, "translation_glossary", None) or [],
+                    series_context_path=series_path or None,
+                )
         try:
             self.translator.translate_textblk_lst(page)
         except Exception as e:
             create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+        else:
+            if series_path and hasattr(self.translator, "append_page_to_series_context"):
+                sources = [blk.get_text() for blk in page]
+                translations = [getattr(blk, "translation", "") or "" for blk in page]
+                self.translator.append_page_to_series_context(series_path, sources, translations)
         if emit_finished:
             self.finish_translate_page.emit(page_key)
 
@@ -305,6 +340,9 @@ class ImgtransThread(QThread):
         self.imgtrans_proj: ProjImgTrans = None
         self.stop_requested = False
         self.pages_to_process = None  # 需要处理的页面列表（用于继续运行模式）
+        self._pause_requested = False
+        self._resume_event = threading.Event()
+        self._resume_event.set()
 
     def on_module_thread_stopped(self):
         while True:
@@ -319,6 +357,66 @@ class ImgtransThread(QThread):
     @property
     def textdetector(self) -> TextDetectorBase:
         return self.textdetect_thread.textdetector
+
+    def _run_dual_detect(self, img: np.ndarray, mask: np.ndarray, blk_list: List[TextBlock], im_w: int, im_h: int):
+        """Run secondary detector and merge blocks (add secondary blocks that don't overlap much with primary)."""
+        sec_name = (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
+        if not sec_name or sec_name not in GET_VALID_TEXTDETECTORS():
+            return mask, blk_list
+        if blk_list is None:
+            blk_list = []
+        try:
+            sec_class = TEXTDETECTORS.module_dict.get(sec_name)
+            if sec_class is None:
+                return mask, blk_list
+            merged_params = merge_config_module_params(
+                cfg_module.get_params('textdetector'),
+                GET_VALID_TEXTDETECTORS(),
+                TEXTDETECTORS.get
+            )
+            params = merged_params.get(sec_name)
+            if isinstance(params, dict):
+                params = {k: v for k, v in params.items() if not k.startswith('__')}
+            sec_detector = sec_class(**params) if params and isinstance(params, dict) else sec_class()
+            if not pcfg.module.load_model_on_demand:
+                sec_detector.load_model()
+        except Exception as e:
+            LOGGER.warning('Could not create secondary detector %s: %s', sec_name, e)
+            return mask, blk_list
+        try:
+            mask2, blk_list_2 = sec_detector.detect(img, self.imgtrans_proj)
+        except Exception as e:
+            LOGGER.warning('Secondary detector %s failed: %s', sec_name, e)
+            return mask, blk_list
+        if blk_list_2 is None:
+            blk_list_2 = []
+        if not blk_list_2:
+            if mask is not None and mask2 is not None and mask.shape == mask2.shape:
+                mask = np.bitwise_or(mask, mask2)
+            elif mask is None and mask2 is not None:
+                mask = mask2
+            return mask, blk_list
+        iou_threshold = 0.4
+        def _iou(a: TextBlock, b: TextBlock) -> float:
+            inter = union_area(a.xyxy, b.xyxy)
+            if inter <= 0:
+                return 0.0
+            area_a = (a.xyxy[2] - a.xyxy[0]) * (a.xyxy[3] - a.xyxy[1])
+            area_b = (b.xyxy[2] - b.xyxy[0]) * (b.xyxy[3] - b.xyxy[1])
+            union = area_a + area_b - inter
+            return inter / union if union > 0 else 0.0
+        for blk in blk_list_2:
+            if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                examine_textblk(blk, im_w, im_h, sort=True)
+            max_iou = max((_iou(blk, p) for p in blk_list), default=0.0)
+            if max_iou < iou_threshold:
+                blk_list.append(blk)
+        blk_list = sort_regions(blk_list)
+        if mask is not None and mask2 is not None and mask.shape == mask2.shape:
+            mask = np.bitwise_or(mask, mask2)
+        elif mask is None and mask2 is not None:
+            mask = mask2
+        return mask, blk_list
 
     @property
     def ocr(self) -> OCRBase:
@@ -337,6 +435,8 @@ class ImgtransThread(QThread):
         self.pages_to_process = pages_to_process  # 保存需要处理的页面列表
         self.num_pages = len(self.imgtrans_proj.pages)
         self.stop_requested = False
+        self._pause_requested = False
+        self._resume_event.set()
         # 创建处理索引到实际页面索引的映射
         self.process_idx_to_page_idx = {}
         self.job = self._imgtrans_pipeline
@@ -345,9 +445,21 @@ class ImgtransThread(QThread):
     def requestStop(self):
         """请求停止当前任务"""
         self.stop_requested = True
+        self._pause_requested = False
+        self._resume_event.set()
         # 同时停止翻译线程
         if self.translate_thread.isRunning():
             self.translate_thread.requestStop()
+
+    def requestPause(self):
+        """Pause the pipeline (batch queue); pipeline will wait until requestResume()."""
+        self._pause_requested = True
+        self._resume_event.clear()
+
+    def requestResume(self):
+        """Resume the pipeline after pause."""
+        self._pause_requested = False
+        self._resume_event.set()
 
     def runBlktransPipeline(self, blk_list: List[TextBlock], tgt_img: np.ndarray, mode: int, blk_ids: List[int], tgt_mask):
         self.job = lambda : self._blktrans_pipeline(blk_list, tgt_img, mode, blk_ids, tgt_mask)
@@ -388,6 +500,46 @@ class ImgtransThread(QThread):
                         blk.region_inpaint_dict = {'img': im, 'mask': mask, 'inpaint_rect': [x1, y1, x2, y2], 'inpainted': inpainted}
                     self.finish_blktrans_stage.emit('inpaint', int((ii+1) * progress_prod))
         self.finish_blktrans.emit(mode, blk_ids)
+
+    def _set_translation_context_for_page(self, imgname: str, pages_to_iterate: list):
+        """Set previous-page context and project glossary on translator before translating this page."""
+        if not hasattr(self.translator, "set_translation_context"):
+            return
+        if imgname not in pages_to_iterate:
+            return
+        series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
+        if not series_path and getattr(self.translator, "get_param_value", None):
+            series_path = (self.translator.get_param_value("series_context_path") or "").strip()
+        if not series_path:
+            series_path = DEFAULT_SERIES_ID
+        idx = pages_to_iterate.index(imgname)
+        n = getattr(self.translator, "context_previous_pages_count", 0)
+        prev_keys = pages_to_iterate[max(0, idx - n) : idx]
+        previous_pages = []
+        for k in prev_keys:
+            blks = self.imgtrans_proj.pages.get(k, [])
+            previous_pages.append({
+                "sources": [blk.get_text() for blk in blks],
+                "translations": [getattr(blk, "translation", "") or "" for blk in blks],
+            })
+        self.translator.set_translation_context(
+            previous_pages,
+            getattr(self.imgtrans_proj, "translation_glossary", None) or [],
+            series_context_path=series_path or None,
+        )
+
+    def _append_page_to_series_context(self, imgname: str, blk_list: list):
+        """Append the translated page to the series context store for cross-chapter consistency."""
+        if not blk_list or not hasattr(self.translator, "append_page_to_series_context"):
+            return
+        series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
+        if not series_path and getattr(self.translator, "get_param_value", None):
+            series_path = (self.translator.get_param_value("series_context_path") or "").strip()
+        if not series_path:
+            series_path = DEFAULT_SERIES_ID
+        sources = [blk.get_text() for blk in blk_list]
+        translations = [getattr(blk, "translation", "") or "" for blk in blk_list]
+        self.translator.append_page_to_series_context(series_path, sources, translations)
 
     def _imgtrans_pipeline(self):
         self.detect_counter = 0
@@ -433,6 +585,10 @@ class ImgtransThread(QThread):
             if self.stop_requested:
                 LOGGER.info('Image translation pipeline stopped by user')
                 break
+            while self._pause_requested and not self.stop_requested:
+                self._resume_event.wait(timeout=0.3)
+            if self.stop_requested:
+                break
             LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)} ({imgname}): starting')
             if cfg_module.enable_ocr and hasattr(self.ocr, 'restore_to_device'):
                 self.ocr.restore_to_device()
@@ -444,11 +600,17 @@ class ImgtransThread(QThread):
                 try:
                     mask, blk_list = self.textdetector.detect(img, self.imgtrans_proj)
                     need_save_mask = True
-                    # Normalize font size and angle so text fits bubbles and is never sideways
                     im_h, im_w = img.shape[:2]
                     for blk in blk_list:
                         if getattr(blk, 'lines', None) and len(blk.lines) > 0:
                             examine_textblk(blk, im_w, im_h, sort=True)
+                    if (getattr(cfg_module, 'enable_dual_detect', False) and
+                            getattr(cfg_module, 'textdetector_secondary', '').strip() and
+                            cfg_module.textdetector_secondary != cfg_module.textdetector):
+                        try:
+                            mask, blk_list = self._run_dual_detect(img, mask, blk_list, im_w, im_h)
+                        except Exception as e:
+                            LOGGER.warning('Dual text detection failed: %s', e)
                 except Exception as e:
                     create_error_dialog(e, self.tr('Text Detection Failed.'), 'TextDetectFailed')
                     blk_list = []
@@ -530,7 +692,9 @@ class ImgtransThread(QThread):
                 if self.parallel_trans:
                     self.translate_thread.push_pagekey_queue(imgname)
                 elif not low_vram_trans:
+                    self._set_translation_context_for_page(imgname, pages_to_iterate)
                     self.translator.translate_textblk_lst(blk_list)
+                    self._append_page_to_series_context(imgname, blk_list)
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
                         
@@ -561,9 +725,14 @@ class ImgtransThread(QThread):
                 if self.stop_requested:
                     LOGGER.info('Translation stopped by user')
                     break
-                    
+                while self._pause_requested and not self.stop_requested:
+                    self._resume_event.wait(timeout=0.3)
+                if self.stop_requested:
+                    break
+                self._set_translation_context_for_page(imgname, pages_to_iterate)
                 blk_list = self.imgtrans_proj.pages[imgname]
                 self.translator.translate_textblk_lst(blk_list)
+                self._append_page_to_series_context(imgname, blk_list)
                 self.translate_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_TRANSLATE)
                 self.update_translate_progress.emit(self.translate_counter)
@@ -707,7 +876,6 @@ class ModuleManager(QObject):
         ocr_panel.addModulesParamWidgets(ocr_params)
         ocr_panel.paramwidget_edited.connect(self.on_ocrparam_edited)
         ocr_panel.ocr_changed.connect(self.setOCR)
-        ocr_panel.test_ocr_clicked.connect(self.on_test_ocr)
         OCRBase.register_postprocess_hooks(ocr_postprocess)
 
         config_panel.unload_models.connect(self.unload_all_models)
@@ -781,6 +949,13 @@ class ModuleManager(QObject):
             return
         
         self.progress_msgbox.detect_bar.setVisible(cfg_module.enable_detect)
+        if cfg_module.enable_detect:
+            dual = getattr(cfg_module, 'enable_dual_detect', False) and (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
+            if dual:
+                sec = getattr(cfg_module, 'textdetector_secondary', '') or ''
+                self.progress_msgbox.detect_bar.description = self.tr('Detecting (dual: {} + {}): ').format(cfg_module.textdetector, sec)
+            else:
+                self.progress_msgbox.detect_bar.description = self.tr('Detecting: ')
         self.progress_msgbox.ocr_bar.setVisible(cfg_module.enable_ocr)
         self.progress_msgbox.translate_bar.setVisible(cfg_module.enable_translate)
         self.progress_msgbox.inpaint_bar.setVisible(cfg_module.enable_inpaint)
@@ -793,6 +968,15 @@ class ModuleManager(QObject):
         LOGGER.info('Stopping image translation pipeline...')
         if self.imgtrans_thread.isRunning():
             self.imgtrans_thread.requestStop()
+
+    def requestPausePipeline(self):
+        """Pause the running pipeline (for batch queue). No-op if not running."""
+        if self.imgtrans_thread.isRunning():
+            self.imgtrans_thread.requestPause()
+
+    def requestResumePipeline(self):
+        """Resume the pipeline after pause."""
+        self.imgtrans_thread.requestResume()
 
     def runBlktransPipeline(self, blk_list: List[TextBlock], tgt_img: np.ndarray, mode: int, blk_ids: List[int], tgt_mask):
         self.terminateRunningThread()
@@ -1037,10 +1221,6 @@ class ModuleManager(QObject):
         if self.ocr is not None:
             self.updateModuleSetupParam(self.ocr, param_key, param_content)
             cfg_module.ocr_params[self.ocr.name] = self.ocr.params
-
-    def on_test_ocr(self):
-        parent = self.ocr_panel.window() if self.ocr_panel else None
-        OCRTestDialog(self.ocr, parent).exec()
 
     def updateModuleSetupParam(self,
                                module: Union[InpainterBase, BaseTranslator],

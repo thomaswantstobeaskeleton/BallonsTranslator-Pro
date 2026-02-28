@@ -326,7 +326,13 @@ class ConfigTable(QTreeView):
         super().selectionChanged(selected, deselected)
 
     def setCurrentItem(self, idx0, idx1):
-        index = self.tm.item(idx0, 0).child(idx1).index()
+        parent = self.tm.item(idx0, 0)
+        if parent is None:
+            return
+        child = parent.child(idx1)
+        if child is None:
+            return
+        index = child.index()
         self.setCurrentIndex(index)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -455,6 +461,18 @@ class ConfigPanel(Widget):
         self.confirm_before_run_checker, _ = generalConfigPanel.addCheckBox(self.tr('Confirm before Run'), discription=self.tr('Show Run / Continue / Cancel dialog when clicking Run.'))
         self.confirm_before_run_checker.stateChanged.connect(self.on_confirm_before_run_changed)
 
+        self.auto_region_merge_combobox = QComboBox()
+        self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
+        self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
+        self.auto_region_merge_combobox.addItem(self.tr('After run: on current page only'), 'current_page')
+        self.auto_region_merge_combobox.currentIndexChanged.connect(self.on_auto_region_merge_changed)
+        sublock_arm = ConfigSubBlock(
+            self.auto_region_merge_combobox,
+            self.tr('After Run: Region merge'),
+            discription=self.tr('Automatically run the Region merge tool after a pipeline run. Uses settings from Tools → Region merge tool.')
+        )
+        generalConfigPanel.addSublock(sublock_arm)
+
         self.darkmode_checker, _ = generalConfigPanel.addCheckBox(self.tr('Dark mode'), discription=self.tr('Use dark theme. Restart or toggle View → Dark Mode to apply fully.'))
         self.darkmode_checker.stateChanged.connect(self.on_darkmode_checker_changed)
 
@@ -481,6 +499,20 @@ class ConfigPanel(Widget):
         self.ocr_spell_check_checker.stateChanged.connect(self.on_ocr_spell_check_changed)
 
         generalConfigPanel.addTextLabel(label_typesetting)
+
+        text_fit_auto = self.tr('Auto fit to box')
+        text_fit_fixed = self.tr('Fixed size (use font size list)')
+        self.text_box_format_combox, sublock = combobox_with_label(
+            [text_fit_auto, text_fit_fixed],
+            self.tr('Text in box'),
+            discription=self.tr('How text is fitted in each text box. Auto fit scales font size so text fits the box while keeping line structure (see issue #1077). Fixed size uses the font size list below.'),
+            parent=self,
+            insert_stretch=True
+        )
+        self.text_box_format_combox.setToolTip(self.tr('Auto fit: program decides font size so text fits the balloon. Fixed: use the font size list.'))
+        generalConfigPanel.addSublock(sublock)
+        self.text_box_format_combox.activated.connect(self.on_text_box_format_changed)
+
         dec_program_str = self.tr('decide by program')
         use_global_str = self.tr('use global setting')
 
@@ -625,6 +657,10 @@ class ConfigPanel(Widget):
     def on_confirm_before_run_changed(self):
         pcfg.confirm_before_run = self.confirm_before_run_checker.isChecked()
 
+    def on_auto_region_merge_changed(self):
+        idx = self.auto_region_merge_combobox.currentIndex()
+        pcfg.auto_region_merge_after_run = self.auto_region_merge_combobox.itemData(idx) or 'never'
+
     def on_darkmode_checker_changed(self):
         pcfg.darkmode = self.darkmode_checker.isChecked()
         self.darkmode_changed.emit(pcfg.darkmode)
@@ -664,6 +700,18 @@ class ConfigPanel(Widget):
         pcfg.let_fntstroke_flag = self.let_fntstroke_combox.currentIndex()
 
     def on_autolayout_changed(self):
+        pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
+
+    def on_text_box_format_changed(self):
+        """Sync Font Size and Auto layout from the Text in box dropdown (issue #1077)."""
+        idx = self.text_box_format_combox.currentIndex()
+        if idx == 0:  # Auto fit to box
+            self.let_fntsize_combox.setCurrentIndex(0)
+            self.let_autolayout_checker.setChecked(True)
+        else:  # Fixed size
+            self.let_fntsize_combox.setCurrentIndex(1)
+            self.let_autolayout_checker.setChecked(False)
+        pcfg.let_fntsize_flag = self.let_fntsize_combox.currentIndex()
         pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
 
     def on_uppercase_changed(self):
@@ -754,6 +802,10 @@ class ConfigPanel(Widget):
             self.open_on_startup_checker.setChecked(True)
 
         self.detect_config_panel.keep_existing_checker.setChecked(pcfg.module.keep_exist_textlines)
+        if hasattr(self.detect_config_panel, 'dual_detect_checker'):
+            self.detect_config_panel.dual_detect_checker.setChecked(getattr(pcfg.module, 'enable_dual_detect', False))
+        if hasattr(self.detect_config_panel, 'secondary_detector_combobox'):
+            self.detect_config_panel.secondary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_secondary', '') or '')
         self.let_effect_combox.setCurrentIndex(pcfg.let_fnteffect_flag)
         self.let_fntsize_combox.setCurrentIndex(pcfg.let_fntsize_flag)
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)
@@ -763,6 +815,11 @@ class ConfigPanel(Widget):
         self.let_family_combox.setCurrentIndex(pcfg.let_family_flag)
         self.let_writing_mode_combox.setCurrentIndex(pcfg.let_writing_mode_flag)
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
+        # Keep Text in box dropdown in sync (Auto fit = decide by program + Auto layout)
+        if pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:
+            self.text_box_format_combox.setCurrentIndex(0)
+        else:
+            self.text_box_format_combox.setCurrentIndex(1)
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)
@@ -780,6 +837,12 @@ class ConfigPanel(Widget):
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
+        arm = getattr(pcfg, 'auto_region_merge_after_run', 'never')
+        arm_idx = self.auto_region_merge_combobox.findData(arm)
+        if arm_idx >= 0:
+            self.auto_region_merge_combobox.blockSignals(True)
+            self.auto_region_merge_combobox.setCurrentIndex(arm_idx)
+            self.auto_region_merge_combobox.blockSignals(False)
         self.darkmode_checker.setChecked(pcfg.darkmode)
         self.display_lang_combobox.blockSignals(True)
         self.display_lang_combobox.setCurrentText(self._display_lang_to_label(getattr(pcfg, 'display_lang', C.DEFAULT_DISPLAY_LANG)))

@@ -208,8 +208,8 @@ AlignmentChecker {
 }
 
 AlignmentChecker::indicator {
-    height: 28px;
-    width: 28px;
+    height: 24px;
+    width: 24px;
     border: 2px solid @borderColor;
 }
 
@@ -223,8 +223,8 @@ AlignmentChecker::indicator:hover {
 
 AlignmentChecker#AlignLeftChecker::indicator {
     border-right: none;
-    min-width: 36px;
-    max-width: 36px;
+    min-width: 30px;
+    max-width: 30px;
     image: url(icons/fontfmt_alignl.svg);
 }
 
@@ -235,8 +235,8 @@ AlignmentChecker#AlignLeftChecker::indicator:checked {
 AlignmentChecker#AlignCenterChecker::indicator {
     border-right: none;
     border-left: none;
-    min-width: 36px;
-    max-width: 36px;
+    min-width: 30px;
+    max-width: 30px;
     image: url(icons/fontfmt_alignc.svg);
 }
 
@@ -246,8 +246,8 @@ AlignmentChecker#AlignCenterChecker::indicator:checked {
 
 AlignmentChecker#AlignRightChecker::indicator {
     border-left: none;
-    min-width: 35px;
-    max-width: 35px;
+    min-width: 30px;
+    max-width: 30px;
     image: url(icons/fontfmt_alignr.svg);
 }
 
@@ -256,12 +256,12 @@ AlignmentChecker#AlignRightChecker::indicator:checked {
 }
 
 QFontChecker {
-    max-width: 34px;
+    max-width: 28px;
 }
 
 QFontChecker::indicator {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     border: 2px solid rgba(30, 147, 229, 0);
 }
 
@@ -801,6 +801,18 @@ DrawToolCheckBox#DrawPenTool::indicator:hover {
 
 DrawToolCheckBox#DrawPenTool::indicator:checked {
     image: url(icons/drawingtools_pen.svg);
+}
+
+DrawToolCheckBox#DrawTextEraserTool::indicator {
+    image: url(icons/drawingtools_texteraser.svg);
+}
+
+DrawToolCheckBox#DrawTextEraserTool::indicator:hover {
+    image: url(icons/drawingtools_texteraser.svg);
+}
+
+DrawToolCheckBox#DrawTextEraserTool::indicator:checked {
+    image: url(icons/drawingtools_texteraser.svg);
 }
 
 DrawToolCheckBox#DrawRectTool::indicator {

@@ -380,6 +380,7 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
     show_pre_MT_keyword_window = Signal()
     show_MT_keyword_window = Signal()
     show_OCR_keyword_window = Signal()
+    show_translation_context_requested = Signal()
     test_translator_clicked = Signal()
 
     def __init__(self, module_name, scrollWidget: QWidget = None, *args, **kwargs) -> None:
@@ -400,6 +401,10 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.replaceOCRkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for source text"), self)
         self.replaceOCRkeywordBtn.clicked.connect(self.show_OCR_keyword_window)
         self.replaceOCRkeywordBtn.setFixedWidth(500)
+        self.translationContextBtn = NoBorderPushBtn(self.tr("Translation context (project)..."), self)
+        self.translationContextBtn.setToolTip(self.tr("Set series path and glossary for this project (cross-chapter consistency)."))
+        self.translationContextBtn.clicked.connect(self.show_translation_context_requested.emit)
+        self.translationContextBtn.setFixedWidth(500)
 
         st_layout = QHBoxLayout()
         st_layout.setSpacing(15)
@@ -412,6 +417,7 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.vlayout.insertLayout(1, st_layout) 
         self.vlayout.addWidget(self.testTranslatorBtn)
         self.vlayout.addWidget(self.replaceOCRkeywordBtn)
+        self.vlayout.addWidget(self.translationContextBtn)
         self.vlayout.addWidget(self.replacePreMTkeywordBtn)
         self.vlayout.addWidget(self.replaceMTkeywordBtn)
 
@@ -457,11 +463,93 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         self.setDetector = self.setModule
         self.keep_existing_checker = QCheckBox(text=self.tr('Keep Existing Lines'))
         self.p_layout.insertWidget(2, self.keep_existing_checker)
-        
+        self.dual_detect_checker = QCheckBox(self.tr('Run second detector (dual detect)'))
+        self.dual_detect_checker.setToolTip(self.tr('Run a second text detector and merge results to catch more regions (e.g. one good at bubbles, one at captions).'))
+        self.dual_detect_checker.setChecked(getattr(pcfg.module, 'enable_dual_detect', False))
+        self.dual_detect_checker.clicked.connect(self._on_dual_detect_changed)
+        self.secondary_detector_combobox = ConfigComboBox(scrollWidget=scrollWidget)
+        self.secondary_detector_combobox.addItem('')
+        self.secondary_detector_combobox.addItems(GET_VALID_TEXTDETECTORS())
+        self.secondary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_secondary', '') or '')
+        self.secondary_detector_combobox.currentTextChanged.connect(self._on_secondary_detector_changed)
+        dual_hl = QHBoxLayout()
+        dual_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        dual_hl.addWidget(self.dual_detect_checker)
+        dual_hl.addWidget(QLabel(self.tr('Secondary:')))
+        dual_hl.addWidget(self.secondary_detector_combobox)
+        self.vlayout.addLayout(dual_hl)
+        # Secondary detector params (shown when dual detect is on and a secondary is selected)
+        self.secondary_params_container = QWidget(self)
+        secondary_params_outer = QVBoxLayout(self.secondary_params_container)
+        secondary_params_outer.setContentsMargins(0, 0, 0, 0)
+        secondary_params_outer.addWidget(QLabel(self.tr('Secondary detector params:')))
+        self.secondary_params_layout = QHBoxLayout()
+        self.secondary_params_layout.setContentsMargins(0, 0, 0, 0)
+        secondary_params_outer.addLayout(self.secondary_params_layout)
+        self.secondary_param_widget_map = {}
+        self.secondary_visible_widget = None
+        self.vlayout.addWidget(self.secondary_params_container)
+        self._update_secondary_params_visibility()
+
+    def _on_dual_detect_changed(self):
+        pcfg.module.enable_dual_detect = self.dual_detect_checker.isChecked()
+        self._update_secondary_params_visibility()
+
+    def _on_secondary_detector_changed(self, name: str):
+        pcfg.module.textdetector_secondary = (name or '').strip()
+        self._update_secondary_params_visibility()
+
+    def _update_secondary_params_visibility(self):
+        dual = self.dual_detect_checker.isChecked()
+        sec = (self.secondary_detector_combobox.currentText() or '').strip()
+        if dual and sec and sec in getattr(self, 'module_dict', {}):
+            self.secondary_params_container.show()
+            self._update_secondary_param_widget()
+        else:
+            self.secondary_params_container.hide()
+
+    def _update_secondary_param_widget(self):
+        sec_name = (self.secondary_detector_combobox.currentText() or '').strip()
+        if self.secondary_visible_widget is not None:
+            self.secondary_visible_widget.hide()
+            self.secondary_params_layout.removeWidget(self.secondary_visible_widget)
+            self.secondary_visible_widget = None
+        if not sec_name or not getattr(self, 'module_dict', None) or sec_name not in self.module_dict:
+            return
+        if sec_name in self.secondary_param_widget_map:
+            widget = self.secondary_param_widget_map[sec_name]
+        else:
+            params = self.module_dict[sec_name]
+            if params is None:
+                return
+            widget = ParamWidget(params, scrollWidget=self)
+            widget.paramwidget_edited.connect(self._on_secondary_param_edited)
+            self.secondary_param_widget_map[sec_name] = widget
+        self.secondary_params_layout.addWidget(widget)
+        widget.show()
+        self.secondary_visible_widget = widget
+
+    def _on_secondary_param_edited(self, param_key: str, param_content: dict):
+        sec_name = (self.secondary_detector_combobox.currentText() or '').strip()
+        if not sec_name:
+            return
+        tparams = getattr(pcfg.module, 'textdetector_params', None) or {}
+        if sec_name not in tparams or param_key not in tparams[sec_name]:
+            return
+        val = param_content.get('content')
+        if val is None:
+            return
+        params = tparams[sec_name]
+        if isinstance(params.get(param_key), dict):
+            params[param_key]['value'] = val
+        else:
+            params[param_key] = val
+
+    def addModulesParamWidgets(self, module_dict: dict):
+        super().addModulesParamWidgets(module_dict)
+        self._update_secondary_params_visibility()
 
 class OCRConfigPanel(ModuleConfigParseWidget):
-    test_ocr_clicked = Signal()
-
     def __init__(self, module_name: str, scrollWidget: QWidget = None, *args, **kwargs) -> None:
         super().__init__(module_name, GET_VALID_OCR, scrollWidget = scrollWidget, *args, **kwargs)
         self.ocr_changed = self.module_changed
@@ -475,10 +563,6 @@ class OCRConfigPanel(ModuleConfigParseWidget):
         self.fontDetectChecker.setChecked(pcfg.module.ocr_font_detect)
         self.fontDetectChecker.clicked.connect(self.on_fontdetect_changed)
         self.vlayout.addWidget(self.fontDetectChecker)
-        self.testOCRBtn = QPushButton(self.tr("Test OCR"), self)
-        self.testOCRBtn.setToolTip(self.tr("Run OCR on a sample image to verify setup and connectivity."))
-        self.testOCRBtn.clicked.connect(self.test_ocr_clicked.emit)
-        self.vlayout.addWidget(self.testOCRBtn)
 
     def on_restore_empty_ocr(self):
         pcfg.restore_ocr_empty = self.restoreEmptyOCRChecker.isChecked()

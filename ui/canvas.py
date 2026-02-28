@@ -176,6 +176,7 @@ class Canvas(QGraphicsScene):
     to_lowercase_signal = Signal()
     toggle_strikethrough_signal = Signal()
     set_gradient_type_signal = Signal(int)  # 0 = Linear, 1 = Radial
+    set_text_on_path_signal = Signal(int)  # 0 = None, 1 = Circular, 2 = Arc
     merge_selected_blocks_signal = Signal()
     move_blocks_up_signal = Signal()
     move_blocks_down_signal = Signal()
@@ -543,12 +544,16 @@ class Canvas(QGraphicsScene):
             self.originallayer_trans_slider.setValue(100 - value)
             self.updateLayers()
 
-    def addStrokeImageItem(self, pos: QPointF, pen: QPen, erasing: bool = False):
+    def addStrokeImageItem(self, pos: QPointF, pen: QPen, erasing: bool = False, text_eraser: bool = False):
         if self.stroke_img_item is not None:
             self.stroke_img_item.startNewPoint(pos)
         else:
+            if text_eraser:
+                self._text_eraser_selected_blocks = self.selected_text_items()
             self.stroke_img_item = StrokeImgItem(pen, pos, self.img_window_size(), shape=self.painting_shape)
-            if not erasing:
+            if text_eraser:
+                self.stroke_img_item.setParentItem(self.textLayer)
+            elif not erasing:
                 self.stroke_img_item.setParentItem(self.baseLayer)
             else:
                 self.erase_img_key = str(QDateTime.currentMSecsSinceEpoch())
@@ -676,14 +681,15 @@ class Canvas(QGraphicsScene):
                 if self.scale_tool_mode:
                     self.begin_scale_tool.emit(event.scenePos())
                 elif self.painting:
-                    self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.painting_pen)
+                    text_eraser = self.image_edit_mode == ImageEditMode.TextEraserTool
+                    self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.painting_pen, text_eraser=text_eraser)
 
             elif btn == Qt.MouseButton.RightButton:
-                # user is drawing using eraser
-                if self.painting:
+                if self.painting and self.image_edit_mode != ImageEditMode.TextEraserTool:
                     erasing = self.image_edit_mode == ImageEditMode.PenTool
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.erasing_pen, erasing)
-                else:   # rubber band selection
+                elif not self.painting:
+                    # rubber band selection
                     self.rubber_band_origin = event.scenePos()
                     self.rubber_band.setGeometry(QRectF(self.rubber_band_origin, self.rubber_band_origin).normalized())
                     self.rubber_band.show()
@@ -774,7 +780,7 @@ class Canvas(QGraphicsScene):
 
     @property
     def painting(self):
-        return self.image_edit_mode == ImageEditMode.PenTool or self.image_edit_mode == ImageEditMode.InpaintTool
+        return self.image_edit_mode == ImageEditMode.PenTool or self.image_edit_mode == ImageEditMode.InpaintTool or self.image_edit_mode == ImageEditMode.TextEraserTool
 
     def setMaskTransparencyBySlider(self, slider_value: int):
         self.setMaskTransparency(slider_value / 100)
@@ -823,8 +829,10 @@ class Canvas(QGraphicsScene):
             gradient_sub = menu.addMenu(self.tr("Gradient type"))
             gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
             gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
-
-            menu.addSeparator()
+            text_on_path_sub = menu.addMenu(self.tr("Text on path"))
+            text_on_path_none_act = text_on_path_sub.addAction(self.tr("None"))
+            text_on_path_circular_act = text_on_path_sub.addAction(self.tr("Circular"))
+            text_on_path_arc_act = text_on_path_sub.addAction(self.tr("Arc"))
             merge_blocks_act = menu.addAction(self.tr("Merge selected blocks"))
             move_up_act = menu.addAction(self.tr("Move block(s) up"))
             move_down_act = menu.addAction(self.tr("Move block(s) down"))
@@ -841,6 +849,7 @@ class Canvas(QGraphicsScene):
             to_lowercase_act.setEnabled(n_sel >= 1)
             toggle_strikethrough_act.setEnabled(n_sel >= 1)
             gradient_sub.setEnabled(n_sel >= 1)
+            text_on_path_sub.setEnabled(n_sel >= 1)
             menu.addSeparator()
 
             format_act = menu.addAction(self.tr("Apply font formatting"))
@@ -900,6 +909,12 @@ class Canvas(QGraphicsScene):
                 self.set_gradient_type_signal.emit(0)
             elif rst == gradient_radial_act:
                 self.set_gradient_type_signal.emit(1)
+            elif rst == text_on_path_none_act:
+                self.set_text_on_path_signal.emit(0)
+            elif rst == text_on_path_circular_act:
+                self.set_text_on_path_signal.emit(1)
+            elif rst == text_on_path_arc_act:
+                self.set_text_on_path_signal.emit(2)
             elif rst == merge_blocks_act:
                 self.merge_selected_blocks_signal.emit()
             elif rst == move_up_act:

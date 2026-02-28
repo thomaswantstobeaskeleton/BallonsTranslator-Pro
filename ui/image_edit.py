@@ -16,6 +16,7 @@ class ImageEditMode:
     InpaintTool = 1
     PenTool = 2
     RectTool = 3
+    TextEraserTool = 4  # (#1093) Erase parts of selected text blocks (mask)
 
 class PenShape:
     Circle = 0

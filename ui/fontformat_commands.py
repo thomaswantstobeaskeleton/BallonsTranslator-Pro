@@ -199,3 +199,35 @@ ffmt_change_gradient_end_color = ffmt_change_gradient_enabled
 ffmt_change_gradient_angle = ffmt_change_gradient_enabled
 ffmt_change_gradient_size = ffmt_change_gradient_enabled
 ffmt_change_gradient_type = ffmt_change_gradient_enabled
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_text_on_path(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.text_on_path = int(value)
+        blkitem.repaint_background()
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_text_on_path_arc_degrees(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.text_on_path_arc_degrees = float(value)
+        blkitem.repaint_background()
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_warp_style(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.warp_style = int(value)
+        blkitem.repaint_background()
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_warp_strength(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.warp_strength = float(value)
+        blkitem.repaint_background()
+        blkitem.update()

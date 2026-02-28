@@ -12,8 +12,8 @@ from utils.message import create_error_dialog, create_info_dialog
 @register_OCR('stariver_ocr')
 class OCRStariver(OCRBase):
     params = {
-        'User': "填入你的用户名",
-        'Password': "填入你的密码。请注意，密码会明文保存，请勿在公共电脑上使用",
+        'User': "Enter your username",
+        'Password': "Enter your password. Stored in plain text; avoid on shared computers.",
         "refine":{
             'type': 'checkbox',
             'value': True
@@ -31,7 +31,7 @@ class OCRStariver(OCRBase):
         "force_expand":{
             'type': 'checkbox',
             'value': False,
-            'description': '是否强制扩展图片像素，会导致识别速度下降'
+            'description': 'Force expand image pixels; may slow down recognition'
         },
         "low_accuracy_mode":{
             'type': 'checkbox',
@@ -40,10 +40,10 @@ class OCRStariver(OCRBase):
         'update_token_btn': {
             'type': 'pushbtn',
             'value': '',
-            'description': '删除旧 Token 并重新申请',
-            'display_name': '更新 Token'
+            'description': 'Clear stored token and request a new one',
+            'display_name': 'Update token'
         },
-        'description': '星河云(团子翻译器) OCR API'
+        'description': 'Starriver Cloud (Tuanzi) OCR API'
     }
 
     @property
@@ -64,7 +64,7 @@ class OCRStariver(OCRBase):
      
     @property
     def filtrate(self):
-        self.params['filtrate']['value']
+        return self.params['filtrate']['value']
 
     @property
     def disable_skip_area(self):
@@ -99,11 +99,11 @@ class OCRStariver(OCRBase):
             "Password": self.Password
         }).json()
         if response.get('Status', -1) != "Success":
-            error_msg = f'stariver ocr 登录失败，错误信息：{response.get("ErrorMsg", "")}'
+            error_msg = f'Starriver login failed. Error: {response.get("ErrorMsg", "")}'
             raise   Exception(error_msg)
         token = response.get('Token', '')
         if token != '':
-            self.logger.info(f'登录成功，token前10位：{token[:10]}')
+            self.logger.info(f'Login successful, token prefix: {token[:10]}')
 
         return token
 
@@ -145,19 +145,19 @@ class OCRStariver(OCRBase):
         response = requests.post(self.url, data=json.dumps(payload))
 
         if response.status_code != 200:
-            print(f'stariver ocr 请求失败，状态码：{response.status_code}')
+            print(f'Starriver OCR request failed, status code: {response.status_code}')
             if response.json().get('Code', -1) != 0:
-                print(f'stariver ocr 错误信息：{response.json().get("Message", "")}')
+                print(f'Starriver OCR error: {response.json().get("Message", "")}')
                 with open('stariver_ocr_error.txt', 'w', encoding='utf-8') as f:
                     f.write(response.text)
-            raise ValueError('stariver ocr 请求失败。')
+            raise ValueError('Starriver OCR request failed.')
 
         response_data = response.json()['Data']
 
         if self.debug:
             id = response.json().get('RequestID', '')
             file_name = f"stariver_ocr_response_{id}.json"
-            print(f"stariver ocr 请求成功，响应数据已保存至{file_name}")
+            print(f"Starriver OCR request successful, response saved to {file_name}")
             with open(file_name, 'w', encoding='utf-8') as f:
                 json.dump(response_data, f, ensure_ascii=False, indent=4)
 
@@ -171,7 +171,7 @@ class OCRStariver(OCRBase):
         if (self.User != self.register_username or 
             self.Password != self.register_password):
             if self.token_obtained == False:
-                if "填入你的用户名" not in self.User and "填入你的密码。请注意，密码会明文保存，请勿在公共电脑上使用" not in self.Password:
+                if "Enter your username" not in self.User and "Enter your password" not in self.Password:
                     if len(self.Password) > 7 and len(self.User) >= 1:
                         new_token = self.get_token()
                         if new_token:  # 确保新获取到有效token再更新信息
@@ -193,6 +193,6 @@ class OCRStariver(OCRBase):
             self.register_password = None  # 强制刷新token时，将密码置空
             try:
                 if self.update_token_if_needed():
-                    create_info_dialog('Token 更新成功')
+                    create_info_dialog('Token updated successfully')
             except Exception as e:
-                create_error_dialog(e, 'Token 更新失败', 'TokenUpdateFailed')
+                create_error_dialog(e, 'Token update failed', 'TokenUpdateFailed')

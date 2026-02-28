@@ -15,8 +15,8 @@ import os
 class StariverDetector(TextDetectorBase):
 
     params = {
-        'User': "填入你的用户名",
-        'Password': "填入你的密码。请注意，密码会明文保存，请勿在公共电脑上使用",
+        'User': "Enter your username",
+        'Password': "Enter your password. Stored in plain text; avoid on shared computers.",
         'expand_ratio': "0.01",
         "refine": {
             'type': 'checkbox',
@@ -47,10 +47,10 @@ class StariverDetector(TextDetectorBase):
         'update_token_btn': {
             'type': 'pushbtn',
             'value': '',
-            'description': '删除旧 Token 并重新申请',
-            'display_name': '更新 Token'
+            'description': 'Clear stored token and request a new one',
+            'display_name': 'Update token'
         },
-        'description': '星河云(团子翻译器) OCR 文字检测器'
+        'description': 'Starriver Cloud (Tuanzi) OCR text detector'
     }
 
     @property
@@ -125,11 +125,11 @@ class StariverDetector(TextDetectorBase):
             "Password": self.Password
         }).json()
         if response.get('Status', -1) != "Success":
-            error_msg = f'stariver ocr 登录失败，错误信息：{response.get("ErrorMsg", "")}'
+            error_msg = f'Starriver login failed. Error: {response.get("ErrorMsg", "")}'
             raise Exception(error_msg)
         token = response.get('Token', '')
         if token != '':
-            self.logger.info(f'stariver detector 登录成功，token前10位：{token[:10]}')
+            self.logger.info(f'Starriver detector login successful, token prefix: {token[:10]}')
 
         return token
 
@@ -144,36 +144,36 @@ class StariverDetector(TextDetectorBase):
         return new_font_size
 
     def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
-        self.update_token_if_needed()  # 在向服务器发送请求前尝试更新 Token
+        self.update_token_if_needed()  # Try to refresh token before sending request
         if not self.token or self.token == '':
             self.logger.error(
-                f'stariver detector token 没有设置。当前token：{self.token}')
-            raise ValueError('stariver detector token 没有设置。')
+                'Starriver detector token is not set.')
+            raise ValueError('Starriver detector token is not set.')
         if self.low_accuracy_mode:
-            self.logger.info('stariver detector 当前处于低精度模式。')
+            self.logger.info('Starriver detector is in low-accuracy mode.')
             short_side = 768
         else:
             short_side = 1536
 
-        # 计算缩放比例
+        # Compute scale factor
         height, width = img.shape[:2]
         scale = short_side / min(height, width)
 
-        # 计算新的宽高
+        # Compute new dimensions
         new_width = int(width * scale)
         new_height = int(height * scale)
 
-        # 按比例缩放图像
+        # Scale image
         if scale < 1:
             img_scaled = cv2.resize(
                 img, (new_width, new_height), interpolation=cv2.INTER_AREA)
         else:
             img_scaled = img
 
-        # 记录日志
-        self.logger.debug(f'图像缩放比例：{scale}，图像尺寸：{new_width}x{new_height}')
+        # Log scale and dimensions
+        self.logger.debug(f'Image scale: {scale}, size: {new_width}x{new_height}')
 
-        # 编码图像为base64
+        # Encode image to base64
         img_encoded = cv2.imencode('.jpg', img_scaled)[1]
         img_base64 = base64.b64encode(img_encoded).decode('utf-8')
 
@@ -191,19 +191,19 @@ class StariverDetector(TextDetectorBase):
         }
         if self.debug:
             payload_log = {k: v for k, v in payload.items() if k != 'image'}
-            self.logger.debug(f'stariver detector 请求参数：{payload_log}')
+            self.logger.debug(f'Starriver detector request params: {payload_log}')
             self.save_debug_json(payload_log, 'request')
 
         response = requests.post(self.url, json=payload)
         if response.status_code != 200:
             self.logger.error(
-                f'stariver detector 请求失败，状态码：{response.status_code}')
+                f'Starriver detector request failed, status code: {response.status_code}')
             if response.json().get('Code', -1) != 0:
                 self.logger.error(
-                    f'stariver detector 错误信息：{response.json().get("Message", "")}')
+                    f'Starriver detector error: {response.json().get("Message", "")}')
                 with open('stariver_ocr_error.txt', 'w', encoding='utf-8') as f:
                     f.write(response.text)
-            raise ValueError('stariver detector 请求失败。')
+            raise ValueError('Starriver detector request failed.')
         response_data = response.json()['Data']
 
         if self.debug:
@@ -239,7 +239,7 @@ class StariverDetector(TextDetectorBase):
 
             if self.debug:
                 self.logger.debug(
-                    f'原始字体大小：{original_font_size}，修正后字体大小：{font_size_recalculated}')
+                    f'Original font size: {original_font_size}, adjusted: {font_size_recalculated}')
 
             blk = TextBlock(
                 xyxy=xyxy,
@@ -256,12 +256,12 @@ class StariverDetector(TextDetectorBase):
             )
             blk_list.append(blk)
             if self.debug:
-                self.logger.debug(f'检测到文本块：{blk.to_dict()}')
+                self.logger.debug(f'Detected text block: {blk.to_dict()}')
 
         mask = self._decode_base64_mask(
             response_data['mask']) if response_data.get('mask', '') != '' else None
         if mask is None:
-            self.logger.warning(f'stariver detector 未检测到文字')
+            self.logger.warning('Starriver detector did not detect any text')
             return None, []
         mask = self.expand_mask(mask)
 
@@ -269,7 +269,7 @@ class StariverDetector(TextDetectorBase):
         if scale < 1:
             mask = cv2.resize(mask, (width, height),
                               interpolation=cv2.INTER_NEAREST)
-        self.logger.debug(f'检测结果mask尺寸：{mask.shape}')
+        self.logger.debug(f'Result mask shape: {mask.shape}')
         return mask, blk_list
 
     @staticmethod
@@ -281,33 +281,33 @@ class StariverDetector(TextDetectorBase):
 
     def expand_mask(self, mask: np.ndarray, expand_ratio: float = 0.01) -> np.ndarray:
         """
-        在mask的原始部分上扩展mask，以便于提取更大的文字区域。
-        :param mask: 输入的mask
-        :param expand_ratio: 扩展比例，默认值为0.01
-        :return: 扩展后的mask
+        Expand mask region for better text extraction.
+        :param mask: input mask
+        :param expand_ratio: expansion ratio (default 0.01)
+        :return: expanded mask
         """
 
         if expand_ratio == 0:
             return mask
 
-        # 确保mask是二值图像（只含0和255）
+        # Ensure mask is binary (0 and 255 only)
         mask = (mask > 0).astype(np.uint8) * 255
 
-        # 获得图像的尺寸
+        # Get image dimensions
         height, width = mask.shape
 
-        # 计算kernel的大小（取图像尺寸的一部分，按比例expand_ratio）
+        # Kernel size from image size and expand_ratio
         kernel_size = int(min(height, width) * expand_ratio)
         if kernel_size % 2 == 0:
-            kernel_size += 1  # 确保kernel尺寸是奇数
+            kernel_size += 1  # Ensure odd kernel size
 
-        # 创建一个正方形的kernel
+        # Create square kernel
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
 
-        # 执行膨胀操作
+        # Dilate
         dilated_mask = cv2.dilate(mask, kernel, iterations=1)
 
-        # 计算扩展后的mask
+        # Binarize expanded mask
         dilated_mask = (dilated_mask > 0).astype(np.uint8) * 255
 
         return dilated_mask
@@ -317,7 +317,7 @@ class StariverDetector(TextDetectorBase):
         if (self.User != self.register_username or 
             self.Password != self.register_password):
             if self.token_obtained == False:
-                if "填入你的用户名" not in self.User and "填入你的密码。请注意，密码会明文保存，请勿在公共电脑上使用" not in self.Password:
+                if "Enter your username" not in self.User and "Enter your password" not in self.Password:
                     if len(self.Password) > 7 and len(self.User) >= 1:
                         new_token = self.get_token()
                         if new_token:  # 确保新获取到有效token再更新信息
@@ -339,9 +339,9 @@ class StariverDetector(TextDetectorBase):
             self.register_password = None  # 强制刷新token时，将密码置空
             try:
                 if self.update_token_if_needed():
-                    create_info_dialog('Token 更新成功')
+                    create_info_dialog('Token updated successfully')
             except Exception as e:
-                create_error_dialog(e, 'Token 更新失败', 'TokenUpdateFailed')
+                create_error_dialog(e, 'Token update failed', 'TokenUpdateFailed')
 
     def save_debug_json(self, data, prefix='debug'):
         timestamp = int(time.time())

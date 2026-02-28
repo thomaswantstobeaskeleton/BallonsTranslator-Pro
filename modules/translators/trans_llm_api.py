@@ -9,6 +9,13 @@ import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from utils.proxy_utils import create_httpx_client
+from utils.series_context_store import (
+    get_series_context_dir,
+    load_series_glossary,
+    load_recent_context,
+    append_page_to_series_context as store_append_page,
+    merge_glossary_no_dupes,
+)
 from .base import BaseTranslator, register_translator
 
 
@@ -86,6 +93,42 @@ class LLM_API_Translator(BaseTranslator):
                 "Example: {\"translations\": [{\"id\": 1, \"translation\": \"Translated text.\"}]}"
             ),
             "description": "System message for the LLM. For z-ai/glm-4.5-air and similar: keep it short; emphasize JSON-only output and consistent terms.",
+        },
+        "translation_glossary": {
+            "type": "editor",
+            "value": "",
+            "description": "Terminology for consistency (one per line). Format: source -> target or source = target. E.g. 丹田 -> dantian. Used on every page.",
+        },
+        "context_previous_pages": {
+            "type": "line_editor",
+            "value": 1,
+            "description": "Include this many previous pages (source+translation) as context for consistency. 0 = off. 1–2 recommended.",
+        },
+        "series_context_prompt": {
+            "type": "editor",
+            "value": "",
+            "description": "Optional. E.g. 'This is a cultivation manhua. Keep cultivation terms and character names consistent.'",
+        },
+        "series_context_path": {
+            "type": "line_editor",
+            "value": "default",
+            "description": "Folder or series ID for cross-chapter consistency (e.g. urban_immortal_cultivator). Uses data/translation_context/<id>/glossary.txt and recent_context.json. Default: 'default'.",
+        },
+        "context_max_chars": {
+            "type": "line_editor",
+            "value": 2000,
+            "description": "Max characters for previous-context block (to fit model context limit). 0 = no limit. When over limit: if 'summarize when over limit' is on, the model summarizes context; otherwise recent context is kept and the rest is dropped.",
+        },
+        "context_trim_mode": {
+            "type": "selector",
+            "options": ["full", "compact"],
+            "value": "compact",
+            "description": "full = use all lines per page (up to limit). compact = use at most 2 lines per page to save tokens.",
+        },
+        "summarize_context_when_over_limit": {
+            "type": "checkbox",
+            "value": True,
+            "description": "When context exceeds context_max_chars, ask the model to summarize it (preserving key terms and style) instead of truncating. Uses one extra API call.",
         },
         "keyword_replacements": {
             "type": "editor",
@@ -173,6 +216,84 @@ class LLM_API_Translator(BaseTranslator):
         self.minute_start_time = time.time()
         self.key_usage = {}
         self.client = None
+        self._translation_context_previous_pages = None
+        self._translation_project_glossary = None
+        self._translation_series_context_path = ""
+
+    def _get_series_context_path(self) -> str:
+        """Resolve series context path (from param or set via set_translation_context)."""
+        path = getattr(self, "_translation_series_context_path", None) or ""
+        if (path or "").strip():
+            return get_series_context_dir(path)
+        param = (self.get_param_value("series_context_path") or "").strip()
+        if param:
+            return get_series_context_dir(param)
+        return ""
+
+    def _get_glossary_entries(self) -> List[tuple]:
+        """Parse translation_glossary param into list of (source, target). Same format as keyword_replacements."""
+        raw = self.get_param_value("translation_glossary") or ""
+        out = []
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for sep in ("->", "→", "=", ":"):
+                if sep in line:
+                    parts = line.split(sep, 1)
+                    if len(parts) == 2:
+                        k, v = parts[0].strip(), parts[1].strip()
+                        if k and v:
+                            out.append((k, v))
+                        break
+        return out
+
+    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None):
+        """Set previous pages (list of {sources, translations}) and project glossary for consistency."""
+        self._translation_context_previous_pages = previous_pages or []
+        self._translation_project_glossary = project_glossary or []
+        if series_context_path is not None:
+            self._translation_series_context_path = (series_context_path or "").strip()
+
+    def append_page_to_series_context(self, series_context_path: str, sources: List[str], translations: List[str]) -> None:
+        """Append one translated page to the series context store for cross-chapter consistency."""
+        path = get_series_context_dir((series_context_path or "").strip())
+        if not path or not sources:
+            return
+        n_prev = max(5, self.context_previous_pages_count * 3)
+        store_append_page(path, sources, translations, max_stored_pages=n_prev)
+
+    def _build_system_prompt(self) -> str:
+        """System prompt plus optional glossary (translator + project + series) and series context."""
+        parts = [self.system_prompt]
+        translator_glossary = self._get_glossary_entries()
+        proj_glossary = getattr(self, "_translation_project_glossary", None) or []
+        proj_as_tuples = [
+            (g["source"], g["target"])
+            for g in proj_glossary
+            if isinstance(g, dict) and g.get("source") and g.get("target")
+        ]
+        series_path = self._get_series_context_path()
+        series_glossary = load_series_glossary(series_path) if series_path else []
+        glossary_entries = merge_glossary_no_dupes(
+            translator_glossary,
+            proj_as_tuples,
+            series_glossary,
+        )
+        if glossary_entries:
+            gl_str = "; ".join(f"{s} -> {t}" for s, t in glossary_entries)
+            parts.append(f"\n\nUse these exact translations for terms when they appear: {gl_str}")
+        series = (self.get_param_value("series_context_prompt") or "").strip()
+        if series:
+            parts.append(f"\n\nContext: {series}")
+        return "\n".join(parts)
+
+    @property
+    def context_previous_pages_count(self) -> int:
+        try:
+            return max(0, min(5, int(self.get_param_value("context_previous_pages"))))
+        except (TypeError, ValueError):
+            return 0
 
     def _initialize_client(self, api_key_to_use: str) -> bool:
         endpoint = self.endpoint
@@ -308,11 +429,67 @@ class LLM_API_Translator(BaseTranslator):
         ]
         input_json_str = json.dumps(input_elements, ensure_ascii=False, indent=2)
 
-        prompt = (
+        prompt_parts = []
+        prev_pages = getattr(self, "_translation_context_previous_pages", None) or []
+        n_prev = self.context_previous_pages_count
+        # If using series store and we have few in-memory pages, seed from stored recent context (e.g. end of previous chapter)
+        series_path = self._get_series_context_path()
+        if n_prev > 0 and series_path:
+            stored = load_recent_context(series_path, max_pages=n_prev)
+            if stored:
+                prev_pages = stored + prev_pages
+        if n_prev > 0 and prev_pages:
+            # Use last N pages only; each entry is {"sources": [...], "translations": [...]}
+            context_entries = prev_pages[-n_prev:]
+            trim_mode = (self.get_param_value("context_trim_mode") or "compact").strip().lower()
+            if trim_mode != "full":
+                trim_mode = "compact"
+            lines = []
+            for i, page in enumerate(context_entries):
+                srcs = page.get("sources") or []
+                trans = page.get("translations") or []
+                if not srcs and not trans:
+                    continue
+                pairs = []
+                for s, t in zip(srcs, trans):
+                    s = (s or "").strip()
+                    t = (t or "").strip()
+                    if s or t:
+                        pairs.append(f"  [{s}] -> [{t}]")
+                if pairs:
+                    if trim_mode == "compact":
+                        # Keep at most 2 lines per page to stay within context limits
+                        if len(pairs) <= 2:
+                            lines.append("Page context:\n" + "\n".join(pairs))
+                        else:
+                            lines.append("Page context:\n" + "\n".join([pairs[0], pairs[-1]]))
+                    else:
+                        lines.append("Page context:\n" + "\n".join(pairs[:10]))
+            if lines:
+                context_block = (
+                    "Previous context (for terminology and style consistency):\n"
+                    + "\n".join(lines[-6:])
+                )
+                try:
+                    max_chars = int(self.get_param_value("context_max_chars") or 0)
+                except (TypeError, ValueError):
+                    max_chars = 2000
+                if max_chars > 0 and len(context_block) > max_chars:
+                    summarize = self.get_param_value("summarize_context_when_over_limit")
+                    if summarize:
+                        context_block = self._request_context_summary(
+                            context_block, max_chars
+                        )
+                    else:
+                        context_block = "...\n" + context_block[-max_chars:]
+                prompt_parts.append(context_block)
+
+        prompt_parts.append(
             f"Please translate the following text snippets from {from_lang} to {to_lang}. "
             f"The input is provided as a JSON array. Respond with a JSON object in the specified format.\n\n"
             f"INPUT:\n{input_json_str}"
         )
+        prompt = "\n\n".join(prompt_parts)
 
         yield prompt, len(queries)
 
@@ -519,6 +696,63 @@ class LLM_API_Translator(BaseTranslator):
                 break
         return out if out else []
 
+    def _request_raw_completion(
+        self, messages: List[dict], max_tokens: int = 1024
+    ) -> Optional[str]:
+        """Perform a single chat completion without JSON response format. Returns content or None."""
+        model_name = self.override_model or self.model
+        if ": " in model_name:
+            model_name = model_name.split(": ", 1)[1]
+        api_args = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+        }
+        try:
+            completion = self.client.chat.completions.create(**api_args)
+        except Exception as e:
+            self.logger.warning(f"Context summary request failed: {e}")
+            return None
+        if (
+            completion.choices
+            and completion.choices[0].message
+            and completion.choices[0].message.content
+        ):
+            return completion.choices[0].message.content.strip()
+        return None
+
+    def _request_context_summary(self, long_context: str, max_chars: int) -> str:
+        """Ask the model to summarize long_context to under max_chars; on failure, truncate."""
+        current_api_key = "lm-studio"
+        if self.provider != "LLM Studio":
+            current_api_key = self._select_api_key()
+            if not current_api_key:
+                self.logger.warning("No API key for context summary; truncating.")
+                return "...\n" + long_context[-max_chars:]
+        if self.provider == "LLM Studio" and not self.endpoint:
+            return "...\n" + long_context[-max_chars:]
+        if not self._initialize_client(current_api_key):
+            return "...\n" + long_context[-max_chars:]
+        self._respect_delay()
+        system = (
+            "You are a helper that shortens translation context. Given a block of previous source->translation pairs "
+            "used for terminology consistency, produce a shorter version that preserves: exact term translations "
+            "(keep [source] -> [translation] for important terms and names), character names, and tone. "
+            "Output only the summarized context, no other commentary. Stay under the requested character limit."
+        )
+        user = (
+            f"Summarize the following translation context to under {max_chars} characters, "
+            f"keeping key terms and style:\n\n{long_context}"
+        )
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        summary = self._request_raw_completion(messages, max_tokens=min(2048, max_chars + 500))
+        if summary and len(summary) > 0:
+            if len(summary) > max_chars:
+                summary = summary[: max_chars - 3].rstrip() + "..."
+            return summary
+        return "...\n" + long_context[-max_chars:]
+
     def _request_translation(self, prompt: str) -> Optional[TranslationResponse]:
         current_api_key = "lm-studio"
         if self.provider != "LLM Studio":
@@ -541,7 +775,7 @@ class LLM_API_Translator(BaseTranslator):
             model_name = model_name.split(": ", 1)[1]
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self._build_system_prompt()},
             {"role": "user", "content": prompt},
         ]
 

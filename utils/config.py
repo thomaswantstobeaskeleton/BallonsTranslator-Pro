@@ -24,6 +24,8 @@ class ModuleConfig(Config):
     inpainter: str = 'lama_large_512px'
     translator: str = "google"
     enable_detect: bool = True
+    enable_dual_detect: bool = False
+    textdetector_secondary: str = ''
     keep_exist_textlines: bool = False
     enable_ocr: bool = True
     enable_translate: bool = True
@@ -181,6 +183,7 @@ class ProgramConfig(Config):
     manga_source_request_delay: float = 0.3
     manga_source_open_after_download: bool = False
     shortcuts: Dict = field(default_factory=dict)
+    auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:

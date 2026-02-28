@@ -108,6 +108,8 @@ class ProjImgTrans:
         self.img_array: np.ndarray = None
         self.mask_array: np.ndarray = None
         self.inpainted_array: np.ndarray = None
+        self.translation_glossary: List[Dict[str, str]] = []  # [{"source": "...", "target": "..."}]
+        self.series_context_path: str = ""  # Folder or ID for cross-chapter consistency (e.g. urban_immortal_cultivator)
         if directory is not None:
             self.load(directory)
 
@@ -183,6 +185,10 @@ class ProjImgTrans:
             self._image_info = proj_dict['image_info']
         else:
             self._image_info = {}
+
+        self.translation_glossary = proj_dict.get('translation_glossary') or []
+
+        self.series_context_path = (proj_dict.get('series_context_path') or "").strip()
 
         for p in self.pages:
             if p not in self._image_info:
@@ -348,12 +354,17 @@ class ProjImgTrans:
         pages = self.pages.copy()
         pages.update(self.not_found_pages)        
         image_info = self._image_info.copy()
-        return {
+        out = {
             'directory': self.directory,
             'pages': pages,
             'current_img': self.current_img,
             'image_info': image_info,
         }
+        if getattr(self, 'translation_glossary', None):
+            out['translation_glossary'] = self.translation_glossary
+        if getattr(self, 'series_context_path', None):
+            out['series_context_path'] = self.series_context_path
+        return out
 
     def read_img(self, imgname: str) -> np.ndarray:
         if imgname not in self.pages:

@@ -85,6 +85,12 @@ class FontFormat(Config):
     gradient_size: float = 1.0
     _style_name: str = ''
     line_spacing_type: int = LineSpacingType.Proportional
+    # Text on path (circular/arc) for manga bubbles and SFX (#1138)
+    text_on_path: int = 0  # 0 = none, 1 = circular, 2 = arc
+    text_on_path_arc_degrees: float = 180.0  # for arc: span in degrees (e.g. 180 = semicircle)
+    # Mesh warp presets (#1093): Arc, Arch, Bulge, Flag (Photoshop-like)
+    warp_style: int = 0  # 0 = none, 1 = arc, 2 = arch, 3 = bulge, 4 = flag
+    warp_strength: float = 0.5  # 0..1
 
     deprecated_attributes: dict = field(default_factory = lambda: dict())
 

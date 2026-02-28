@@ -38,6 +38,32 @@ class StrokeItemUndoCommand(QUndoCommand):
             self.target_layer.scene().update()
 
 
+class TextEraserUndoCommand(QUndoCommand):
+    """Undo/redo for text eraser mask changes (#1093)."""
+    def __init__(self, canvas: Canvas, entries: List[Tuple]):
+        super().__init__()
+        self.canvas = canvas
+        self.entries = entries
+
+    def undo(self):
+        for item, old_mask, _ in self.entries:
+            if item is None or getattr(item, 'blk', None) is None:
+                continue
+            item.blk.text_mask = np.copy(old_mask) if old_mask is not None else None
+            item.repaint_background()
+            item.update()
+        self.canvas.setProjSaveState(False)
+
+    def redo(self):
+        for item, _, new_mask in self.entries:
+            if item is None or getattr(item, 'blk', None) is None:
+                continue
+            item.blk.text_mask = np.copy(new_mask) if new_mask is not None else None
+            item.repaint_background()
+            item.update()
+        self.canvas.setProjSaveState(False)
+
+
 class InpaintUndoCommand(QUndoCommand):
     def __init__(self, canvas: Canvas, inpainted: np.ndarray, mask: np.ndarray, inpaint_rect: List[int], merge_existing_mask=False):
         super().__init__()

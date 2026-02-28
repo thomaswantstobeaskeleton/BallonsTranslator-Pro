@@ -1,17 +1,19 @@
 import math, re
 import numpy as np
+import cv2
 from typing import List, Union, Tuple
 
 from qtpy.QtWidgets import QGraphicsItem, QWidget, QGraphicsSceneHoverEvent, QGraphicsTextItem, QStyleOptionGraphicsItem, QStyle, QGraphicsSceneMouseEvent
 from qtpy.QtCore import Qt, QRect, QRectF, QPointF, Signal, QSizeF
 from qtpy.QtGui import (QGradient, QKeyEvent, QFont, QTextCursor, QPixmap, QPainterPath, QTextDocument, 
                        QInputMethodEvent, QPainter, QPen, QColor, QTextCharFormat, QTextDocument, QLinearGradient, QRadialGradient,
-                       QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat)
+                       QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat, QImage, QBitmap, QRegion)
 
 from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingType
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
 from utils.fontformat import FontFormat, px2pt, pt2px
-from .misc import td_pattern, table_pattern
+from .misc import td_pattern, table_pattern, pixmap2ndarray, ndarray2pixmap
+from .image_edit import ImageEditMode
 from .scene_textlayout import VerticalTextDocumentLayout, HorizontalTextDocumentLayout, SceneTextLayout
 from .text_graphical_effect import apply_shadow_effect
 
@@ -187,28 +189,97 @@ class TextBlkItem(QGraphicsTextItem):
         layout.relayout_on_changed = False
         doc.drawContents(painter)
 
+    def _paint_text_on_path(self, painter: QPainter, draw_stroke: bool = False, draw_fill: bool = True) -> None:
+        """Draw text along a circular or arc path (for text_on_path fontformat)."""
+        ff = self.fontformat
+        if ff.text_on_path == 0:
+            return
+        doc = self.document()
+        text = doc.toPlainText().strip()
+        if not text:
+            return
+        br = self.boundingRect()
+        w, h = br.width(), br.height()
+        cx, cy = br.center().x(), br.center().y()
+        r = min(w, h) / 2.0 * 0.85
+        if r <= 0:
+            return
+        font = doc.defaultFont()
+        if font.pointSizeF() <= 0:
+            font.setPointSizeF(max(1.0, pt2px(ff.font_size)))
+        fg = QColor(*ff.foreground_color())
+        stroke_pen = QPen(QColor(*ff.stroke_color()), 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        stroke_px = pt2px(font.pointSizeF()) * ff.stroke_width if draw_stroke and ff.stroke_width > 0 else 0
+        if stroke_px > 0:
+            stroke_pen.setWidthF(stroke_px)
+
+        if ff.text_on_path == 1:
+            # Full circle: start at bottom (270°), clockwise
+            start_deg = 270.0
+            arc_span_deg = 360.0
+        else:
+            # Arc: top semicircle; arc_degrees from fontformat
+            arc_span_deg = max(30.0, min(360.0, ff.text_on_path_arc_degrees))
+            start_deg = 180.0 - (arc_span_deg / 2.0)
+
+        n = len(text)
+        angle_step = arc_span_deg / n if n else 0
+        to_rad = math.pi / 180.0
+
+        for i, ch in enumerate(text):
+            angle_deg = start_deg + (i + 0.5) * angle_step
+            angle_rad = angle_deg * to_rad
+            x = cx + r * math.cos(angle_rad)
+            y = cy + r * math.sin(angle_rad)
+            rotation = angle_deg + 90.0
+
+            painter.save()
+            painter.translate(x, y)
+            painter.rotate(rotation)
+            painter.setFont(font)
+
+            if draw_stroke and stroke_px > 0:
+                painter.setPen(stroke_pen)
+                painter.setBrush(Qt.GlobalColor.transparent)
+                painter.drawText(0, 0, ch)
+            if draw_fill:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(fg)
+                painter.drawText(0, 0, ch)
+            painter.restore()
+
     def repaint_background(self):
         empty = self.document().isEmpty()
         if self.repainting:
             return
 
+        use_path = getattr(self.fontformat, 'text_on_path', 0) != 0
         paint_stroke = self.fontformat.stroke_width > 0
         paint_shadow = self.fontformat.shadow_radius > 0 and self.fontformat.shadow_strength > 0
-        if not paint_shadow and not paint_stroke or empty:
+        warp_style = getattr(self.fontformat, 'warp_style', 0)
+        if not use_path and not paint_shadow and not paint_stroke and not warp_style or empty:
             self.background_pixmap = None
             return
         
         self.repainting = True
         font_size = self.layout.max_font_size(to_px=True)
-        target_map = QPixmap(self.boundingRect().size().toSize())
+        br_size = self.boundingRect().size().toSize()
+        if br_size.width() < 1 or br_size.height() < 1:
+            self.background_pixmap = None
+            self.repainting = False
+            return
+        target_map = QPixmap(br_size)
         target_map.fill(Qt.GlobalColor.transparent)
         painter = QPainter(target_map)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
-        if paint_stroke:
-            self.paint_stroke(painter)
+        if use_path:
+            self._paint_text_on_path(painter, draw_stroke=paint_stroke, draw_fill=True)
         else:
-            self.document().drawContents(painter)
+            if paint_stroke:
+                self.paint_stroke(painter)
+            else:
+                self.document().drawContents(painter)
 
         # shadow
         if paint_shadow:
@@ -221,6 +292,8 @@ class TextBlkItem(QGraphicsTextItem):
             painter.setCompositionMode(cm)
 
         painter.end()
+        if warp_style and target_map.width() > 2 and target_map.height() > 2:
+            target_map = self._apply_warp_preset(target_map, warp_style, getattr(self.fontformat, 'warp_strength', 0.5))
         self.background_pixmap = target_map
         self.repainting = False
         
@@ -495,8 +568,21 @@ class TextBlkItem(QGraphicsTextItem):
         pal = QPalette(option.palette)
         pal.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
         option.palette = pal
+        use_path = not self.is_editting() and getattr(self.fontformat, 'text_on_path', 0) != 0
         if not self.document().isEmpty():
-            super().paint(painter, option, widget)
+            if use_path:
+                # Path text is drawn entirely via background_pixmap (stroke+fill+shadow) in _draw_accessories
+                pass
+            else:
+                if self._text_mask_all_zero():
+                    pass
+                else:
+                    mask_region = self._text_mask_region() if not self.is_editting() else None
+                    if mask_region is not None:
+                        painter.setClipRegion(mask_region)
+                    super().paint(painter, option, widget)
+                    if mask_region is not None:
+                        painter.setClipRegion(QRegion())
         painter.restore()
 
         if not self.is_editting():
@@ -504,6 +590,71 @@ class TextBlkItem(QGraphicsTextItem):
             self._draw_accessories(painter)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
+    def _text_mask_region(self):
+        """Build QRegion from blk.text_mask for clipping (#1093 text eraser). Returns None if no mask or mask is full (no clip needed)."""
+        blk = getattr(self, 'blk', None)
+        if blk is None or getattr(blk, 'text_mask', None) is None:
+            return None
+        mask_np = blk.text_mask
+        if mask_np.size == 0:
+            return None
+        if np.all(mask_np >= 255):
+            return None
+        if np.all(mask_np <= 0):
+            return None
+        br = self.boundingRect()
+        tw, th = int(br.width()), int(br.height())
+        if tw <= 0 or th <= 0:
+            return None
+        h, w = mask_np.shape[:2]
+        if (w, h) != (tw, th):
+            mask_np = cv2.resize(mask_np, (tw, th), interpolation=cv2.INTER_NEAREST)
+            h, w = th, tw
+        m = np.ascontiguousarray(mask_np, dtype=np.uint8)
+        try:
+            qimg = QImage(m.tobytes(), w, h, w, QImage.Format.Format_Alpha8)
+        except Exception:
+            qimg = QImage(m.tobytes(), w, h, w, QImage.Format.Format_Grayscale8)
+        bm = QBitmap.fromImage(qimg, Qt.ImageConversionFlag.ThresholdAlphaDither)
+        return QRegion(bm)
+
+    def _text_mask_all_zero(self):
+        """True if blk has a text_mask that is all zeros (fully erased)."""
+        blk = getattr(self, 'blk', None)
+        if blk is None or getattr(blk, 'text_mask', None) is None:
+            return False
+        return np.all(blk.text_mask <= 0)
+
+    def _apply_warp_preset(self, pixmap: QPixmap, warp_style: int, strength: float) -> QPixmap:
+        """Apply Photoshop-like warp presets (#1093): 1=Arc, 2=Arch, 3=Bulge, 4=Flag."""
+        if warp_style < 1 or strength <= 0:
+            return pixmap
+        arr = pixmap2ndarray(pixmap, keep_alpha=True)
+        if arr is None or arr.size == 0:
+            return pixmap
+        h, w = arr.shape[:2]
+        strength = max(0.01, min(1.0, float(strength)))
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        if warp_style == 1:  # Arc: top bulges up
+            amp = strength * h * 0.12 * np.sin(np.pi * xx / max(1, w))
+            map_x, map_y = xx, yy - amp
+        elif warp_style == 2:  # Arch: top bulges down
+            amp = strength * h * 0.12 * np.sin(np.pi * xx / max(1, w))
+            map_x, map_y = xx, yy + amp
+        elif warp_style == 3:  # Bulge: radial
+            cx, cy = w * 0.5, h * 0.5
+            r = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+            R = max(1, np.sqrt(cx ** 2 + cy ** 2))
+            f = 1 + strength * 0.3 * (1 - np.minimum(r / R, 1.0))
+            map_x = cx + (xx - cx) * f
+            map_y = cy + (yy - cy) * f
+        elif warp_style == 4:  # Flag: horizontal wave
+            amp = strength * w * 0.06 * np.sin(2 * np.pi * yy / max(1, h))
+            map_x, map_y = xx - amp, yy
+        else:
+            return pixmap
+        out = cv2.remap(arr, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+        return ndarray2pixmap(out)
 
     def _draw_accessories(self, painter: QPainter):
         br = self.boundingRect()
@@ -511,7 +662,15 @@ class TextBlkItem(QGraphicsTextItem):
         
         if self.background_pixmap is not None:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            painter.drawPixmap(br.toRect(), self.background_pixmap)
+            if not self._text_mask_all_zero():
+                mask_region = self._text_mask_region()
+                if mask_region is not None:
+                    painter.setClipRegion(mask_region)
+                painter.drawPixmap(br.toRect(), self.background_pixmap)
+                if mask_region is not None:
+                    painter.setClipRegion(QRegion())
+            else:
+                pass
 
         draw_rect = self.draw_rect and not self.under_ctrl
         if self.isSelected() and not self.is_editting():
@@ -607,15 +766,31 @@ class TextBlkItem(QGraphicsTextItem):
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            sc = self.scene()
+            if sc is not None and getattr(sc, 'image_edit_mode', None) == ImageEditMode.TextEraserTool:
+                event.ignore()
+                return
             self.oldPos = self.pos()
             self.leftbutton_pressed.emit(self.idx)
         return super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            sc = self.scene()
+            if sc is not None and getattr(sc, 'image_edit_mode', None) == ImageEditMode.TextEraserTool:
+                event.ignore()
+                return
+        return super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            sc = self.scene()
+            if sc is not None and getattr(sc, 'image_edit_mode', None) == ImageEditMode.TextEraserTool:
+                event.ignore()
+                return
             if self.oldPos != self.pos():
                 self.moved.emit()
-        super().mouseReleaseEvent(event)
+        return super().mouseReleaseEvent(event)
 
     def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
         self.hover_move.emit(self.idx)

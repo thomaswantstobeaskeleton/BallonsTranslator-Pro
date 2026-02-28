@@ -344,10 +344,15 @@ class TitleBar(Widget):
         replaceOCRkeyword = QAction(self.tr("Keyword substitution for source text"), self)
         self.replaceOCRkeyword_trigger = replaceOCRkeyword.triggered
 
+        translationContextAction = QAction(self.tr("Translation context (project)..."), self)
+        self.translation_context_trigger = translationContextAction.triggered
+
         editMenu = QMenu(self.editToolBtn)
         editMenu.addActions([undoAction, redoAction])
         editMenu.addSeparator()
         editMenu.addActions([pageSearchAction, globalSearchAction, replaceOCRkeyword, replacePreMTkeyword, replaceMTkeyword])
+        editMenu.addSeparator()
+        editMenu.addAction(translationContextAction)
         self.editToolBtn.setMenu(editMenu)
         self.editToolBtn.setPopupMode(QToolButton.InstantPopup)
 
@@ -444,6 +449,10 @@ class TitleBar(Widget):
         mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
         self.manga_source_trigger = mangaSourceAction.triggered
 
+        batchQueueAction = QAction(self.tr('Batch queue...'), self)
+        batchQueueAction.setToolTip(self.tr('Process multiple folders in sequence with Pause/Cancel (issue #1020).'))
+        self.batch_queue_trigger = batchQueueAction.triggered
+
         manageModelsAction = QAction(self.tr('Manage models...'), self)
         manageModelsAction.setToolTip(self.tr('Check which models are downloaded and download selected models.'))
         self.manage_models_trigger = manageModelsAction.triggered
@@ -455,6 +464,7 @@ class TitleBar(Widget):
         toolsMenu.addAction(batchExportAction)
         toolsMenu.addAction(validateProjAction)
         toolsMenu.addAction(mangaSourceAction)
+        toolsMenu.addAction(batchQueueAction)
         toolsMenu.addAction(manageModelsAction)
         self.toolsToolBtn.setMenu(toolsMenu)
         self.toolsToolBtn.setPopupMode(QToolButton.InstantPopup)
