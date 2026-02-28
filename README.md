@@ -17,7 +17,13 @@
 9. [New and modified files](#9-new-and-modified-files)
 10. [Fixes and behavior changes](#10-fixes-and-behavior-changes)
 11. [Documentation and references](#11-documentation-and-references)
-12. [UI, workflow, and export enhancements](#12-ui-workflow-and-export-enhancements)
+12. [UI, workflow, and export enhancements](#12-ui-workflow-and-export-enhancements)  
+    - [12.6 Batch processing queue (#1020)](#126-batch-processing-queue-1020)  
+    - [12.7 Translation context: glossary, series, previous pages, summarization](#127-translation-context-glossary-series-previous-pages-summarization)  
+    - [12.8 Translation context: glossary, series, previous pages, summarization (detail)](#128-translation-context-glossary-series-previous-pages-summarization)  
+    - [12.9 Dual text detection (primary + secondary detector)](#129-dual-text-detection-primary--secondary-detector)  
+    - [12.10 Text eraser tool](#1210-text-eraser-tool)  
+    - [12.11 Text edit panel and right panel layout](#1211-text-edit-panel-and-right-panel-layout)
 
 ---
 
@@ -30,10 +36,10 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 | **Text detection** | MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), **CRAFT** (standalone), **HF object-detection** (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2 (optional repos). |
 | **OCR** | 20+ new OCR backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, **HunyuanOCR**, **Manga OCR Mobile** (TFLite), **Nemotron Parse** (full-page). |
 | **Inpainting** | Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), **RePaint**, **LaMa ONNX** (general + manga), **Qwen-Image-Edit**, **MAT** (repo+checkpoint), **CUHK Manga**, **Fluently v4**. |
-| **Translation** | No new translators in this fork; existing LLM_API_Translator, Sakura, DeepL, etc. unchanged. |
-| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). **Config panel (General, Save, DL Module):** Logical DPI, display language, dark mode, config panel font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, default device, unload after idle, and more — all in UI and persisted. |
-| **UI / workflow / export** | **Canvas right-click menu:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all; **Spell check source text** and **Spell check translation** (pyenchant); **Trim whitespace**; **To uppercase** / **To lowercase**. Menu items enabled/disabled by selection. **Lossless WebP** (#1055) in Config → Save when format is WebP; Save and Export all pages respect it. **Manga / Comic source** (Tools menu): search MangaDex by title or by chapter URL, list chapters by language, download as 001/002… pages, optional open folder in app; config persistence and rate limiting. **Default download folder** for chapters: `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty). **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) opens a dialog to view and customize keybinds for file, edit, view, go, canvas, format, and drawing actions; shortcuts persist in config. See [§12](#12-ui-workflow-and-export-enhancements). |
-| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, this README. |
+| **Translation** | **Translation context and glossary:** Cross-page and cross-chapter terminology consistency via project/series glossary, previous-page context, and optional **context summarization** when near the model limit. See [§6.1](#61-translation-context-and-glossary) and [§12.7](#127-translation-context-glossary-series-previous-pages-summarization). |
+| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). **Dual text detection:** Run a second detector and merge results (see [§12.9](#129-dual-text-detection-primary--secondary-detector)). **Config panel (General, Save, DL Module):** Logical DPI, display language, dark mode, config panel font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, default device, unload after idle, and more — all in UI and persisted. |
+| **UI / workflow / export** | **Canvas right-click menu:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all; **Spell check source text** and **Spell check translation** (pyenchant); **Trim whitespace**; **To uppercase** / **To lowercase**; **Gradient type** (Linear/Radial); **Text on path** (None/Circular/Arc, [#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)). **Text eraser tool:** In drawing mode, erase parts of text blocks by painting over them (mask-based; undo with Ctrl+Z). See [§12.10](#1210-text-eraser-tool). **Text edit panel:** Default width closer to minimum; less cramped layout (opacity label, format icons, spacing). See [§12.11](#1211-text-edit-panel-and-right-panel-layout). Menu items enabled/disabled by selection. **Translation context (project):** Edit menu and Translator config open a dialog to set project **series path** and **project glossary** for cross-chapter consistency. **Lossless WebP** (#1055) in Config → Save when format is WebP; Save and Export all pages respect it. **Manga / Comic source** (Tools menu): search MangaDex by title or by chapter URL, list chapters by language, download as 001/002… pages, optional open folder in app; config persistence and rate limiting. **Batch queue** (Tools → Batch queue...): process multiple folders in sequence with Pause/Resume/Cancel ([#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020)). **Default download folder** for chapters: `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty). **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) opens a dialog to view and customize keybinds for file, edit, view, go, canvas, format, and drawing actions; shortcuts persist in config. **Typesetting:** Option to **auto-adjust text size to fit text box** (Config → General: set **Font Size** to “decide by program” and enable **Auto layout”; line structure is preserved). **Font size list** includes more steps (e.g. 30, 32, 34, 40, 44 between 28 and 48) for finer control. **Drag-and-drop** of folder or images onto the canvas to open a project; copy-paste (File → Open) also works. See [§12](#12-ui-workflow-and-export-enhancements). |
+| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, **`docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md`** (design and implementation of translation context, glossary, series storage), this README. |
 
 ---
 
@@ -182,7 +188,18 @@ Select the inpainter from the **Inpainting** dropdown. Key settings: **inpaint_s
 
 ## 6. Translation modules
 
-No new translators were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. See original README and `doc/加别的翻译器.md` for adding new translators.
+No new translator backends were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. See original README and `doc/加别的翻译器.md` for adding new translators.
+
+### 6.1 Translation context and glossary
+
+The **LLM_API_Translator** supports **cross-page and cross-chapter terminology consistency** so that long works (e.g. cultivation manhua) keep terms and style consistent across all images and chapters. This is implemented via:
+
+- **Glossary (translator + project + series):** Term list (source → target) injected into the prompt so the model uses the same wording every time. You can set a translator-level glossary in Config → Translator params, and a **project glossary** in the Translation context dialog (Edit → Translation context (project)... or Translator config → Translation context (project)...). When a **series context path** is set, a series-level glossary is loaded from `data/translation_context/<series_id>/glossary.txt` and merged with the others.
+- **Previous-page context:** When translating in reading order, the last N pages’ source and translation are appended to the prompt (compact format) so the model sees recent choices and repeats style/terms.
+- **Series-level storage:** For a given series (e.g. `urban_immortal_cultivator`), the app stores recent page context in `data/translation_context/<series_id>/recent_context.json`. When you open another chapter of the same series, the translator can seed from that stored context so consistency carries across chapters.
+- **Context limit and summarization:** To respect model context limits, the previous-context block is capped by **context_max_chars** (Translator param). When the block would exceed that cap, you can either **truncate** (keep the tail) or **summarize**: the app asks the model to summarize the context (preserving key terms and style) in one extra API call, then uses the summary instead of dropping content. See [§12.7](#127-translation-context-glossary-series-previous-pages-summarization) for full detail.
+
+Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md**.
 
 ---
 
@@ -234,7 +251,7 @@ Most behavior and display options are set in the **Config panel** (left bar → 
 - **General → Typesetting:** Defaults for new/unchanged blocks: font size, stroke, color, alignment, writing mode, font family, effect (decide by program vs use global); **Auto layout**; **To uppercase**; **Independent text styles per project**; **Show only custom fonts**.
 - **General → Save:** Result image format (PNG, JPG, WebP, JXL); **Quality**; **WebP lossless** (when format is WebP); Intermediate image format (PNG, JXL).
 - **General → Saladict / search:** Show mini menu when selecting text; Saladict shortcut; Search engine URL for lookups.
-- **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel.
+- **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel. The **Translator** section includes **Translation context (project)...** to open the dialog for project series path and glossary (see [§12.7](#127-translation-context-glossary-series-previous-pages-summarization)).
 
 Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a concise list of implemented UI settings and possible future additions.
 
@@ -267,7 +284,7 @@ The main application and all other modules work with the versions in `requiremen
   `modules/inpaint/inpaint_simple_lama.py`, `inpaint_diffusers_sd.py`, `inpaint_sd2.py`, `inpaint_sdxl.py`, `inpaint_dreamshaper.py`, `inpaint_flux_fill.py`, `inpaint_kandinsky.py`, `inpaint_fluently.py`, `inpaint_cuhk_manga.py`, `inpaint_repaint.py`, `inpaint_lama_onnx.py`, `inpaint_lama_manga_onnx.py`, `inpaint_qwen_image_edit.py`, `inpaint_mat.py`.
 
 - **Documentation:**  
-  `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, this README.  
+  `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, **`docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md`**, this README.  
   `doc/INSTALL_MMOCR.md` (if present).
 
 ### Unchanged (behavior and discovery)
@@ -288,7 +305,7 @@ The main application and all other modules work with the versions in `requiremen
   `ui/mainwindow.py` (all QShortcuts and drawing tool shortcuts created from `pcfg.shortcuts`; `apply_shortcuts`, `open_shortcuts_dialog`; View → Keyboard Shortcuts).
 
 - **Canvas and context menu:**  
-  `ui/canvas.py` — New signals: `merge_selected_blocks_signal`, `move_blocks_up_signal`, `move_blocks_down_signal`, `run_detect_region`, `copy_trans_signal`, `paste_trans_signal`, `clear_src_signal`, `clear_trans_signal`, `select_all_signal`, `spell_check_src_signal`, `spell_check_trans_signal`, `trim_whitespace_signal`, `to_uppercase_signal`, `to_lowercase_signal`. Context menu extended with Merge, Move up/down, Detect text in region/on page, Copy/Paste translation, Clear source/translation, Select all, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, **To lowercase**; **Merge** and **Move up/down** enabled only when selection state allows it; spell check, trim, and case actions enabled when at least one block is selected.
+  `ui/canvas.py` — New signals: `merge_selected_blocks_signal`, `move_blocks_up_signal`, `move_blocks_down_signal`, `run_detect_region`, `copy_trans_signal`, `paste_trans_signal`, `clear_src_signal`, `clear_trans_signal`, `select_all_signal`, `spell_check_src_signal`, `spell_check_trans_signal`, `trim_whitespace_signal`, `to_uppercase_signal`, `to_lowercase_signal`. Context menu extended with Merge, Move up/down, Detect text in region/on page, Copy/Paste translation, Clear source/translation, Select all, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, **To lowercase**; **Merge** and **Move up/down** enabled only when selection state allows it; spell check, trim, and case actions enabled when at least one block is selected. **Text eraser tool:** When `image_edit_mode == TextEraserTool`, right-click does not start a stroke (avoids black lines); painting uses left-button; stroke item and hit-test in scene coordinates.
 
 - **Main window and bars:**  
   `ui/mainwindowbars.py` — Tools menu: new action **Manga / Comic source...** (`manga_source_trigger`).  
@@ -296,18 +313,29 @@ The main application and all other modules work with the versions in `requiremen
 
 - **Scene text and module manager:**  
   `ui/scenetext_manager.py` — New method `swap_block_positions(i, j)` to swap two blocks in the project, scene, and text panel order.  
-  `ui/module_manager.py` — New `run_detect_region(rect, img_array, page_name)` and signal `detect_region_finished(page_name, blk_list)` for region-based detection.
+  `ui/module_manager.py` — New `run_detect_region(rect, img_array, page_name)` and signal `detect_region_finished(page_name, blk_list)` for region-based detection. **Dual text detection:** `_run_dual_detect(img, mask, blk_list, im_w, im_h)` instantiates the secondary detector from merged params (with internal keys stripped), runs secondary `detect()`, merges blocks by IoU threshold 0.4 and masks when same shape; called from pipeline when `enable_dual_detect` and `textdetector_secondary` are set and ≠ primary. Progress dialog detect bar label set to “Detecting (dual: primary + secondary):” when dual is active. Before each page translate: passes **series_context_path** into `set_translation_context`; after each successful translate calls **append_page_to_series_context** for series storage. Same for sequential and low-VRAM pipeline paths.
+
+- **Translation context and glossary:**  
+  `utils/series_context_store.py` — Series folder layout `data/translation_context/<series_id>/` with `glossary.txt` and `recent_context.json`; `get_series_context_dir`, `load_series_glossary`, `load_recent_context`, `append_page_to_series_context`, `merge_glossary_no_dupes`.  
+  `utils/proj_imgtrans.py` — `translation_glossary`, **series_context_path**; save/load in `to_dict` / `load_from_dict`.  
+  `modules/translators/base.py` — `set_translation_context(..., series_context_path=None)`, **append_page_to_series_context** (no-op in base).  
+  `modules/translators/trans_llm_api.py` — Params: glossary, context_previous_pages, series_context_prompt, **series_context_path**, **context_max_chars**, **context_trim_mode**, **summarize_context_when_over_limit**. Loads series glossary and recent context; merges glossaries; builds previous-context block with trim and cap; when over cap and summarization on, **`_request_context_summary`** (one extra API call) to shorten context; else truncate. After each page, appends to series store.  
+  `ui/translation_context_dialog.py` — Dialog to edit project **series context path** and **project glossary**; Save writes to `ProjImgTrans` and calls `save()`.  
+  `ui/mainwindow.py` — `show_translation_context_dialog`; connects config panel and title bar **Translation context (project)...** to open dialog; requires project open.  
+  `ui/mainwindowbars.py` — Edit menu action **Translation context (project)...** (`translation_context_trigger`).  
+  `ui/module_parse_widgets.py` — Translator config: **Translation context (project)...** button, emits `show_translation_context_requested`. **Text detection panel:** **Run second detector (dual detect)** checkbox and **Secondary:** combobox; when dual is on and a secondary detector is selected, **Secondary detector params** block with lazy-loaded ParamWidgets per detector; `_on_secondary_param_edited` writes to `pcfg.module.textdetector_params[sec_name]`.
 
 - **Config and config panel:**  
-  `utils/config.py` — New `ProgramConfig` fields: `imgsave_webp_lossless`, `manga_source_lang`, `manga_source_data_saver`, `manga_source_download_dir`, `manga_source_request_delay`, `shortcuts`. **`default_downloaded_chapters_dir()`** static method returns and creates `~/BallonsTranslator/Downloaded Chapters` when no download dir is set. Load config merges default shortcuts for any missing action.  
-  `ui/configpanel.py` — WebP lossless checkbox in Save section, visibility tied to result format; load/save of `imgsave_webp_lossless` and manga_source_* (the latter only via the Manga source dialog).  
+  `utils/config.py` — New `ProgramConfig` fields: `imgsave_webp_lossless`, `manga_source_lang`, `manga_source_data_saver`, `manga_source_download_dir`, `manga_source_request_delay`, `shortcuts`. **ModuleConfig:** **`enable_dual_detect`** (bool, False) and **`textdetector_secondary`** (str, '') for dual text detection. **`default_downloaded_chapters_dir()`** static method returns and creates `~/BallonsTranslator/Downloaded Chapters` when no download dir is set. Load config merges default shortcuts for any missing action.  
+  `ui/configpanel.py` — WebP lossless checkbox in Save section, visibility tied to result format; load/save of `imgsave_webp_lossless` and manga_source_* (the latter only via the Manga source dialog). Sync of dual-detect checkbox and secondary detector combobox from `pcfg.module` in setupConfig.  
   `config/config.example.json` — Example keys for `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts`.
 
 - **I/O:**  
   `utils/io_utils.py` — `imwrite(..., webp_lossless=False)`; when WebP and `webp_lossless` True, uses quality 101 for lossless.
 
 - **Documentation:**  
-  `docs/SETTINGS_UI_RECOMMENDATIONS.md` — Lists implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu, etc.) and possible future additions.
+  `docs/SETTINGS_UI_RECOMMENDATIONS.md` — Lists implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu, etc.) and possible future additions.  
+  `docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md` — Design and implementation of translation context, glossary, series storage, and LLM integration.
 
 ---
 
@@ -338,11 +366,17 @@ The main application and all other modules work with the versions in `requiremen
 - **Paddle det:**  
   - Strict bubble mode and params (det_limit_side_len, merge_same_line_only, merge_line_overlap_ratio, etc.) documented and used for comic workflows; see MANHUA_BEST_SETTINGS.md.
 
+- **Dual text detection:**  
+  - When **enable_dual_detect** is True and **textdetector_secondary** is set (and different from primary), the pipeline runs a second detector and merges blocks (IoU &lt; 0.4) and masks (when same shape). Secondary detector is built from merged config with internal keys (e.g. `__param_patched`) stripped so "Found invalid … config" warnings do not appear. Progress dialog shows **Detecting (dual: primary + secondary):** when dual is active. See [§12.9](#129-dual-text-detection-primary--secondary-detector).
+
+- **Text eraser tool:**  
+  - New drawing tool **Text eraser** (ImageEditMode.TextEraserTool) erases parts of text blocks by painting on the canvas; stroke is applied in scene coordinates and updates each block’s mask. Right-click does not start a stroke in this mode. Undo (Ctrl+Z) via **TextEraserUndoCommand**. See [§12.10](#1210-text-eraser-tool).
+
 - **Config:**  
   - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.  
-  - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. **Test translator** (Translator) and **Test OCR** (OCR) buttons run a quick check of the current API/OCR. Typesetting options use a single-column layout with a minimum content width so controls do not go off screen. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).  
+  - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. **Test translator** (Translator) runs a quick check of the current API. Typesetting options use a single-column layout with a minimum content width so controls do not go off screen. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).  
   - **Proxy:** `utils/proxy_utils.py` provides `normalize_proxy_url`, `create_httpx_transport`, and `create_httpx_client`; the LLM API translator uses them so proxy strings without a scheme (e.g. `127.0.0.1:7897`) are normalized to `http://...` and work with httpx.  
-  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), lossless WebP, Manga / Comic source (Tools), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). **Quit:** Close confirmation ("Are you sure you want to quit?"). **Open menu:** Order is Open Folder → Open Images → Open Project. **Page list:** Context menu supports Reveal in File Explorer, Translate selected images, Remove from project. **Drag-drop:** Dropping image files on the canvas opens a project from that folder. Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
+  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), **Translation context (project)** (Edit menu and Translator config dialog for series path and glossary), lossless WebP, Manga / Comic source (Tools), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). **Quit:** Close confirmation ("Are you sure you want to quit?"). **Open menu:** Order is Open Folder → Open Images → Open Project. **Page list:** Context menu supports Reveal in File Explorer, Translate selected images, Remove from project. **Drag-drop:** Dropping image files on the canvas opens a project from that folder. Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
 
 ---
 
@@ -357,6 +391,7 @@ The main application and all other modules work with the versions in `requiremen
 | **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, hf_object_det); none_ocr usage; detection vs OCR coverage table. |
 | **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
 | **docs/SETTINGS_UI_RECOMMENDATIONS.md** | Implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu items) and possible future additions; references upstream issues (#1055, #1137, etc.). |
+| **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md** | Design and implementation of translation context: glossary, previous-page context, series-level storage, and integration with LLM translator. |
 | **doc/FORMATTING_COMPARISON_AI_VS_MAIN.md** | Comparison of formatting and layout behavior (webcomics/manhua) between this fork and BallonsTranslator-ai; useful when migrating or choosing settings. |
 | **Original README** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) – base setup, Windows/Mac, translators, AMD ROCm/ZLUDA. |
 | **doc/加别的翻译器.md** | How to add new translators. |
@@ -365,7 +400,7 @@ The main application and all other modules work with the versions in `requiremen
 
 ## 12. UI, workflow, and export enhancements
 
-This section describes **all UI, workflow, and export-related changes** added in BallonsTranslatorPro: canvas context menu actions, block reordering and merging, lossless WebP export, and the Manga / Comic source feature. These improvements make editing and exporting faster and support upstream feature requests (e.g. #1055 Lossless WebP, #1137 manual text detection).
+This section describes **all UI, workflow, and export-related changes** added in BallonsTranslatorPro: canvas context menu actions, block reordering and merging, lossless WebP export, **translation context (glossary, series, summarization)**, and the Manga / Comic source feature. These improvements make editing and exporting faster and support upstream feature requests (e.g. #1055 Lossless WebP, #1137 manual text detection).
 
 ### 12.1 Canvas right-click menu (text edit mode)
 
@@ -389,6 +424,7 @@ In **text edit mode**, right-clicking on the canvas (or after right-dragging a r
 | **Move block(s) up** | Move the selected block one position up in the block list (and in the right-hand text panel). Implemented by swapping the block with the one above. | **Only when exactly one block is selected and it is not the first block.** |
 | **Move block(s) down** | Move the selected block one position down. | **Only when exactly one block is selected and it is not the last block.** |
 | **Apply font formatting** / **Auto layout** / **Reset Angle** / **Squeeze** | Existing formatting and layout actions. | As before. |
+| **Gradient type** / **Text on path** | **Gradient type** submenu: Linear or Radial. **Text on path** ([#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)) submenu: None, Circular, or Arc — draws text along a circle or arc (for balloons and SFX). Arc span is set in the format panel (Arc degrees). | When at least one block is selected. |
 | **Detect text in region** | Run the current **text detector** only on the region you drew: right-drag a rectangle on the canvas, then right-click and choose this item. New text blocks are added in full-image coordinates and appended to the current page. No OCR or translation is run. Useful for adding bubbles in one area without re-running the full pipeline (addresses upstream #1137). | **Only when a rubber-band rectangle was drawn** (right-drag before right-click). |
 | **Detect text on page** | Run the text detector on the **entire page** (same as running the pipeline with only detection enabled). New blocks are appended. Convenience alternative to opening the Run menu. | Always (when in text edit mode). |
 | **Translate** / **OCR** / **OCR and translate** / **OCR, translate and inpaint** / **Inpaint** | Existing pipeline actions. | As before. |
@@ -464,14 +500,190 @@ A **Keyboard Shortcuts** dialog lets you view and customize keybinds for common 
 
 ---
 
-### 12.5 Other small behavior and UI details
+### 12.5 Typesetting: auto-adjust text size to fit box, font size list, drag-and-drop (#1077)
+
+These improvements address the original BallonsTranslator [feature request #1077](https://github.com/dmMaze/BallonsTranslator/issues/1077): automatic text-size adjustment based on text box dimensions, more font sizes in the list, and drag-and-drop support.
+
+#### Auto-adjust text size to fit text box
+
+You can have the program **automatically scale font size** so that text fits inside each balloon/text box while **keeping line structure unchanged** (no manual trial-and-error with font sizes). Use the **Text in box** dropdown in Config → General → Typesetting: **Auto fit to box** or **Fixed size (use font size list)** ([#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077)).
+
+- **How to enable:** In **Config panel → General → Typesetting**, set **Font Size** to **“decide by program”** and enable **Auto layout** (split translation into lines according to balloon region).
+- **Behavior:** When both are on, the layout logic scales text up or down so it fits the detected region: it scales down if the laid-out text would overflow the bubble (with margin), and can scale up when the bubble is much larger than the text so short text stays readable. Line breaks and structure follow the source/region; only the font size is adjusted.
+- **Implementation:** `ui/scenetext_manager.py` (auto layout and resize ratios), `utils/textblock.py` (font size normalization so text fits bubbles). Detection also sets `_detected_font_size` per block, which is used when “decide by program” is selected.
+
+#### More font sizes in the list
+
+The font size combo in the format panel (and when editing a text block) now includes **extra steps between 28 and 48** for finer control: in addition to 28, 36, 48, the list includes **30, 32, 34, 40, 44** (and the existing smaller/larger sizes). Scrolling or selecting from the list gives better precision without large jumps.
+
+- **Where:** Format panel (right side) → Font size dropdown. Same list is used when a block has a fixed font size.
+- **Implementation:** `ui/text_panel.py` → `FontSizeBox` → `SizeComboBox` item list.
+
+#### Drag-and-drop to open project
+
+You can **drag a folder or image files** onto the **canvas** to open them as a project (same as opening via File → Open folder/images). If drag-and-drop does not work on your system (e.g. some file managers or OS configurations), use **File → Open Folder...** or **Open Images...** (copy-paste workflow) instead; both paths are supported.
+
+- **Implementation:** The main canvas has `setAcceptDrops(True)` and handles `dragEnterEvent` / `dropEvent`; when a folder or image list is dropped, it emits `drop_open_folder` or equivalent and the main window opens that path as the project. See `ui/canvas.py` (GraphicsView drop handling) and `ui/mainwindow.py` (connection to open project).
+
+---
+
+### 12.6 Batch processing queue (#1020)
+
+[Issue #1020](https://github.com/dmMaze/BallonsTranslator/issues/1020) requested a batch processing queue for multiple files/folders with Pause/Cancel controls so users can queue many chapters and process them without manual intervention. This is available in **headless mode** via `--exec_dirs "dir1,dir2,..."`. The same behavior is now available in the GUI.
+
+- **Opening the dialog:** **Tools → Batch queue...**
+- **Queue list:** Add folders with **Add folder(s)...** (one folder per dialog) or **Add folder (include subfolders)** to add the selected folder and each of its **immediate subfolders** as separate queue items (e.g. one parent “Manga” folder → “Manga”, “Manga/Ch1”, “Manga/Ch2”, …). Remove selected items or **Clear all**.
+- **Start queue:** Click **Start queue** to process the list in order. The app opens each folder as a project and runs the full pipeline (detect, OCR, translate, inpaint) as configured. When one folder is done, the next is opened automatically. The queue list in the dialog shrinks as each item is started.
+- **Pause / Resume:** While the queue is running, **Pause** temporarily halts the pipeline (at page boundaries). **Resume** continues. Useful to free resources for other tasks.
+- **Cancel queue:** **Cancel queue** stops the current job and clears the remaining queue (no further folders are processed).
+- **Signals:** The main window emits `batch_queue_empty` when all items are done and `batch_queue_cancelled` when the user cancelled; the dialog updates its status text accordingly.
+
+**Files:** `ui/batch_queue_dialog.py` (dialog UI), `ui/mainwindow.py` (run_batch, run_next_dir, signals, handlers), `ui/mainwindowbars.py` (Tools → Batch queue...), `ui/module_manager.py` (requestPause / requestResume in ImgtransThread and ModuleManager; pause wait in the page loop).
+
+---
+
+### 12.7 Other small behavior and UI details
 
 - **Tools menu:** In addition to **Manga / Comic source...** and **Keyboard Shortcuts** (View), the **Tools** menu includes: **Manage models** (download/remove detection, OCR, inpainting models), **Batch export** (export all result images to a folder), **Check project** (validate project: missing images, invalid JSON), **Re-run detection only** / **Re-run OCR only** (run pipeline with only that stage, then restore previous stage flags), **Region merge tool** (dialog for merging), and **Export all pages**. Display language and dark mode can also be toggled from **View**.
 - **Config panel – WebP lossless:** The WebP lossless checkbox is shown in the Save section only when the result format is WebP; its **enabled** state is toggled by `_update_webp_lossless_visibility()` when the format combo changes, so you cannot turn on lossless when the format is not WebP.
-- **Config panel – Typesetting and width:** The **Typesetting** section (Font Size, Stroke Size, Font Color, Stroke Color, Effect, Alignment, Writing-mode, Font Family) uses a single-column layout so all dropdowns stay visible; the config content area has a minimum width so **Test translator** (Translator) and **Test OCR** (OCR) buttons and other right-side controls do not go off screen. A horizontal scrollbar appears if the panel is narrow.
-- **Test translator / Test OCR:** In **Config → DL Module**, the **Translator** section has a **Test translator** button that runs a short translation with the current API/key and shows success or error. The **OCR** section has a **Test OCR** button that opens a dialog, runs the current OCR on a small sample image, and shows the result and timing. Useful to verify API keys and OCR setup before running the full pipeline. **Proxy:** LLM API translator (and other modules using `utils/proxy_utils`) normalizes proxy URLs (e.g. `127.0.0.1:7897` → `http://127.0.0.1:7897`) so httpx accepts them without "Unknown scheme" errors.
+- **Config panel – Typesetting and width:** The **Typesetting** section (Font Size, Stroke Size, Font Color, Stroke Color, Effect, Alignment, Writing-mode, Font Family) uses a single-column layout so all dropdowns stay visible; the config content area has a minimum width so **Test translator** (Translator) and other right-side controls do not go off screen. A horizontal scrollbar appears if the panel is narrow.
+- **Test translator:** In **Config → DL Module**, the **Translator** section has a **Test translator** button that runs a short translation with the current API/key and shows success or error. **Proxy:** LLM API translator (and other modules using `utils/proxy_utils`) normalizes proxy URLs (e.g. `127.0.0.1:7897` → `http://127.0.0.1:7897`) so httpx accepts them without "Unknown scheme" errors.
 - **Canvas – context menu state:** Before showing the context menu, the canvas computes the number of selected blocks and total blocks, then sets `setEnabled(True/False)` on the **Merge selected blocks**, **Move block(s) up**, **Move block(s) down**, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, and **To lowercase** actions so they appear grayed out when not applicable (e.g. merge when fewer than 2 selected, move up when none or first block selected; spell check, trim, and case when no blocks selected).
 - **Export all pages:** Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path, so Export all pages also respects the lossless WebP option when format is WebP.
+
+---
+
+### 12.8 Translation context: glossary, series, previous pages, summarization
+
+This subsection documents **cross-page and cross-chapter translation context** for the LLM translator: how glossaries, previous-page context, series storage, and **context summarization** work together to keep terminology and style consistent. It applies only to **LLM_API_Translator**; other translators are unchanged.
+
+#### Purpose
+
+- **Terminology drift:** Without context, the same concept can be translated differently on each page (e.g. 丹田 → "dantian" on one page, "core" on another).
+- **Style drift:** Tone and register can change from page to page.
+- **Cross-chapter reuse:** For a long series (e.g. *Rebirth of the Urban Immortal Cultivator*), you want the same terms and style across all chapters. Storing context in a **series folder** lets the next chapter seed from the end of the previous one.
+
+#### Glossary (three sources, merged)
+
+1. **Translator param `translation_glossary`** — Multiline field in Config → Translator (LLM_API_Translator). Format: one entry per line, e.g. `source -> target` or `source = target`. Used on every page.
+2. **Project glossary** — Stored in the project JSON and editable in the **Translation context (project)** dialog (Edit menu or Translator config panel). Same format; merged with the translator glossary at run time. Travels with the project.
+3. **Series glossary** — When a **series context path** is set (project or translator param), the app loads `data/translation_context/<series_id>/glossary.txt`. Format: one line per entry, `source -> target` or `source = target`. Lines starting with `#` are ignored. Merged with translator and project glossaries; first occurrence of each source term wins.
+
+The merged glossary is injected into the **system prompt** (or user prompt) so the model is instructed to use those exact translations when the source terms appear.
+
+#### Series context path and folder layout
+
+- **Series context path** can be:
+  - A **series ID** (e.g. `urban_immortal_cultivator`): resolved to `data/translation_context/urban_immortal_cultivator/`.
+  - A **path** (relative to program root or absolute): used as-is (relative paths are joined with the program root).
+  - **Default:** If neither the project nor the translator sets a path, the app uses **`default`** (i.e. `data/translation_context/default/`) so context is never blank.
+- **Folder layout** for a series:
+  - `glossary.txt` — Optional. One line per entry: `source -> target`. Loaded when building the prompt.
+  - `recent_context.json` — List of page entries `{"sources": [...], "translations": [...]}`. Last N pages are loaded to seed “previous context”; after each translated page, the pipeline appends that page to this file (and trims to a max, e.g. 15 pages).
+
+So all chapters that share the same series ID/path share the same glossary and a rolling window of recent page context.
+
+#### Previous-page context
+
+- **When:** Only when translation runs in **reading order** (sequential pipeline or ordered queue). The pipeline passes the last **N** pages (param **context_previous_pages**, 0–5) that have already been translated.
+- **What is passed:** For each of those pages, source texts and translations are formatted into a compact block (e.g. at most 2 lines per page in **compact** trim mode, or more in **full** mode). The block is labeled “Previous context (for terminology and style consistency):” and appended to the user prompt.
+- **Seeding from series:** If a series path is set and there are few in-memory “previous” pages (e.g. start of a new chapter), the translator loads **recent_context.json** from the series folder and uses those entries as the initial previous pages, so the new chapter continues from where the last chapter left off.
+
+#### Context limit: truncate vs summarize
+
+- **context_max_chars** (Translator param, default 2000, 0 = no limit): The previous-context block (after trim) must not exceed this length so the full prompt fits the model’s context window.
+- **When over limit:**
+  - **Truncate (default when summarization is off):** Replace the block with `"...\n" + last max_chars characters`. Simple and no extra API call, but you lose the beginning of the context.
+  - **Summarize (optional):** If **summarize_context_when_over_limit** (Translator checkbox, default True) is enabled, the app makes **one extra API call** before the translation request: it sends the long context to the model with a system prompt asking to shorten it to under `context_max_chars` while **preserving key term translations** (e.g. `[source] -> [translation]`), character names, and tone. The model’s reply is used as the previous-context block. If the reply is still too long, it is trimmed. If the summary call fails (e.g. no API key, network error), the code falls back to truncation. This way you retain more useful signal (terms and style) instead of discarding the start of the context.
+
+**Params summary (LLM_API_Translator):**
+
+| Parameter | Description |
+|-----------|-------------|
+| **translation_glossary** | Multiline: `source -> target` per line. Merged with project and series glossary. |
+| **series_context_path** | Folder or series ID for cross-chapter consistency; uses `data/translation_context/<id>/` when ID. |
+| **series_context_prompt** | Optional short prompt, e.g. “This is a cultivation manhua. Keep terms consistent.” |
+| **context_previous_pages** | Number of previous pages (0–5) to include as context. 0 = off. |
+| **context_max_chars** | Max characters for the previous-context block. 0 = no limit. |
+| **context_trim_mode** | **full** = more lines per page; **compact** = at most 2 lines per page to save tokens. |
+| **summarize_context_when_over_limit** | When context exceeds context_max_chars, ask the model to summarize it (one extra call) instead of truncating. |
+
+#### UI: Translation context (project) dialog
+
+- **Where to open:** **Edit → Translation context (project)...** or **Config → DL Module → Translator** section → **Translation context (project)...** button.
+- **Requires:** A project must be open (File → Open Folder / Open Project). If none is open, a message asks you to open one first.
+- **Contents:**
+  - **Series context path** — Line edit. Folder or series ID (e.g. `urban_immortal_cultivator`). Leave empty to use only the translator’s **series_context_path** param (or no series).
+  - **Project glossary** — Multiline text: one entry per line, `source -> target` (or `=`, `:`). Lines starting with `#` are ignored. Saved into the project JSON and merged at translate time.
+- **Save:** On **Save**, the dialog writes `series_context_path` and `translation_glossary` to the current `ProjImgTrans` and calls `save()` so the project file is updated.
+
+#### Pipeline integration
+
+- **Before translating a page:** The pipeline (e.g. `ui/module_manager.py`) determines the **series_context_path** from the project’s `series_context_path` if set, else from the translator’s **series_context_path** param. It calls `translator.set_translation_context(previous_pages_data, glossary_override=None, series_context_path=series_path, ...)` so the translator can load the series glossary and recent context and set the previous-pages list.
+- **After a successful translation:** If a series path is set, the pipeline calls `translator.append_page_to_series_context(series_path, sources, translations)`. The LLM translator appends that page to `recent_context.json` in the series folder (and trims to the configured max).
+
+**Files:** `utils/series_context_store.py` (folder layout, load/save glossary and recent context, merge glossaries), `utils/proj_imgtrans.py` (`translation_glossary`, `series_context_path`, save/load), `modules/translators/base.py` (`set_translation_context`, `append_page_to_series_context`), `modules/translators/trans_llm_api.py` (params, prompt assembly, truncate/summarize, `_request_context_summary`), `ui/module_manager.py` (set context before translate, append after translate), `ui/translation_context_dialog.py` (dialog), `ui/mainwindow.py` and `ui/mainwindowbars.py` (Edit menu and config panel button), `ui/module_parse_widgets.py` (Translator **Translation context (project)...** button). Design doc: **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md**.
+
+### 12.9 Dual text detection (primary + secondary detector)
+
+You can run **two text detectors** on each page and merge their results so that regions missed by one detector (e.g. captions vs speech bubbles) are caught by the other. This is useful when one detector is strong on bubbles and another on captions or SFX.
+
+#### Config and UI
+
+- **Config (ModuleConfig):** `enable_dual_detect` (bool, default False) and `textdetector_secondary` (str, default ''). Stored in `config.json` under module config.
+- **Config panel → Text detection:**  
+  - **Run second detector (dual detect)** — Checkbox; when checked, a second detector runs after the primary on every page.  
+  - **Secondary:** — Dropdown listing all valid text detectors (same list as primary); select the second detector (cannot be the same as primary).  
+  - **Secondary detector params:** — When dual detect is enabled and a secondary detector is selected, a **Secondary detector params** block appears below with the same param widgets (device, thresholds, etc.) as the primary panel. Edits are saved to `textdetector_params[secondary_name]` so the secondary detector uses them when instantiated during the pipeline.
+- **Config load/save:** `configpanel.setupConfig` syncs the dual-detect checkbox and secondary combobox from `pcfg.module`; the panel’s `addModulesParamWidgets` is called with merged text detector params so both primary and secondary param sets are available.
+
+#### Pipeline behavior
+
+- **When:** After the primary detector runs (`mask, blk_list = self.textdetector.detect(...)`), if `enable_dual_detect` is True, `textdetector_secondary` is non-empty, and secondary ≠ primary, the pipeline calls `_run_dual_detect(img, mask, blk_list, im_w, im_h)`.
+- **Secondary detector creation:** The secondary detector is instantiated from `TEXTDETECTORS.module_dict[sec_name]` with params from `merge_config_module_params(cfg_module.get_params('textdetector'), GET_VALID_TEXTDETECTORS(), TEXTDETECTORS.get)`. Internal keys (e.g. `__param_patched`) are stripped before passing params to the constructor to avoid “invalid config” warnings. If creation or model load fails, a warning is logged and the primary result is returned unchanged.
+- **Merge logic:**  
+  - Secondary’s `detect(img, proj)` is run. If it raises or returns no blocks, the primary result is returned (masks are still merged if the secondary returned a valid mask).  
+  - For each secondary block, IoU (intersection-over-union) with every primary block is computed; if **max IoU < 0.4**, the secondary block is appended (low overlap = new region).  
+  - Blocks are reordered with `sort_regions(blk_list)`.  
+  - Masks are merged only when both primary and secondary masks exist and have the **same shape** (`np.bitwise_or(mask, mask2)`); if the secondary returns a different mask shape, only blocks are merged.  
+- **Progress dialog:** When you start the pipeline (Run) or open the run-status window, the detection bar label is set to **Detecting (dual: &lt;primary&gt; + &lt;secondary&gt;):** when dual detect is enabled and a secondary is selected; otherwise **Detecting:**. This makes it clear that dual mode is active.
+
+#### Files and robustness
+
+- **Files:** `utils/config.py` (`enable_dual_detect`, `textdetector_secondary`), `ui/module_parse_widgets.py` (TextDetectConfigPanel: dual checkbox, secondary combobox, **Secondary detector params** container and lazy ParamWidgets, `_on_secondary_param_edited` to persist to `textdetector_params`), `ui/configpanel.py` (setupConfig sync), `ui/module_manager.py` (`_run_dual_detect`, pipeline call, progress label, param stripping).  
+- **Robustness:** `blk_list` or `blk_list_2` may be None (treated as []). Secondary params come from merged config so defaults apply if a detector was never selected. Mask merge is skipped when shapes differ. Failures in secondary creation or detection are caught and logged; the run continues with the primary result.
+
+---
+
+### 12.10 Text eraser tool
+
+A **text eraser** drawing tool lets you erase parts of text blocks by painting over them. The tool modifies each block’s **mask** (the region where text is rendered) so that painted areas are no longer drawn. This is useful for removing stray strokes, cleaning bubble edges, or hiding parts of a line without deleting the block.
+
+#### How to use
+
+- **Enable:** In the **drawing tools** bar (e.g. when in image-edit / draw mode), select the **Text eraser** tool (eraser icon). The canvas switches to `ImageEditMode.TextEraserTool`.
+- **Erase:** Use the **left mouse button** to paint over the text you want to erase. The stroke is applied in **scene coordinates** so hit-testing matches the visible text blocks. If no text blocks are selected, the eraser applies to **all text items** whose `sceneBoundingRect()` intersects the stroke; if blocks are selected, only those blocks’ masks are modified.
+- **Undo:** **Ctrl+Z** undoes the last eraser stroke (and other drawing commands). Each eraser stroke is recorded as a **TextEraserUndoCommand** storing the item and the mask state before/after.
+
+#### Implementation details
+
+- **Coordinates:** Stroke and mask updates use **scene space**: the stroke’s scene rect is computed with `stroke_item.mapToScene(QRectF(...))`; for each mask pixel the corresponding scene point is mapped into the text item’s space with `item.mapToScene` / `stroke_item.mapFromScene` so the correct mask pixels are cleared. The mask region is aligned with the block’s `_text_mask_region()` and the item’s bounding rect.
+- **Events:** In **TextBlkItem**, when `scene.image_edit_mode == ImageEditMode.TextEraserTool`, **left-button** press/move/release are ignored by the item so the scene receives them and the stroke is drawn. **Right-click** does not start a stroke in text-eraser mode (to avoid accidental black lines or rubber-band while erasing); right-drag is used for selection/rubber-band only when not painting.
+- **Merge:** After a stroke, `_apply_text_eraser_stroke` builds the combined stroke mask, intersects with each target block’s mask, and updates the block’s mask. The stroke item is removed from the canvas and the undo command is pushed.
+
+**Files:** `ui/image_edit.py` (`ImageEditMode.TextEraserTool`), `ui/drawingpanel.py` (text eraser tool button, `on_finish_painting`, `_apply_text_eraser_stroke`), `ui/canvas.py` (mouse press: no stroke on right-click in TextEraserTool; addStrokeImageItem; painting vs rubber-band), `ui/textitem.py` (ignore left-button in TextEraserTool), `ui/drawing_commands.py` (`TextEraserUndoCommand`), `config/stylesheet.css` (DrawTextEraserTool indicator styles).
+
+---
+
+### 12.11 Text edit panel and right panel layout
+
+The **right-hand panel** (text edit / format panel) and the **comic translation stack** have been adjusted so the default width is closer to the minimum and the layout is less cramped when many controls are shown.
+
+- **Right panel width:** The right comic-trans stack panel has a **minimum width** (e.g. 320) and **maximum width** (e.g. 900). On show, the splitter is set so the right panel’s default size is **just above the minimum** (e.g. 322) so more space stays on the canvas by default.
+- **Format / alignment controls:** The format bar (color, alignment, bold/italic/underline, letter spacing, line spacing, vertical text, text-on-path, arc degrees, warp, opacity) uses increased spacing and margins (`FONTFORMAT_SPACING` and related constants). The **opacity** label is given a minimum width so “Opacity” is not truncated (e.g. “Opacit”). Rows are split (e.g. `hl2` for color/align/format/vertical, `hl2b` for text-on-path, arc, warp, opacity) so that narrow windows do not squeeze every control onto one line.
+- **Stylesheet:** In `config/stylesheet.css`, the **AlignmentChecker** and **QFontChecker** indicators (bold/italic/underline state) are made **smaller** so they fit better next to the font dropdown and other format controls.
+
+**Files:** `ui/mainwindow.py` (splitter sizes, right panel min/max, showEvent default), `ui/text_panel.py` (layout rows, spacing, opacity label `setMinimumWidth`), `config/stylesheet.css` (AlignmentChecker, QFontChecker indicator size).
 
 ---
 
