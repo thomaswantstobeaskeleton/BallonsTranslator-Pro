@@ -14,16 +14,24 @@ except:
 from .misc import ndarray2pixmap, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION
 from .textitem import TextBlkItem, TextBlock
 from .texteditshapecontrol import TextBlkShapeControl
+from .textedit_commands import WarpItemCommand
 from .custom_widget import ScrollBar, FadeLabel
 from .image_edit import ImageEditMode, DrawingLayer, StrokeImgItem
 from .page_search_widget import PageSearchWidget
 from utils import shared as C
 from utils.config import pcfg
+from utils.config import context_menu_visible
 from utils.proj_imgtrans import ProjImgTrans
+from .context_menu_config_dialog import ContextMenuConfigDialog
 
 CANVAS_SCALE_MAX = 10.0
 CANVAS_SCALE_MIN = 0.01
 CANVAS_SCALE_SPEED = 0.1
+
+# Default size for "create text box" at cursor / right-click (no drag)
+DEFAULT_TEXTBOX_WIDTH = 200
+DEFAULT_TEXTBOX_HEIGHT = 50
+MIN_DRAG_SIZE = 15  # below this, right-release is treated as "click" and creates default-size box
 
 class MoveByKeyCommand(QUndoCommand):
     def __init__(self, blkitems: List[TextBlkItem], direction: QPointF, shape_ctrl: TextBlkShapeControl) -> None:
@@ -181,6 +189,8 @@ class Canvas(QGraphicsScene):
     split_selected_regions_signal = Signal()
     move_blocks_up_signal = Signal()
     move_blocks_down_signal = Signal()
+    import_image_to_blk = Signal()  # PR #1070: import image as overlay for single empty block
+    clear_overlay_signal = Signal()  # PR #1070: clear foreground image from selected block
 
     format_textblks = Signal()
     layout_textblks = Signal()
@@ -218,6 +228,7 @@ class Canvas(QGraphicsScene):
         self.creating_textblock = False
         self.create_block_origin: QPointF = None
         self.editing_textblkitem: TextBlkItem = None
+        self.warp_edit_mode = False  # PR #1105: Free Transform (quad warp) editing
 
         self.gv = CustomGV(self)
         self.gv.scale_down_signal.connect(self.scaleDown)
@@ -589,6 +600,18 @@ class Canvas(QGraphicsScene):
                 textblk_created = True
         return textblk_created
 
+    def cancel_rect_selection(self) -> bool:
+        """Cancel in-progress rect or hide rect tool selection (#126). Returns True if something was cancelled."""
+        if self.creating_textblock and self.creating_normal_rect:
+            self.creating_textblock = False
+            self.gv.setCursor(Qt.CursorShape.ArrowCursor)
+            self.txtblkShapeControl.hide()
+            return True
+        if self.image_edit_mode == ImageEditMode.RectTool and self.txtblkShapeControl.isVisible() and self.txtblkShapeControl.blk_item is None:
+            self.txtblkShapeControl.hide()
+            return True
+        return False
+
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self.mid_btn_pressed:
             new_pos = event.screenPos()
@@ -716,11 +739,19 @@ class Canvas(QGraphicsScene):
         textblk_created = False
         if self.creating_textblock:
             tgt = 0 if btn == Qt.MouseButton.LeftButton else 1
-            textblk_created = self.endCreateTextblock(btn=tgt)
+            rect = self.txtblkShapeControl.rect()
+            if btn == Qt.MouseButton.RightButton and rect.width() < MIN_DRAG_SIZE and rect.height() < MIN_DRAG_SIZE:
+                default_rect = QRectF(self.create_block_origin, QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
+                self.end_create_textblock.emit(default_rect)
+                self.endCreateTextblock(btn=tgt)  # clear cursor and shape control (won't emit again)
+                textblk_created = True
+            else:
+                textblk_created = self.endCreateTextblock(btn=tgt)
         if btn == Qt.MouseButton.RightButton:
             if self.stroke_img_item is not None:
                 self.finish_erasing.emit(self.stroke_img_item)
             if self.textEditMode() and not textblk_created:
+                self._context_menu_scene_pos = event.scenePos()
                 self.context_menu_requested.emit(event.screenPos(), False)
         if btn == Qt.MouseButton.LeftButton:
             if self.stroke_img_item is not None:
@@ -798,95 +829,234 @@ class Canvas(QGraphicsScene):
     def on_create_contextmenu(self, pos: QPoint, is_textpanel: bool):
         if self.textEditMode() and not self.creating_textblock:
             menu = QMenu(self.gv)
-            # Disabled items use lower opacity so they're clearly greyed and don't show hover
             menu.setStyleSheet("QMenu::item:disabled { opacity: 0.5; }")
             sel = self.selected_text_items()
             n_sel = len(sel)
             n_total = len(self.imgtrans_proj.pages[self.imgtrans_proj.current_img]) if (self.imgtrans_proj and self.imgtrans_proj.current_img and self.imgtrans_proj.current_img in self.imgtrans_proj.pages) else 0
-
-            copy_act = menu.addAction(self.tr("Copy"))
-            copy_act.setShortcut(QKeySequence.StandardKey.Copy)
-            paste_act = menu.addAction(self.tr("Paste"))
-            paste_act.setShortcut(QKeySequence.StandardKey.Paste)
-            copy_trans_act = menu.addAction(self.tr("Copy translation"))
-            paste_trans_act = menu.addAction(self.tr("Paste translation"))
-            delete_act = menu.addAction(self.tr("Delete"))
-            delete_act.setShortcut(QKeySequence("Ctrl+D"))
-            copy_src_act = menu.addAction(self.tr("Copy source text"))
-            copy_src_act.setShortcut(QKeySequence("Ctrl+Shift+C"))
-            paste_src_act = menu.addAction(self.tr("Paste source text"))
-            paste_src_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
-            delete_recover_act = menu.addAction(self.tr("Delete and Recover removed text"))
-            delete_recover_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
-            clear_src_act = menu.addAction(self.tr("Clear source text"))
-            clear_trans_act = menu.addAction(self.tr("Clear translation"))
-            select_all_act = menu.addAction(self.tr("Select all"))
-            select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
-
-            # Only show selection-only options when at least one text box is selected
-            spell_check_src_act = None
-            spell_check_trans_act = None
-            trim_whitespace_act = None
-            to_uppercase_act = None
-            to_lowercase_act = None
-            toggle_strikethrough_act = None
-            gradient_sub = None
-            gradient_linear_act = None
-            gradient_radial_act = None
-            text_on_path_sub = None
-            text_on_path_none_act = None
-            text_on_path_circular_act = None
-            text_on_path_arc_act = None
-            merge_blocks_act = None
-            split_regions_act = None
-            move_up_act = None
-            move_down_act = None
-            if n_sel >= 1:
-                spell_check_src_act = menu.addAction(self.tr("Spell check source text"))
-                spell_check_src_act.setToolTip(self.tr("Run spell check / auto-correct on source text of selected blocks (requires pyenchant)."))
-                spell_check_trans_act = menu.addAction(self.tr("Spell check translation"))
-                spell_check_trans_act.setToolTip(self.tr("Run spell check / auto-correct on translation text of selected blocks (requires pyenchant)."))
-                trim_whitespace_act = menu.addAction(self.tr("Trim whitespace"))
-                trim_whitespace_act.setToolTip(self.tr("Remove leading and trailing whitespace from each line in selected blocks."))
-                to_uppercase_act = menu.addAction(self.tr("To uppercase"))
-                to_lowercase_act = menu.addAction(self.tr("To lowercase"))
-                toggle_strikethrough_act = menu.addAction(self.tr("Toggle strikethrough"))
-                toggle_strikethrough_act.setToolTip(self.tr("Toggle strikethrough on selected blocks."))
-                gradient_sub = menu.addMenu(self.tr("Gradient type"))
-                gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
-                gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
-                text_on_path_sub = menu.addMenu(self.tr("Text on path"))
-                text_on_path_none_act = text_on_path_sub.addAction(self.tr("None"))
-                text_on_path_circular_act = text_on_path_sub.addAction(self.tr("Circular"))
-                text_on_path_arc_act = text_on_path_sub.addAction(self.tr("Arc"))
-                merge_blocks_act = menu.addAction(self.tr("Merge selected blocks"))
-                merge_blocks_act.setEnabled(n_sel >= 2)
-                split_regions_act = menu.addAction(self.tr("Split selected region(s)"))
-                move_up_act = menu.addAction(self.tr("Move block(s) up"))
-                move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
-                move_down_act = menu.addAction(self.tr("Move block(s) down"))
-                move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
-            menu.addSeparator()
-
-            format_act = menu.addAction(self.tr("Apply font formatting"))
-            layout_act = menu.addAction(self.tr("Auto layout"))
-            angle_act = menu.addAction(self.tr("Reset Angle"))
-            squeeze_act = menu.addAction(self.tr("Squeeze"))
-            menu.addSeparator()
-            detect_region_act = None
-            if getattr(self, '_last_rubber_band_rect', None) is not None:
-                detect_region_act = menu.addAction(self.tr("Detect text in region"))
-            detect_page_act = menu.addAction(self.tr("Detect text on page"))
-            translate_act = menu.addAction(self.tr("Translate"))
-            ocr_act = menu.addAction(self.tr("OCR"))
-            ocr_translate_act = menu.addAction(self.tr("OCR and translate"))
-            ocr_translate_inpaint_act = menu.addAction(self.tr("OCR, translate and inpaint"))
-            inpaint_act = menu.addAction(self.tr("Inpaint"))
-
             saved_rect = getattr(self, '_last_rubber_band_rect', None)
+
+            # --- Edit ---
+            copy_act = paste_act = copy_trans_act = paste_trans_act = None
+            copy_src_act = paste_src_act = delete_act = delete_recover_act = None
+            clear_src_act = clear_trans_act = select_all_act = None
+            edit_menu = None
+            if context_menu_visible('edit_copy'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                copy_act = edit_menu.addAction(self.tr("Copy"))
+                copy_act.setShortcut(QKeySequence.StandardKey.Copy)
+            if context_menu_visible('edit_paste'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                paste_act = edit_menu.addAction(self.tr("Paste"))
+                paste_act.setShortcut(QKeySequence.StandardKey.Paste)
+            if context_menu_visible('edit_copy_trans'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                copy_trans_act = edit_menu.addAction(self.tr("Copy translation"))
+            if context_menu_visible('edit_paste_trans'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                paste_trans_act = edit_menu.addAction(self.tr("Paste translation"))
+            if context_menu_visible('edit_copy_src'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                copy_src_act = edit_menu.addAction(self.tr("Copy source text"))
+                copy_src_act.setShortcut(QKeySequence("Ctrl+Shift+C"))
+            if context_menu_visible('edit_paste_src'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                paste_src_act = edit_menu.addAction(self.tr("Paste source text"))
+                paste_src_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
+            if context_menu_visible('edit_delete'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                delete_act = edit_menu.addAction(self.tr("Delete"))
+                delete_act.setShortcut(QKeySequence("Ctrl+D"))
+            if context_menu_visible('edit_delete_recover'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                delete_recover_act = edit_menu.addAction(self.tr("Delete and Recover removed text"))
+                delete_recover_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
+            if context_menu_visible('edit_clear_src'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                clear_src_act = edit_menu.addAction(self.tr("Clear source text"))
+            if context_menu_visible('edit_clear_trans'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                clear_trans_act = edit_menu.addAction(self.tr("Clear translation"))
+            if context_menu_visible('edit_select_all'):
+                if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
+                select_all_act = edit_menu.addAction(self.tr("Select all"))
+                select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
+
+            # --- Text (selection) ---
+            spell_check_src_act = spell_check_trans_act = trim_whitespace_act = None
+            to_uppercase_act = to_lowercase_act = toggle_strikethrough_act = None
+            gradient_linear_act = gradient_radial_act = None
+            text_on_path_none_act = text_on_path_circular_act = text_on_path_arc_act = None
+            text_menu = None
+            if n_sel >= 1:
+                if context_menu_visible('text_spell_src'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    spell_check_src_act = text_menu.addAction(self.tr("Spell check source text"))
+                if context_menu_visible('text_spell_trans'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    spell_check_trans_act = text_menu.addAction(self.tr("Spell check translation"))
+                if context_menu_visible('text_trim'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    trim_whitespace_act = text_menu.addAction(self.tr("Trim whitespace"))
+                if context_menu_visible('text_upper'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    to_uppercase_act = text_menu.addAction(self.tr("To uppercase"))
+                if context_menu_visible('text_lower'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    to_lowercase_act = text_menu.addAction(self.tr("To lowercase"))
+                if context_menu_visible('text_strikethrough'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    toggle_strikethrough_act = text_menu.addAction(self.tr("Toggle strikethrough"))
+                if context_menu_visible('text_gradient'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    gradient_sub = text_menu.addMenu(self.tr("Gradient type"))
+                    gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
+                    gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
+                if context_menu_visible('text_on_path'):
+                    if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
+                    path_sub = text_menu.addMenu(self.tr("Text on path"))
+                    text_on_path_none_act = path_sub.addAction(self.tr("None"))
+                    text_on_path_circular_act = path_sub.addAction(self.tr("Circular"))
+                    text_on_path_arc_act = path_sub.addAction(self.tr("Arc"))
+
+            # --- Block (selection) ---
+            merge_blocks_act = split_regions_act = move_up_act = move_down_act = None
+            create_textbox_act = None
+            block_menu = None
+            if context_menu_visible('create_textbox'):
+                if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
+                create_textbox_act = block_menu.addAction(self.tr("Create text box"))
+                create_textbox_act.setToolTip(self.tr("Add a new text box at the right-click position (default size). Or right-click and drag to set size."))
+            if n_sel >= 1:
+                if context_menu_visible('block_merge'):
+                    if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
+                    merge_blocks_act = block_menu.addAction(self.tr("Merge selected blocks"))
+                    merge_blocks_act.setEnabled(n_sel >= 2)
+                if context_menu_visible('block_split'):
+                    if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
+                    split_regions_act = block_menu.addAction(self.tr("Split selected region(s)"))
+                if context_menu_visible('block_move_up'):
+                    if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
+                    move_up_act = block_menu.addAction(self.tr("Move block(s) up"))
+                    move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
+                if context_menu_visible('block_move_down'):
+                    if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
+                    move_down_act = block_menu.addAction(self.tr("Move block(s) down"))
+                    move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
+
+            # --- Image / Overlay (selection) ---
+            import_image_act = clear_overlay_act = None
+            overlay_menu = None
+            if n_sel >= 1:
+                if context_menu_visible('overlay_import'):
+                    if overlay_menu is None: overlay_menu = menu.addMenu(self.tr("Image / Overlay"))
+                    import_image_act = overlay_menu.addAction(self.tr("Import Image"))
+                    import_image_act.setEnabled(n_sel == 1 and sel[0].document().isEmpty())
+                if context_menu_visible('overlay_clear'):
+                    if overlay_menu is None: overlay_menu = menu.addMenu(self.tr("Image / Overlay"))
+                    clear_overlay_act = overlay_menu.addAction(self.tr("Clear overlay image"))
+                    clear_overlay_act.setEnabled(bool(n_sel == 1 and getattr(getattr(sel[0], 'blk', None), 'foreground_image_path', None)))
+
+            # --- Transform (selection) ---
+            free_transform_act = reset_warp_act = None
+            warp_arc_up_act = warp_arc_down_act = warp_arch_act = warp_flag_act = None
+            transform_menu = None
+            if n_sel >= 1:
+                if context_menu_visible('transform_free'):
+                    if transform_menu is None: transform_menu = menu.addMenu(self.tr("Transform"))
+                    free_transform_act = transform_menu.addAction(self.tr("Free Transform"))
+                    free_transform_act.setCheckable(True)
+                    free_transform_act.setChecked(getattr(self, 'warp_edit_mode', False))
+                if context_menu_visible('transform_reset_warp'):
+                    if transform_menu is None: transform_menu = menu.addMenu(self.tr("Transform"))
+                    reset_warp_act = transform_menu.addAction(self.tr("Reset warp"))
+                    reset_warp_act.setEnabled(bool(n_sel == 1 and getattr(getattr(sel[0], 'blk', None), 'warp_mode', None) in ('quad', 'mesh')))
+                if context_menu_visible('transform_warp_preset'):
+                    if transform_menu is None: transform_menu = menu.addMenu(self.tr("Transform"))
+                    warp_preset_sub = transform_menu.addMenu(self.tr("Warp preset"))
+                    warp_arc_up_act = warp_preset_sub.addAction(self.tr("Arc Up"))
+                    warp_arc_down_act = warp_preset_sub.addAction(self.tr("Arc Down"))
+                    warp_arch_act = warp_preset_sub.addAction(self.tr("Arch"))
+                    warp_flag_act = warp_preset_sub.addAction(self.tr("Flag"))
+
+            # --- Order (selection) ---
+            bring_front_act = send_back_act = None
+            order_menu = None
+            if n_sel >= 1:
+                if context_menu_visible('order_bring_front'):
+                    if order_menu is None: order_menu = menu.addMenu(self.tr("Order"))
+                    bring_front_act = order_menu.addAction(self.tr("Bring to front"))
+                if context_menu_visible('order_send_back'):
+                    if order_menu is None: order_menu = menu.addMenu(self.tr("Order"))
+                    send_back_act = order_menu.addAction(self.tr("Send to back"))
+
+            menu.addSeparator()
+
+            # --- Format ---
+            format_act = layout_act = angle_act = squeeze_act = None
+            format_menu = None
+            if context_menu_visible('format_apply'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                format_act = format_menu.addAction(self.tr("Apply font formatting"))
+            if context_menu_visible('format_layout'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                layout_act = format_menu.addAction(self.tr("Auto layout"))
+            if context_menu_visible('format_angle'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                angle_act = format_menu.addAction(self.tr("Reset Angle"))
+            if context_menu_visible('format_squeeze'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                squeeze_act = format_menu.addAction(self.tr("Squeeze"))
+
+            menu.addSeparator()
+
+            # --- Detect & Run ---
+            detect_region_act = detect_page_act = translate_act = ocr_act = None
+            ocr_translate_act = ocr_translate_inpaint_act = inpaint_act = None
+            run_menu = None
+            if context_menu_visible('run_detect_region') and saved_rect is not None:
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                detect_region_act = run_menu.addAction(self.tr("Detect text in region"))
+            if context_menu_visible('run_detect_page'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                detect_page_act = run_menu.addAction(self.tr("Detect text on page"))
+            if context_menu_visible('run_translate'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                translate_act = run_menu.addAction(self.tr("Translate"))
+            if context_menu_visible('run_ocr'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                ocr_act = run_menu.addAction(self.tr("OCR"))
+            if context_menu_visible('run_ocr_translate'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                ocr_translate_act = run_menu.addAction(self.tr("OCR and translate"))
+            if context_menu_visible('run_ocr_translate_inpaint'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                ocr_translate_inpaint_act = run_menu.addAction(self.tr("OCR, translate and inpaint"))
+            if context_menu_visible('run_inpaint'):
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                inpaint_act = run_menu.addAction(self.tr("Inpaint"))
+
+            menu.addSeparator()
+            configure_menu_act = menu.addAction(self.tr("Configure menu..."))
+
             rst = menu.exec(pos)
             self._last_rubber_band_rect = None
-            
+
+            if rst == configure_menu_act:
+                dlg = ContextMenuConfigDialog(self.gv)
+                dlg.exec()
+                return
+
+            if rst == create_textbox_act:
+                sp = getattr(self, '_context_menu_scene_pos', None)
+                if sp is not None and self.imgtrans_proj.img_valid:
+                    p = self.baseLayer.mapFromScene(sp)
+                    br = self.baseLayer.rect()
+                    x = max(0, min(p.x(), br.right() - DEFAULT_TEXTBOX_WIDTH))
+                    y = max(0, min(p.y(), br.bottom() - DEFAULT_TEXTBOX_HEIGHT))
+                    rect = QRectF(QPointF(x, y), QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
+                    self.end_create_textblock.emit(rect)
+                return
+
             if rst == delete_act:
                 self.delete_textblks.emit(0)
             elif rst == delete_recover_act:
@@ -939,6 +1109,67 @@ class Canvas(QGraphicsScene):
                 self.move_blocks_up_signal.emit()
             elif move_down_act is not None and rst == move_down_act:
                 self.move_blocks_down_signal.emit()
+            elif import_image_act is not None and rst == import_image_act:
+                self.import_image_to_blk.emit()
+            elif clear_overlay_act is not None and rst == clear_overlay_act:
+                self.clear_overlay_signal.emit()
+            elif free_transform_act is not None and rst == free_transform_act:
+                self.warp_edit_mode = not self.warp_edit_mode
+                self.txtblkShapeControl.setWarpEditing(self.warp_edit_mode)
+            elif reset_warp_act is not None and rst == reset_warp_act and n_sel == 1:
+                item = sel[0]
+                blk = getattr(item, 'blk', None)
+                if blk is not None and getattr(blk, 'warp_mode', None) in ('quad', 'mesh'):
+                    before = {'warp_mode': blk.warp_mode, 'warp_quad': [list(p) for p in blk.warp_quad]}
+                    after = {'warp_mode': 'none', 'warp_quad': [[0, 0], [1, 0], [1, 1], [0, 1]]}
+                    self.push_undo_command(WarpItemCommand(item, before, after, self.txtblkShapeControl))
+                    if self.txtblkShapeControl.blk_item == item:
+                        self.txtblkShapeControl.warp_editing = False
+                        self.txtblkShapeControl.updateControlBlocks()
+                    self.setProjSaveState(False)
+            elif rst == warp_arc_up_act or rst == warp_arc_down_act or rst == warp_arch_act or rst == warp_flag_act:
+                if n_sel == 1:
+                    item = sel[0]
+                    blk = getattr(item, 'blk', None)
+                    if blk is not None:
+                        presets = {
+                            warp_arc_up_act: [[0.05, 0], [0.95, 0], [1, 1], [0, 1]],
+                            warp_arc_down_act: [[0, 0.08], [1, 0.08], [1, 1], [0, 1]],
+                            warp_arch_act: [[0, 0.1], [1, 0.1], [1, 1], [0, 1]],
+                            warp_flag_act: [[0.02, 0], [0.98, 0.02], [0.98, 0.98], [0.02, 1]],
+                        }
+                        quad = presets.get(rst)
+                        if quad is not None:
+                            before = {'warp_mode': getattr(blk, 'warp_mode', 'none'), 'warp_quad': [list(p) for p in getattr(blk, 'warp_quad', [[0,0],[1,0],[1,1],[0,1]])]}
+                            blk.warp_mode = 'quad'
+                            blk.warp_quad = [list(p) for p in quad]
+                            after = {'warp_mode': 'quad', 'warp_quad': blk.warp_quad}
+                            self.push_undo_command(WarpItemCommand(item, before, after, self.txtblkShapeControl))
+                            item.update()
+                            if self.txtblkShapeControl.blk_item == item:
+                                self.txtblkShapeControl.setWarpEditing(True)
+                                self.txtblkShapeControl.updateControlBlocks()
+                            self.setProjSaveState(False)
+            elif bring_front_act is not None and rst == bring_front_act:
+                items = self.selected_text_items()
+                if items:
+                    parent = items[0].parentItem()
+                    if parent is not None:
+                        children = parent.childItems()
+                        text_items = [c for c in children if isinstance(c, TextBlkItem)]
+                        max_z = max((c.zValue() for c in text_items), default=0)
+                        for it in items:
+                            it.setZValue(max_z + 1)
+            elif send_back_act is not None and rst == send_back_act:
+                items = self.selected_text_items()
+                if items:
+                    parent = items[0].parentItem()
+                    if parent is not None:
+                        children = parent.childItems()
+                        text_items = [c for c in children if isinstance(c, TextBlkItem)]
+                        min_z = min((c.zValue() for c in text_items), default=0)
+                        for it in items:
+                            it.setZValue(min_z - 1)
             elif rst == format_act:
                 self.format_textblks.emit()
             elif rst == layout_act:
