@@ -147,6 +147,32 @@ class MainWindow(mainwindow_cls):
             self.hideSystemTitleBar()
             self.showMaximized()
 
+    def on_create_errdialog(self, error_msg: str, detail_traceback: str = '', exception_type: str = ''):
+        try:
+            if exception_type != '':
+                shared.showed_exception.add(exception_type)
+            err = QMessageBox()
+            err.setText(error_msg)
+            err.setDetailedText(detail_traceback)
+            err.exec()
+            if exception_type != '':
+                shared.showed_exception.remove(exception_type)
+        except Exception:
+            if exception_type in shared.showed_exception:
+                shared.showed_exception.remove(exception_type)
+            LOGGER.error('Failed to create error dialog')
+            LOGGER.error(traceback.format_exc())
+
+    def on_create_infodialog(self, info_dict: dict):
+        QMessageBox.StandardButton.NoButton
+        dialog = MessageBox(**info_dict)
+        dialog.show()   # exec_ will block main thread
+
+    def register_view_widget(self, widget: ViewWidget):
+        assert widget.config_name not in shared.config_name_to_view_widget
+        d = {'widget': widget}
+        shared.config_name_to_view_widget[widget.config_name] = d
+
     def setStyleSheet(self, styleSheet: str) -> None:
         self.imgtrans_progress_msgbox.setStyleSheet(styleSheet)
         self.export_doc_thread.progress_bar.setStyleSheet(styleSheet)
@@ -922,18 +948,17 @@ class MainWindow(mainwindow_cls):
             return []
         page = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
         return [
-            (i, _spellcheck_normalize_lines(getattr(blk, 'text', None)), (getattr(blk, 'translation', None) or '').split('\n'))
+            (i, self._spellcheck_normalize_lines(getattr(blk, 'text', None)), (getattr(blk, 'translation', None) or '').split('\n'))
             for i, blk in enumerate(page)
         ]
 
-
-def _spellcheck_normalize_lines(text_attr):
-    """Return a list of strings from block text (list or string)."""
-    if text_attr is None:
-        return []
-    if isinstance(text_attr, str):
-        return text_attr.split('\n') if text_attr else []
-    return [line if isinstance(line, str) else str(line) for line in text_attr]
+    def _spellcheck_normalize_lines(self, text_attr):
+        """Return a list of strings from block text (list or string)."""
+        if text_attr is None:
+            return []
+        if isinstance(text_attr, str):
+            return text_attr.split('\n') if text_attr else []
+        return [line if isinstance(line, str) else str(line) for line in text_attr]
 
     def _spellcheck_apply_replacement(self, block_idx: int, line_idx: int, new_line: str, is_translation: bool):
         """Apply spell check replacement to block (PR #974)."""
@@ -2884,27 +2909,6 @@ def _spellcheck_normalize_lines(text_attr):
                 shared.pbar['inpaint'] = tqdm(range(npages), desc="Inpaint")
         self.on_run_imgtrans()
 
-    def on_create_errdialog(self, error_msg: str, detail_traceback: str = '', exception_type: str = ''):
-        try:
-            if exception_type != '':
-                shared.showed_exception.add(exception_type)
-            err = QMessageBox()
-            err.setText(error_msg)
-            err.setDetailedText(detail_traceback)
-            err.exec()
-            if exception_type != '':
-                shared.showed_exception.remove(exception_type)
-        except:
-            if exception_type in shared.showed_exception:
-                shared.showed_exception.remove(exception_type)
-            LOGGER.error('Failed to create error dialog')
-            LOGGER.error(traceback.format_exc())
-
-    def on_create_infodialog(self, info_dict: dict):
-        QMessageBox.StandardButton.NoButton
-        dialog = MessageBox(**info_dict)
-        dialog.show()   # exec_ will block main thread
-
     def setupRegisterWidget(self):
         self.titleBar.viewMenu.addSeparator()
         for cfg_name in shared.config_name_to_view_widget:
@@ -2921,11 +2925,6 @@ def _spellcheck_normalize_lines(text_attr):
             widget.set_expend_area(expend=getattr(pcfg, widget.config_expand_name), set_config=False)
             widget.view_hide_btn_clicked.connect(self.on_hide_view_widget)
             widget.setVisible(visible)
-
-    def register_view_widget(self, widget: ViewWidget):
-        assert widget.config_name not in shared.config_name_to_view_widget
-        d = {'widget': widget}
-        shared.config_name_to_view_widget[widget.config_name] = d
 
     def action_set_view_visible(self):
         action: QAction = self.sender()
