@@ -20,6 +20,7 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("view.draw_board", "P", "View", "Drawing Board"),
     ("view.text_edit", "T", "View", "Text Editor"),
     ("view.keyboard_shortcuts", "Ctrl+K", "View", "Keyboard Shortcuts"),
+    ("view.context_menu_options", "Ctrl+Shift+O", "View", "Context menu options"),
     # Go / Navigation
     ("go.prev_page", "PgUp", "Go", "Previous Page"),
     ("go.next_page", "PgDown", "Go", "Next Page"),
@@ -34,6 +35,7 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("canvas.select_all", "Ctrl+A", "Canvas", "Select all blocks"),
     ("canvas.escape", "Escape", "Canvas", "Escape / Deselect"),
     ("canvas.delete_line", "Delete", "Canvas", "Delete (key)"),
+    ("canvas.create_textbox", "Ctrl+Shift+N", "Canvas", "Create text box"),
     # Format
     ("format.bold", "Ctrl+B", "Format", "Bold"),
     ("format.italic", "Ctrl+I", "Format", "Italic"),

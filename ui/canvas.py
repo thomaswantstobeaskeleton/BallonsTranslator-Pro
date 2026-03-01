@@ -685,6 +685,19 @@ class Canvas(QGraphicsScene):
         origin = self.gv.mapFromGlobal(QCursor.pos())
         return self.gv.mapToScene(origin)
 
+    def create_textbox_at_cursor(self) -> bool:
+        """Create a default-size text box at current cursor position. Returns True if created."""
+        if not self.textEditMode() or not self.imgtrans_proj.img_valid:
+            return False
+        sp = self.scene_cursor_pos()
+        p = self.baseLayer.mapFromScene(sp)
+        br = self.baseLayer.rect()
+        x = max(0, min(p.x(), br.right() - DEFAULT_TEXTBOX_WIDTH))
+        y = max(0, min(p.y(), br.bottom() - DEFAULT_TEXTBOX_HEIGHT))
+        rect = QRectF(QPointF(x, y), QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
+        self.end_create_textblock.emit(rect)
+        return True
+
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         btn = event.button()
         if btn == Qt.MouseButton.MiddleButton:

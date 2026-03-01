@@ -45,6 +45,7 @@ from . import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox
 from .model_manager_dialog import ModelManagerDialog
 from .shortcuts_dialog import ShortcutsDialog
+from .context_menu_config_dialog import ContextMenuConfigDialog
 from .batch_queue_dialog import BatchQueueDialog
 from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
@@ -809,6 +810,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
         self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
         self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
+        self.titleBar.context_menu_options_trigger.connect(self.shortcutContextMenuOptions)
         self.titleBar.help_doc_trigger.connect(self.on_help_documentation)
         self.titleBar.help_about_trigger.connect(self.on_help_about)
 
@@ -837,6 +839,8 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.italic", "Ctrl+I", self.shortcutItalic)
         _mk_shortcut("format.underline", "Ctrl+U", self.shortcutUnderline)
         _mk_shortcut("canvas.delete_line", "Delete", self.shortcutDelete)
+        _mk_shortcut("canvas.create_textbox", "Ctrl+Shift+N", self.shortcutCreateTextbox)
+        _mk_shortcut("view.context_menu_options", "Ctrl+Shift+O", self.shortcutContextMenuOptions)
 
         drawpanel_shortcuts = [
             ("draw.hand", "H", "hand"),
@@ -1016,6 +1020,16 @@ class MainWindow(mainwindow_cls):
     def shortcutUnderline(self):
         if self.textPanel.formatpanel.isVisible():
             self.textPanel.formatpanel.formatBtnGroup.underlineBtn.click()
+
+    def shortcutCreateTextbox(self):
+        """Create a default-size text box at cursor (Canvas)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible():
+            self.canvas.create_textbox_at_cursor()
+
+    def shortcutContextMenuOptions(self):
+        """Open Context menu options dialog (View)."""
+        dlg = ContextMenuConfigDialog(self)
+        dlg.exec()
 
     def on_redo(self):
         self.canvas.redo()

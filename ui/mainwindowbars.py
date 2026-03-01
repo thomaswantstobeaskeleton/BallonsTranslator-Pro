@@ -389,6 +389,10 @@ class TitleBar(Widget):
         keyboardShortcutsAction = QAction(self.tr('Keyboard Shortcuts...'), self)
         keyboardShortcutsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.keyboard_shortcuts", getattr(pcfg, "shortcuts", None))))
         self.keyboard_shortcuts_trigger = keyboardShortcutsAction.triggered
+        contextMenuOptionsAction = QAction(self.tr('Context menu options...'), self)
+        contextMenuOptionsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.context_menu_options", getattr(pcfg, "shortcuts", None))))
+        contextMenuOptionsAction.setToolTip(self.tr('Show or hide canvas right-click menu actions by category.'))
+        self.context_menu_options_trigger = contextMenuOptionsAction.triggered
         self.darkModeAction = darkModeAction = QAction(self.tr('Dark Mode'), self)
         darkModeAction.setCheckable(True)
 
@@ -397,6 +401,7 @@ class TitleBar(Widget):
         viewMenu.addActions([drawBoardAction, texteditAction, spellCheckPanelAction])
         viewMenu.addSeparator()
         viewMenu.addAction(keyboardShortcutsAction)
+        viewMenu.addAction(contextMenuOptionsAction)
         viewMenu.addSeparator()
         helpMenu = QMenu(self.tr('Help'), self)
         docAction = QAction(self.tr('Documentation'), self)
@@ -432,6 +437,7 @@ class TitleBar(Widget):
             ("view.draw_board", "P", drawBoardAction),
             ("view.text_edit", "T", texteditAction),
             ("view.keyboard_shortcuts", "Ctrl+K", keyboardShortcutsAction),
+            ("view.context_menu_options", "Ctrl+Shift+O", contextMenuOptionsAction),
             ("edit.merge_tool", "Ctrl+Shift+M", mergeToolAction),
         ]
 
