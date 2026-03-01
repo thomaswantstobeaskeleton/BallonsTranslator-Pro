@@ -33,7 +33,7 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **Manga / Comic source...** — Opens a dialog to search for manga/manhua/manhwa titles (via MangaDex API), list chapters by language, select chapters to download, and optionally open the downloaded chapter folder in BallonsTranslator to translate. Supports “data-saver” (smaller) or original quality. **Sources:** MangaDex (search by title) and MangaDex by chapter URL (paste a single chapter link). **Downloaded pages are saved as 001.ext, 002.ext, …** so BallonsTranslator loads them in the correct order. **Config:** Language, data-saver, download folder, and request delay (rate limiting) are persisted and restored. Optional “Request delay” (0–2 s) throttles API requests.
 
 ### Other
-- **Config safety:** API keys removed from source; config.example.json and GITHUB_UPLOAD.md added.
+- **Config safety:** API keys removed from source; config.example.json used for safe upload and config handling.
 - **Lossless WebP (#1055)** — In Config → General → Save: when result format is WebP, a "WebP lossless" checkbox enables lossless encoding (quality setting ignored). Export all pages and normal Save both respect this option.
 
 ### Canvas right-click menu (text edit mode)

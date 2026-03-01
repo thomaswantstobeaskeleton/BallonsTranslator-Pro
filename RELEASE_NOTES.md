@@ -51,7 +51,6 @@ This is **BallonsTranslatorPro**, an extended fork of [BallonsTranslator](https:
 | **docs/MANHUA_BEST_SETTINGS.md** | Suggested settings for Chinese manhua. |
 | **docs/OPTIONAL_DEPENDENCIES.md** | Optional module conflicts (e.g. CRAFT, Simple LaMa) and workarounds. |
 | **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, HF object det). |
-| **GITHUB_UPLOAD.md** | Notes on safe upload and config handling. |
 
 ---
 

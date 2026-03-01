@@ -524,7 +524,6 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Optional deps:** [docs/OPTIONAL_DEPENDENCIES.md](docs/OPTIONAL_DEPENDENCIES.md), [docs/INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md)
 - **Translation context:** [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
 - **UI/settings:** [docs/SETTINGS_UI_RECOMMENDATIONS.md](docs/SETTINGS_UI_RECOMMENDATIONS.md)
-- **Git/auto-push:** [docs/CONNECT_GITHUB_AND_AUTO_PUSH.md](docs/CONNECT_GITHUB_AND_AUTO_PUSH.md)
 
 ---
 
