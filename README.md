@@ -10,7 +10,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 | Topic | Summary |
 |-------|---------|
-| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, Manga source, 370 fonts. Full docs and recommended settings. |
+| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, **Manga/Comic source** (MangaDex, GOMANGA, Manhwa Reader, Comick, Local folder), **batch export to PDF**, **duplicate/overlapping block check**, 370 fonts. Full docs and recommended settings. |
 | **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
 
@@ -38,7 +38,7 @@ This fork adds **many new optional modules** (detectors, OCR engines, inpainters
 - **OCR:** 20+ engines (Paddle, manga_ocr, Surya, TrOCR, GOT-OCR2, Ocean, InternVL2/3, HunyuanOCR, etc.). **Crop padding** on many OCRs to avoid clipped text.
 - **Inpainting:** lama_large_512px with **configurable mask dilation** (0–5); Simple LaMa, Diffusers (SD/SDXL/FLUX), LaMa ONNX, MAT, Fluently v4, etc.
 - **Translation context:** Glossary, previous-page context, series-level storage, optional **context summarization** when near model limit (LLM_API_Translator).
-- **UI:** Canvas right-click menu (30+ actions: copy/paste, merge, move up/down, spell check, trim, case change, gradient, text on path, detect in region, pipeline stages); **OCR auto-correct** (pyenchant, single-suggestion replacement after OCR); **text eraser** tool; **batch queue**; **Manga source** (MangaDex search/download); **keyboard shortcuts** (customizable); **keyword substitution** (OCR, pre-MT, post-MT).
+- **UI:** Canvas right-click menu (30+ actions: copy/paste, merge, move up/down, spell check, trim, case change, gradient, text on path, detect in region, pipeline stages); **OCR auto-correct** (pyenchant, single-suggestion replacement after OCR); **text eraser** tool; **batch queue**; **Manga / Comic source** (MangaDex, GOMANGA, Manhwa Reader, Comick, Local folder — search and download where supported); **batch export to PDF** (Export all pages); **Check project** (missing files, invalid JSON, overlapping blocks); **keyboard shortcuts** (customizable); **keyword substitution** (OCR, pre-MT, post-MT).
 - **Config panel:** Logical DPI, dark mode, display language, WebP lossless, typesetting defaults, dual text detection (primary + secondary detector).
 
 **Models and fonts added in this fork:** The fork ships with **many more** detection, OCR, and inpainting modules than the original (15+ text detectors, 30+ OCR engines, 15+ inpainters), plus **370+ fonts** (in `fonts/` and system; supported extensions: `.ttf`, `.otf`, `.ttc`, `.pfb`). Custom fonts in `fonts/` are loaded at startup. Config → Typesetting: **Show only custom fonts** limits the font list to those. Not every module is tested in every environment—see [Disclaimer: models and testing](#disclaimer-models-and-testing) above.
@@ -121,18 +121,27 @@ See [Dual text detection](#dual-text-detection-primary--secondary) for using HF 
 
 ---
 
-### Manga / Comic source (MangaDex)
+### Manga / Comic source (multiple sources)
 
-**Goal:** Search, download chapters, and open in BallonsTranslator.
+**Goal:** Search, list chapters, and download manga/manhua/manhwa from several sources; or open a local folder of images as a project.
 
-**Tools → Manga / Comic source...** opens the dialog. Uses the public [MangaDex API](https://api.mangadex.org/docs/).
+**Tools → Manga / Comic source...** opens the dialog. Choose a **Source** from the dropdown:
 
-#### Search and load chapters
+| Source | Search | Chapter list | Download | Notes |
+|--------|--------|--------------|----------|--------|
+| **MangaDex** | By title | By language | Yes (001/002… pages) | Official API; data-saver option |
+| **MangaDex (by chapter URL)** | — | Paste chapter URL | Yes | Single chapter by link |
+| **Comick** | By title (Comick Source API) | Yes | No | Many aggregator sites; chapter links only |
+| **GOMANGA** | By title | Yes | Yes | Unofficial API; direct image URLs |
+| **Manhwa Reader** | Filter /api/all by title | Yes | Yes | Manhwa/webtoon; unofficial Vercel API |
+| **Local folder** | — | — | — | Open folder of images as project |
 
-1. **Search by title:** Enter manga name → **Search** → results show title, description. Select a result → **Load chapters**.
-2. **Or by URL:** Paste a MangaDex chapter URL (e.g. `https://mangadex.org/chapter/abc123...`) → **Load chapter** — fetches that chapter directly.
-3. **Language:** Dropdown for chapter feed (e.g. English, Japanese, Chinese Simplified). Stored in `manga_source_lang`.
-4. **Quality:** **Use data-saver** — smaller images, faster download. Stored in `manga_source_data_saver`.
+#### Search and load chapters (MangaDex, Comick, GOMANGA, Manhwa Reader)
+
+1. **Search by title:** Enter manga name → **Search** → results show title. Select a result → **Load chapters**.
+2. **MangaDex only — by URL:** Paste a MangaDex chapter URL (e.g. `https://mangadex.org/chapter/abc123...`) → **Load chapter** — fetches that chapter directly.
+3. **Language:** Dropdown for chapter feed (e.g. English, Japanese, Chinese Simplified). Stored in `manga_source_lang`. (MangaDex only; other sources ignore.)
+4. **Quality:** **Use data-saver** — smaller images, faster download (MangaDex only). Stored in `manga_source_data_saver`.
 
 #### Download
 
@@ -318,7 +327,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 4. **Export source text as markdown** / **Export translation as markdown** — markdown format.
 5. **Import translation from TXT/markdown** — paste translations from a file; lines map to blocks in order.
 
-**Tools → Export all pages** — exports result images for all pages to a folder (respects Config → Save format, quality, WebP lossless).
+**Tools → Export all pages** — exports result images for all pages to a folder as **001.ext**, **002.ext**, **003.ext**, … (in project page order), so the exported folder uses the same naming convention as manga chapter downloads and natural sort. Respects Config → Save format, quality, WebP lossless. Option **Also create PDF from exported images** builds a single `exported.pdf` in that folder (requires `pip install img2pdf`).
 
 ---
 
@@ -390,9 +399,9 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | **Region merge tool** | Merge overlapping/adjacent blocks (Ctrl+Shift+M) |
 | **Re-run detection only** | Run detector on all pages; keep existing OCR/translation |
 | **Re-run OCR only** | Run OCR on all pages; keep existing detection/translation |
-| **Export all pages** | Export result images to a folder |
-| **Check project** | Validate project (missing images, invalid JSON) |
-| **Manga / Comic source...** | Search MangaDex, download chapters |
+| **Export all pages** | Export result images to a folder as 001.ext, 002.ext, … (page order); optional **Also create PDF** (img2pdf) |
+| **Check project** | Validate project: missing images, invalid JSON, duplicate/overlapping text blocks |
+| **Manga / Comic source...** | Search and download from MangaDex, GOMANGA, Manhwa Reader; Comick (search/list only); Local folder |
 | **Batch queue...** | Process multiple folders in sequence |
 | **Manage models...** | Check/download detection, OCR, inpainting models |
 
@@ -513,7 +522,9 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Text edit panel:** Default width closer to minimum; less cramped layout. See [§12.11](#1211-text-edit-panel-and-right-panel-layout)
 - **Translation context (project):** Edit menu and Translator config open a dialog to set project series path and project glossary for cross-chapter consistency
 - **Lossless WebP** (#1055): Config → Save when format is WebP; Save and Export all pages respect it
-- **Manga / Comic source** (Tools menu): Search MangaDex by title or chapter URL; list chapters by language; download as 001/002… pages; optional open folder in app; config persistence and rate limiting
+- **Batch export to PDF:** In **Tools → Export all pages**, checkbox **Also create PDF from exported images** builds `exported.pdf` in the chosen folder (requires `pip install img2pdf`).
+- **Check project:** **Tools → Check project** validates missing image files, invalid project JSON, and **duplicate/overlapping text blocks** (reports page name and block index pairs).
+- **Manga / Comic source** (Tools menu): Multiple sources — **MangaDex** (search, chapter URL, download), **GOMANGA** (search, chapters, download), **Manhwa Reader** (manhwa/webtoon, search, chapters, download), **Comick** (search and chapter list only; no download), **Local folder** (open folder of images as project). List chapters by language (MangaDex); download as 001/002… pages where supported; optional open folder in app; config persistence and rate limiting.
 - **Batch queue** (Tools → Batch queue...): Process multiple folders in sequence with Pause/Resume/Cancel ([#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020))
 - **Default download folder:** `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty)
 - **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) to view and customize keybinds; shortcuts persist in config
@@ -914,8 +925,13 @@ The main application and all other modules work with the versions in `requiremen
 ### New or modified for UI / workflow / export (BallonsTranslatorPro)
 
 - **Manga source:**  
-  `utils/manga_sources/__init__.py`, `utils/manga_sources/mangadex.py` (MangaDex API client: search, feed, chapter-by-ID, at-home, download with 001/002 page naming, rate limiting).  
-  `ui/manga_source_dialog.py` (dialog: search, URL mode, chapters list, download folder with default `~/BallonsTranslator/Downloaded Chapters`, config persistence; worker thread for API and download).
+  `utils/manga_sources/__init__.py`, `utils/manga_sources/mangadex.py` (MangaDex: search, feed, chapter-by-ID, at-home, download).  
+  `utils/manga_sources/comick_source.py` (Comick Source API: search, get_feed; no download).  
+  `utils/manga_sources/gomanga_api.py` (GOMANGA-API: search, feed, download via imageUrls).  
+  `utils/manga_sources/manhwa_reader.py` (Manhwa-Reader Vercel API: /api/all, /api/info, /api/chapter; manhwa/webtoon).  
+  `ui/manga_source_dialog.py` (dialog: source combo, search/URL/local folder UI, chapters list, download folder, config persistence; worker selects client by source_id).  
+  `ui/export_dialog.py` (Export all pages dialog: **Also create PDF** checkbox, `get_also_pdf()`).  
+  `ui/mainwindow.py` (`_do_batch_export`: optional img2pdf; `on_validate_project`: duplicate/overlapping block check via `union_area` from `utils/imgproc_utils`).
 
 - **Keyboard shortcuts:**  
   `utils/shortcuts.py` (shortcut schema, default keybinds, `get_shortcut`, `get_shortcut_info`, `get_default_shortcuts`).  
@@ -928,7 +944,7 @@ The main application and all other modules work with the versions in `requiremen
 
 - **Main window and bars:**  
   `ui/mainwindowbars.py` — Tools menu: new action **Manga / Comic source...** (`manga_source_trigger`).  
-  `ui/mainwindow.py` — Handlers: `on_merge_selected_blocks`, `on_move_blocks_up`, `on_move_blocks_down`, `on_run_detect_region`, `on_detect_region_finished`, `on_copy_trans`, `on_paste_trans`, `on_clear_src`, `on_clear_trans`, `on_select_all_canvas`, **`on_spell_check_src`**, **`on_spell_check_trans`**, **`on_trim_whitespace`**, **`on_to_uppercase`**, **`on_to_lowercase`**, `on_open_manga_source`; Save and Export all pages pass `webp_lossless` when WebP + lossless config.
+  `ui/mainwindow.py` — Handlers: `on_merge_selected_blocks`, `on_move_blocks_up`, `on_move_blocks_down`, `on_run_detect_region`, `on_detect_region_finished`, `on_copy_trans`, `on_paste_trans`, `on_clear_src`, `on_clear_trans`, `on_select_all_canvas`, **`on_spell_check_src`**, **`on_spell_check_trans`**, **`on_trim_whitespace`**, **`on_to_uppercase`**, **`on_to_lowercase`**, `on_open_manga_source`; Save and Export all pages pass `webp_lossless` when WebP + lossless config; **`_do_batch_export`** supports optional PDF via img2pdf; **`on_validate_project`** includes overlapping-block check.
 
 - **Scene text and module manager:**  
   `ui/scenetext_manager.py` — New method `swap_block_positions(i, j)` to swap two blocks in the project, scene, and text panel order.  
@@ -995,7 +1011,7 @@ The main application and all other modules work with the versions in `requiremen
   - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.  
   - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. **Test translator** (Translator) runs a quick check of the current API. *Note: Test translator may fail if "Unload models after idle" or "Load model on demand" is on — the translator may not be loaded until you run a pipeline.* Typesetting options use a single-column layout with a minimum content width so controls do not go off screen. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).  
   - **Proxy:** `utils/proxy_utils.py` provides `normalize_proxy_url`, `create_httpx_transport`, and `create_httpx_client`; the LLM API translator uses them so proxy strings without a scheme (e.g. `127.0.0.1:7897`) are normalized to `http://...` and work with httpx.  
-  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), **Translation context (project)** (Edit menu and Translator config dialog for series path and glossary), lossless WebP, Manga / Comic source (Tools), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). **Quit:** Close confirmation ("Are you sure you want to quit?"). **Open menu:** Order is Open Folder → Open Images → Open Project. **Page list:** Context menu supports Reveal in File Explorer, Translate selected images, Remove from project. **Drag-drop:** Dropping image files on the canvas opens a project from that folder. Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
+  - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), **Translation context (project)** (Edit menu and Translator config dialog for series path and glossary), lossless WebP, **batch export to PDF** (Export all pages), **Check project** (missing files, invalid JSON, overlapping blocks), **Manga / Comic source** (Tools: MangaDex, GOMANGA, Manhwa Reader, Comick, Local folder), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). **Quit:** Close confirmation ("Are you sure you want to quit?"). **Open menu:** Order is Open Folder → Open Images → Open Project. **Page list:** Context menu supports Reveal in File Explorer, Translate selected images, Remove from project. **Drag-drop:** Dropping image files on the canvas opens a project from that folder. Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
 
 ---
 
@@ -1009,7 +1025,8 @@ The main application and all other modules work with the versions in `requiremen
 | **docs/OPTIONAL_DEPENDENCIES.md** | craft_det and simple_lama dependency conflicts and workarounds. |
 | **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, hf_object_det); none_ocr usage; detection vs OCR coverage table. |
 | **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
-| **docs/SETTINGS_UI_RECOMMENDATIONS.md** | Implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu items) and possible future additions; references upstream issues (#1055, #1137, etc.). |
+| **docs/SETTINGS_UI_RECOMMENDATIONS.md** | Implemented UI/settings (canvas menu, Lossless WebP, batch export to PDF, Check project overlap, Manga/Comic sources: MangaDex, GOMANGA, Manhwa Reader, Comick, Local folder), Tools menu, and possible future additions. |
+| **docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md** | In-depth prompt for ChatGPT/LLMs to find manga APIs with direct image URLs for implementing more download sources. |
 | **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md** | Design and implementation of translation context: glossary, previous-page context, series-level storage, and integration with LLM translator. |
 | **doc/FORMATTING_COMPARISON_AI_VS_MAIN.md** | Comparison of formatting and layout behavior (webcomics/manhua) between this fork and BallonsTranslator-ai; useful when migrating or choosing settings. |
 | **Original README** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) – base setup, Windows/Mac, translators, AMD ROCm/ZLUDA. |
@@ -1073,13 +1090,16 @@ When saving or exporting result images in **WebP** format, you can enable **loss
 
 ### 12.3 Manga / Comic source (search, chapters, download)
 
-A full **Manga / Comic source** workflow is available from **Tools → Manga / Comic source...**. It opens a dialog where you can search for manga/manhua/manhwa by title, list chapters by language, select chapters to download, and optionally open the downloaded folder in BallonsTranslator to translate. This uses the **MangaDex** public API only (no scraping of other sites).
+A full **Manga / Comic source** workflow is available from **Tools → Manga / Comic source...**. The dialog supports **multiple sources**: **MangaDex** (search, chapter URL, download), **GOMANGA** (search, chapters, download), **Manhwa Reader** (manhwa/webtoon, search, chapters, download), **Comick** (search and chapter list only; no download), **Local folder** (open folder of images as project). It opens a dialog where you can search for manga/manhua/manhwa by title, list chapters by language, select chapters to download, and optionally open the downloaded folder in BallonsTranslator to translate.
 
 #### Features
 
-- **Two sources in one dialog:**
+- **Two sources in one dialog (plus more):**
   - **MangaDex:** Search by title → results list → select a title → **Load chapters** (with language filter) → chapter list with checkboxes → **Download selected chapters**.
   - **MangaDex (by chapter URL):** Paste a MangaDex chapter URL (or raw chapter UUID) → **Load chapter** → one chapter appears in the list → download as above.
+  - **GOMANGA**, **Manhwa Reader:** Search → Load chapters → Download (full download support).
+  - **Comick:** Search and chapter list only (no download; use MangaDex or open links in browser).
+  - **Local folder:** Open a folder of images as a project (no search/download).
 - **Page numbering for correct order:** Downloaded chapter images are saved as **001.ext**, **002.ext**, … (e.g. 001.png, 002.png) so that BallonsTranslator’s natural sort loads them in reading order. The original MangaDex filenames are not used for the saved files.
 - **Language:** Choose translation language for the chapter feed (e.g. English, Japanese, Chinese Simplified/Traditional, Korean). Stored in config.
 - **Quality:** **Use data-saver (smaller images)** uses MangaDex’s data-saver image set (smaller files, lower resolution); unchecked uses original quality. Stored in config.
@@ -1098,11 +1118,11 @@ These are saved when you change them in the dialog or when you close the dialog.
 
 #### Implementation summary
 
-- **MangaDex client** (`utils/manga_sources/mangadex.py`): `search(title)`, `get_feed(manga_id, lang)`, `get_chapter_by_id(chapter_id)` for URL mode, `get_chapter_urls(chapter_id, data_saver)`, `download_chapter(...)` which saves pages as 001.ext, 002.ext, … . All HTTP calls go through `_get()` which applies `_throttle()` (rate limit). Uses the public API only (e.g. `/manga`, `/manga/{id}/feed`, `/chapter/{id}`, `/at-home/server/{id}`).
-- **Dialog** (`ui/manga_source_dialog.py`): Search/URL UI, results list, chapter list with checkboxes, language/quality/delay/folder controls, progress bar. A **worker** object runs in a **QThread** so API and download work do not block the UI; triggers are done via signals (`run_search`, `run_feed`, `run_download`, `run_load_chapter_url`). URL mode: paste URL → extract UUID with a regex → `get_chapter_by_id` → feed_finished with one chapter; dialog sets a synthetic “Chapter from URL” as selected manga so download works the same way.
-- **Main window:** **Tools** menu has **Manga / Comic source...**; the handler creates/shows the dialog and connects `open_folder_requested(path)` to `OpenProj(path)` so the chosen chapter folder opens as a project.
+- **MangaDex client** (`utils/manga_sources/mangadex.py`): `search(title)`, `get_feed(manga_id, lang)`, `get_chapter_by_id(chapter_id)` for URL mode, `get_chapter_urls(chapter_id, data_saver)`, `download_chapter(...)` which saves pages as 001.ext, 002.ext, … . **Comick** (`comick_source.py`): search, get_feed; no download. **GOMANGA** (`gomanga_api.py`): search, get_feed, download_chapter (imageUrls). **Manhwa Reader** (`manhwa_reader.py`): search via /api/all, get_feed via /api/info/:slug, download_chapter via /api/chapter/:slug.
+- **Dialog** (`ui/manga_source_dialog.py`): Source combo (MangaDex, MangaDex URL, Comick, GOMANGA, Manhwa Reader, Local folder); search/URL/local rows; results list; chapter list with checkboxes; language/quality/delay/folder; progress bar. Worker in QThread selects client by source_id; Local folder: Open folder in BallonsTranslator triggers open_folder_requested(path).
+- **Main window:** Tools menu **Manga / Comic source...**; connects open_folder_requested(path) to OpenProj(path) for chapter or local folder.
 
-**Files:** `utils/manga_sources/__init__.py`, `utils/manga_sources/mangadex.py`, `ui/manga_source_dialog.py`, `ui/mainwindowbars.py` (Tools action), `ui/mainwindow.py` (`on_open_manga_source`, `OpenProj` connection), `utils/config.py` (manga_source_*, `default_downloaded_chapters_dir()`), `config/config.example.json` (example keys). See also **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a short reference.
+**Files:** `utils/manga_sources/__init__.py`, `mangadex.py`, `comick_source.py`, `gomanga_api.py`, `manhwa_reader.py`, `ui/manga_source_dialog.py`, `ui/mainwindowbars.py`, `ui/mainwindow.py`, `utils/config.py`, `config/config.example.json`. See **docs/SETTINGS_UI_RECOMMENDATIONS.md**. Export/Check: `ui/export_dialog.py` (Also create PDF), `ui/mainwindow.py` (`_do_batch_export` + img2pdf; `on_validate_project` + overlapping-block check).
 
 ---
 
@@ -1163,12 +1183,12 @@ You can **drag a folder or image files** onto the **canvas** to open them as a p
 
 ### 12.7 Other small behavior and UI details
 
-- **Tools menu:** In addition to **Manga / Comic source...** and **Keyboard Shortcuts** (View), the **Tools** menu includes: **Manage models** (download/remove detection, OCR, inpainting models), **Batch export** (export all result images to a folder), **Check project** (validate project: missing images, invalid JSON), **Re-run detection only** / **Re-run OCR only** (run pipeline with only that stage, then restore previous stage flags), **Region merge tool** (dialog for merging), and **Export all pages**. Display language and dark mode can also be toggled from **View**.
+- **Tools menu:** In addition to **Manga / Comic source...** and **Keyboard Shortcuts** (View), the **Tools** menu includes: **Manage models** (download/remove detection, OCR, inpainting models), **Batch export** (export all result images to a folder; option **Also create PDF** builds `exported.pdf` via img2pdf when checked), **Check project** (validate project: missing images, invalid JSON, **duplicate/overlapping text blocks** — reports page and block index pairs), **Re-run detection only** / **Re-run OCR only**, **Region merge tool**, and **Export all pages**. Display language and dark mode can also be toggled from **View**.
 - **Config panel – WebP lossless:** The WebP lossless checkbox is shown in the Save section only when the result format is WebP; its **enabled** state is toggled by `_update_webp_lossless_visibility()` when the format combo changes, so you cannot turn on lossless when the format is not WebP.
 - **Config panel – Typesetting and width:** The **Typesetting** section (Font Size, Stroke Size, Font Color, Stroke Color, Effect, Alignment, Writing-mode, Font Family) uses a single-column layout so all dropdowns stay visible; the config content area has a minimum width so **Test translator** (Translator) and other right-side controls do not go off screen. A horizontal scrollbar appears if the panel is narrow.
 - **Test translator:** In **Config → DL Module**, the **Translator** section has a **Test translator** button that runs a short translation with the current API/key and shows success or error. **Note:** Having **Unload models after idle** or **Load model on demand** enabled can cause Test translator to fail sometimes (e.g. "No translator loaded"), because the translator may not be loaded until you run a pipeline. Run a page first, or temporarily disable those options when testing. **Proxy:** LLM API translator (and other modules using `utils/proxy_utils`) normalizes proxy URLs (e.g. `127.0.0.1:7897` → `http://127.0.0.1:7897`) so httpx accepts them without "Unknown scheme" errors.
 - **Canvas – context menu state:** Before showing the context menu, the canvas computes the number of selected blocks and total blocks, then sets `setEnabled(True/False)` on the **Merge selected blocks**, **Move block(s) up**, **Move block(s) down**, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, and **To lowercase** actions so they appear grayed out when not applicable (e.g. merge when fewer than 2 selected, move up when none or first block selected; spell check, trim, and case when no blocks selected).
-- **Export all pages:** Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path, so Export all pages also respects the lossless WebP option when format is WebP.
+- **Export all pages:** Exported files are named **001.ext**, **002.ext**, **003.ext**, … in project page order (same convention as manga chapter downloads). Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path. When **Also create PDF from exported images** is checked in the export dialog, the app builds `exported.pdf` in the chosen folder using `img2pdf` (user is prompted to install if missing).
 
 ---
 

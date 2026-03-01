@@ -1411,31 +1411,48 @@ class MainWindow(mainwindow_cls):
         if not out_dir:
             QMessageBox.information(self, self.tr('Export'), self.tr('Select an output folder.'))
             return
-        self._do_batch_export(out_dir, ext=dlg.get_extension())
+        self._do_batch_export(out_dir, ext=dlg.get_extension(), also_pdf=dlg.get_also_pdf())
 
-    def _do_batch_export(self, out_dir: str, ext: str = None):
+    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False):
         try:
             from utils.io_utils import imread, imwrite
             result_dir = self.imgtrans_proj.result_dir()
             exported = 0
             missing = []
-            for pagename in self.imgtrans_proj.pages:
+            exported_paths = []  # (pagename, path) in page order for PDF
+            page_order = list(self.imgtrans_proj.pages.keys())
+            for i, pagename in enumerate(page_order):
                 result_path = self.imgtrans_proj.get_result_path(pagename)
                 if osp.exists(result_path):
                     use_ext = ext if ext else osp.splitext(result_path)[1]
                     if use_ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
                         use_ext = '.png'
-                    base = osp.splitext(pagename)[0]
-                    dest = osp.join(out_dir, base + use_ext)
+                    # Export with consistent 001, 002, 003 naming (same as manga download / natural sort)
+                    dest = osp.join(out_dir, f"{i + 1:03d}{use_ext}")
                     img = imread(result_path)
                     kw = {'ext': use_ext, 'quality': pcfg.imgsave_quality}
                     if use_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
                         kw['webp_lossless'] = True
                     imwrite(dest, img, **kw)
                     exported += 1
+                    exported_paths.append((pagename, dest))
                 else:
                     missing.append(pagename)
             msg = self.tr('Exported {0} page(s) to {1}.').format(exported, out_dir)
+            if also_pdf and exported_paths:
+                pdf_path = osp.join(out_dir, 'exported.pdf')
+                try:
+                    import img2pdf
+                    with open(pdf_path, 'wb') as f:
+                        # img2pdf expects image paths; order by page order
+                        img_paths = [p for _, p in exported_paths]
+                        f.write(img2pdf.convert(img_paths))
+                    msg += '\n' + self.tr('PDF saved: {}').format(pdf_path)
+                except ImportError:
+                    msg += '\n' + self.tr('PDF export skipped. Install img2pdf: pip install img2pdf')
+                except Exception as e:
+                    LOGGER.exception(e)
+                    msg += '\n' + self.tr('PDF export failed: {}').format(str(e))
             if missing:
                 msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
             QMessageBox.information(self, self.tr('Export'), msg)
@@ -1444,7 +1461,7 @@ class MainWindow(mainwindow_cls):
             create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
 
     def on_validate_project(self):
-        """Check project: missing images, invalid JSON, duplicate blocks."""
+        """Check project: missing images, invalid JSON, duplicate/overlapping blocks."""
         if self.imgtrans_proj.is_empty:
             QMessageBox.information(self, self.tr('Check project'), self.tr('Open a project first.'))
             return
@@ -1467,6 +1484,37 @@ class MainWindow(mainwindow_cls):
             img_path = osp.join(proj_dir, pagename)
             if not osp.exists(img_path):
                 report.append(self.tr('Missing image: {}').format(pagename))
+
+        # Duplicate/overlapping block check
+        from utils.imgproc_utils import union_area
+        overlap_report = []
+        for pagename in list(self.imgtrans_proj.pages.keys()):
+            blks = self.imgtrans_proj.pages.get(pagename) or []
+            n = len(blks)
+            pairs = []
+            for i in range(n):
+                for j in range(i + 1, n):
+                    blk_i = blks[i]
+                    blk_j = blks[j]
+                    xyxy_i = getattr(blk_i, 'xyxy', None) if not isinstance(blk_i, dict) else blk_i.get('xyxy')
+                    xyxy_j = getattr(blk_j, 'xyxy', None) if not isinstance(blk_j, dict) else blk_j.get('xyxy')
+                    if xyxy_i is None and isinstance(blk_i, (list, tuple)) and len(blk_i) >= 4:
+                        xyxy_i = list(blk_i)[:4]
+                    if xyxy_j is None and isinstance(blk_j, (list, tuple)) and len(blk_j) >= 4:
+                        xyxy_j = list(blk_j)[:4]
+                    if xyxy_i and xyxy_j and len(xyxy_i) >= 4 and len(xyxy_j) >= 4:
+                        inter = union_area(list(xyxy_i)[:4], list(xyxy_j)[:4])
+                        if inter > 0:
+                            pairs.append((i, j))
+            if pairs:
+                overlap_report.append(self.tr('Page "{}": {} overlapping block pair(s): {}').format(
+                    pagename, len(pairs), ', '.join(f'({a},{b})' for a, b in pairs[:10]) + (' ...' if len(pairs) > 10 else '')
+                ))
+        if overlap_report:
+            report.append('')
+            report.append(self.tr('Duplicate/overlapping blocks:'))
+            report.extend(overlap_report)
+
         if not report:
             report.append(self.tr('No issues found.'))
         msg = '\n'.join(report)
