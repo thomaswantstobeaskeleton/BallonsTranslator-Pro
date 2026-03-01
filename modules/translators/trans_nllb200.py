@@ -93,6 +93,9 @@ class NLLB200Translator(BaseTranslator):
     def _translate(self, src_list: List[str]) -> List[str]:
         if not src_list:
             return []
+        # Translator params can invalidate loaded objects (updateParam). Reload lazily.
+        if not hasattr(self, 'model') or self.model is None or not hasattr(self, 'tokenizer') or self.tokenizer is None:
+            self.setup_translator()
         src_lang = NLLB_LANG_MAP.get(self.lang_source) or self.lang_map.get(self.lang_source)
         tgt_lang = NLLB_LANG_MAP.get(self.lang_target) or self.lang_map.get(self.lang_target)
         if not src_lang or not tgt_lang:
@@ -102,7 +105,18 @@ class NLLB200Translator(BaseTranslator):
             )
         import torch
         self.tokenizer.src_lang = src_lang
-        forced_bos_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+        # forced_bos_token_id must be int; convert_tokens_to_ids may return list in some tokenizer versions
+        forced_bos_id = None
+        if hasattr(self.tokenizer, 'lang_code_to_id'):
+            forced_bos_id = self.tokenizer.lang_code_to_id.get(tgt_lang)
+        if forced_bos_id is None:
+            raw = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+            forced_bos_id = raw[0] if isinstance(raw, (list, tuple)) else raw
+        if not isinstance(forced_bos_id, int):
+            raise MissingTranslatorParams(
+                f"NLLB200: could not resolve token ID for target language {tgt_lang}. "
+                "Try a different language pair or update transformers."
+            )
         inputs = self.tokenizer(
             src_list,
             return_tensors="pt",
@@ -130,8 +144,10 @@ class NLLB200Translator(BaseTranslator):
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
-        if param_key in ('model_name', 'device') and hasattr(self, 'model'):
-            delattr(self, 'model')
-            delattr(self, 'tokenizer')
+        if param_key in ('model_name', 'device'):
+            if hasattr(self, 'model'):
+                delattr(self, 'model')
+            if hasattr(self, 'tokenizer'):
+                delattr(self, 'tokenizer')
             if hasattr(self, '_model_name'):
                 delattr(self, '_model_name')
