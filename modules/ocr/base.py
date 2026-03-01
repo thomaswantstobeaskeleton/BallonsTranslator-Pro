@@ -2,6 +2,7 @@ from typing import Tuple, List, Dict, Union, Callable
 import numpy as np
 import cv2
 from collections import OrderedDict
+import re
 
 from utils.textblock import TextBlock
 from utils.registry import Registry
@@ -10,6 +11,31 @@ register_OCR = OCR.register_module
 
 from ..base import BaseModule, DEFAULT_DEVICE, DEVICE_SELECTOR, LOGGER
 from utils.io_utils import normalize_line_breaks
+
+# Substrings that indicate OCR/API junk or watermarks; lines containing these are cleared from source.
+SOURCE_JUNK_PHRASES = [
+    "the quick brown fox jumps over the lazy dog",
+    "the image is too blurry to recognize",
+    "too blurry to recognize any text",
+    "腾讯动漫",
+    "[table_companyrpttype]",
+    "the world in a book",
+    "온라인",  # common in watermarks / error text
+]
+SOURCE_JUNK_PATTERN = re.compile(
+    "|".join(re.escape(p) for p in SOURCE_JUNK_PHRASES),
+    re.IGNORECASE
+)
+
+
+def _filter_source_junk(text_list: List[str]) -> None:
+    """In-place: replace any line that contains known junk with empty string."""
+    for i, line in enumerate(text_list):
+        if not line or not line.strip():
+            continue
+        # Match ASCII case-insensitive; CJK and other phrases as-is
+        if SOURCE_JUNK_PATTERN.search(line):
+            text_list[i] = ""
 
 class OCRBase(BaseModule):
 
@@ -48,6 +74,8 @@ class OCRBase(BaseModule):
             blk.text = [normalize_line_breaks(t) for t in blk.text]
             # Avoid empty squares: replace Unicode replacement char with visible placeholder (all OCRs)
             blk.text = [t.replace("\uFFFD", "\u25A1") for t in blk.text]
+            # Drop lines that are known OCR/API junk (watermarks, error messages, test text)
+            _filter_source_junk(blk.text)
         self._register_spell_check_hook()
         for callback_name, callback in self._postprocess_hooks.items():
             callback(textblocks=blk_list, img=img, ocr_module=self)

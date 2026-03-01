@@ -71,7 +71,7 @@ if _GOT_OCR2_AVAILABLE:
             "batch_size": {
                 "type": "line_editor",
                 "value": 1,
-                "description": "Batch size for blocks (1 = sequential; 4–8 = faster, more VRAM).",
+                "description": "Batch size (1 = safe for 11GB VRAM; 4–8 = faster, needs more VRAM). OOM falls back to 1.",
             },
             "description": "GOT-OCR2 – unified OCR (Hugging Face, 580M).",
         }
@@ -204,8 +204,16 @@ if _GOT_OCR2_AVAILABLE:
                         blk.text = [text if text else ""]
                 except Exception as e:
                     self.logger.warning(f"GOT-OCR2 batch failed: {e}")
-                    for blk in batch_blks:
-                        blk.text = [""]
+                    # OOM or other error: free cache and fall back to one-by-one so blocks get text instead of empty
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    for blk, pil_img in zip(batch_blks, batch_pils):
+                        try:
+                            text = self._generate_one(pil_img, max_tokens)
+                            blk.text = [text if text else ""]
+                        except Exception as e2:
+                            self.logger.warning(f"GOT-OCR2 fallback failed for block: {e2}")
+                            blk.text = [""]
 
         def ocr_img(self, img: np.ndarray) -> str:
             pil_img = _cv2_to_pil_rgb(img)
