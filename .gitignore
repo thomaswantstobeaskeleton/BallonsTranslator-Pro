@@ -84,6 +84,10 @@ GITHUB_UPLOAD.md
 docs/CONNECT_GITHUB_AND_AUTO_PUSH.md
 COMMUNITY_RESPONSES.md
 docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md
+RELEASE_NOTES.md
+NOTES.md
+docs/*_local.md
+docs/*-local.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db

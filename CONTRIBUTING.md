@@ -4,6 +4,12 @@ Guidelines for contributors and AI-assisted development, based on feedback from 
 
 ---
 
+## Ignored files
+
+See **`.gitignore`** for the full list. Ignored paths include: config and cache dirs, `config.json`, `.env`, secrets, model weights (`*.pt`, `*.onnx`), IDE folders (`.vscode`, `.idea`, `.cursor`), and maintainer-only docs (e.g. `GITHUB_UPLOAD.md`, `COMMUNITY_RESPONSES.md`, `docs/CONNECT_GITHUB_AND_AUTO_PUSH.md`, `docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md`, `RELEASE_NOTES.md`, `NOTES.md`, `docs/*_local.md`). Don’t commit these unless you’re a maintainer and intend to.
+
+---
+
 ## Git commit practices
 
 **Prefer many small, focused commits over few large ones.**
