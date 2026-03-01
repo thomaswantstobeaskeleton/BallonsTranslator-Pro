@@ -46,6 +46,7 @@ else:
 parser.add_argument("--debug", action='store_true')
 parser.add_argument("--requirements", default='requirements.txt')
 parser.add_argument("--headless", action='store_true', help='run without GUI')
+parser.add_argument("--headless_continuous", action='store_true', help='like headless but after finishing --exec_dirs prompts for new dirs (comma-separated) until you enter "exit"')
 parser.add_argument("--exec_dirs", default='', help='translation queue (project directories) separated by comma')
 parser.add_argument("--ldpi", default=None, type=float, help='logical dots perinch')
 parser.add_argument("--export-translation-txt", action='store_true', help='save translation to txt file once RUN completed')
@@ -187,11 +188,12 @@ def main():
     shared.args = args
     shared.DEFAULT_DISPLAY_LANG = QLocale.system().name().replace('en_CN', 'zh_CN')
     shared.HEADLESS = args.headless
+    shared.HEADLESS_CONTINUOUS = getattr(args, 'headless_continuous', False)
     shared.load_cache()
     program_config.load_config(args.config_path)
     config = program_config.pcfg
 
-    if args.headless:
+    if args.headless or getattr(args, 'headless_continuous', False):
         config.module.load_model_on_demand = True
         config.module.empty_runcache = False
 
@@ -222,7 +224,7 @@ def main():
     setup_logging(shared.LOGGING_PATH)
 
     app_args = sys.argv
-    if args.headless:
+    if args.headless or getattr(args, 'headless_continuous', False):
         app_args = sys.argv + ['-platform', 'offscreen']
     app = QApplication(app_args)
     app.setApplicationName('BallonsTranslatorPro')
@@ -235,7 +237,7 @@ def main():
     init_module_registries()
     prepare_local_files_forall()
 
-    if not args.headless:
+    if not args.headless and not getattr(args, 'headless_continuous', False):
         ps = QGuiApplication.primaryScreen()
         shared.LDPI = ps.logicalDotsPerInch()
         shared.SCREEN_W = ps.geometry().width()
@@ -259,7 +261,7 @@ def main():
             if fnt_idx >= 0:
                 shared.CUSTOM_FONTS.append(QFontDatabase.applicationFontFamilies(fnt_idx)[0])
 
-    if sys.platform == 'win32' and args.headless:
+    if sys.platform == 'win32' and (args.headless or getattr(args, 'headless_continuous', False)):
         # font database does not initialise on windows with qpa -offscreen:
         # whttps://github.com/dmMaze/BallonsTranslator/issues/519
         from qtpy.QtCore import QStandardPaths
@@ -298,8 +300,8 @@ def main():
     BT = ballontrans
     BT.restart_signal.connect(restart)
 
-    if not args.headless:
-        if shared.SCREEN_W > 1707 and sys.platform == 'win32':   # higher than 2560 (1440p) / 1.5
+    if not args.headless and not getattr(args, 'headless_continuous', False):
+        if shared.SCREEN_W > 1707 and sys.platform == 'win32':
             # https://github.com/dmMaze/BallonsTranslator/issues/220
             BT.comicTransSplitter.setHandleWidth(7)
 
@@ -372,10 +374,10 @@ def prepare_environment():
                 Exception("No AMD Nightly GPU supported")
             if amd_nightly_gpu == "RDNA3":
                 torch_command = os.environ.get('TORCH_COMMAND',
-                                               "pip install rocm==7.0.0rc20250818 rocm-sdk-core==7.0.0rc20250818 rocm-sdk-libraries-gfx110X-dgpu==7.0.0rc20250818 torch==2.9.0a0+rocm7.0.0rc20250818 torchvision==0.24.0a0+rocm7.0.0rc20250818 --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx110X-dgpu/ intel-openmp==2025.1.1 --extra-index-url https://pypi.org/simple --disable-pip-version-check")
+                                               "pip install https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torch-2.8.0a0%2Bgitfc14c65-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchvision-0.24.0a0%2Bc85f008-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchaudio-2.6.0a0%2B1a8f621-cp312-cp312-win_amd64.whl")
             if amd_nightly_gpu == "RDNA4":
                 torch_command = os.environ.get('TORCH_COMMAND',
-                                               "pip install rocm==7.0.0rc20250817 rocm-sdk-core==7.0.0rc20250817 rocm-sdk-libraries-gfx120X-all==7.0.0rc20250817 torch==2.9.0a0+rocm7.0.0rc20250817 torchvision==0.24.0a0+rocm7.0.0rc20250817 --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/ intel-openmp==2025.1.1 --extra-index-url https://pypi.org/simple --disable-pip-version-check")
+                                               "pip install https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torch-2.8.0a0%2Bgitfc14c65-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchvision-0.24.0a0%2Bc85f008-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchaudio-2.6.0a0%2B1a8f621-cp312-cp312-win_amd64.whl")
         else:
             # AMD GPU: Cuda 11.8, Pytorch 2.2.2
             torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")

@@ -556,6 +556,8 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
 
 - **Headless (no GUI):**  
   `python launch.py --headless --exec_dirs "[DIR_1],[DIR_2]..."`  
+  For continuous mode (prompt for new dirs after each batch until you type `exit`):  
+  `python launch.py --headless_continuous --exec_dirs "DIR_1,DIR_2,..."`  
   Settings are read from `config/config.json`. Ensure the chosen detector, OCR, and inpainter are installed and configured in that config.
 
 - **Logical DPI (font/rendering):**  
@@ -567,6 +569,7 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
 |----------|-------------|
 | `--proj-dir PATH` | Open project directory on startup |
 | `--headless` | Run without GUI |
+| `--headless_continuous` | Like headless; after finishing `--exec_dirs` prompts for new dirs (comma-separated) until you enter `exit`. |
 | `--exec_dirs "DIR1,DIR2,..."` | Translation queue: process folders in sequence (comma-separated). Same as Batch queue in GUI. |
 | `--ldpi N` | Logical DPI override (e.g. 96, 72). Overrides config once. |
 | `--config_path PATH` | Config file to use (default: `config/config.json`) |
@@ -581,6 +584,13 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
 
 **Example (headless batch):**  
 `python launch.py --headless --exec_dirs "C:\manga\ch1,C:\manga\ch2" --config_path config/config.json`
+
+### AMD GPU (ROCm / ZLUDA)
+
+On **AMD** GPUs you can use either **ZLUDA** (translation layer, works with the project’s Python 3.10/3.11 and CUDA builds) or **native ROCm on Windows** (as of AMD driver 2026.1.1; requires Python 3.12 and official ROCm PyTorch wheels).
+
+- **ZLUDA:** Install an [AMD HIP SDK](https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html) version that matches your driver, then [ZLUDA](https://github.com/lshqqytiger/ZLUDA/releases). Add the ZLUDA folder and `%HIP_PATH%bin` to PATH, and replace CUDA DLLs as described in the upstream README. Use **Config → device: Cuda** for detection/OCR (inpainting often stays on CPU). First run can take several minutes while PTX compiles.
+- **Native ROCm (Windows):** Supported on AMD driver **2026.1.1+**. Requires **Python 3.12** and the ROCm PyTorch stack. Use `launch_win_amd_nightly.bat` or `python launch.py --nightly` after installing the appropriate ROCm wheels (see upstream for current URLs and GPU support). For full step-by-step instructions, HIP SDK vs ZLUDA version table, and driver notes, see the [original BallonsTranslator README](https://github.com/dmMaze/BallonsTranslator) and expand the **“启用 AMD ROCm 显卡加速方法”** (Enable AMD ROCm GPU acceleration) section.
 
 ---
 

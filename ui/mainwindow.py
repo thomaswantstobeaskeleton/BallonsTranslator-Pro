@@ -77,7 +77,7 @@ class PageListView(QListWidget):
 
         return super().contextMenuEvent(e)
 
-mainwindow_cls = Widget if shared.HEADLESS else FramelessWindow
+mainwindow_cls = Widget if (shared.HEADLESS or shared.HEADLESS_CONTINUOUS) else FramelessWindow
 class MainWindow(mainwindow_cls):
 
     imgtrans_proj: ProjImgTrans = ProjImgTrans()
@@ -131,7 +131,7 @@ class MainWindow(mainwindow_cls):
                 if osp.exists(proj_dir):
                     self.OpenProj(proj_dir)
 
-        if shared.HEADLESS:
+        if shared.HEADLESS or shared.HEADLESS_CONTINUOUS:
             self.run_batch(**exec_args)
         elif exec_args.get('exec_dirs') and str(exec_args.get('exec_dirs')).strip():
             self.run_batch(**exec_args)
@@ -515,7 +515,7 @@ class MainWindow(mainwindow_cls):
         else:
             self.openJsonProj(proj_path)
         
-        if pcfg.let_textstyle_indep_flag and not shared.HEADLESS:
+        if pcfg.let_textstyle_indep_flag and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             self.load_textstyle_from_proj_dir(from_proj=True)
 
     def load_textstyle_from_proj_dir(self, from_proj=False):
@@ -1659,7 +1659,7 @@ class MainWindow(mainwindow_cls):
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
         self.postprocess_mt_toggle = True
-        if pcfg.module.empty_runcache and not shared.HEADLESS:
+        if pcfg.module.empty_runcache and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             self.module_manager.unload_all_models()
         else:
             self._reset_idle_unload_timer()
@@ -1667,7 +1667,7 @@ class MainWindow(mainwindow_cls):
             self.on_export_txt('translation')
         if shared.args.export_source_txt:
             self.on_export_txt('source')
-        if shared.HEADLESS or getattr(self, 'exec_dirs', None) is not None:
+        if shared.HEADLESS or shared.HEADLESS_CONTINUOUS or getattr(self, 'exec_dirs', None) is not None:
             self.run_next_dir()
             return
         self.maybe_auto_run_region_merge()
@@ -2544,6 +2544,18 @@ class MainWindow(mainwindow_cls):
                 self._batch_cancelled = False
             else:
                 self.batch_queue_empty.emit()
+            if shared.HEADLESS_CONTINUOUS:
+                LOGGER.info('Enter next dirs to translate (comma-separated), or "exit" to quit.')
+                try:
+                    new_exec_dirs = input()
+                except (EOFError, KeyboardInterrupt):
+                    new_exec_dirs = 'exit'
+                if new_exec_dirs.strip().lower() == 'exit':
+                    LOGGER.info('Exiting.')
+                    self.app.quit()
+                    return
+                self.run_batch(new_exec_dirs)
+                return
             if shared.HEADLESS:
                 self.app.quit()
             return
