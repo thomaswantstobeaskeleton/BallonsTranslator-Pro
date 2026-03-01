@@ -7,6 +7,7 @@ from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout,
     QSpinBox, QComboBox, QDoubleSpinBox)
 
 from .custom_widget import ConfigComboBox, Widget
+from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
@@ -382,6 +383,7 @@ class ConfigPanel(Widget):
         label_typesetting = self.tr('Typesetting')
         label_save = self.tr('Save')
         label_saladict = self.tr('SalaDict')
+        label_canvas = self.tr('Canvas')
     
         dltableitem.appendRows([
             TableItem(label_text_det, _config_font_size(CONFIG_FONTSIZE_TABLE)),
@@ -394,6 +396,7 @@ class ConfigPanel(Widget):
             TableItem(label_typesetting, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_save, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_saladict, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_canvas, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
         
         self.load_model_checker, msublock = checkbox_with_label(self.tr('Load models on demand'), discription=self.tr('Load models on demand to save memory.'))
@@ -611,6 +614,13 @@ class ConfigPanel(Widget):
         self.searchurl_combobox.setFixedWidth(CONFIG_COMBOBOX_LONG)
         self.searchurl_combobox.currentTextChanged.connect(self.on_searchurl_changed)
 
+        generalConfigPanel.addTextLabel(label_canvas)
+        self.context_menu_btn = QPushButton(self.tr("Context menu options..."))
+        self.context_menu_btn.setToolTip(self.tr("Choose which actions appear in the canvas right-click menu."))
+        self.context_menu_btn.clicked.connect(self._open_context_menu_config)
+        sublock_ctx = ConfigSubBlock(self.context_menu_btn, self.tr("Right-click menu"), discription=self.tr("Show or hide actions in the canvas context menu by category."))
+        generalConfigPanel.addSublock(sublock_ctx)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.configTable)
         splitter.addWidget(self.configContent)
@@ -659,6 +669,10 @@ class ConfigPanel(Widget):
 
     def on_confirm_before_run_changed(self):
         pcfg.confirm_before_run = self.confirm_before_run_checker.isChecked()
+
+    def _open_context_menu_config(self):
+        dlg = ContextMenuConfigDialog(self)
+        dlg.exec()
 
     def on_auto_region_merge_changed(self):
         idx = self.auto_region_merge_combobox.currentIndex()
