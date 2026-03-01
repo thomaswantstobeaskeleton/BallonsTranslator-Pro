@@ -11,7 +11,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 | **What** | Fork with 10+ detectors, 20+ OCR engines, translation context, batch queue, Manga source, and UI improvements |
 | **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
-| **Community** | Preferred: ask upstream to add *"There's a fork with more advanced features here"* in their README. When helping others: *"I solved this like this"* + link to the specific code block. Don't spam. |
+
 
 ---
 
