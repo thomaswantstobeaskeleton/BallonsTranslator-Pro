@@ -5,6 +5,7 @@ Download is not supported: the API returns chapter reader URLs, not image URLs.
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, List, Optional
 
@@ -48,27 +49,58 @@ class ComickSourceClient:
     def search(self, title: str, limit: int = 20, source: str = "all") -> List[dict]:
         """
         Search manga. Returns list of dicts with keys: id, title, url (use url as id for get_feed).
+        API returns NDJSON (one JSON object per source); we merge all results.
         """
         if not title or not title.strip():
             return []
         try:
             r = self._post("/api/search", {"query": title.strip(), "source": source})
             r.raise_for_status()
-            data = r.json()
-            results = data.get("results") or []
+            results = self._parse_search_response(r)
             out = []
-            for item in results[:limit]:
+            seen = set()
+            for item in results[: limit * 3]:
+                url = item.get("url") or item.get("id")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
                 out.append({
-                    "id": item.get("url") or item.get("id"),
+                    "id": url,
                     "title": item.get("title") or "?",
-                    "url": item.get("url"),
+                    "url": url,
                     "description": "",
-                    "source": data.get("source", "Comick"),
+                    "source": "Comick",
                 })
+                if len(out) >= limit:
+                    break
             return out
         except Exception as e:
             LOGGER.warning(f"Comick Source search failed: {e}")
             return []
+
+    def _parse_search_response(self, r: requests.Response) -> List[dict]:
+        """Parse NDJSON search response: one JSON object per line, merge all 'results' arrays."""
+        merged = []
+        for line in r.text.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                merged.extend(data.get("results") or [])
+            except json.JSONDecodeError:
+                continue
+        return merged
+
+    def _parse_json(self, r: requests.Response) -> dict:
+        """Parse single JSON object; if response has extra data, use first line."""
+        try:
+            return r.json()
+        except requests.exceptions.JSONDecodeError as e:
+            if "Extra data" in str(e):
+                first_line = r.text.strip().split("\n")[0]
+                return json.loads(first_line)
+            raise
 
     def get_feed(
         self,
@@ -92,7 +124,7 @@ class ComickSourceClient:
                 body["source"] = source
             r = self._post("/api/chapters", body)
             r.raise_for_status()
-            data = r.json()
+            data = self._parse_json(r)
             chapters = data.get("chapters") or []
             out = []
             for ch in chapters:

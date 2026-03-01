@@ -54,15 +54,28 @@ class GomangaApiClient:
             r = self._get(url)
             r.raise_for_status()
             data = r.json()
-            manga_list = data.get("manga") or []
+            manga_list = data.get("manga") or data.get("mangaList") or []
+            err_msg = data.get("error")
+            if not manga_list and err_msg:
+                raise ValueError(
+                    "GOMANGA upstream returned an error (e.g. 403). Try MangaDex or Comick."
+                )
             out = []
             for item in manga_list[:limit]:
+                mid = item.get("id") or item.get("slug")
+                if mid is None:
+                    continue
                 out.append({
-                    "id": item.get("id"),
+                    "id": mid,
                     "title": item.get("title") or "?",
                     "description": "",
                 })
             return out
+        except requests.RequestException as e:
+            LOGGER.warning(f"GOMANGA search failed: {e}")
+            return []
+        except ValueError:
+            raise
         except Exception as e:
             LOGGER.warning(f"GOMANGA search failed: {e}")
             return []

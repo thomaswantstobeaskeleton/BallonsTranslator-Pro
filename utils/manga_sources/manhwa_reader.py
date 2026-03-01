@@ -47,6 +47,15 @@ class ManhwaReaderClient:
         self._throttle()
         return self.session.get(url, timeout=self.timeout, **kwargs)
 
+    def is_available(self, timeout_override: Optional[int] = None) -> bool:
+        """Return True if the API is up (HTTP 200). Use a short timeout for startup check."""
+        try:
+            t = timeout_override if timeout_override is not None else self.timeout
+            r = self.session.get(f"{BASE_URL}/api/all", timeout=min(t, 8))
+            return r.status_code == 200
+        except Exception:
+            return False
+
     def search(self, title: str, limit: int = 20) -> List[dict]:
         """
         Search by fetching GET /api/all and filtering by title substring.
@@ -77,6 +86,14 @@ class ManhwaReaderClient:
                     if len(out) >= limit:
                         break
             return out[:limit]
+        except requests.RequestException as e:
+            # 5xx = server-side; log at DEBUG to avoid flooding when the service is down
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status and 500 <= status < 600:
+                LOGGER.debug(f"Manhwa-Reader search failed (server error {status}): {e}")
+            else:
+                LOGGER.warning(f"Manhwa-Reader search failed: {e}")
+            return []
         except Exception as e:
             LOGGER.warning(f"Manhwa-Reader search failed: {e}")
             return []
@@ -128,6 +145,13 @@ class ManhwaReaderClient:
             if order != "asc":
                 out.reverse()
             return out[:limit]
+        except requests.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status and 500 <= status < 600:
+                LOGGER.debug(f"Manhwa-Reader feed failed (server error {status}): {e}")
+            else:
+                LOGGER.warning(f"Manhwa-Reader feed failed: {e}")
+            return []
         except Exception as e:
             LOGGER.warning(f"Manhwa-Reader feed failed: {e}")
             return []
@@ -144,6 +168,13 @@ class ManhwaReaderClient:
             urls = data.get("images") or data.get("imageUrls") or data.get("pages") or data.get("data")
             if isinstance(urls, list) and urls:
                 return [u if isinstance(u, str) else u.get("url") or u.get("src") for u in urls if u]
+            return None
+        except requests.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status and 500 <= status < 600:
+                LOGGER.debug(f"Manhwa-Reader chapter images failed (server error {status}): {e}")
+            else:
+                LOGGER.warning(f"Manhwa-Reader chapter images failed: {e}")
             return None
         except Exception as e:
             LOGGER.warning(f"Manhwa-Reader chapter images failed: {e}")

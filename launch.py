@@ -280,6 +280,8 @@ def main():
     app_font = QFont('Microsoft YaHei UI')
     if not app_font.exactMatch() or sys.platform == 'darwin':
         app_font = app.font()
+    if app_font.pointSizeF() <= 0:
+        app_font.setPointSizeF(10.0)
     app_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
     app_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.NoSubpixelAntialias)
     QGuiApplication.setFont(app_font)

@@ -64,17 +64,24 @@ class MangaDexClient:
         self._throttle()
         return self.session.get(url, timeout=self.timeout, **kwargs)
 
-    def search(self, title: str, limit: int = 20) -> List[dict]:
+    def search(
+        self,
+        title: str,
+        limit: int = 20,
+        original_language: Optional[str] = None,
+    ) -> List[dict]:
         """
         Search manga by title. Returns list of dicts with keys: id, title.
+        If original_language is set (e.g. 'ja', 'ko', 'zh'), only manga with that
+        original language are returned (for finding raw/untranslated material).
         """
         if not title.strip():
             return []
         try:
-            r = self._get(
-                f"{BASE_URL}/manga",
-                params={"title": title.strip(), "limit": limit},
-            )
+            params = {"title": title.strip(), "limit": limit}
+            if original_language:
+                params["originalLanguage[]"] = [original_language]
+            r = self._get(f"{BASE_URL}/manga", params=params)
             r.raise_for_status()
             data = r.json()
             if data.get("result") != "ok":

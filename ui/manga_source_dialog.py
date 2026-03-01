@@ -9,7 +9,7 @@ import os.path as osp
 import re
 from typing import Any, List, Optional
 
-from qtpy.QtCore import Qt, Signal, QThread, QObject
+from qtpy.QtCore import Qt, Signal, QThread, QObject, QTimer
 from qtpy.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -54,6 +54,29 @@ def _extract_mangadex_chapter_id(url_or_id: str) -> Optional[str]:
     return None
 
 
+# Source combo: (display label, source_id). Manhwa Reader is shown only when API is up.
+SOURCE_OPTIONS: List[tuple] = [
+    ("MangaDex", "mangadex"),
+    ("MangaDex (raw / original language)", "mangadex_raw"),
+    ("MangaDex (by chapter URL)", "mangadex_url"),
+    ("Comick", "comick"),
+    ("GOMANGA", "gomanga"),
+    ("Manhwa Reader", "manhwa_reader"),
+    ("Local folder", "local_folder"),
+]
+
+
+def _mangadex_original_language_code(ui_code: str) -> str:
+    """Map UI language code to MangaDex API originalLanguage (e.g. zh-hans -> zh)."""
+    if not ui_code:
+        return "ja"
+    if ui_code == "zh-hans":
+        return "zh"
+    if ui_code == "zh-hant":
+        return "zh-hk"
+    return ui_code
+
+
 class MangaSourceWorker(QObject):
     """Runs API calls and downloads in a background thread."""
     search_finished = Signal(list)   # list of {id, title, description}
@@ -61,10 +84,12 @@ class MangaSourceWorker(QObject):
     error = Signal(str)
     download_progress = Signal(int, int, str)  # current, total, chapter_display
     download_finished = Signal(str)  # path to folder that was downloaded
-    run_search = Signal(str, str)   # title, source_id
+    manhwa_reader_available = Signal(bool)  # True if Manhwa Reader API is up
+    run_search = Signal(str, str, str)   # title, source_id, lang (for raw: original language)
     run_feed = Signal(str, str, str)  # manga_id, lang, source_id
     run_download = Signal(object)  # (chapter_infos, base_dir, manga_title, data_saver, source_id)
     run_load_chapter_url = Signal(str)
+    run_check_manhwa_reader = Signal()
 
     def __init__(self):
         super().__init__()
@@ -78,11 +103,19 @@ class MangaSourceWorker(QObject):
         self.run_feed.connect(self.do_feed)
         self.run_download.connect(self._do_download)
         self.run_load_chapter_url.connect(self.do_load_chapter_by_url)
+        self.run_check_manhwa_reader.connect(self._do_check_manhwa_reader)
 
     def abort(self):
         self._abort = True
 
-    def do_search(self, title: str, source_id: str):
+    def _do_check_manhwa_reader(self):
+        try:
+            ok = self._manhwa_reader.is_available(timeout_override=8)
+            self.manhwa_reader_available.emit(ok)
+        except Exception:
+            self.manhwa_reader_available.emit(False)
+
+    def do_search(self, title: str, source_id: str, lang: str = ""):
         self._abort = False
         delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
         if source_id == "comick":
@@ -103,6 +136,16 @@ class MangaSourceWorker(QObject):
             self._manhwa_reader.request_delay = delay
             try:
                 results = self._manhwa_reader.search(title, limit=25)
+                self.search_finished.emit(results)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "mangadex_raw":
+            self._mangadex.request_delay = delay
+            try:
+                raw_lang = _mangadex_original_language_code(lang or "ja")
+                results = self._mangadex.search(
+                    title, limit=25, original_language=raw_lang
+                )
                 self.search_finished.emit(results)
             except Exception as e:
                 self.error.emit(str(e))
@@ -135,6 +178,18 @@ class MangaSourceWorker(QObject):
             self._manhwa_reader.request_delay = delay
             try:
                 chapters = self._manhwa_reader.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
+                self.feed_finished.emit(chapters)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "mangadex_raw":
+            self._mangadex.request_delay = delay
+            try:
+                feed_lang = lang or "ja"
+                if feed_lang == "zh-hans":
+                    feed_lang = "zh"
+                elif feed_lang == "zh-hant":
+                    feed_lang = "zh-hk"
+                chapters = self._mangadex.get_feed(manga_id, translated_language=feed_lang, limit=500, order="asc")
                 self.feed_finished.emit(chapters)
             except Exception as e:
                 self.error.emit(str(e))
@@ -256,6 +311,8 @@ class MangaSourceDialog(QDialog):
         self._is_url_source = False
         self._is_local_folder = False
         self._is_comick = False
+        # Manhwa Reader is hidden until we confirm the API is up
+        self._unavailable_sources: set = {"manhwa_reader"}
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -266,14 +323,9 @@ class MangaSourceDialog(QDialog):
         search_layout = QVBoxLayout(search_group)
         row = QHBoxLayout()
         self._source_combo = QComboBox()
-        self._source_combo.addItem("MangaDex", "mangadex")
-        self._source_combo.addItem(self.tr("MangaDex (by chapter URL)"), "mangadex_url")
-        self._source_combo.addItem("Comick", "comick")
-        self._source_combo.addItem("GOMANGA", "gomanga")
-        self._source_combo.addItem(self.tr("Manhwa Reader"), "manhwa_reader")
-        self._source_combo.addItem(self.tr("Local folder"), "local_folder")
+        self._populate_source_combo()
         self._source_combo.setToolTip(
-            self.tr("Manga source. MangaDex, GOMANGA, and Manhwa Reader support search and download. Comick supports search and chapter list only. Local folder opens a folder of images as a project.")
+            self.tr("Manga source. MangaDex: translated chapters. MangaDex (raw): search by original language and download raw chapters to translate. GOMANGA and Manhwa Reader support search and download. Comick supports search and chapter list only. Local folder opens a folder of images as a project.")
         )
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
         row.addWidget(QLabel(self.tr("Source:")))
@@ -336,7 +388,8 @@ class MangaSourceDialog(QDialog):
             ("ko", "Korean"),
         ]:
             self._lang_combo.addItem(label, code)
-        row_ch.addWidget(QLabel(self.tr("Language:")))
+        self._lang_label = QLabel(self.tr("Language:"))
+        row_ch.addWidget(self._lang_label)
         row_ch.addWidget(self._lang_combo)
         self._lang_combo.currentIndexChanged.connect(self._save_config_to_pcfg)
         self._data_saver_check = QCheckBox(self.tr("Use data-saver (smaller images)"))
@@ -420,6 +473,7 @@ class MangaSourceDialog(QDialog):
         self._worker.error.connect(self._on_worker_error)
         self._worker.download_progress.connect(self._on_download_progress)
         self._worker.download_finished.connect(self._on_download_finished)
+        self._worker.manhwa_reader_available.connect(self._on_manhwa_reader_availability)
 
         # Load persisted config
         lang = getattr(pcfg, 'manga_source_lang', 'en')
@@ -431,12 +485,44 @@ class MangaSourceDialog(QDialog):
         self._delay_spin.setValue(getattr(pcfg, 'manga_source_request_delay', 0.3))
         self._open_after_download_check.setChecked(getattr(pcfg, 'manga_source_open_after_download', False))
         self._on_source_changed(self._source_combo.currentIndex())
+        QTimer.singleShot(100, self._start_manhwa_reader_check)
+
+    def _populate_source_combo(self):
+        current_id = self._source_combo.currentData() if self._source_combo.currentIndex() >= 0 else None
+        self._source_combo.blockSignals(True)
+        self._source_combo.clear()
+        for label, source_id in SOURCE_OPTIONS:
+            if source_id not in self._unavailable_sources:
+                self._source_combo.addItem(self.tr(label), source_id)
+        idx = self._source_combo.findData(current_id)
+        if idx >= 0:
+            self._source_combo.setCurrentIndex(idx)
+        self._source_combo.blockSignals(False)
+
+    def _start_manhwa_reader_check(self):
+        self._worker.run_check_manhwa_reader.emit()
+
+    def _on_manhwa_reader_availability(self, available: bool):
+        if available:
+            self._unavailable_sources.discard("manhwa_reader")
+        else:
+            self._unavailable_sources.add("manhwa_reader")
+        self._populate_source_combo()
 
     def _on_source_changed(self, index: int):
         source = self._source_combo.currentData() if index >= 0 else None
         self._is_url_source = source == "mangadex_url"
         self._is_local_folder = source == "local_folder"
         self._is_comick = source == "comick"
+        is_raw = source == "mangadex_raw"
+        if is_raw:
+            self._lang_label.setText(self.tr("Raw language (chapters to load):"))
+            if self._lang_combo.currentData() == "en":
+                idx = self._lang_combo.findData("ja")
+                if idx >= 0:
+                    self._lang_combo.setCurrentIndex(idx)
+        else:
+            self._lang_label.setText(self.tr("Language:"))
         for w in self._search_row_widgets:
             w.setVisible(not self._is_url_source and not self._is_local_folder)
         for w in self._url_row_widgets:
@@ -478,7 +564,8 @@ class MangaSourceDialog(QDialog):
             return
         self._status_label.setText(self.tr("Searching..."))
         self._search_btn.setEnabled(False)
-        self._worker.run_search.emit(title, source_id)
+        lang = self._lang_combo.currentData() or "en"
+        self._worker.run_search.emit(title, source_id, lang)
 
     def _on_search_finished(self, results: list):
         self._search_btn.setEnabled(True)
