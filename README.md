@@ -1,5 +1,7 @@
 # BallonsTranslatorPro
 
+**Repository:** [https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) · **Version:** 1.5.0
+
 Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
 
 ---
@@ -8,10 +10,16 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 | Topic | Summary |
 |-------|---------|
-| **What** | Fork with 10+ detectors, 20+ OCR engines, translation context, batch queue, Manga source, and UI improvements |
+| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, Manga source, 370 fonts. Full docs and recommended settings. |
 | **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
 
+
+---
+
+### Disclaimer: models and testing
+
+This fork adds **many new optional modules** (detectors, OCR engines, inpainters). **Not all of them have been tested in every environment** (Windows/Linux/macOS, CPU/CUDA, all language pairs). Some issues may persist—e.g. dependency conflicts (see [§8 Optional dependency conflicts](#8-optional-dependency-conflicts-and-workarounds)), OOM on low VRAM, or model-specific bugs. Use **docs/QUALITY_RANKINGS.md** and **docs/MANHUA_BEST_SETTINGS.md** for recommended combinations. If you hit a problem with a particular module, try another from the same category or report an issue with details (OS, device, config). Known dependency conflicts (e.g. craft_det, simple_lama) are documented in **docs/OPTIONAL_DEPENDENCIES.md**.
 
 ---
 
@@ -26,25 +34,422 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 ## Key highlights (point by point)
 
-- **Text detection:** 10+ detectors (CTD, Paddle, EasyOCR, YSGYolo, HF object-detection, MMOCR, Surya, Magi, CRAFT, DPText-DETR, etc.). **Box padding** (4–6 px) on most detectors to reduce clipped punctuation.
+- **Text detection:** 20+ detectors (CTD, Paddle, EasyOCR, YSGYolo, HF object-detection, MMOCR, Surya, Magi, CRAFT, DPText-DETR, etc.). **Box padding** (4–6 px) on CTD, Paddle, EasyOCR, YSGYolo, HF object-det, MMOCR, Surya to reduce clipped punctuation.
 - **OCR:** 20+ engines (Paddle, manga_ocr, Surya, TrOCR, GOT-OCR2, Ocean, InternVL2/3, HunyuanOCR, etc.). **Crop padding** on many OCRs to avoid clipped text.
 - **Inpainting:** lama_large_512px with **configurable mask dilation** (0–5); Simple LaMa, Diffusers (SD/SDXL/FLUX), LaMa ONNX, MAT, Fluently v4, etc.
 - **Translation context:** Glossary, previous-page context, series-level storage, optional **context summarization** when near model limit (LLM_API_Translator).
-- **UI:** Canvas right-click menu (merge blocks, move up/down, spell check, trim, case change, detect in region); **text eraser** tool; **batch queue**; **Manga source** (MangaDex search/download); **keyboard shortcuts** (customizable).
+- **UI:** Canvas right-click menu (30+ actions: copy/paste, merge, move up/down, spell check, trim, case change, gradient, text on path, detect in region, pipeline stages); **OCR auto-correct** (pyenchant, single-suggestion replacement after OCR); **text eraser** tool; **batch queue**; **Manga source** (MangaDex search/download); **keyboard shortcuts** (customizable); **keyword substitution** (OCR, pre-MT, post-MT).
 - **Config panel:** Logical DPI, dark mode, display language, WebP lossless, typesetting defaults, dual text detection (primary + secondary detector).
+
+**Models and fonts added in this fork:** The fork ships with **many more** detection, OCR, and inpainting modules than the original (15+ text detectors, 30+ OCR engines, 15+ inpainters), plus **370+ fonts** (in `fonts/` and system; supported extensions: `.ttf`, `.otf`, `.ttc`, `.pfb`). Custom fonts in `fonts/` are loaded at startup. Config → Typesetting: **Show only custom fonts** limits the font list to those. Not every module is tested in every environment—see [Disclaimer: models and testing](#disclaimer-models-and-testing) above.
+
+### Recommended settings (manhua / Chinese comics)
+
+For **manhua** (Chinese comics), see [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md). Quick reference:
+
+| Stage | Recommended | Key settings |
+|-------|-------------|--------------|
+| **Detection** | CTD | detect_size 1280, box score 0.42–0.48, box_padding 4–6 |
+| **OCR** | Surya OCR | Language: Chinese (Simplified), Fix Latin misread: True, crop_padding 6–8 |
+| **Inpainting** | lama_large_512px | mask_dilation 1–2, inpaint_size 1024 |
+
+For quality rankings (tier-based), see [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md).
+
+---
+
+## Tutorials (step-by-step)
+
+### Translation context and glossary (LLM_API_Translator)
+
+**Goal:** Keep terminology and style consistent across pages and chapters (e.g. cultivation manhua).
+
+1. **Open a project** (File → Open Folder or Open Images).
+2. **Edit → Translation context (project)...** (or Config → DL Module → Translator → **Translation context (project)...**).
+3. **Series context path:** Enter a folder path or series ID (e.g. `urban_immortal_cultivator`). Resolves to `data/translation_context/<id>/`.
+4. **Project glossary:** Add entries, one per line: `source -> target` or `source = target`. Example: `丹田 -> dantian`.
+5. **Save** — writes to project JSON.
+6. **Translator params** (Config → Translator): Set **context_previous_pages** (0–5), **context_max_chars** (e.g. 2000), **context_trim_mode** (`full` = more lines per page; `compact` = at most 2 lines per page to save tokens), **summarize_context_when_over_limit** (optional). **translation_glossary** in params merges with project and series glossary.
+7. **Run** — pipeline passes previous pages and glossary to the LLM; after each page, appends to `recent_context.json` in the series folder for cross-chapter consistency.
+
+**Glossary format:** One entry per line: `source -> target` or `source = target`. Lines starting with `#` are ignored. First occurrence of each source term wins when merging glossaries.
+
+**Files:** `data/translation_context/<series_id>/glossary.txt`, `recent_context.json`. See [§12.8](#128-translation-context-glossary-series-previous-pages-summarization).
+
+**Proxy (LLM / API modules):** If behind a proxy, set **Proxy** in Config → Translator (LLM_API_Translator) or the relevant module params. Format: `http://host:port` or `socks5://host:port`. URLs without scheme (e.g. `127.0.0.1:7897`) are auto-normalized to `http://...` via `utils/proxy_utils.py`.
+
+---
+
+### OCR spell check / auto-correct (after OCR)
+
+**Goal:** Automatically fix common OCR misspellings (e.g. "teh" → "the") right after OCR runs.
+
+1. **Config → General → OCR result** → check **Spell check / Auto-correct OCR result**. Stored in `pcfg.ocr_spell_check`.
+2. **Requires:** [pyenchant](https://pyenchant.github.io/pyenchant/) and a system dictionary (e.g. `en_US`). Install: `pip install pyenchant`. On Windows, you may need to install [Enchant](https://github.com/AbiWord/enchant) or use a compatible spell library.
+3. **How it works:** After each OCR run, `spell_check_textblocks` (in `utils/ocr_spellcheck.py`) runs as an OCR postprocess hook. For each word: if it's misspelled and there is **exactly one suggestion**, the word is replaced. If there are 0 or 2+ suggestions, the word is left unchanged (avoids wrong corrections).
+4. **Manual spell check:** You can also run spell check manually via the canvas right-click menu → **Spell check source text** or **Spell check translation** on selected blocks (same logic, requires pyenchant).
+
+---
+
+### Dual text detection (primary + secondary)
+
+**Goal:** Catch regions missed by one detector (e.g. captions vs speech bubbles).
+
+1. **Config → Text detection** → check **Run second detector (dual detect)**.
+2. **Secondary:** dropdown — select a different detector (e.g. CTD + Surya).
+3. **Secondary detector params** — appears below; set device, thresholds, etc. for the secondary.
+4. **Run** — pipeline runs primary, then secondary, merges blocks by IoU threshold 0.4 and masks when same shape.
+5. Progress: **Detecting (dual: primary + secondary):** when active.
+
+**Recommended dual combo (Paddle v5 + HF ogkalu):** Use **paddle_det_v5** as primary (strong on captions, dense text, vertical) and **hf_object_det** (ogkalu/comic-text-and-bubble-detector) as secondary to add bubble regions Paddle may miss. In Secondary detector params, set **labels_include** to `bubble,text_bubble` so HF adds only speech/thought bubbles; add `text_free` if you want HF to also catch SFX/captions Paddle missed. **box_padding** 4–6 on both detectors.
+
+---
+
+### Manga / Comic source (MangaDex)
+
+**Goal:** Search, download chapters, and open in BallonsTranslator.
+
+**Tools → Manga / Comic source...** opens the dialog. Uses the public [MangaDex API](https://api.mangadex.org/docs/).
+
+#### Search and load chapters
+
+1. **Search by title:** Enter manga name → **Search** → results show title, description. Select a result → **Load chapters**.
+2. **Or by URL:** Paste a MangaDex chapter URL (e.g. `https://mangadex.org/chapter/abc123...`) → **Load chapter** — fetches that chapter directly.
+3. **Language:** Dropdown for chapter feed (e.g. English, Japanese, Chinese Simplified). Stored in `manga_source_lang`.
+4. **Quality:** **Use data-saver** — smaller images, faster download. Stored in `manga_source_data_saver`.
+
+#### Download
+
+5. **Download folder:** Choose base folder. Default: `~/BallonsTranslator/Downloaded Chapters` (created automatically). Stored in `manga_source_download_dir`.
+6. **Request delay:** 0–2 s between API requests (rate limiting). Stored in `manga_source_request_delay`.
+7. Select chapters (checkboxes) → **Download selected chapters**.
+8. **Page naming:** Pages are saved as **001.png**, **002.png**, … (or original ext) so BallonsTranslator loads them in reading order. Original MangaDex filenames are not used.
+9. **Folder structure:** `{download_folder}/{manga_title}/{chapter_display}/` (e.g. `Ch.1 – Vol.1`).
+
+#### After download
+
+10. **Open in BallonsTranslator after download** — when checked, first chapter folder opens automatically. Stored in `manga_source_open_after_download`.
+11. **Open folder in BallonsTranslator** — button to manually open the first downloaded chapter folder as a project.
+
+---
+
+### Batch queue
+
+**Goal:** Process multiple folders in sequence (e.g. chapters 1–10).
+
+1. **Tools → Batch queue...**
+2. **Add folder(s)...** — add one or more folders.
+3. **Add folder (include subfolders)** — add selected folder and each immediate subfolder as separate items.
+4. **Start queue** — processes folders one by one (same as headless `--exec_dirs`).
+5. **Pause** / **Resume** — halt or continue at page boundaries.
+6. **Cancel queue** — stop and clear remaining queue.
+
+---
+
+### Canvas right-click menu (full reference)
+
+In **text edit mode**, right-click on the canvas to open a context menu. Items are enabled/disabled based on selection state.
+
+| Action | Shortcut | When enabled | Description |
+|--------|----------|--------------|-------------|
+| **Copy** | Ctrl+C | Always | Copy source text to clipboard |
+| **Paste** | Ctrl+V | Always | Paste from clipboard |
+| **Copy translation** | — | Always | Copy translation of selected blocks (one per line) |
+| **Paste translation** | — | Always | Paste lines into translation fields of selected blocks |
+| **Delete** | Ctrl+D | Always | Delete selected blocks |
+| **Copy source text** | Ctrl+Shift+C | Always | Copy source text |
+| **Paste source text** | Ctrl+Shift+V | Always | Paste source text |
+| **Delete and Recover removed text** | Ctrl+Shift+D | Always | Delete blocks but keep text in recover list |
+| **Clear source text** | — | Always | Clear source text of selected blocks |
+| **Clear translation** | — | Always | Clear translation of selected blocks |
+| **Select all** | Ctrl+A | Always | Select all blocks on page |
+| **Spell check source text** | — | ≥1 selected | Auto-correct source text (pyenchant) |
+| **Spell check translation** | — | ≥1 selected | Auto-correct translation (pyenchant) |
+| **Trim whitespace** | — | ≥1 selected | Remove leading/trailing whitespace |
+| **To uppercase** / **To lowercase** | — | ≥1 selected | Change case |
+| **Toggle strikethrough** | — | ≥1 selected | Toggle strikethrough |
+| **Gradient type** → Linear / Radial | — | ≥1 selected | Set gradient |
+| **Text on path** → None / Circular / Arc | — | ≥1 selected | Draw text along path |
+| **Merge selected blocks** | — | ≥2 selected | Merge into one block |
+| **Split selected region(s)** | — | ≥1 selected | Split block(s) |
+| **Move block(s) up** | — | 1 selected, not first | Swap with block above |
+| **Move block(s) down** | — | 1 selected, not last | Swap with block below |
+| **Apply font formatting** | — | Always | Apply format panel to selected |
+| **Auto layout** | — | Always | Auto-split lines to fit region |
+| **Reset Angle** | — | Always | Reset block angle |
+| **Squeeze** | — | Always | Squeeze text layout |
+| **Detect text in region** | — | After right-drag rect | Run detector in drawn region only |
+| **Detect text on page** | — | Always | Run detector on full page |
+| **Translate** | — | Always | Translate selected blocks |
+| **OCR** | — | Always | Run OCR on selected blocks |
+| **OCR and translate** | — | Always | OCR then translate |
+| **OCR, translate and inpaint** | — | Always | Full pipeline |
+| **Inpaint** | — | Always | Inpaint only |
+
+**Detect text in region:** Right-drag a rectangle first (rubber-band); then right-click. The menu shows **Detect text in region** only when a rect was drawn. New blocks are appended in full-image coordinates; no OCR or translation runs.
+
+---
+
+### Detect text in region
+
+**Goal:** Add text blocks in one area without re-running the full pipeline.
+
+1. **Text edit mode** — ensure you're in text edit mode (T).
+2. **Right-drag** a rectangle on the canvas (rubber-band).
+3. **Right-click** → **Detect text in region**.
+4. New blocks are appended in full-image coordinates. No OCR or translation.
+5. **Or:** Right-click without a region → **Detect text on page** — runs detector on full page.
+
+---
+
+### Inpaint tiling (OOM fix)
+
+**Goal:** Avoid OOM when inpainting large images.
+
+1. **Config → Inpainting** (or DL Module → Inpainter params).
+2. **Inpaint tile size:** Set 512 or 1024 (0 = off).
+3. **Inpaint tile overlap:** 64 px typical.
+4. Tiling activates when image is > 1.5× tile size. Tiles are processed separately and stitched.
+
+---
+
+### Region merge tool
+
+**Goal:** Merge overlapping or adjacent text blocks with configurable rules.
+
+1. **Edit → Region merge tool** (or Ctrl+Shift+M) — opens settings dialog.
+2. **Merge mode:** Vertical, Horizontal, Vertical then horizontal, Horizontal then vertical, None.
+3. **Text merge order:** LTR, RTL, TTB labels (e.g. `balloon,qipao,shuqing` for RTL).
+4. **Label merge strategy:** Prefer shorter, Use first, Combine, Prefer non-default.
+5. **Blacklist labels:** Exclude from merge (e.g. `other`).
+6. **Require same label** or **Merge only within specific label groups**.
+7. **Geometry:** Max vertical/horizontal gap (px; 0 = must touch; negative = require overlap), min overlap ratio (%). Strict mode: gaps 0 or negative, overlap 98–100%.
+8. **Merge result type:** Axis-aligned rectangle or Rotated rectangle.
+9. **Run on current page** or **Run on all pages**.
+
+**Settings persistence:** Region merge settings are saved to `pcfg.region_merge_settings` when you run; they are restored when you reopen the dialog.
+
+---
+
+### Auto region merge after run
+
+**Goal:** Automatically run the Region merge tool after each pipeline run (detect/OCR/translate/inpaint).
+
+1. **Config → General → Startup** → **After Run: Region merge** dropdown.
+2. **Never** (default) — no auto merge.
+3. **After run: on all pages** — runs Region merge on every page in the project using saved settings.
+4. **After run: on current page only** — runs Region merge only on the current page.
+5. Uses settings from **Edit → Region merge tool** (merge mode, labels, geometry, etc.). Configure that dialog first; settings are persisted in `region_merge_settings`.
+
+---
+
+### Text eraser tool
+
+**Goal:** Erase parts of text blocks by painting over them (mask-based).
+
+1. **Drawing mode** — switch to drawing board (P).
+2. **Text eraser** tool — select from the drawing tools bar (eraser icon).
+3. **Left-click and drag** over the text to erase. Stroke modifies each block's mask.
+4. **Right-click** does not start a stroke (avoids accidental lines).
+5. **Ctrl+Z** — undo the last eraser stroke.
+
+---
+
+### Text formatting (gradient, text on path, warp)
+
+**Goal:** Style text for balloons and SFX (sound effects).
+
+1. **Select one or more text blocks** — right-hand format panel appears.
+2. **Gradient type:** Format panel → **Gradient** group → Linear or Radial. Or right-click canvas → **Gradient type** → Linear / Radial.
+3. **Text on path** ([#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)): Format panel → **Text on path** dropdown: None, Circular, or Arc. **Circular** — text along a full circle. **Arc** — text along an arc; set **Arc degrees** (30–360°, default 180°) for the arc span.
+4. **Warp** ([#1093](https://github.com/dmMaze/BallonsTranslator/issues/1093)): Format panel → **Warp** dropdown: None, Arc, Arch, Bulge, Flag. **Warp strength** (0.1–1) for distortion intensity.
+
+---
+
+### Manage models
+
+**Goal:** Check which models are downloaded and download missing ones.
+
+1. **Tools → Manage models...**
+2. Table lists all modules (detection, OCR, inpainting) with status: downloaded / missing / hash mismatch.
+3. **Check** — refresh status (optionally include import check).
+4. Select rows → **Download selected** — downloads missing models to `data/models/`.
+5. Models are stored per module (e.g. `comictextdetector.pt.onnx`, `lama_large_512px.ckpt`).
+
+---
+
+### Run presets and pipeline stages
+
+**Goal:** Run only specific stages (e.g. detect + OCR without translate).
+
+1. **Run** menu (title bar) → **Pipeline presets**:
+   - **Full** — detect, OCR, translate, inpaint (default).
+   - **Detect + OCR only** — no translation or inpainting.
+   - **Translate only** — assumes detection/OCR already done.
+   - **Inpaint only** — assumes text already placed.
+2. **Enable Text Detection / OCR / Translation / Inpainting** — checkboxes to enable/disable each stage for the next run.
+3. **Run without update textstyle** — runs pipeline but does not apply global font format to new blocks.
+
+---
+
+### Export and import (File menu)
+
+**Goal:** Export text for external editing or import translations from files.
+
+1. **File** (left bar Open button) → **Export as Doc** — exports project to `.docx` (Word).
+2. **Import from Doc** — imports from `.docx` or `.json` project file.
+3. **Export source text as TXT** / **Export translation as TXT** — plain text, one block per line.
+4. **Export source text as markdown** / **Export translation as markdown** — markdown format.
+5. **Import translation from TXT/markdown** — paste translations from a file; lines map to blocks in order.
+
+**Tools → Export all pages** — exports result images for all pages to a folder (respects Config → Save format, quality, WebP lossless).
+
+---
+
+### File menu quick reference (left bar Open button)
+
+| Item | Shortcut | Description |
+|------|----------|-------------|
+| **Open Folder** | Ctrl+O | Open folder as project |
+| **Open Images** | — | Select image files; opens as project |
+| **Open Project** | — | Open `.json` project file |
+| **Open Recent** | — | Submenu of recent projects |
+| **Save Project** | Ctrl+S | Save project JSON |
+| **Export as Doc** | — | Export to `.docx` |
+| **Import from Doc** | — | Import from `.docx` or `.json` |
+| **Export source/translation as TXT** | — | Plain text |
+| **Export source/translation as markdown** | — | Markdown |
+| **Import translation from TXT/markdown** | — | Paste translations from file |
+
+---
+
+### Edit menu quick reference
+
+| Item | Description |
+|------|-------------|
+| **Undo** / **Redo** | Ctrl+Z / Ctrl+Shift+Z |
+| **Search** | Current page search (Ctrl+F) |
+| **Global Search** | All pages search (Ctrl+G) |
+| **Keyword substitution for source text** | Replace in OCR output |
+| **Keyword substitution for machine translation source text** | Replace before translation |
+| **Keyword substitution for machine translation** | Replace after translation |
+| **Translation context (project)...** | Project glossary, series path |
+
+---
+
+### View menu quick reference
+
+| Item | Description |
+|------|-------------|
+| **Display Language** | UI language (submenu) |
+| **Drawing Board** | Switch to drawing mode (P) |
+| **Text Editor** | Switch to text edit mode (T) |
+| **Keyboard Shortcuts...** | Customize keybinds (Ctrl+K) |
+| **Dark Mode** | Toggle dark theme |
+
+---
+
+### Go menu and page navigation
+
+| Item | Shortcut | Description |
+|------|----------|-------------|
+| **Previous page** | PgUp | Go to previous page |
+| **Next page** | PgDown | Go to next page |
+| **Previous (alt)** | A | Alternate key |
+| **Next (alt)** | D | Alternate key |
+
+**Page list** (left bar: toggle **Show page list**): Thumbnail list of all pages. Right-click a page for:
+- **Reveal in File Explorer** — open folder and select the image file
+- **Translate selected images** — run translation on selected pages only
+- **Remove from Project** — remove page from project (does not delete the image file)
+
+---
+
+### Tools menu quick reference
+
+| Item | Description |
+|------|-------------|
+| **Region merge tool** | Merge overlapping/adjacent blocks (Ctrl+Shift+M) |
+| **Re-run detection only** | Run detector on all pages; keep existing OCR/translation |
+| **Re-run OCR only** | Run OCR on all pages; keep existing detection/translation |
+| **Export all pages** | Export result images to a folder |
+| **Check project** | Validate project (missing images, invalid JSON) |
+| **Manga / Comic source...** | Search MangaDex, download chapters |
+| **Batch queue...** | Process multiple folders in sequence |
+| **Manage models...** | Check/download detection, OCR, inpainting models |
+
+---
+
+### Search (current page vs global)
+
+**Goal:** Find text across the project.
+
+1. **Edit → Search** (Ctrl+F) — search **current page** only. Highlights matches in source/translation; supports case-sensitive, whole word, regex (Config → General).
+2. **Edit → Global Search** (Ctrl+G) — search **all pages** in the project. Opens a panel with a tree of matches; click to jump to the block.
+3. **Left bar:** Toggle **Global Search** checkbox to show/hide the global search panel.
+
+---
+
+### Keyword substitution (Edit menu)
+
+**Goal:** Replace keywords in source text, pre-MT source, or translation (e.g. fix OCR errors, standardize terms).
+
+1. **Edit → Keyword substitution for source text** — applies to OCR output (source text). Stored in `pcfg.ocr_sublist`.
+2. **Edit → Keyword substitution for machine translation source text** — applies before translation (pre-MT). Stored in `pcfg.pre_mt_sublist`.
+3. **Edit → Keyword substitution for machine translation** — applies after translation. Stored in `pcfg.mt_sublist`.
+4. Each dialog: table with **Keyword**, **Substitution**, **Use regex**, **Case sensitive**. **New** / **Delete** to add/remove rows.
+5. Substitutions run automatically during pipeline (OCR stage, pre-translate, post-translate). Order of rows matters (first match wins when overlapping).
+
+---
+
+### Project folder structure
+
+| Path | Purpose |
+|------|---------|
+| `data/models/` | Detection, OCR, inpainting model files (e.g. `comictextdetector.pt.onnx`, `lama_large_512px.ckpt`) |
+| `data/translation_context/<series_id>/` | Series glossary (`glossary.txt`), recent context (`recent_context.json`) |
+| `data/libs/` | Some runtime libraries |
+| `config/config.json` | User config (modules, shortcuts, save format, etc.) |
+| `config/config.example.json` | Example config keys |
+| `fonts/` | Custom fonts (370+ included) |
+| `~/BallonsTranslator/Downloaded Chapters` | Default Manga source download folder |
+
+**Project JSON** (`imgtrans_<folder_name>.json` in project folder): `pages` (page name → list of TextBlock), `image_info` (per-page finish_code, etc.), `current_img`, `translation_glossary`, `series_context_path`. Subfolders: `mask/`, `inpainted/`, `result/` for masks, inpainted images, and final output.
+
+---
+
+### Text style presets
+
+**Goal:** Save and reuse font formats (font, size, color, stroke, etc.) across blocks.
+
+1. **Format panel** (right side) — when a block is selected, use **Save as default** to write current format to global config, or **Apply to all blocks** to apply current format to every block.
+2. **Text style preset panel** — shows saved presets (Config → General: **Show text style preset**). Click a preset to apply it to the selected block; double-click to edit the name.
+3. **View → Import Text Styles** / **Export Text Styles** — load or save presets to a JSON file. Stored in `pcfg.text_styles_path` (default: `data/text_styles/default.json`).
+4. **Independent text styles per project** (Config → Typesetting) — when enabled, each project can have its own preset set.
+
+---
+
+### Saladict and text selection mini menu
+
+**Goal:** Look up selected text in Saladict (dictionary) or search engine.
+
+1. **Config → General → Saladict / search** — **Show mini menu when selecting text** (`textselect_mini_menu`). When enabled, selecting text in a block shows a mini menu.
+2. **Saladict shortcut** — default Alt+S. When you select text and trigger this shortcut, the app copies the selection and sends the shortcut to Saladict (must be installed; see [doc/saladict.md](doc/saladict.md)).
+3. **Search engine URL** — for "Search" in the mini menu; opens `search_url` + selected text (e.g. Google search).
 
 ---
 
 ## Table of contents
 
 - [Contributing & guidelines](CONTRIBUTING.md) — Git practices, community etiquette, upstream merge
+- [Disclaimer: models and testing](#disclaimer-models-and-testing) — Not all modules tested; issues may persist
+- [Tutorials (step-by-step)](#tutorials-step-by-step) — Translation context, dual detection, Manga source, batch queue, canvas right-click, detect in region, OCR spell check, auto region merge, text eraser, text formatting, manage models, run presets, export/import, Tools menu, keyword substitution, project structure, text style presets, Saladict
 1. [Summary of modifications](#1-summary-of-modifications)
 2. [How to run the application](#2-how-to-run-the-application)
 3. [Text detection – all modules and how to run](#3-text-detection--all-modules-and-how-to-run)
 4. [OCR – all modules and how to run](#4-ocr--all-modules-and-how-to-run)
 5. [Inpainting – all modules and how to run](#5-inpainting--all-modules-and-how-to-run)
 6. [Translation modules](#6-translation-modules)
-7. [Settings reference: inpaint size, mask dilation, detection, OCR, formatting](#7-settings-reference-inpaint-size-mask-dilation-detection-ocr-formatting)
+7. [Settings reference: inpaint size, mask dilation, detection, OCR, formatting](#7-settings-reference-inpaint-size-mask-dilation-detection-ocr-formatting) — incl. §7.8 config reference, §7.9 shortcuts, §7.10 drawing tools
 8. [Optional dependency conflicts and workarounds](#8-optional-dependency-conflicts-and-workarounds)
 9. [New and modified files](#9-new-and-modified-files)
 10. [Fixes and behavior changes](#10-fixes-and-behavior-changes)
@@ -61,7 +466,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 ## 1. Summary of modifications
 
-This fork adds **many new optional modules** and applies **fixes and setting improvements**. Original behavior and defaults are unchanged unless noted. New modules are discovered automatically via the existing registry (no changes to core launch or config flow). You only install extra dependencies for the modules you use.
+This fork adds **many new optional modules** and applies **fixes and setting improvements**. Original behavior and defaults are unchanged unless noted. New modules are discovered automatically via the existing registry (no changes to core launch or config flow). You only install extra dependencies for the modules you use. **Not all added models have been tested in every environment**—see [Disclaimer: models and testing](#disclaimer-models-and-testing).
 
 ### Text detection
 - MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), CRAFT (standalone), HF object-detection (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2
@@ -97,7 +502,12 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Drag-and-drop:** Folder or images onto the canvas to open a project; copy-paste (File → Open) also works
 
 ### Documentation
-- `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, `docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md`
+- **Recommended settings:** [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md) — detection, OCR, inpainting for manhua (Chinese comics)
+- **Quality rankings:** [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md), [docs/BEST_MODELS_RESEARCH.md](docs/BEST_MODELS_RESEARCH.md), [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
+- **Optional deps:** [docs/OPTIONAL_DEPENDENCIES.md](docs/OPTIONAL_DEPENDENCIES.md), [docs/INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md)
+- **Translation context:** [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
+- **UI/settings:** [docs/SETTINGS_UI_RECOMMENDATIONS.md](docs/SETTINGS_UI_RECOMMENDATIONS.md)
+- **Git/auto-push:** [docs/CONNECT_GITHUB_AND_AUTO_PUSH.md](docs/CONNECT_GITHUB_AND_AUTO_PUSH.md)
 
 ---
 
@@ -134,6 +544,27 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
 
 - **Logical DPI (font/rendering):**  
   Set in **Config panel → General**: **Logical DPI (restart to apply)** — 0 = system default; use 96 or 72 if font scaling is wrong. Persisted in config and applied on next launch. You can still override once via the command line: `python launch.py --ldpi 96`.
+
+### Command-line arguments (launch.py)
+
+| Argument | Description |
+|----------|-------------|
+| `--proj-dir PATH` | Open project directory on startup |
+| `--headless` | Run without GUI |
+| `--exec_dirs "DIR1,DIR2,..."` | Translation queue: process folders in sequence (comma-separated). Same as Batch queue in GUI. |
+| `--ldpi N` | Logical DPI override (e.g. 96, 72). Overrides config once. |
+| `--config_path PATH` | Config file to use (default: `config/config.json`) |
+| `--export-translation-txt` | Save translation to txt file once RUN completed |
+| `--export-source-txt` | Save source text to txt file once RUN completed |
+| `--update` | Update the repository before launching |
+| `--reinstall-torch` | Reinstall torch even if already installed |
+| `--frozen` | Skip requirement checks |
+| `--debug` | Debug mode |
+| `--nightly` | Enable AMD Nightly ROCm |
+| `--qt-api pyqt6\|pyside6\|pyqt5\|pyside2` | Qt API (default: pyqt6; pyqt5 on Windows 7) |
+
+**Example (headless batch):**  
+`python launch.py --headless --exec_dirs "C:\manga\ch1,C:\manga\ch2" --config_path config/config.json`
 
 ---
 
@@ -272,9 +703,10 @@ Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md
 - **min box area:** 0 or 100–200 to drop tiny noise.
 - **custom_onnx_path:** Optional path to alternate ONNX (e.g. mayocream comic-text-detector); leave empty for default CTD ONNX.
 
-### 7.2 Inpaint size (all inpainters)
+### 7.2 Inpaint size and tiling (all inpainters)
 
 - **lama_large_512px:** Options 512, 768, 1024, 1536, 2048. Default 1024. Smaller = less VRAM, gentler on small bubbles; larger = more detail on big regions. Avoid 2048 unless needed (risk of artifacts).
+- **Inpaint tiling (OOM fix):** Config → Inpainting (or DL Module) → **Inpaint tile size** (0 = off; 512–1024 for OOM), **Inpaint tile overlap** (64 px). Tiling activates when image is > 1.5× tile size; tiles are processed separately and stitched with overlap blending. Use only when you get out-of-memory errors; tiling can cause grey or blurry bubbles.
 - **lama_mpe, aot:** 1024 or 2048.
 - **Diffusers-based (SD, SD2, SDXL, DreamShaper, Fluently, Kandinsky, RePaint, Qwen-Image-Edit):** Each has an **inpaint_size** (or similar) in params; 512/768/1024 typical. Match to model native resolution when possible.
 - **lama_onnx:** 512 (model is 512×512); param controls max side before resize.
@@ -286,9 +718,10 @@ Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md
 - **lama_large_512px** exposes **mask_dilation** (0–5). It sets **mask_dilation_iterations** for a 3×3 morphological dilation on the mask before inpainting. **0** = no dilation; **2** = default (balanced); **3–5** = more coverage for dots/smudges; **0–1** = minimal distortion on tiny bubbles.
 - Base inpainter (`modules/inpaint/base.py`) applies this dilation in `inpaint()` so all block-based inpainters that inherit (e.g. lama_large_512px) use it. Other inpainters (AOT, lama_mpe, Diffusers, etc.) do not expose a separate mask_dilation param; the base applies a configurable **mask_dilation_iterations** only when the inpainter sets it (lama_large_512px).
 
-### 7.4 OCR crop padding
+### 7.4 Box padding (detectors) and crop padding (OCR)
 
-Many OCRs have **crop_padding** (pixels to add around each detected box when cropping for OCR). Typical range 0–24. **6–8** is a good default to reduce clipped text at edges (e.g. with CTD). **manga_ocr**, **surya_ocr**, **trocr**, **manga_ocr_mobile**, etc. expose this in params.
+- **Box padding (detectors):** CTD, Paddle, EasyOCR, YSGYolo, HF object-det, MMOCR, Surya expose **box_padding** (px). Uses `box_utils.expand_blocks()` to expand each box outward by padding on all sides before passing to OCR. **4–6 px** recommended to reduce clipped punctuation (?, !) and character edges. Clamped to image bounds.
+- **Crop padding (OCR):** Many OCRs have **crop_padding** (pixels to add around each detected box when cropping for OCR). Typical range 0–24. **6–8** is a good default. Supported by: manga_ocr, easyocr, mmocr, manga_ocr_mobile, got_ocr2, ocrflux, internvl3, minicpm, florence2, ocean, hunyuan, paddleocr_vl_hf, qwen2vl, chandra, internvl2, nanonets, docowl2, deepseek, lighton, donut, glm_ocr, trocr, surya_ocr, and others.
 
 ### 7.5 Text and box formatting
 
@@ -304,14 +737,93 @@ For **paddle_det**, **Strict bubble mode** applies stricter thresholds and filte
 
 Most behavior and display options are set in the **Config panel** (left bar → gear icon). All of the following are persisted in `config.json`.
 
-- **General → Startup:** Reopen last project on startup; **Recent projects limit** (5–30); **Logical DPI** (0 = system, 96/72 for font scaling; restart to apply); **Confirm before Run** (show Run/Continue/Cancel dialog); **Dark mode** (synced with View → Dark Mode); **Display language** (UI language, same as View → Display Language); **Config panel font scale** (0.8–1.5, for this panel only).
-- **General → OCR result:** **Spell check / Auto-correct OCR result** — after OCR, correct misspelled words when there is a single suggestion (e.g. "teh" → "the"); requires pyenchant and a system dictionary.
+- **General → Startup:** Reopen last project on startup; **Recent projects limit** (5–30); **Logical DPI** (0 = system, 96/72 for font scaling; restart to apply); **Confirm before Run** (show Run/Continue/Cancel dialog); **After Run: Region merge** (Never / on all pages / on current page only — uses Region merge tool settings); **Dark mode** (synced with View → Dark Mode); **Display language** (UI language, same as View → Display Language); **Config panel font scale** (0.8–1.5, for this panel only).
+- **General → OCR result:** **Spell check / Auto-correct OCR result** — after OCR, correct misspelled words when there is **exactly one suggestion** (e.g. "teh" → "the"); requires pyenchant and a system dictionary. Stored in `pcfg.ocr_spell_check`. Runs via `spell_check_textblocks` in OCR postprocess hooks (`utils/ocr_spellcheck.py`). See [OCR spell check / auto-correct](#ocr-spell-check--auto-correct-after-ocr) tutorial.
 - **General → Typesetting:** Defaults for new/unchanged blocks: font size, stroke, color, alignment, writing mode, font family, effect (decide by program vs use global); **Auto layout**; **To uppercase**; **Independent text styles per project**; **Show only custom fonts**.
 - **General → Save:** Result image format (PNG, JPG, WebP, JXL); **Quality**; **WebP lossless** (when format is WebP); Intermediate image format (PNG, JXL).
 - **General → Saladict / search:** Show mini menu when selecting text; Saladict shortcut; Search engine URL for lookups.
 - **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel. The **Translator** section includes **Translation context (project)...** and **Test translator**. *Note: Test translator may fail when Load model on demand or Unload models after idle is enabled — the translator is only loaded when you run a pipeline; run a page first or temporarily disable those options when testing.* See [§12.7](#127-translation-context-glossary-series-previous-pages-summarization) for translation context.
 
 Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a concise list of implemented UI settings and possible future additions.
+
+### 7.8 Full config reference (ProgramConfig & ModuleConfig)
+
+| Config path | Key | Type | Default | Description |
+|-------------|-----|------|---------|-------------|
+| **General → Startup** | `open_recent_on_startup` | bool | true | Reopen last project on startup |
+| | `recent_proj_list_max` | int | 14 | Recent projects limit (5–30) |
+| | `logical_dpi` | int | 0 | 0 = system; 96/72 for font scaling (restart to apply) |
+| | `confirm_before_run` | bool | true | Show Run/Continue/Cancel dialog |
+| | `darkmode` | bool | false | Dark mode (synced with View → Dark Mode) |
+| | `display_lang` | str | — | UI language |
+| | `config_panel_font_scale` | float | 1.0 | Config panel font scale (0.8–1.5) |
+| **General → OCR** | Spell check / auto-correct | — | — | After OCR, correct misspellings (pyenchant) |
+| **General → Typesetting** | `let_fntsize_flag`, `let_autolayout_flag`, etc. | — | — | Font size, auto layout, alignment, etc. |
+| **General → Save** | `imgsave_ext` | str | '.png' | PNG, JPG, WebP, JXL |
+| | `imgsave_quality` | int | 100 | Quality (1–100) |
+| | `imgsave_webp_lossless` | bool | false | Lossless WebP (when format is WebP) |
+| **DL Module** | `default_device` | str | '' | Device when module uses "Default" |
+| | `load_model_on_demand` | bool | false | Load models only when needed |
+| | `unload_after_idle_minutes` | int | 0 | Unload models after idle (0 = off) |
+| **Module** | `enable_dual_detect` | bool | false | Run second detector |
+| | `textdetector_secondary` | str | '' | Secondary detector name |
+| | `inpaint_tile_size` | int | 0 | 0 = off; 512–1024 for OOM |
+| | `inpaint_tile_overlap` | int | 64 | Overlap between tiles (px) |
+| **Manga source** | `manga_source_lang` | str | 'en' | Chapter feed language |
+| | `manga_source_data_saver` | bool | false | Use data-saver images |
+| | `manga_source_download_dir` | str | '' | Default: `~/BallonsTranslator/Downloaded Chapters` |
+| | `manga_source_request_delay` | float | 0.3 | Seconds between API requests |
+| | `manga_source_open_after_download` | bool | false | Open first chapter folder in app after download |
+| **General** | `auto_region_merge_after_run` | str | 'never' | `never` \| `all_pages` \| `current_page` — auto Region merge after pipeline |
+| | `region_merge_settings` | dict | — | Persisted Region merge tool settings |
+| | `ocr_spell_check` | bool | false | Spell check / auto-correct OCR result (pyenchant) |
+| | `shortcuts` | dict | — | Custom keybinds (action_id → key string) |
+
+### 7.9 Keyboard shortcuts (customizable)
+
+Open **View → Keyboard Shortcuts...** (Ctrl+K) to view and customize. Stored in `config.json`.
+
+| Category | Action | Default key |
+|----------|--------|-------------|
+| **File** | Open Folder | Ctrl+O |
+| | Save Project | Ctrl+S |
+| **Edit** | Undo | Ctrl+Z |
+| | Redo | Ctrl+Shift+Z |
+| | Search (current page) | Ctrl+F |
+| | Global Search | Ctrl+G |
+| | Region merge tool | Ctrl+Shift+M |
+| **View** | Drawing Board | P |
+| | Text Editor | T |
+| | Keyboard Shortcuts | Ctrl+K |
+| **Go** | Previous Page | PgUp |
+| | Next Page | PgDown |
+| | Previous (alt) | A |
+| | Next (alt) | D |
+| **Canvas** | Text block mode | W |
+| | Zoom In | Ctrl++ |
+| | Zoom Out | Ctrl+- |
+| | Delete / Rect delete | Ctrl+D |
+| | Inpaint (when drawing) | Space |
+| | Select all blocks | Ctrl+A |
+| | Escape / Deselect | Escape |
+| | Delete (key) | Delete |
+| **Format** | Bold | Ctrl+B |
+| | Italic | Ctrl+I |
+| | Underline | Ctrl+U |
+| **Drawing** | Hand tool (pan) | H |
+| | Inpaint brush | J |
+| | Pen tool | B |
+| | Rectangle select | R |
+
+### 7.10 Drawing tools (DrawPanelConfig)
+
+When in **Drawing Board** (P), the drawing panel exposes:
+
+- **Pen tool (B):** `pentool_width`, `pentool_color`, `pentool_shape` — brush size and color.
+- **Inpaint brush (J):** `inpainter_width`, `inpainter_shape`, `inpaint_hardness` (0–100; 100 = hard edge, 0 = soft/feathered).
+- **Rectangle tool (R):** `rectool_auto`, `rectool_method`, `recttool_dilate_ksize`, `recttool_erode_ksize`.
+
+Stored in `pcfg.drawpanel`. Changes apply immediately.
 
 ---
 
