@@ -1,6 +1,6 @@
 from qtpy.QtCore import Signal, Qt, QPointF, QSize, QSizeF, QLineF, QRectF
 from qtpy.QtWidgets import QGridLayout, QPushButton, QComboBox, QSizePolicy, QBoxLayout, QCheckBox, QHBoxLayout, QGraphicsView, QStackedWidget, QVBoxLayout, QLabel, QGraphicsPixmapItem, QGraphicsEllipseItem
-from qtpy.QtGui import QPen, QColor, QCursor, QPainter, QPixmap, QBrush, QFontMetrics
+from qtpy.QtGui import QPen, QColor, QCursor, QPainter, QPixmap, QBrush, QFontMetrics, QPolygonF
 
 from typing import Union, Tuple, List
 import numpy as np
@@ -691,12 +691,12 @@ class DrawingPanel(Widget):
             self.canvas._text_eraser_selected_blocks = None
         if not sel:
             all_text = [i for i in self.canvas.items() if isinstance(i, TextBlkItem)]
-            sel = [i for i in all_text if stroke_scene_rect.intersects(i.sceneBoundingRect())]
+            sel = [i for i in all_text if stroke_scene_rect.intersects(QPolygonF(i.sceneBoundingRect()))]
             sel.sort(key=lambda x: x.idx)
         if not sel:
             return
         for item in sel:
-            if not stroke_scene_rect.intersects(item.sceneBoundingRect()):
+            if not stroke_scene_rect.intersects(QPolygonF(item.sceneBoundingRect())):
                 continue
             blk = getattr(item, 'blk', None)
             if blk is None:
