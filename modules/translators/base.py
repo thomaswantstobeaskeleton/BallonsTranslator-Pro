@@ -235,8 +235,8 @@ class BaseTranslator(BaseModule):
         for tr, blk in zip(translations, textblk_lst):
             blk.translation = sanitize_translation_text(tr)
 
-    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None):
-        """Optional: set cross-page context and project glossary before translate_textblk_lst. Base implementation does nothing."""
+    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None, next_page=None):
+        """Optional: set cross-page context and project glossary before translate_textblk_lst. next_page: optional {"sources": [...]} for next page context. Base implementation does nothing."""
         pass
 
     def append_page_to_series_context(self, series_context_path: str, sources: list, translations: list) -> None:

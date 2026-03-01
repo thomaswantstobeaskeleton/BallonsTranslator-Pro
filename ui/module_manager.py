@@ -6,7 +6,7 @@ import os.path as osp
 
 import cv2
 import numpy as np
-from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer
+from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer, QMutex, QWaitCondition
 from qtpy.QtWidgets import QFileDialog, QMessageBox
 
 from .funcmaps import get_maskseg_method
@@ -237,10 +237,17 @@ class TranslateThread(ModuleThread):
                         "sources": [blk.get_text() for blk in blks],
                         "translations": [getattr(blk, "translation", "") or "" for blk in blks],
                     })
+                next_page = None
+                if idx + 1 < len(ordered):
+                    next_key = ordered[idx + 1]
+                    blks = proj.pages.get(next_key, [])
+                    if blks:
+                        next_page = {"sources": [blk.get_text() for blk in blks]}
                 self.translator.set_translation_context(
                     previous_pages,
                     getattr(proj, "translation_glossary", None) or [],
                     series_context_path=series_path or None,
+                    next_page=next_page,
                 )
         try:
             self.translator.translate_textblk_lst(page)
@@ -286,18 +293,34 @@ class TranslateThread(ModuleThread):
             try:
                 self._translate_page(self.imgtrans_proj.pages, page_key, emit_finished=False)
             except Exception as e:
-                # TODO: allowing retry/skip/terminate
                 trans_success = False
                 msg = self.tr('Translation Failed.')
                 if isinstance(e, MissingTranslatorParams):
                     msg = msg + '\n' + str(e) + self.tr(' is required for ' + self.translator.name)
-                    
                 self.blockSignals(False)
-                create_error_dialog(e, msg, 'TranslationFailed')
-                # self.imgtrans_proj = None
-                # self.finished_counter = 0
-                # self.pipeline_pagekey_queue = []
-                # return
+                manager = getattr(self, 'manager', None)
+                if manager is not None:
+                    create_error_dialog(e, msg, 'TranslationFailed')
+                    manager.translation_failure_request.emit(msg, page_key)
+                    manager._trans_failure_mutex.lock()
+                    manager._trans_failure_condition.wait(manager._trans_failure_mutex)
+                    choice = getattr(manager, '_trans_failure_choice', 'skip')
+                    manager._trans_failure_choice = None
+                    manager._trans_failure_mutex.unlock()
+                    if choice == 'terminate':
+                        self.stop_requested = True
+                        self.pipeline_pagekey_queue.clear()
+                        self.finished_counter += 1
+                        self.progress_changed.emit(self.finished_counter)
+                        break
+                    elif choice == 'retry':
+                        self.pipeline_pagekey_queue.insert(0, page_key)
+                        self.blockSignals(True)
+                        if not self.pipeline_finished() and delay > 0:
+                            time.sleep(delay)
+                        continue
+                else:
+                    create_error_dialog(e, msg, 'TranslationFailed')
             self.blockSignals(False)
             self.finished_counter += 1
             if trans_success:
@@ -523,10 +546,17 @@ class ImgtransThread(QThread):
                 "sources": [blk.get_text() for blk in blks],
                 "translations": [getattr(blk, "translation", "") or "" for blk in blks],
             })
+        next_page = None
+        if idx + 1 < len(pages_to_iterate):
+            next_key = pages_to_iterate[idx + 1]
+            blks = self.imgtrans_proj.pages.get(next_key, [])
+            if blks:
+                next_page = {"sources": [blk.get_text() for blk in blks]}
         self.translator.set_translation_context(
             previous_pages,
             getattr(self.imgtrans_proj, "translation_glossary", None) or [],
             series_context_path=series_path or None,
+            next_page=next_page,
         )
 
     def _append_page_to_series_context(self, imgname: str, blk_list: list):
@@ -812,6 +842,9 @@ class ModuleManager(QObject):
     page_trans_finished = Signal(int)
     detect_region_finished = Signal(str, list)  # page_name, new_blk_list
 
+    # Translation failure in batch: user choice (retry/skip/terminate)
+    translation_failure_request = Signal(str, str)  # msg, page_key
+
     run_canvas_inpaint = False
     is_waiting_th = False
     block_set_inpainter = False
@@ -823,6 +856,9 @@ class ModuleManager(QObject):
         self.imgtrans_proj = imgtrans_proj
         self.check_inpaint_fin_timer = QTimer(self)
         self.check_inpaint_fin_timer.timeout.connect(self.check_inpaint_th_finished)
+        self._trans_failure_mutex = QMutex()
+        self._trans_failure_condition = QWaitCondition()
+        self._trans_failure_choice = None  # 'retry' | 'skip' | 'terminate'
 
     def setupThread(self, config_panel: ConfigPanel, imgtrans_progress_msgbox: ImgtransProgressMessageBox, ocr_postprocess: Callable = None, translate_preprocess: Callable = None, translate_postprocess: Callable = None):
         self.textdetect_thread = TextDetectThread()
@@ -830,8 +866,10 @@ class ModuleManager(QObject):
         self.ocr_thread = OCRThread()
         
         self.translate_thread = TranslateThread()
+        self.translate_thread.manager = self
         self.translate_thread.progress_changed.connect(self.on_update_translate_progress)
-        self.translate_thread.finish_translate_page.connect(self.on_finish_translate_page)  
+        self.translate_thread.finish_translate_page.connect(self.on_finish_translate_page)
+        self.translation_failure_request.connect(self.on_translation_failure_request)  
 
         self.inpaint_thread = InpaintThread()
         self.inpaint_thread.finish_inpaint.connect(self.on_finish_inpaint)
@@ -908,6 +946,27 @@ class ModuleManager(QObject):
                 self.translate_thread.terminate()
             return
         self.translate_thread.translatePage(self.imgtrans_proj.pages, page_key)
+
+    def on_translation_failure_request(self, msg: str, page_key: str):
+        """Show Retry/Skip/Terminate dialog when translation fails in batch; set choice and wake waiting thread."""
+        from qtpy.QtWidgets import QApplication
+        box = QMessageBox(QApplication.activeWindow() if QApplication.instance() else None)
+        box.setWindowTitle(self.tr('Translation Failed'))
+        box.setText(msg)
+        box.setStandardButtons(QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Ignore | QMessageBox.StandardButton.Abort)
+        box.setDefaultButton(QMessageBox.StandardButton.Retry)
+        box.button(QMessageBox.StandardButton.Ignore).setText(self.tr('Skip'))
+        box.button(QMessageBox.StandardButton.Abort).setText(self.tr('Terminate'))
+        result = box.exec()
+        self._trans_failure_mutex.lock()
+        if result == QMessageBox.StandardButton.Retry:
+            self._trans_failure_choice = 'retry'
+        elif result == QMessageBox.StandardButton.Ignore:
+            self._trans_failure_choice = 'skip'
+        else:
+            self._trans_failure_choice = 'terminate'
+        self._trans_failure_condition.wakeAll()
+        self._trans_failure_mutex.unlock()
 
     def inpainterBusy(self):
         return self.inpaint_thread.isRunning()

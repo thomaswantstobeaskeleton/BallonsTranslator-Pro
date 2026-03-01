@@ -104,6 +104,11 @@ class LLM_API_Translator(BaseTranslator):
             "value": 1,
             "description": "Include this many previous pages (source+translation) as context for consistency. 0 = off. 1–2 recommended.",
         },
+        "context_next_page": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Include the next page's source text as context (helps with continuity; upstream #1142). Off by default.",
+        },
         "series_context_prompt": {
             "type": "editor",
             "value": "",
@@ -248,9 +253,10 @@ class LLM_API_Translator(BaseTranslator):
                         break
         return out
 
-    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None):
-        """Set previous pages (list of {sources, translations}) and project glossary for consistency."""
+    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None, next_page=None):
+        """Set previous pages (list of {sources, translations}), optional next_page {sources: [...]}, and project glossary for consistency."""
         self._translation_context_previous_pages = previous_pages or []
+        self._translation_context_next_page = next_page if next_page and isinstance(next_page, dict) else None
         self._translation_project_glossary = project_glossary or []
         if series_context_path is not None:
             self._translation_series_context_path = (series_context_path or "").strip()
@@ -483,7 +489,15 @@ class LLM_API_Translator(BaseTranslator):
                     else:
                         context_block = "...\n" + context_block[-max_chars:]
                 prompt_parts.append(context_block)
-
+        next_page = None
+        if self.get_param_value("context_next_page"):
+            next_page = getattr(self, "_translation_context_next_page", None)
+        if next_page and isinstance(next_page, dict):
+            srcs = next_page.get("sources") or []
+            if srcs:
+                next_preview = " ".join((s or "").strip() for s in srcs[:5])[:500]
+                if next_preview:
+                    prompt_parts.append("Next page (for context): " + next_preview.strip())
         prompt_parts.append(
             f"Please translate the following text snippets from {from_lang} to {to_lang}. "
             f"The input is provided as a JSON array. Respond with a JSON object in the specified format.\n\n"

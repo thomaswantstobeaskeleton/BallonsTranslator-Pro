@@ -2,6 +2,7 @@ import os.path as osp
 import os, re, traceback, sys
 import shutil
 import copy
+import numpy as np
 from typing import List, Union
 from pathlib import Path
 import subprocess
@@ -2161,30 +2162,56 @@ class MainWindow(mainwindow_cls):
         self.export_doc_thread.exportAsDoc(self.imgtrans_proj)
 
     def on_export_current_page_as(self):
-        """Export current page result image in chosen format (#126)."""
+        """Export current page as image: result if available, else inpainted, else original (#1134)."""
         if self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
             QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
             return
-        result_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)
-        if not osp.exists(result_path):
-            QMessageBox.information(self, self.tr('Export'), self.tr('No result for current page. Run pipeline first.'))
+        from utils.io_utils import imread, imwrite
+        current_img = self.imgtrans_proj.current_img
+        result_path = self.imgtrans_proj.get_result_path(current_img)
+        inpainted_path = self.imgtrans_proj.get_inpainted_path(current_img)
+        img = None
+        source_kind = None
+        if osp.exists(result_path):
+            img = imread(result_path)
+            source_kind = self.tr('result')
+        elif self.imgtrans_proj.inpainted_valid and self.imgtrans_proj.inpainted_array is not None:
+            img = np.array(self.imgtrans_proj.inpainted_array)
+            if img.ndim == 2:
+                img = np.stack([img] * 3, axis=-1)
+            elif img.shape[-1] == 4:
+                img = img[:, :, :3].copy()
+            source_kind = self.tr('inpainted')
+        elif inpainted_path and osp.exists(inpainted_path):
+            img = imread(inpainted_path)
+            if img is not None and img.ndim == 3 and img.shape[-1] == 4:
+                img = img[:, :, :3].copy()
+            source_kind = self.tr('inpainted')
+        if img is None:
+            orig_path = osp.join(self.imgtrans_proj.directory, current_img)
+            if osp.exists(orig_path):
+                img = imread(orig_path)
+                source_kind = self.tr('original')
+        if img is None:
+            QMessageBox.information(self, self.tr('Export'), self.tr('No image available for current page.'))
             return
         flt = 'PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;JXL (*.jxl)'
-        default_name = osp.splitext(self.imgtrans_proj.current_img)[0] + '.png'
+        default_name = osp.splitext(current_img)[0] + '.png'
         path, sel = QFileDialog.getSaveFileName(self, self.tr('Export current page as'), default_name, flt)
         if not path:
             return
         try:
-            from utils.io_utils import imread, imwrite
             ext = osp.splitext(path)[1].lower()
             if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
                 ext = '.png'
-            img = imread(result_path)
             kw = {'ext': ext, 'quality': pcfg.imgsave_quality}
             if ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
                 kw['webp_lossless'] = True
             imwrite(path, img, **kw)
-            QMessageBox.information(self, self.tr('Export'), self.tr('Saved to {}').format(path))
+            msg = self.tr('Saved to {}').format(path)
+            if source_kind:
+                msg += ' (' + source_kind + ')'
+            QMessageBox.information(self, self.tr('Export'), msg)
         except Exception as e:
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Export failed'))
