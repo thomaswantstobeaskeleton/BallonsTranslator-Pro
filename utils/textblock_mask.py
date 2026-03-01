@@ -374,6 +374,8 @@ def extract_ballon_mask(img: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, 
     img = cv2.GaussianBlur(img,(3,3),cv2.BORDER_DEFAULT)
     h, w = img.shape[:2]
     text_sum = np.sum(mask)
+    if text_sum == 0:
+        return None, None
     cannyed = cv2.Canny(img, 70, 140, L2gradient=True, apertureSize=3)
     e_size = 1
     element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * e_size + 1, 2 * e_size + 1),(e_size, e_size))

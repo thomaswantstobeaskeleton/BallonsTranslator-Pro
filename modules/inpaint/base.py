@@ -163,14 +163,16 @@ class InpainterBase(BaseModule):
             self.load_model()
         
         # Dilate mask so stroke edges, punctuation, and anti-aliased text are fully covered (reduces leftover/ghost text in bubbles)
-        # Use a small kernel (3×3) to avoid overdoing small bubbles; iterations configurable via mask_dilation_iterations
+        # Kernel size and iterations control how much the mask grows: smaller kernel + fewer iterations = keep bubble shape, less over-inpaint
         mask = np.copy(mask)
         if mask.ndim == 3:
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         binary = (mask > 127).astype(np.uint8) * 255
         dilate_iter = getattr(self, 'mask_dilation_iterations', 2)
         if dilate_iter > 0:
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            k = getattr(self, 'mask_dilation_kernel_size', 2)
+            k = max(2, min(5, int(k)))
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
             mask = cv2.dilate(binary, kernel, iterations=dilate_iter)
         else:
             mask = binary
@@ -217,11 +219,28 @@ class InpainterBase(BaseModule):
             # Preserve original mask for transparency analysis
             original_mask = mask.copy()
             
+            # Optional: exclude blocks by detector label (e.g. scene text); off by default so all blocks are inpainted
+            if getattr(pcfg.module, 'inpaint_exclude_labels_enabled', False):
+                exclude_str = (getattr(pcfg.module, 'inpaint_exclude_labels', None) or '').strip()
+                if exclude_str:
+                    excluded_labels = {s.strip().lower() for s in exclude_str.split(',') if s.strip()}
+                    textblock_list = [b for b in textblock_list if (getattr(b, 'label', None) or '').strip().lower() not in excluded_labels]
+            
+            # Crop enlargement ratio: lower = tighter crop, less risk of including adjacent bubbles and over-filling (was 1.7, often too large)
+            enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 1.2)
             for blk in textblock_list:
                 xyxy = blk.xyxy
-                xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=1.7)
+                xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=enlarge_ratio)
+                # Skip blocks with degenerate crop (e.g. zero-area bbox or invalid enlarge_window result)
+                crop_w = xyxy_e[2] - xyxy_e[0]
+                crop_h = xyxy_e[3] - xyxy_e[1]
+                if crop_w < 2 or crop_h < 2:
+                    continue
                 im = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
                 msk = mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+                # Skip if this crop has no text mask left (e.g. already covered by a previous block's enlarged region)
+                if np.sum(msk > 127) == 0:
+                    continue
                 need_inpaint = True
                 if self.check_need_inpaint or check_need_inpaint:
                     ballon_msk, non_text_msk = extract_ballon_mask(im, msk)
@@ -249,7 +268,9 @@ class InpainterBase(BaseModule):
                 if need_inpaint:
                     inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(im, msk)
 
-                mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
+                # Clear the enlarged crop in the mask so neighboring blocks don't see this region as 255
+                # (prevents double-inpaint and wrong mask context in overlapping margins)
+                mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = 0
             
             # Recombine with alpha if original was RGBA
             if original_alpha is not None:
@@ -579,6 +600,7 @@ class LamaInpainterMPE(InpainterBase):
 class LamaLarge(LamaInpainterMPE):
 
     mask_dilation_iterations = 1
+    mask_dilation_kernel_size = 2  # 2×2 = gentler expansion per iteration; 3×3 = stronger
     # Always run LaMa; skip median fill to avoid "weird box of a certain color" in speech bubbles
     check_need_inpaint = False
 
@@ -589,16 +611,28 @@ class LamaLarge(LamaInpainterMPE):
                 512,
                 768,
                 1024,
-                1536, 
+                1536,
                 2048
-            ], 
+            ],
             'value': 1024,
         },
         'mask_dilation': {
             'type': 'selector',
             'options': [0, 1, 2, 3, 4, 5],
+            'value': 1,
+            'description': 'Mask dilation iterations (0–5). 0 = no expansion, keeps bubble edges. 1 = minimal. Higher values expand the mask more and can erase bubble shape.',
+        },
+        'mask_dilation_kernel': {
+            'type': 'selector',
+            'options': [2, 3],
             'value': 2,
-            'description': 'Mask dilation (0–5). Lower = less small-bubble distortion; higher = better coverage for dots/smudges.',
+            'description': 'Dilation kernel size (2 or 3). 2 = gentler expansion per iteration; 3 = stronger. Use 2 if inpainting is too strong.',
+        },
+        'inpaint_enlarge_ratio': {
+            'type': 'selector',
+            'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7],
+            'value': 1.2,
+            'description': 'Crop margin ratio (1.1–1.7). Lower = tighter crop, keeps bubble shape. Higher = more context, risk of merging adjacent bubbles.',
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone']),
         'precision': {
@@ -606,9 +640,9 @@ class LamaLarge(LamaInpainterMPE):
             'options': [
                 'fp32',
                 'bf16'
-            ], 
+            ],
             'value': 'bf16' if BF16_SUPPORTED == 'cuda' else 'fp32'
-        }, 
+        },
     }
 
     download_file_list = [{
@@ -621,9 +655,13 @@ class LamaLarge(LamaInpainterMPE):
         super().__init__(**params)
         self.precision = self.params['precision']['value']
         self._update_mask_dilation()
+        self._update_mask_dilation_kernel()
 
     def _update_mask_dilation(self):
         self.mask_dilation_iterations = int(self.params.get('mask_dilation', {}).get('value', 1))
+
+    def _update_mask_dilation_kernel(self):
+        self.mask_dilation_kernel_size = int(self.params.get('mask_dilation_kernel', {}).get('value', 2))
 
     def _load_model(self):
         device = self.params['device']['value']
@@ -636,6 +674,8 @@ class LamaLarge(LamaInpainterMPE):
         super().updateParam(param_key, param_content)
         if param_key == 'mask_dilation':
             self._update_mask_dilation()
+        elif param_key == 'mask_dilation_kernel':
+            self._update_mask_dilation_kernel()
 
 
 # LAMA_ORI: LamaFourier = None
