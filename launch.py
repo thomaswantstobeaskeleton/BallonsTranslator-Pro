@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*
 # Disable Paddle oneDNN before any Paddle import (avoids ConvertPirAttribute2RuntimeAttribute error on Windows)
 os.environ["FLAGS_use_mkldnn"] = "0"
 
-BRANCH = 'dev'
-VERSION = '1.4.0'
+BRANCH = 'main'
+VERSION = '1.5.0'
 
 python = sys.executable
 git = os.environ.get('GIT', "git")
