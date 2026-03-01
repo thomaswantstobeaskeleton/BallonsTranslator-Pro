@@ -7,6 +7,7 @@ import sys
 from utils.registry import Registry
 from utils.textblock_mask import extract_ballon_mask
 from utils.imgproc_utils import enlarge_window
+from utils.config import pcfg
 
 from ..base import BaseModule, DEFAULT_DEVICE, soft_empty_cache, DEVICE_SELECTOR, GPUINTENSIVE_SET, TORCH_DTYPE_MAP, BF16_SUPPORTED
 from ..textdetector import TextBlock
@@ -57,10 +58,41 @@ class InpainterBase(BaseModule):
     
     def memory_safe_inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
         '''
-        handle cuda out of memory
+        handle cuda out of memory; optionally run tiled inpainting when tile_size is set.
         '''
+        import torch
+        tile_size = getattr(pcfg.module, 'inpaint_tile_size', 0) or 0
+        tile_overlap = max(0, getattr(pcfg.module, 'inpaint_tile_overlap', 64) or 0)
+        h, w = img.shape[:2]
+        # Only tile when image is substantially larger than tile_size (avoids grey blobs on medium crops)
+        use_tiling = (
+            tile_size > 0
+            and (h > tile_size * 3 // 2 or w > tile_size * 3 // 2)
+            and tile_overlap < tile_size
+        )
+
+        def do_inpaint(im, msk, blk_list=None):
+            return self._inpaint(im, msk, blk_list)
+
+        if use_tiling:
+            try:
+                return self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
+            except Exception as e:
+                if DEFAULT_DEVICE == 'cuda' and isinstance(e, torch.cuda.OutOfMemoryError):
+                    soft_empty_cache()
+                    try:
+                        return self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
+                    except Exception as ee:
+                        if isinstance(ee, torch.cuda.OutOfMemoryError):
+                            self.logger.warning(f'CUDA OOM during tiled inpainting ({self.name}). Try smaller tile size or disable tiling.')
+                            self.moveToDevice('cpu')
+                            out = self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
+                            precision = getattr(self, 'precision', None)
+                            self.moveToDevice('cuda', precision)
+                            return out
+                raise e
         try:
-            return self._inpaint(img, mask, textblock_list)
+            return do_inpaint(img, mask, textblock_list)
         except Exception as e:
             if DEFAULT_DEVICE == 'cuda' and isinstance(e, torch.cuda.OutOfMemoryError):
                 soft_empty_cache()
@@ -80,6 +112,50 @@ class InpainterBase(BaseModule):
                         return inpainted
             else:
                 raise e
+
+    def _inpaint_tiled(self, img: np.ndarray, mask: np.ndarray, tile_size: int, tile_overlap: int, do_inpaint) -> np.ndarray:
+        """Run inpainting in overlapping tiles and blend in overlap regions. do_inpaint(im, msk) -> inpainted crop."""
+        h, w = img.shape[:2]
+        stride = max(1, tile_size - tile_overlap)
+        out = np.zeros_like(img, dtype=np.float64)
+        weight_sum = np.zeros((h, w), dtype=np.float64)
+        # Tile bounds: [y1, y2, x1, x2] so that y2-y1 <= tile_size, x2-x1 <= tile_size
+        y_starts = list(range(0, h, stride))
+        x_starts = list(range(0, w, stride))
+        if y_starts[-1] + tile_size < h:
+            y_starts.append(max(0, h - tile_size))
+        if x_starts[-1] + tile_size < w:
+            x_starts.append(max(0, w - tile_size))
+        for y0 in y_starts:
+            for x0 in x_starts:
+                y1 = min(y0 + tile_size, h)
+                x1 = min(x0 + tile_size, w)
+                tile_img = img[y0:y1, x0:x1]
+                tile_mask = mask[y0:y1, x0:x1]
+                if np.sum(tile_mask > 127) == 0:
+                    out[y0:y1, x0:x1] += tile_img.astype(np.float64)
+                    weight_sum[y0:y1, x0:x1] += 1.0
+                    continue
+                tile_out = do_inpaint(tile_img, tile_mask, None)
+                th, tw = tile_out.shape[:2]
+                # Linear blend weight: 1 in center, 0 at tile edges over overlap zone
+                wy = np.ones((th,), dtype=np.float64)
+                wx = np.ones((tw,), dtype=np.float64)
+                if tile_overlap > 0:
+                    fade = np.linspace(1, 0, tile_overlap + 1, dtype=np.float64)
+                    wy[:tile_overlap + 1] = np.minimum(wy[:tile_overlap + 1], fade)
+                    wy[-tile_overlap - 1:] = np.minimum(wy[-tile_overlap - 1:], fade[::-1])
+                    wx[:tile_overlap + 1] = np.minimum(wx[:tile_overlap + 1], fade)
+                    wx[-tile_overlap - 1:] = np.minimum(wx[-tile_overlap - 1:], fade[::-1])
+                w2d = wy[:, np.newaxis] * wx[np.newaxis, :]
+                out[y0:y1, x0:x1] += tile_out.astype(np.float64) * w2d
+                weight_sum[y0:y1, x0:x1] += w2d
+        weight_sum[weight_sum < 1e-6] = 1.0
+        if out.ndim == 3:
+            out = (out / weight_sum[:, :, np.newaxis]).astype(img.dtype)
+        else:
+            out = (out / weight_sum).astype(img.dtype)
+        return np.clip(out, 0, 255).astype(img.dtype)
 
     def inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None, check_need_inpaint: bool = False) -> np.ndarray:
         
