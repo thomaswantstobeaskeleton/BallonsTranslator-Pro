@@ -1,5 +1,6 @@
 import os.path as osp
 import os, re, traceback, sys
+import shutil
 import copy
 from typing import List, Union
 from pathlib import Path
@@ -9,7 +10,7 @@ import time
 import cv2
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent
 
@@ -45,6 +46,9 @@ from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMess
 from .model_manager_dialog import ModelManagerDialog
 from .shortcuts_dialog import ShortcutsDialog
 from .batch_queue_dialog import BatchQueueDialog
+from .export_dialog import ExportFormatDialog
+from .spellcheck_panel import SpellCheckPanel
+from .image_edit import ImageEditMode
 
 class PageListView(QListWidget):
 
@@ -176,6 +180,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.open_json_proj.connect(self.openJsonProj)
         self.leftBar.save_proj.connect(self.manual_save)
         self.leftBar.export_doc.connect(self.on_export_doc)
+        self.leftBar.export_current_page_as.connect(self.on_export_current_page_as)
         self.leftBar.import_doc.connect(self.on_import_doc)
         self.leftBar.export_src_txt.connect(lambda : self.on_export_txt(dump_target='source'))
         self.leftBar.export_trans_txt.connect(lambda : self.on_export_txt(dump_target='translation'))
@@ -247,6 +252,8 @@ class MainWindow(mainwindow_cls):
         self.canvas.split_selected_regions_signal.connect(self.on_split_selected_regions)
         self.canvas.move_blocks_up_signal.connect(self.on_move_blocks_up)
         self.canvas.move_blocks_down_signal.connect(self.on_move_blocks_down)
+        self.canvas.import_image_to_blk.connect(self.on_import_image_to_blk)
+        self.canvas.clear_overlay_signal.connect(self.on_clear_overlay)
 
         self.bottomBar.originalSlider.valueChanged.connect(self.canvas.setOriginalTransparencyBySlider)
         self.bottomBar.textlayerSlider.valueChanged.connect(self.canvas.setTextLayerTransparencyBySlider)
@@ -284,6 +291,10 @@ class MainWindow(mainwindow_cls):
         self.rightComicTransStackPanel = QStackedWidget(self)
         self.rightComicTransStackPanel.addWidget(self.drawingPanel)
         self.rightComicTransStackPanel.addWidget(self.textPanel)
+        self.spellCheckPanel = SpellCheckPanel(self)
+        self.spellCheckPanel.set_get_blocks(self._spellcheck_get_blocks)
+        self.spellCheckPanel.set_apply_replacement(self._spellcheck_apply_replacement)
+        self.rightComicTransStackPanel.addWidget(self.spellCheckPanel)
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
         self.comicTransSplitter = QSplitter(Qt.Orientation.Horizontal)
@@ -768,6 +779,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.prevpage_trigger.connect(self.shortcutBefore)
         self.titleBar.textedit_trigger.connect(self.shortcutTextedit)
         self.titleBar.drawboard_trigger.connect(self.shortcutDrawboard)
+        self.titleBar.spellcheck_panel_trigger.connect(self.shortcutSpellCheckPanel)
         self.titleBar.redo_trigger.connect(self.on_redo)
         self.titleBar.undo_trigger.connect(self.on_undo)
         self.titleBar.page_search_trigger.connect(self.on_page_search)
@@ -787,6 +799,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.re_run_detection_only_trigger.connect(self.on_re_run_detection_only)
         self.titleBar.re_run_ocr_only_trigger.connect(self.on_re_run_ocr_only)
         self.titleBar.batch_export_trigger.connect(self.on_batch_export)
+        self.titleBar.batch_export_as_trigger.connect(self.on_batch_export_as)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
@@ -796,6 +809,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
         self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
         self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
+        self.titleBar.help_doc_trigger.connect(self.on_help_documentation)
+        self.titleBar.help_about_trigger.connect(self.on_help_about)
 
         sc = getattr(pcfg, "shortcuts", None) or {}
         self._shortcuts_list = []  # (action_id, default_key, QShortcut)
@@ -854,6 +869,57 @@ class MainWindow(mainwindow_cls):
         dlg.shortcuts_changed.connect(self.apply_shortcuts)
         dlg.show()
 
+    def on_help_documentation(self):
+        """Open project README (#126 Help menu)."""
+        root = osp.dirname(osp.dirname(osp.abspath(__file__)))
+        readme = osp.join(root, 'README.md')
+        if osp.isfile(readme):
+            if sys.platform == 'win32':
+                os.startfile(readme)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', readme], check=False)
+            else:
+                subprocess.run(['xdg-open', readme], check=False)
+        else:
+            create_info_dialog({'title': self.tr('Documentation'), 'text': self.tr('README.md not found.')})
+
+    def on_help_about(self):
+        """Show About dialog (#126 Help menu)."""
+        from launch import VERSION
+        QMessageBox.about(
+            self,
+            self.tr('About'),
+            self.tr('BallonsTranslatorPro — community fork') + f' {VERSION}\n\n' + self.tr('Deep learning–assisted comic/manga translation.')
+        )
+
+    def _spellcheck_get_blocks(self):
+        """Return [(block_idx, text_lines, trans_lines), ...] for current page (PR #974)."""
+        page = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
+        return [
+            (i, getattr(blk, 'text', None) or [], (getattr(blk, 'translation', None) or '').split('\n'))
+            for i, blk in enumerate(page)
+        ]
+
+    def _spellcheck_apply_replacement(self, block_idx: int, line_idx: int, new_line: str, is_translation: bool):
+        """Apply spell check replacement to block (PR #974)."""
+        page = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
+        if block_idx < 0 or block_idx >= len(page):
+            return
+        blk = page[block_idx]
+        if is_translation:
+            lines = (blk.translation or '').split('\n')
+            if line_idx < len(lines):
+                lines[line_idx] = new_line
+                blk.translation = '\n'.join(lines)
+                if block_idx < len(self.st_manager.pairwidget_list):
+                    self.st_manager.pairwidget_list[block_idx].e_trans.setPlainText(blk.translation)
+        else:
+            if hasattr(blk, 'text') and blk.text is not None and line_idx < len(blk.text):
+                blk.text[line_idx] = new_line
+                if block_idx < len(self.st_manager.pairwidget_list):
+                    self.st_manager.pairwidget_list[block_idx].e_source.setPlainText(blk.get_text())
+        self.canvas.setProjSaveState(False)
+
     def shortcutNext(self):
         sender: QShortcut = self.sender()
         if isinstance(sender, QShortcut):
@@ -906,6 +972,15 @@ class MainWindow(mainwindow_cls):
     def shortcutDrawboard(self):
         if self.centralStackWidget.currentIndex() == 0:
             self.bottomBar.paintChecker.click()
+
+    def shortcutSpellCheckPanel(self):
+        """Show Spell check panel (PR #974)."""
+        if self.centralStackWidget.currentIndex() != 0:
+            return
+        if self.rightComicTransStackPanel.isHidden():
+            self.rightComicTransStackPanel.show()
+            self.bottomBar.paintChecker.setChecked(True)
+        self.rightComicTransStackPanel.setCurrentIndex(2)
 
     def shortcutCtrlD(self):
         if self.centralStackWidget.currentIndex() == 0:
@@ -1307,6 +1382,24 @@ class MainWindow(mainwindow_cls):
         out_dir = QFileDialog.getExistingDirectory(self, self.tr('Select output folder'))
         if not out_dir:
             return
+        self._do_batch_export(out_dir, ext=None)
+
+    def on_batch_export_as(self):
+        """Export all pages with chosen format (#126 Export as)."""
+        if self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        initial = self.imgtrans_proj.directory if self.imgtrans_proj.directory else None
+        dlg = ExportFormatDialog(self, initial_dir=initial)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        out_dir = dlg.get_folder()
+        if not out_dir:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Select an output folder.'))
+            return
+        self._do_batch_export(out_dir, ext=dlg.get_extension())
+
+    def _do_batch_export(self, out_dir: str, ext: str = None):
         try:
             from utils.io_utils import imread, imwrite
             result_dir = self.imgtrans_proj.result_dir()
@@ -1315,11 +1408,14 @@ class MainWindow(mainwindow_cls):
             for pagename in self.imgtrans_proj.pages:
                 result_path = self.imgtrans_proj.get_result_path(pagename)
                 if osp.exists(result_path):
-                    ext = osp.splitext(result_path)[1]
-                    dest = osp.join(out_dir, osp.splitext(pagename)[0] + ext)
+                    use_ext = ext if ext else osp.splitext(result_path)[1]
+                    if use_ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
+                        use_ext = '.png'
+                    base = osp.splitext(pagename)[0]
+                    dest = osp.join(out_dir, base + use_ext)
                     img = imread(result_path)
-                    kw = {'ext': ext if ext in ('.png', '.jpg', '.jpeg', '.webp', '.jxl') else '.png', 'quality': pcfg.imgsave_quality}
-                    if kw['ext'] == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
+                    kw = {'ext': use_ext, 'quality': pcfg.imgsave_quality}
+                    if use_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
                         kw['webp_lossless'] = True
                     imwrite(dest, img, **kw)
                     exported += 1
@@ -1402,6 +1498,12 @@ class MainWindow(mainwindow_cls):
             self.canvas.search_widget.hide()
         elif self.canvas.editing_textblkitem is not None and self.canvas.editing_textblkitem.isEditing():
             self.canvas.editing_textblkitem.endEdit()
+        elif self.canvas.image_edit_mode == ImageEditMode.TextEraserTool:
+            self.drawingPanel.setCurrentToolByName('hand')
+            if hasattr(self.canvas, '_text_eraser_selected_blocks'):
+                self.canvas._text_eraser_selected_blocks = None
+        elif self.canvas.drawMode() and self.canvas.cancel_rect_selection():
+            pass  # rect selection cancelled (#126)
 
     def setPaintMode(self):
         if self.bottomBar.paintChecker.isChecked():
@@ -1996,6 +2098,35 @@ class MainWindow(mainwindow_cls):
             self.st_manager.updateTextBlkList()
         self.export_doc_thread.exportAsDoc(self.imgtrans_proj)
 
+    def on_export_current_page_as(self):
+        """Export current page result image in chosen format (#126)."""
+        if self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
+            return
+        result_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)
+        if not osp.exists(result_path):
+            QMessageBox.information(self, self.tr('Export'), self.tr('No result for current page. Run pipeline first.'))
+            return
+        flt = 'PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;JXL (*.jxl)'
+        default_name = osp.splitext(self.imgtrans_proj.current_img)[0] + '.png'
+        path, sel = QFileDialog.getSaveFileName(self, self.tr('Export current page as'), default_name, flt)
+        if not path:
+            return
+        try:
+            from utils.io_utils import imread, imwrite
+            ext = osp.splitext(path)[1].lower()
+            if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
+                ext = '.png'
+            img = imread(result_path)
+            kw = {'ext': ext, 'quality': pcfg.imgsave_quality}
+            if ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
+                kw['webp_lossless'] = True
+            imwrite(path, img, **kw)
+            QMessageBox.information(self, self.tr('Export'), self.tr('Saved to {}').format(path))
+        except Exception as e:
+            LOGGER.exception(e)
+            create_error_dialog(e, self.tr('Export failed'))
+
     def on_import_doc(self):
         self.import_doc_thread.importDoc(self.imgtrans_proj)
 
@@ -2520,6 +2651,60 @@ class MainWindow(mainwindow_cls):
             return
         self.st_manager.swap_block_positions(idx, idx + 1)
         self.canvas.setProjSaveState(False)
+
+    def on_import_image_to_blk(self):
+        """PR #1070: Import image as foreground overlay for the single selected empty block."""
+        if self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
+            return
+        sel = self.canvas.selected_text_items()
+        if len(sel) != 1 or not sel[0].document().isEmpty():
+            return
+        item = sel[0]
+        blk = getattr(item, 'blk', None)
+        if blk is None:
+            return
+        flt = self.tr("Images") + " (*.png *.jpg *.jpeg *.bmp *.webp);;" + self.tr("All files") + " (*.*)"
+        path, _ = QFileDialog.getOpenFileName(self, self.tr("Import Image"), None, flt)
+        if not path or not osp.isfile(path):
+            return
+        proj_dir = self.imgtrans_proj.directory
+        overlay_dir = osp.join(proj_dir, "overlays")
+        try:
+            os.makedirs(overlay_dir, exist_ok=True)
+        except OSError:
+            create_error_dialog(self, self.tr("Could not create overlays folder."))
+            return
+        base = osp.splitext(osp.basename(self.imgtrans_proj.current_img or "page"))[0]
+        ext = osp.splitext(path)[1] or ".png"
+        dest_name = f"{base}_blk{item.idx}{ext}"
+        dest_path = osp.join(overlay_dir, dest_name)
+        try:
+            shutil.copy2(path, dest_path)
+        except OSError as e:
+            create_error_dialog(self, self.tr("Could not copy image: ") + str(e))
+            return
+        rel_path = osp.join("overlays", dest_name)
+        blk.foreground_image_path = rel_path
+        item.invalidate_foreground_cache()
+        item.update()
+        self.imgtrans_proj.save()
+        self.canvas.setProjSaveState(False)
+
+    def on_clear_overlay(self):
+        """PR #1070: Clear foreground image overlay from the selected block."""
+        sel = self.canvas.selected_text_items()
+        if len(sel) != 1:
+            return
+        item = sel[0]
+        blk = getattr(item, 'blk', None)
+        if blk is None or not getattr(blk, 'foreground_image_path', None):
+            return
+        blk.foreground_image_path = None
+        item.invalidate_foreground_cache()
+        item.update()
+        if not self.imgtrans_proj.is_empty and self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
     
     def run_batch(self, exec_dirs: Union[List, str], **kwargs):
         if not isinstance(exec_dirs, List):
