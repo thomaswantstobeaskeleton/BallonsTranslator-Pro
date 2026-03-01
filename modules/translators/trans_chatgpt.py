@@ -80,7 +80,22 @@ class GPTTranslator(BaseTranslator):
             'value': False,
             'description': 'check it if you\'re running it locally on a single device and encountered a crash due to vram OOM',
             'type': 'checkbox',
-        }
+        },
+        'context previous pages count': {
+            'value': 0,
+            'description': 'Number of previous pages to include as context for terminology/style (0 = off).',
+            'type': 'line_editor',
+        },
+        'context next page': {
+            'value': False,
+            'description': 'Include next page source lines as context.',
+            'type': 'checkbox',
+        },
+        'context max chars': {
+            'value': 400,
+            'description': 'Max characters for previous/next context to avoid token limits.',
+            'type': 'line_editor',
+        },
     }
 
     def _setup_translator(self):
@@ -110,6 +125,8 @@ class GPTTranslator(BaseTranslator):
 
         self.token_count = 0
         self.token_count_last = 0
+        self._translation_context_previous_pages = None
+        self._translation_context_next_page = None
     
     @property
     def model(self) -> str:
@@ -167,6 +184,51 @@ class GPTTranslator(BaseTranslator):
         else:
             return None
 
+    def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None, next_page=None):
+        """Store previous/next page context for continuity (used when building prompts)."""
+        self._translation_context_previous_pages = previous_pages if previous_pages is not None else []
+        self._translation_context_next_page = next_page if isinstance(next_page, dict) else None
+
+    def _context_previous_pages_count(self) -> int:
+        try:
+            v = self.get_param_value('context previous pages count')
+            return max(0, min(5, int(v) if v is not None else 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _build_context_block(self) -> str:
+        """Build optional previous/next page context string for the prompt."""
+        parts = []
+        n_prev = self._context_previous_pages_count()
+        prev_pages = getattr(self, '_translation_context_previous_pages', None) or []
+        if n_prev > 0 and prev_pages:
+            entries = prev_pages[-n_prev:]
+            lines = []
+            for page in entries:
+                trans = (page.get('translations') or [])
+                if trans:
+                    lines.extend((t or '').strip() for t in trans if (t or '').strip())
+            if lines:
+                raw = ' '.join(lines)
+                try:
+                    max_chars = int(self.get_param_value('context max chars') or 0)
+                except (TypeError, ValueError):
+                    max_chars = 400
+                if max_chars > 0 and len(raw) > max_chars:
+                    raw = raw[-max_chars:]
+                parts.append('Previous context (for terminology and style):\n' + raw)
+        if self.get_param_value('context next page'):
+            next_page = getattr(self, '_translation_context_next_page', None)
+            if next_page and isinstance(next_page, dict):
+                srcs = next_page.get('sources') or []
+                if srcs:
+                    preview = ' '.join((s or '').strip() for s in srcs[:5])[:500]
+                    if preview:
+                        parts.append('Next page (for context): ' + preview.strip())
+        if not parts:
+            return ''
+        return '\n\n'.join(parts) + '\n\n'
+
     def _assemble_prompts(self, queries: List[str], from_lang: str = None, to_lang: str = None, max_tokens = None):
         if from_lang is None:
             from_lang = self.lang_map[self.lang_source]
@@ -174,6 +236,7 @@ class GPTTranslator(BaseTranslator):
             to_lang = self.lang_map[self.lang_target]
             
         prompt = ''
+        context_prefix = self._build_context_block()
 
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -189,11 +252,13 @@ class GPTTranslator(BaseTranslator):
             # If prompt is growing too large and theres still a lot of text left
             # split off the rest of the queries into new prompts.
             # 1 token = ~4 characters according to https://platform.openai.com/tokenizer
-            # TODO: potentially add summarizations from special requests as context information
+            # Optional future: prepend a short summary of the previous chunk as context for continuity
+            # (see trans_llm_api.py context summarization and set_translation_context for the pattern).
             if max_tokens * 2 and len(''.join(queries[i+1:])) > max_tokens:
                 # if return_prompt:
                 #     prompt += '\n<|1|>'
-                yield prompt.lstrip(), num_src
+                out = (context_prefix + prompt) if context_prefix else prompt
+                yield out.lstrip(), num_src
                 prompt = prompt_template
                 # Restart counting at 1
                 i_offset = i + 1
@@ -201,7 +266,8 @@ class GPTTranslator(BaseTranslator):
 
         # if return_prompt:
         #     prompt += '\n<|1|>'
-        yield prompt.lstrip(), num_src
+        out = (context_prefix + prompt) if context_prefix else prompt
+        yield out.lstrip(), num_src
 
     def _format_prompt_log(self, to_lang: str, prompt: str) -> str:
         chat_sample = self.chat_sample
