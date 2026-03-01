@@ -887,6 +887,13 @@ class ConfigPanel(Widget):
             self.inpaint_config_panel.inpaint_tile_overlap_spin.blockSignals(True)
             self.inpaint_config_panel.inpaint_tile_overlap_spin.setValue(getattr(pcfg.module, 'inpaint_tile_overlap', 64))
             self.inpaint_config_panel.inpaint_tile_overlap_spin.blockSignals(False)
+        if hasattr(self.inpaint_config_panel, 'exclude_labels_checker'):
+            self.inpaint_config_panel.exclude_labels_checker.setChecked(getattr(pcfg.module, 'inpaint_exclude_labels_enabled', False))
+            self.inpaint_config_panel.exclude_labels_edit.setEnabled(self.inpaint_config_panel.exclude_labels_checker.isChecked())
+        if hasattr(self.inpaint_config_panel, 'exclude_labels_edit'):
+            self.inpaint_config_panel.exclude_labels_edit.blockSignals(True)
+            self.inpaint_config_panel.exclude_labels_edit.setText(getattr(pcfg.module, 'inpaint_exclude_labels', '') or '')
+            self.inpaint_config_panel.exclude_labels_edit.blockSignals(False)
         self.let_effect_combox.setCurrentIndex(pcfg.let_fnteffect_flag)
         self.let_fntsize_combox.setCurrentIndex(pcfg.let_fntsize_flag)
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)

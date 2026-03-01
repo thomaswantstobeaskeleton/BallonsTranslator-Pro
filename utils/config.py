@@ -41,6 +41,9 @@ class ModuleConfig(Config):
     check_need_inpaint: bool = True
     inpaint_tile_size: int = 0   # 0 = no tiling (recommended); set 512–1024 only if OOM
     inpaint_tile_overlap: int = 64   # overlap between tiles (px); only used when tile_size > 0
+    # Optional: exclude text blocks by detector label from inpainting (e.g. leave scene text as-is). Off by default.
+    inpaint_exclude_labels_enabled: bool = False
+    inpaint_exclude_labels: str = ''  # comma-separated, case-insensitive (e.g. "other,scene")
     load_model_on_demand: bool = False
     empty_runcache: bool = False
     finish_code: int = 15

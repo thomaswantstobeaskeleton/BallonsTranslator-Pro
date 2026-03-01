@@ -468,6 +468,34 @@ class InpaintConfigPanel(ModuleConfigParseWidget):
         self.inpaint_tile_size_spin.valueChanged.connect(self._on_inpaint_tile_size_changed)
         self.inpaint_tile_overlap_spin.valueChanged.connect(self._on_inpaint_tile_overlap_changed)
 
+        # Optional: exclude blocks by detector label from inpainting (off by default)
+        self.exclude_labels_checker = QCheckBox(self.tr('Exclude certain labels from inpainting'))
+        self.exclude_labels_checker.setChecked(getattr(pcfg.module, 'inpaint_exclude_labels_enabled', False))
+        self.exclude_labels_checker.setToolTip(self.tr(
+            'When enabled, text blocks whose detector label is in the list below will not be inpainted (e.g. leave scene text as-is). '
+            'Labels are case-insensitive. Requires a detector that sets block labels (e.g. YSG YOLO).'))
+        self.exclude_labels_checker.clicked.connect(self._on_exclude_labels_checker_changed)
+        self.vlayout.addWidget(self.exclude_labels_checker)
+        exclude_hl = QHBoxLayout()
+        exclude_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        exclude_hl.addWidget(QLabel(self.tr('Labels to exclude (comma-separated):')))
+        self.exclude_labels_edit = QLineEdit()
+        self.exclude_labels_edit.setPlaceholderText(self.tr('e.g. other, scene'))
+        self.exclude_labels_edit.setText(getattr(pcfg.module, 'inpaint_exclude_labels', '') or '')
+        self.exclude_labels_edit.setEnabled(self.exclude_labels_checker.isChecked())
+        self.exclude_labels_edit.textChanged.connect(self._on_exclude_labels_edit_changed)
+        self.exclude_labels_edit.setToolTip(self.tr('Comma-separated detector labels to exclude from inpainting.'))
+        exclude_hl.addWidget(self.exclude_labels_edit)
+        self.vlayout.addLayout(exclude_hl)
+
+    def _on_exclude_labels_checker_changed(self):
+        enabled = self.exclude_labels_checker.isChecked()
+        pcfg.module.inpaint_exclude_labels_enabled = enabled
+        self.exclude_labels_edit.setEnabled(enabled)
+
+    def _on_exclude_labels_edit_changed(self, text: str):
+        pcfg.module.inpaint_exclude_labels = (text or '').strip()
+
     def _on_inpaint_tile_size_changed(self, value: int):
         pcfg.module.inpaint_tile_size = value
 

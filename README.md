@@ -766,6 +766,7 @@ Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md
 
 - **lama_large_512px:** Options 512, 768, 1024, 1536, 2048. Default 1024. Smaller = less VRAM, gentler on small bubbles; larger = more detail on big regions. Avoid 2048 unless needed (risk of artifacts).
 - **Inpaint tiling (OOM fix):** Config → Inpainting (or DL Module) → **Inpaint tile size** (0 = off; 512–1024 for OOM), **Inpaint tile overlap** (64 px). Tiling activates when image is > 1.5× tile size; tiles are processed separately and stitched with overlap blending. Use only when you get out-of-memory errors; tiling can cause grey or blurry bubbles.
+- **Exclude labels from inpainting (optional):** Config → Inpainting → **Exclude certain labels from inpainting** (off by default). When enabled, enter comma-separated detector labels (e.g. `other, scene`); blocks with those labels are not inpainted (e.g. leave scene text or signs as-is). Requires a detector that sets block labels (e.g. YSG YOLO). When off, all detected text regions are inpainted.
 - **lama_mpe, aot:** 1024 or 2048.
 - **Diffusers-based (SD, SD2, SDXL, DreamShaper, Fluently, Kandinsky, RePaint, Qwen-Image-Edit):** Each has an **inpaint_size** (or similar) in params; 512/768/1024 typical. Match to model native resolution when possible.
 - **lama_onnx:** 512 (model is 512×512); param controls max side before resize.
@@ -828,6 +829,8 @@ Module-specific params (CTD box score, mask dilation, inpaint_size, translator A
 | | `textdetector_secondary` | str | '' | Secondary detector name |
 | | `inpaint_tile_size` | int | 0 | 0 = off; 512–1024 for OOM |
 | | `inpaint_tile_overlap` | int | 64 | Overlap between tiles (px) |
+| | `inpaint_exclude_labels_enabled` | bool | false | When true, exclude blocks by label (see **Exclude certain labels from inpainting**) |
+| | `inpaint_exclude_labels` | str | '' | Comma-separated labels to exclude (e.g. `other, scene`); used when above is true |
 | **Manga source** | `manga_source_lang` | str | 'en' | Chapter feed language |
 | | `manga_source_data_saver` | bool | false | Use data-saver images |
 | | `manga_source_download_dir` | str | '' | Default: `~/BallonsTranslator/Downloaded Chapters` |
