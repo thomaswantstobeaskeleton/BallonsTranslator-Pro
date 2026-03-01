@@ -67,6 +67,8 @@ This document maps the **curated list of 20+ models per category** (from communi
 | **APIs (Google Vision, Bing, Nanonets)** | ✅ **google_vision**, **bing_ocr**, **nanonets_ocr** | API keys required. |
 | **LLM-based OCR** | ✅ **llm_ocr**, **stariver_ocr** | Generic LLM API or Stariver API. |
 
+**OpenRouter vision models for LLM OCR:** When using **llm_ocr** with provider **OpenRouter** (API key from [openrouter.ai](https://openrouter.ai)), you can pick any vision-capable model. **Free vision models** (image in, text out, $0; [full list](https://openrouter.ai/models?fmt=cards&input_modalities=image&max_price=0&output_modalities=text)): `openrouter/free`, `google/gemma-3-4b-it:free`, `google/gemma-3-12b-it:free`, `google/gemma-3-27b-it:free`, `mistralai/mistral-small-3.1-24b-instruct:free`, `nvidia/nemotron-nano-12b-v2-vl:free`, `qwen/qwen3-vl-30b-a3b-thinking`, `qwen/qwen3-vl-235b-a22b-thinking`. Paid examples: `openai/gpt-4o`, `openai/gpt-4o-mini`, `google/gemini-2.0-flash-001`, `google/gemini-1.5-flash`, `google/gemini-1.5-pro`, `qwen/qwen2.5-vl-72b-instruct`, `qwen/qwen3.5-flash-02-23`, `anthropic/claude-sonnet-4`, `anthropic/claude-3-5-sonnet`. [Image inputs](https://openrouter.ai/docs/features/image-inputs), [API models](https://openrouter.ai/api/v1/models).
+
 ---
 
 ## 3. Translation
@@ -74,7 +76,7 @@ This document maps the **curated list of 20+ models per category** (from communi
 | Recommended model | In BallonsTranslator | Notes |
 |-------------------|----------------------|--------|
 | **GPT-4o / OpenAI** | ✅ **LLM_API_Translator** (provider OpenAI) | Best contextual translation; API key. |
-| **Claude / Gemini** | ✅ **LLM_API_Translator** (OpenRouter) or **ChatGPT** | Use OpenRouter or provider endpoints. |
+| **Claude / Gemini** | ✅ **LLM_API_Translator** (OpenRouter) or **ChatGPT** | Use OpenRouter or provider endpoints. **Free models:** provider OpenRouter, then pick a free model from the dropdown (e.g. `openrouter/free`, `meta-llama/llama-3.3-70b-instruct:free`, `stepfun/step-3.5-flash:free`). [Full list](https://openrouter.ai/models?fmt=cards&max_price=0&order=most-popular&output_modalities=text&input_modalities=text). |
 | **Google Translate API** | ✅ **google** | |
 | **DeepL** | ✅ **DeepL**, **DeepL Free**, **DeepLX API** | |
 | **M2M-100** | ✅ **m2m100** | Local CTranslate2; many languages. |

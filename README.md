@@ -667,7 +667,7 @@ Select the OCR from the **OCR** dropdown. Install only the dependencies for the 
 | **manga_ocr** | Select **manga_ocr**; model in `data/models/manga-ocr-base` (auto-download). |
 | **easyocr_ocr**, **mmocr_ocr** | Pair with corresponding detector. |
 | **mit32px**, **mit48px**, **mit48px_ctc** | From manga-image-translator; select as needed. |
-| **google_vision**, **bing_ocr**, **one_ocr**, **windows_ocr**, **macos_ocr**, **llm_ocr**, **stariver_ocr**, **none_ocr** | Select and configure (API keys, etc.). **none_ocr** = no OCR (use with spotters). |
+| **google_vision**, **bing_ocr**, **one_ocr**, **windows_ocr**, **macos_ocr**, **llm_ocr**, **stariver_ocr**, **none_ocr** | Select and configure (API keys, etc.). **llm_ocr** with provider **OpenRouter** offers free vision models in the dropdown (e.g. `openrouter/free`, Gemma/Gemini/Qwen VL). **none_ocr** = no OCR (use with spotters). |
 
 ### New in this fork
 
@@ -734,7 +734,7 @@ Select the inpainter from the **Inpainting** dropdown. Key settings: **inpaint_s
 
 ## 6. Translation modules
 
-No new translator backends were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. See original README and `doc/加别的翻译器.md` for adding new translators.
+No new translator backends were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. **LLM_API_Translator** with provider **OpenRouter** includes free text models in the model dropdown (e.g. `openrouter/free`, Llama, Gemma, StepFun, Qwen); see [OpenRouter free models](https://openrouter.ai/models?fmt=cards&max_price=0&order=most-popular&output_modalities=text&input_modalities=text). See original README and `doc/加别的翻译器.md` for adding new translators.
 
 ### 6.1 Translation context and glossary
 

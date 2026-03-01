@@ -143,6 +143,27 @@ class LLM_OCR(OCRBase):
         "OAI: gpt-4",
         "GGL: gemini-1.5-pro-latest",
         "GGL: gemini-1.5-flash-latest",
+        # OpenRouter vision models (use with provider=OpenRouter; get key at openrouter.ai)
+        # Free vision models (image in, text out, $0): https://openrouter.ai/models?fmt=cards&input_modalities=image&max_price=0&output_modalities=text
+        "OpenRouter: openrouter/free",
+        "OpenRouter: google/gemma-3-4b-it:free",
+        "OpenRouter: google/gemma-3-12b-it:free",
+        "OpenRouter: google/gemma-3-27b-it:free",
+        "OpenRouter: mistralai/mistral-small-3.1-24b-instruct:free",
+        "OpenRouter: nvidia/nemotron-nano-12b-v2-vl:free",
+        "OpenRouter: qwen/qwen3-vl-30b-a3b-thinking",
+        "OpenRouter: qwen/qwen3-vl-235b-a22b-thinking",
+        # Paid OpenRouter vision models
+        "OpenRouter: openai/gpt-4o",
+        "OpenRouter: openai/gpt-4o-mini",
+        "OpenRouter: google/gemini-2.0-flash-001",
+        "OpenRouter: google/gemini-2.0-flash-exp",
+        "OpenRouter: google/gemini-1.5-flash",
+        "OpenRouter: google/gemini-1.5-pro",
+        "OpenRouter: qwen/qwen2.5-vl-72b-instruct",
+        "OpenRouter: qwen/qwen3.5-flash-02-23",
+        "OpenRouter: anthropic/claude-sonnet-4",
+        "OpenRouter: anthropic/claude-3-5-sonnet",
     ]
 
     params = {
