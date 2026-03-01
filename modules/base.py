@@ -248,7 +248,14 @@ class BaseModule:
         return model_deleted
 
     def load_model(self):
-        # TODO: check and download files & inform UIs
+        # Check and download required files before loading (inform UIs via dialog on failure)
+        cls = self.__class__
+        if getattr(cls, 'download_file_list', None) is not None and not getattr(cls, 'download_file_on_load', False):
+            try:
+                from modules.prepare_local_files import download_and_check_module_files
+                download_and_check_module_files([cls])
+            except Exception as e:
+                self.logger.warning(f'Module file check/download failed: {e}')
         aquire_model_loading_lock()
         self._load_model()
         release_model_loading_lock()

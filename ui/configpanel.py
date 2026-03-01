@@ -1,10 +1,10 @@
 from typing import List, Union, Tuple
 
 from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
-from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent
+from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent, QColor
 from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit,
-    QSpinBox, QComboBox, QDoubleSpinBox)
+    QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox)
 
 from .custom_widget import ConfigComboBox, Widget
 from .context_menu_config_dialog import ContextMenuConfigDialog
@@ -420,6 +420,12 @@ class ConfigPanel(Widget):
         self.unload_model_btn.setText(self.tr('Unload All Models'))
         self.unload_model_btn.clicked.connect(self.unload_models)
         msublock.layout().addWidget(self.unload_model_btn)
+        self.check_download_models_btn = QPushButton(parent=self)
+        self.check_download_models_btn.setFixedWidth(500)
+        self.check_download_models_btn.setText(self.tr('Check / Download module files'))
+        self.check_download_models_btn.setToolTip(self.tr('Check and download required model files for all detectors, OCR, inpainters, and translators. Run this if a module fails to load.'))
+        self.check_download_models_btn.clicked.connect(self.on_check_download_module_files)
+        msublock.layout().addWidget(self.check_download_models_btn)
         self.unload_after_idle_spin = QSpinBox()
         self.unload_after_idle_spin.setRange(0, 120)
         self.unload_after_idle_spin.setValue(getattr(pcfg, 'unload_after_idle_minutes', 0))
@@ -545,21 +551,37 @@ class ConfigPanel(Widget):
         self.let_fnt_scolor_combox.activated.connect(self.on_font_scolor_flag_changed)
         global_fntfmt_layout.addWidget(sublock, 3, 0)
 
+        self.default_stroke_width_spin = QDoubleSpinBox(self)
+        self.default_stroke_width_spin.setRange(0, 5)
+        self.default_stroke_width_spin.setSingleStep(0.1)
+        self.default_stroke_width_spin.setDecimals(2)
+        self.default_stroke_width_spin.setValue(getattr(pcfg.global_fontformat, 'stroke_width', 0) or 0)
+        self.default_stroke_width_spin.valueChanged.connect(self.on_default_stroke_width_changed)
+        sublock_sw = ConfigSubBlock(self.default_stroke_width_spin, self.tr('Default stroke width'), discription=self.tr('Global default when "use global setting" is selected for Stroke Size. 0 = no stroke.'))
+        global_fntfmt_layout.addWidget(sublock_sw, 4, 0)
+
+        self.default_stroke_color_btn = QPushButton(self)
+        self.default_stroke_color_btn.setFixedWidth(80)
+        self._update_default_stroke_color_button()
+        self.default_stroke_color_btn.clicked.connect(self.on_default_stroke_color_clicked)
+        sublock_sc = ConfigSubBlock(self.default_stroke_color_btn, self.tr('Default stroke color'), discription=self.tr('Global default when "use global setting" is selected for Stroke Color.'))
+        global_fntfmt_layout.addWidget(sublock_sc, 5, 0)
+
         self.let_effect_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Effect'), parent=self, insert_stretch=True)
         self.let_effect_combox.activated.connect(self.on_effect_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 4, 0)
+        global_fntfmt_layout.addWidget(sublock, 6, 0)
         self.let_alignment_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Alignment'), parent=self, insert_stretch=True)
         self.let_alignment_combox.activated.connect(self.on_alignment_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 5, 0)
+        global_fntfmt_layout.addWidget(sublock, 7, 0)
 
         self.let_writing_mode_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Writing-mode'), parent=self, insert_stretch=True)
         self.let_writing_mode_combox.activated.connect(self.on_writing_mode_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 6, 0)
+        global_fntfmt_layout.addWidget(sublock, 8, 0)
         self.let_family_combox, sublock = combobox_with_label([self.tr('Keep existing'), self.tr('Always use global setting')], self.tr('Font Family'), parent=self, insert_stretch=True)
         self.let_family_combox.activated.connect(self.on_family_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 7, 0)
+        global_fntfmt_layout.addWidget(sublock, 9, 0)
 
-        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 8, 0)
+        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 10, 0)
 
         self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'), 
                 discription=self.tr('Split translation into multi-lines according to the extracted balloon region.'))
@@ -710,11 +732,45 @@ class ConfigPanel(Widget):
     def on_unload_after_idle_changed(self, value: int):
         pcfg.unload_after_idle_minutes = value
 
+    def on_check_download_module_files(self):
+        try:
+            from modules.prepare_local_files import download_and_check_module_files
+            download_and_check_module_files()
+            QMessageBox.information(
+                self,
+                self.tr('Check / Download module files'),
+                self.tr('Finished. If any module reported missing files, check the console/log and save them to the specified paths, then restart or switch module.')
+            )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                self.tr('Check / Download module files'),
+                self.tr('Error: ') + str(e)
+            )
+
     def on_fntsize_flag_changed(self):
         pcfg.let_fntsize_flag = self.let_fntsize_combox.currentIndex()
 
     def on_fntstroke_flag_changed(self):
         pcfg.let_fntstroke_flag = self.let_fntstroke_combox.currentIndex()
+
+    def _update_default_stroke_color_button(self):
+        gf = pcfg.global_fontformat
+        srgb = getattr(gf, 'srgb', [0, 0, 0]) or [0, 0, 0]
+        r, g, b = int(srgb[0]) if len(srgb) > 0 else 0, int(srgb[1]) if len(srgb) > 1 else 0, int(srgb[2]) if len(srgb) > 2 else 0
+        self.default_stroke_color_btn.setStyleSheet(f'background-color: rgb({r},{g},{b}); border: 1px solid #888;')
+
+    def on_default_stroke_width_changed(self, value: float):
+        pcfg.global_fontformat.stroke_width = value
+
+    def on_default_stroke_color_clicked(self):
+        gf = pcfg.global_fontformat
+        srgb = getattr(gf, 'srgb', [0, 0, 0]) or [0, 0, 0]
+        r, g, b = (srgb[0], srgb[1], srgb[2]) if len(srgb) >= 3 else (0, 0, 0)
+        color = QColorDialog.getColor(QColor(r, g, b), self, self.tr('Default stroke color'))
+        if color.isValid():
+            pcfg.global_fontformat.srgb = [color.red(), color.green(), color.blue()]
+            self._update_default_stroke_color_button()
 
     def on_autolayout_changed(self):
         pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
@@ -836,6 +892,12 @@ class ConfigPanel(Widget):
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)
         self.let_fntcolor_combox.setCurrentIndex(pcfg.let_fntcolor_flag)
         self.let_fnt_scolor_combox.setCurrentIndex(pcfg.let_fnt_scolor_flag)
+        if hasattr(self, 'default_stroke_width_spin'):
+            self.default_stroke_width_spin.blockSignals(True)
+            self.default_stroke_width_spin.setValue(getattr(pcfg.global_fontformat, 'stroke_width', 0) or 0)
+            self.default_stroke_width_spin.blockSignals(False)
+        if hasattr(self, 'default_stroke_color_btn'):
+            self._update_default_stroke_color_button()
         self.let_alignment_combox.setCurrentIndex(pcfg.let_alignment_flag)
         self.let_family_combox.setCurrentIndex(pcfg.let_family_flag)
         self.let_writing_mode_combox.setCurrentIndex(pcfg.let_writing_mode_flag)
