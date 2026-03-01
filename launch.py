@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*
 os.environ["FLAGS_use_mkldnn"] = "0"
 
 BRANCH = 'main'
-VERSION = '1.5.1'
+VERSION = '1.6.0'
 
 python = sys.executable
 git = os.environ.get('GIT', "git")
