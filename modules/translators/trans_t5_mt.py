@@ -72,6 +72,9 @@ class T5MTTranslator(BaseTranslator):
     def _translate(self, src_list: List[str]) -> List[str]:
         if not src_list:
             return []
+        # Translator params can invalidate loaded objects (updateParam). Reload lazily.
+        if not hasattr(self, 'model') or self.model is None or not hasattr(self, 'tokenizer') or self.tokenizer is None:
+            self.setup_translator()
         src_name = T5_LANG_PROMPT_NAMES.get(self.lang_source) or self.lang_map.get(self.lang_source)
         tgt_name = T5_LANG_PROMPT_NAMES.get(self.lang_target) or self.lang_map.get(self.lang_target)
         if not src_name or not tgt_name:
@@ -102,6 +105,8 @@ class T5MTTranslator(BaseTranslator):
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
-        if param_key in ('model_name', 'device') and hasattr(self, 'model'):
-            delattr(self, 'model')
-            delattr(self, 'tokenizer')
+        if param_key in ('model_name', 'device'):
+            if hasattr(self, 'model'):
+                delattr(self, 'model')
+            if hasattr(self, 'tokenizer'):
+                delattr(self, 'tokenizer')
