@@ -339,9 +339,13 @@ def perform_merge(shapes, mode, config):
             for s in group_shapes:
                 text = s.get('text', [])
                 if isinstance(text, list):
-                    text = ''.join(text)
+                    text = ''.join(str(t) if t is not None else '' for t in text)
+                elif text is None:
+                    text = ''
+                else:
+                    text = str(text)
                 if text:
-                    final_description += str(text).strip()
+                    final_description += text.strip()
             
             # 获取所有点 - 从 lines 或 xyxy
             all_points = []
@@ -504,7 +508,7 @@ def process_file(file_path, config):
         debug_info = f"未发生任何合并。\n"
         debug_info += f"共有 {len(initial_shapes)} 个文本框。\n"
         if len(initial_shapes) > 0:
-            labels = set(s.get('label', '') for s in initial_shapes)
+            labels = set(str(s.get('label') or '') for s in initial_shapes)
             debug_info += f"标签类型: {', '.join(labels)}\n"
             debug_info += f"合并模式: {mode_cn}"
         return False, debug_info

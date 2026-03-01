@@ -1,6 +1,9 @@
 from qtpy.QtWidgets import QDialog, QVBoxLayout, QGroupBox, QFormLayout, QComboBox, QLineEdit, QPlainTextEdit, QCheckBox, QSpinBox, QLabel, QRadioButton, QButtonGroup, QHBoxLayout, QPushButton
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtWidgets import QSizePolicy
+from qtpy.QtGui import QShowEvent, QCloseEvent
+
+from utils.config import pcfg
 
 class MergeDialog(QDialog):
     # Signals: emitted when user clicks run buttons
@@ -116,20 +119,24 @@ class MergeDialog(QDialog):
         geo_layout.setContentsMargins(8, 6, 8, 6)
 
         self.max_vertical_gap = QSpinBox()
-        self.max_vertical_gap.setRange(0, 1000)
+        self.max_vertical_gap.setRange(-100, 1000)
         self.max_vertical_gap.setValue(10)
+        self.max_vertical_gap.setToolTip("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap).")
         self.min_width_overlap_ratio = QSpinBox()
         self.min_width_overlap_ratio.setRange(0, 100)
         self.min_width_overlap_ratio.setValue(90)
         self.min_width_overlap_ratio.setSuffix(" %")
+        self.min_width_overlap_ratio.setToolTip("Min horizontal overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped).")
 
         self.max_horizontal_gap = QSpinBox()
-        self.max_horizontal_gap.setRange(0, 1000)
+        self.max_horizontal_gap.setRange(-100, 1000)
         self.max_horizontal_gap.setValue(10)
+        self.max_horizontal_gap.setToolTip("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap).")
         self.min_height_overlap_ratio = QSpinBox()
         self.min_height_overlap_ratio.setRange(0, 100)
         self.min_height_overlap_ratio.setValue(90)
         self.min_height_overlap_ratio.setSuffix(" %")
+        self.min_height_overlap_ratio.setToolTip("Min vertical overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped).")
 
         geo_layout.addRow(QLabel("<b>Vertical merge (up-down)</b>"))
         geo_layout.addRow("Max vertical gap (px):", self.max_vertical_gap)
@@ -137,6 +144,10 @@ class MergeDialog(QDialog):
         geo_layout.addRow(QLabel("<b>Horizontal merge (left-right)</b>"))
         geo_layout.addRow("Max horizontal gap (px):", self.max_horizontal_gap)
         geo_layout.addRow("Min vertical overlap ratio:", self.min_height_overlap_ratio)
+        geo_strict_label = QLabel(self.tr("Strict (one box per bubble): set both gaps to 0 or negative (e.g. -10), overlap to 98–100%."))
+        geo_strict_label.setWordWrap(True)
+        geo_strict_label.setStyleSheet("color: gray; font-size: 0.9em;")
+        geo_layout.addRow(geo_strict_label)
 
         self.layout.addWidget(geo_group)
 
@@ -193,6 +204,83 @@ class MergeDialog(QDialog):
 
     def on_run_all(self):
         self.run_all_clicked.emit()
+
+    def get_serializable_settings(self):
+        """Return a JSON-serializable dict of current dialog state for saving."""
+        excluded = self.exclude_labels.text().strip()
+        excluded_list = [l.strip() for l in excluded.split(",") if l.strip()]
+        return {
+            "merge_mode": self.merge_mode.currentData(),
+            "ltr_labels": self.ltr_labels_edit.text().strip(),
+            "rtl_labels": self.rtl_labels_edit.text().strip(),
+            "ttb_labels": self.ttb_labels_edit.text().strip(),
+            "label_merge_strategy": self.label_merge_strategy.currentData(),
+            "enable_exclude_labels": self.enable_exclude_labels.isChecked(),
+            "exclude_labels": self.exclude_labels.text().strip(),
+            "require_same_label": self.require_same_label.isChecked(),
+            "use_specific_groups": self.use_specific_groups.isChecked(),
+            "specific_groups_text": self.specific_groups_edit.toPlainText().strip(),
+            "max_vertical_gap": self.max_vertical_gap.value(),
+            "min_width_overlap_ratio": self.min_width_overlap_ratio.value(),
+            "max_horizontal_gap": self.max_horizontal_gap.value(),
+            "min_height_overlap_ratio": self.min_height_overlap_ratio.value(),
+            "allow_negative_gap": self.allow_negative_gap.isChecked(),
+            "output_shape_type": "rectangle" if self.output_type_group.checkedId() == 1 else "rotation",
+        }
+
+    def save_settings_to_pcfg(self):
+        """Write current dialog state to pcfg (call before save_config)."""
+        pcfg.region_merge_settings = self.get_serializable_settings()
+
+    def set_settings(self, d):
+        """Restore dialog state from a saved dict (e.g. pcfg.region_merge_settings)."""
+        if not d or not isinstance(d, dict):
+            return
+        mode = d.get("merge_mode")
+        if mode is not None:
+            idx = self.merge_mode.findData(mode)
+            if idx >= 0:
+                self.merge_mode.setCurrentIndex(idx)
+        if "ltr_labels" in d:
+            self.ltr_labels_edit.setText(d.get("ltr_labels", ""))
+        if "rtl_labels" in d:
+            self.rtl_labels_edit.setText(d.get("rtl_labels", ""))
+        if "ttb_labels" in d:
+            self.ttb_labels_edit.setText(d.get("ttb_labels", ""))
+        strat = d.get("label_merge_strategy")
+        if strat is not None:
+            idx = self.label_merge_strategy.findData(strat)
+            if idx >= 0:
+                self.label_merge_strategy.setCurrentIndex(idx)
+        self.enable_exclude_labels.setChecked(d.get("enable_exclude_labels", True))
+        if "exclude_labels" in d:
+            self.exclude_labels.setText(d.get("exclude_labels", ""))
+        self.require_same_label.setChecked(d.get("require_same_label", False))
+        self.use_specific_groups.setChecked(d.get("use_specific_groups", False))
+        if "specific_groups_text" in d:
+            self.specific_groups_edit.setPlainText(d.get("specific_groups_text", ""))
+        if "max_vertical_gap" in d:
+            self.max_vertical_gap.setValue(int(d["max_vertical_gap"]))
+        if "min_width_overlap_ratio" in d:
+            self.min_width_overlap_ratio.setValue(int(d["min_width_overlap_ratio"]))
+        if "max_horizontal_gap" in d:
+            self.max_horizontal_gap.setValue(int(d["max_horizontal_gap"]))
+        if "min_height_overlap_ratio" in d:
+            self.min_height_overlap_ratio.setValue(int(d["min_height_overlap_ratio"]))
+        self.allow_negative_gap.setChecked(d.get("allow_negative_gap", True))
+        out = d.get("output_shape_type", "rectangle")
+        if out == "rotation":
+            self.radio_output_rotation.setChecked(True)
+        else:
+            self.radio_output_rectangle.setChecked(True)
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        self.set_settings(getattr(pcfg, "region_merge_settings", {}))
+
+    def closeEvent(self, event: QCloseEvent):
+        self.save_settings_to_pcfg()
+        super().closeEvent(event)
 
     def get_config(self):
         """Return merge config from dialog."""

@@ -1,5 +1,6 @@
 import time
 import threading
+import copy
 from typing import Union, List, Dict, Callable
 import os.path as osp
 
@@ -370,7 +371,7 @@ class ImgtransThread(QThread):
             if sec_class is None:
                 return mask, blk_list
             merged_params = merge_config_module_params(
-                cfg_module.get_params('textdetector'),
+                copy.deepcopy(cfg_module.get_params('textdetector')),
                 GET_VALID_TEXTDETECTORS(),
                 TEXTDETECTORS.get
             )

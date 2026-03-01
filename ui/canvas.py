@@ -178,6 +178,7 @@ class Canvas(QGraphicsScene):
     set_gradient_type_signal = Signal(int)  # 0 = Linear, 1 = Radial
     set_text_on_path_signal = Signal(int)  # 0 = None, 1 = Circular, 2 = Arc
     merge_selected_blocks_signal = Signal()
+    split_selected_regions_signal = Signal()
     move_blocks_up_signal = Signal()
     move_blocks_down_signal = Signal()
 
@@ -797,6 +798,12 @@ class Canvas(QGraphicsScene):
     def on_create_contextmenu(self, pos: QPoint, is_textpanel: bool):
         if self.textEditMode() and not self.creating_textblock:
             menu = QMenu(self.gv)
+            # Disabled items use lower opacity so they're clearly greyed and don't show hover
+            menu.setStyleSheet("QMenu::item:disabled { opacity: 0.5; }")
+            sel = self.selected_text_items()
+            n_sel = len(sel)
+            n_total = len(self.imgtrans_proj.pages[self.imgtrans_proj.current_img]) if (self.imgtrans_proj and self.imgtrans_proj.current_img and self.imgtrans_proj.current_img in self.imgtrans_proj.pages) else 0
+
             copy_act = menu.addAction(self.tr("Copy"))
             copy_act.setShortcut(QKeySequence.StandardKey.Copy)
             paste_act = menu.addAction(self.tr("Paste"))
@@ -816,40 +823,49 @@ class Canvas(QGraphicsScene):
             select_all_act = menu.addAction(self.tr("Select all"))
             select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
 
-            spell_check_src_act = menu.addAction(self.tr("Spell check source text"))
-            spell_check_src_act.setToolTip(self.tr("Run spell check / auto-correct on source text of selected blocks (requires pyenchant)."))
-            spell_check_trans_act = menu.addAction(self.tr("Spell check translation"))
-            spell_check_trans_act.setToolTip(self.tr("Run spell check / auto-correct on translation text of selected blocks (requires pyenchant)."))
-            trim_whitespace_act = menu.addAction(self.tr("Trim whitespace"))
-            trim_whitespace_act.setToolTip(self.tr("Remove leading and trailing whitespace from each line in selected blocks."))
-            to_uppercase_act = menu.addAction(self.tr("To uppercase"))
-            to_lowercase_act = menu.addAction(self.tr("To lowercase"))
-            toggle_strikethrough_act = menu.addAction(self.tr("Toggle strikethrough"))
-            toggle_strikethrough_act.setToolTip(self.tr("Toggle strikethrough on selected blocks."))
-            gradient_sub = menu.addMenu(self.tr("Gradient type"))
-            gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
-            gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
-            text_on_path_sub = menu.addMenu(self.tr("Text on path"))
-            text_on_path_none_act = text_on_path_sub.addAction(self.tr("None"))
-            text_on_path_circular_act = text_on_path_sub.addAction(self.tr("Circular"))
-            text_on_path_arc_act = text_on_path_sub.addAction(self.tr("Arc"))
-            merge_blocks_act = menu.addAction(self.tr("Merge selected blocks"))
-            move_up_act = menu.addAction(self.tr("Move block(s) up"))
-            move_down_act = menu.addAction(self.tr("Move block(s) down"))
-            sel = self.selected_text_items()
-            n_sel = len(sel)
-            n_total = len(self.imgtrans_proj.pages[self.imgtrans_proj.current_img]) if (self.imgtrans_proj and self.imgtrans_proj.current_img and self.imgtrans_proj.current_img in self.imgtrans_proj.pages) else 0
-            merge_blocks_act.setEnabled(n_sel >= 2)
-            move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
-            move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
-            spell_check_src_act.setEnabled(n_sel >= 1)
-            spell_check_trans_act.setEnabled(n_sel >= 1)
-            trim_whitespace_act.setEnabled(n_sel >= 1)
-            to_uppercase_act.setEnabled(n_sel >= 1)
-            to_lowercase_act.setEnabled(n_sel >= 1)
-            toggle_strikethrough_act.setEnabled(n_sel >= 1)
-            gradient_sub.setEnabled(n_sel >= 1)
-            text_on_path_sub.setEnabled(n_sel >= 1)
+            # Only show selection-only options when at least one text box is selected
+            spell_check_src_act = None
+            spell_check_trans_act = None
+            trim_whitespace_act = None
+            to_uppercase_act = None
+            to_lowercase_act = None
+            toggle_strikethrough_act = None
+            gradient_sub = None
+            gradient_linear_act = None
+            gradient_radial_act = None
+            text_on_path_sub = None
+            text_on_path_none_act = None
+            text_on_path_circular_act = None
+            text_on_path_arc_act = None
+            merge_blocks_act = None
+            split_regions_act = None
+            move_up_act = None
+            move_down_act = None
+            if n_sel >= 1:
+                spell_check_src_act = menu.addAction(self.tr("Spell check source text"))
+                spell_check_src_act.setToolTip(self.tr("Run spell check / auto-correct on source text of selected blocks (requires pyenchant)."))
+                spell_check_trans_act = menu.addAction(self.tr("Spell check translation"))
+                spell_check_trans_act.setToolTip(self.tr("Run spell check / auto-correct on translation text of selected blocks (requires pyenchant)."))
+                trim_whitespace_act = menu.addAction(self.tr("Trim whitespace"))
+                trim_whitespace_act.setToolTip(self.tr("Remove leading and trailing whitespace from each line in selected blocks."))
+                to_uppercase_act = menu.addAction(self.tr("To uppercase"))
+                to_lowercase_act = menu.addAction(self.tr("To lowercase"))
+                toggle_strikethrough_act = menu.addAction(self.tr("Toggle strikethrough"))
+                toggle_strikethrough_act.setToolTip(self.tr("Toggle strikethrough on selected blocks."))
+                gradient_sub = menu.addMenu(self.tr("Gradient type"))
+                gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
+                gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
+                text_on_path_sub = menu.addMenu(self.tr("Text on path"))
+                text_on_path_none_act = text_on_path_sub.addAction(self.tr("None"))
+                text_on_path_circular_act = text_on_path_sub.addAction(self.tr("Circular"))
+                text_on_path_arc_act = text_on_path_sub.addAction(self.tr("Arc"))
+                merge_blocks_act = menu.addAction(self.tr("Merge selected blocks"))
+                merge_blocks_act.setEnabled(n_sel >= 2)
+                split_regions_act = menu.addAction(self.tr("Split selected region(s)"))
+                move_up_act = menu.addAction(self.tr("Move block(s) up"))
+                move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
+                move_down_act = menu.addAction(self.tr("Move block(s) down"))
+                move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
             menu.addSeparator()
 
             format_act = menu.addAction(self.tr("Apply font formatting"))
@@ -893,33 +909,35 @@ class Canvas(QGraphicsScene):
                 self.clear_trans_signal.emit()
             elif rst == select_all_act:
                 self.select_all_signal.emit()
-            elif rst == spell_check_src_act:
+            elif spell_check_src_act is not None and rst == spell_check_src_act:
                 self.spell_check_src_signal.emit()
-            elif rst == spell_check_trans_act:
+            elif spell_check_trans_act is not None and rst == spell_check_trans_act:
                 self.spell_check_trans_signal.emit()
-            elif rst == trim_whitespace_act:
+            elif trim_whitespace_act is not None and rst == trim_whitespace_act:
                 self.trim_whitespace_signal.emit()
-            elif rst == to_uppercase_act:
+            elif to_uppercase_act is not None and rst == to_uppercase_act:
                 self.to_uppercase_signal.emit()
-            elif rst == to_lowercase_act:
+            elif to_lowercase_act is not None and rst == to_lowercase_act:
                 self.to_lowercase_signal.emit()
-            elif rst == toggle_strikethrough_act:
+            elif toggle_strikethrough_act is not None and rst == toggle_strikethrough_act:
                 self.toggle_strikethrough_signal.emit()
-            elif rst == gradient_linear_act:
+            elif gradient_linear_act is not None and rst == gradient_linear_act:
                 self.set_gradient_type_signal.emit(0)
-            elif rst == gradient_radial_act:
+            elif gradient_radial_act is not None and rst == gradient_radial_act:
                 self.set_gradient_type_signal.emit(1)
-            elif rst == text_on_path_none_act:
+            elif text_on_path_none_act is not None and rst == text_on_path_none_act:
                 self.set_text_on_path_signal.emit(0)
-            elif rst == text_on_path_circular_act:
+            elif text_on_path_circular_act is not None and rst == text_on_path_circular_act:
                 self.set_text_on_path_signal.emit(1)
-            elif rst == text_on_path_arc_act:
+            elif text_on_path_arc_act is not None and rst == text_on_path_arc_act:
                 self.set_text_on_path_signal.emit(2)
-            elif rst == merge_blocks_act:
+            elif merge_blocks_act is not None and rst == merge_blocks_act:
                 self.merge_selected_blocks_signal.emit()
-            elif rst == move_up_act:
+            elif split_regions_act is not None and rst == split_regions_act:
+                self.split_selected_regions_signal.emit()
+            elif move_up_act is not None and rst == move_up_act:
                 self.move_blocks_up_signal.emit()
-            elif rst == move_down_act:
+            elif move_down_act is not None and rst == move_down_act:
                 self.move_blocks_down_signal.emit()
             elif rst == format_act:
                 self.format_textblks.emit()

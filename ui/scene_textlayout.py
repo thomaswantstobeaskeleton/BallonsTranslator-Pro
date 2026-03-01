@@ -1,4 +1,5 @@
 import re
+import math
 
 from qtpy.QtCore import Qt, QRectF, QPointF, Signal, QSizeF, QSize
 from qtpy.QtGui import QTextCharFormat, QTextDocument, QPixmap, QImage, QTransform, QPalette, QPainter, QTextFrame, QTextBlock, QAbstractTextDocumentLayout, QTextLayout, QFont, QFontMetricsF, QTextOption, QTextLine, QTextFormat
@@ -44,7 +45,8 @@ def vertical_force_aligncentel(char: str) -> bool:
 
 @lru_cache(maxsize=512)
 def _font_metrics(ffamily: str, size: float, weight: int, italic: bool) -> QFontMetricsF:
-    size = max(1.0, size) if size <= 0 else size
+    if not math.isfinite(size) or size <= 0:
+        size = 1.0
     font = QFont(ffamily, max(1, int(size)), weight, italic)
     font.setPointSizeF(size)
     return QFontMetricsF(font)
@@ -96,6 +98,9 @@ def punc_actual_rect_cached(cached_args: LruIgnoreArg, char: str, family: str, s
 class CharFontFormat:
     def __init__(self, fcmt: QTextCharFormat) -> None:
         font = fcmt.font()
+        pt = font.pointSizeF()
+        if not math.isfinite(pt) or pt <= 0:
+            font.setPointSizeF(1.0)
         self.font = font
         self.stroke_width = fcmt.textOutline().widthF() / 2
         self.font_metrics = QFontMetricsF(font)

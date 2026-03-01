@@ -15,7 +15,10 @@ from .module_parse_widgets import InpaintConfigPanel, TextDetectConfigPanel, Tra
 
 def _config_font_size(base_size: float) -> float:
     """Apply config panel font scale (accessibility)."""
-    return base_size * getattr(pcfg, 'config_panel_font_scale', 1.0)
+    scale = getattr(pcfg, 'config_panel_font_scale', 1.0)
+    if scale <= 0 or scale > 5:
+        scale = 1.0
+    return max(1.0, base_size * scale)
 
 class CustomIntValidator(QIntValidator):
 
@@ -806,6 +809,14 @@ class ConfigPanel(Widget):
             self.detect_config_panel.dual_detect_checker.setChecked(getattr(pcfg.module, 'enable_dual_detect', False))
         if hasattr(self.detect_config_panel, 'secondary_detector_combobox'):
             self.detect_config_panel.secondary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_secondary', '') or '')
+        if hasattr(self.inpaint_config_panel, 'inpaint_tile_size_spin'):
+            self.inpaint_config_panel.inpaint_tile_size_spin.blockSignals(True)
+            self.inpaint_config_panel.inpaint_tile_size_spin.setValue(getattr(pcfg.module, 'inpaint_tile_size', 0))
+            self.inpaint_config_panel.inpaint_tile_size_spin.blockSignals(False)
+        if hasattr(self.inpaint_config_panel, 'inpaint_tile_overlap_spin'):
+            self.inpaint_config_panel.inpaint_tile_overlap_spin.blockSignals(True)
+            self.inpaint_config_panel.inpaint_tile_overlap_spin.setValue(getattr(pcfg.module, 'inpaint_tile_overlap', 64))
+            self.inpaint_config_panel.inpaint_tile_overlap_spin.blockSignals(False)
         self.let_effect_combox.setCurrentIndex(pcfg.let_fnteffect_flag)
         self.let_fntsize_combox.setCurrentIndex(pcfg.let_fntsize_flag)
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)

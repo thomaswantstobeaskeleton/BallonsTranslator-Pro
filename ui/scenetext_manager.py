@@ -504,6 +504,62 @@ class SceneTextManager(QObject):
         self.new_textblk.emit(blk_item.idx)
         return blk_item
 
+    def insertTextBlocksAt(self, idx: int, blk_list: List[TextBlock]) -> List[TextBlkItem]:
+        """Insert new text blocks at index idx (used e.g. after splitting a region). Caller must update imgtrans_proj.pages[page_name] before calling."""
+        if idx < 0 or idx > len(self.textblk_item_list) or not blk_list:
+            return []
+        new_items = []
+        new_widgets = []
+        for k, blk in enumerate(blk_list):
+            blk_item = TextBlkItem(blk, idx + k, show_rect=self.canvas.textblock_mode)
+            pair_widget = TransPairWidget(blk, idx + k, pcfg.fold_textarea)
+            pair_widget.e_source.setPlainText(blk_item.blk.get_text())
+            pair_widget.e_trans.setPlainText(blk_item.toPlainText())
+            pair_widget.e_source.focus_in.connect(self.on_transwidget_focus_in)
+            pair_widget.e_source.ensure_scene_visible.connect(self.on_ensure_textitem_svisible)
+            pair_widget.e_source.push_undo_stack.connect(self.on_push_edit_stack)
+            pair_widget.e_source.redo_signal.connect(self.on_textedit_redo)
+            pair_widget.e_source.undo_signal.connect(self.on_textedit_undo)
+            pair_widget.e_source.show_select_menu.connect(self.on_show_select_menu)
+            pair_widget.e_source.focus_out.connect(self.on_pairw_focusout)
+            pair_widget.e_trans.focus_in.connect(self.on_transwidget_focus_in)
+            pair_widget.e_trans.propagate_user_edited.connect(self.on_propagate_transwidget_edit)
+            pair_widget.e_trans.ensure_scene_visible.connect(self.on_ensure_textitem_svisible)
+            pair_widget.e_trans.push_undo_stack.connect(self.on_push_edit_stack)
+            pair_widget.e_trans.redo_signal.connect(self.on_textedit_redo)
+            pair_widget.e_trans.undo_signal.connect(self.on_textedit_undo)
+            pair_widget.e_trans.show_select_menu.connect(self.on_show_select_menu)
+            pair_widget.e_trans.focus_out.connect(self.on_pairw_focusout)
+            pair_widget.drag_move.connect(self.textEditList.handle_drag_pos)
+            pair_widget.pw_drop.connect(self.textEditList.on_pw_dropped)
+            pair_widget.idx_edited.connect(self.textEditList.on_idx_edited)
+            new_items.append(blk_item)
+            new_widgets.append(pair_widget)
+        for k in range(len(blk_list)):
+            self.textblk_item_list.insert(idx + k, new_items[k])
+            self.pairwidget_list.insert(idx + k, new_widgets[k])
+            self.textEditList.insertPairWidget(new_widgets[k], idx + k)
+        for blk_item in new_items:
+            blk_item.setParentItem(self.canvas.textLayer)
+            blk_item.begin_edit.connect(self.onTextBlkItemBeginEdit)
+            blk_item.end_edit.connect(self.onTextBlkItemEndEdit)
+            blk_item.hover_enter.connect(self.onTextBlkItemHoverEnter)
+            blk_item.leftbutton_pressed.connect(self.onLeftbuttonPressed)
+            blk_item.moving.connect(self.onTextBlkItemMoving)
+            blk_item.moved.connect(self.onTextBlkItemMoved)
+            blk_item.reshaped.connect(self.onTextBlkItemReshaped)
+            blk_item.rotated.connect(self.onTextBlkItemRotated)
+            blk_item.push_undo_stack.connect(self.on_push_textitem_undostack)
+            blk_item.undo_signal.connect(self.on_textedit_undo)
+            blk_item.redo_signal.connect(self.on_textedit_redo)
+            blk_item.propagate_user_edited.connect(self.on_propagate_textitem_edit)
+            blk_item.doc_size_changed.connect(self.onTextBlkItemSizeChanged)
+            blk_item.pasted.connect(self.onBlkitemPaste)
+        self.updateTextBlkItemIdx()
+        for k in range(len(blk_list)):
+            self.new_textblk.emit(idx + k)
+        return new_items
+
     def addTextBlkItem(self, textblk_item: TextBlkItem) -> TextBlkItem:
         self.textblk_item_list.append(textblk_item)
         textblk_item.setParentItem(self.canvas.textLayer)

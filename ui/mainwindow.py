@@ -1,5 +1,6 @@
 import os.path as osp
 import os, re, traceback, sys
+import copy
 from typing import List, Union
 from pathlib import Path
 import subprocess
@@ -15,6 +16,7 @@ from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, Q
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
 from utils.textblock import TextBlock, TextAlignment, examine_textblk
+from utils.split_text_region import split_textblock
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
@@ -242,6 +244,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.set_text_on_path_signal.connect(self.on_set_text_on_path)
         self.canvas.run_detect_region.connect(self.on_run_detect_region)
         self.canvas.merge_selected_blocks_signal.connect(self.on_merge_selected_blocks)
+        self.canvas.split_selected_regions_signal.connect(self.on_split_selected_regions)
         self.canvas.move_blocks_up_signal.connect(self.on_move_blocks_up)
         self.canvas.move_blocks_down_signal.connect(self.on_move_blocks_down)
 
@@ -723,6 +726,9 @@ class MainWindow(mainwindow_cls):
             self.restart_signal.emit()
 
     def save_config(self):
+        # Flush Region merge tool dialog state if it's open so it gets persisted
+        if getattr(self, 'merge_dialog', None) is not None and self.merge_dialog.isVisible():
+            self.merge_dialog.save_settings_to_pcfg()
         save_config()
 
     def on_set_default_format_requested(self):
@@ -2433,6 +2439,64 @@ class MainWindow(mainwindow_cls):
         to_remove_items = blks[1:]
         to_remove_widgets = [self.st_manager.pairwidget_list[b.idx] for b in blks[1:]]
         self.st_manager.deleteTextblkItemList(to_remove_items, to_remove_widgets)
+        self.canvas.setProjSaveState(False)
+        self.global_search_widget.set_document_edited()
+
+    def on_split_selected_regions(self):
+        """Try to split each selected region into multiple regions using image gaps (e.g. two bubbles in one box)."""
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        page_name = self.imgtrans_proj.current_img
+        if not page_name or not self.imgtrans_proj.img_valid or self.imgtrans_proj.img_array is None:
+            return
+        img = self.imgtrans_proj.img_array
+        if img.ndim == 3:
+            crop_img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        else:
+            crop_img = img
+        h_img, w_img = img.shape[:2]
+        # Process in descending index so indices stay valid
+        for blk_item in sorted(blks, key=lambda b: b.idx, reverse=True):
+            blk = blk_item.blk
+            x1, y1, x2, y2 = blk.xyxy
+            x1, y1 = max(0, int(x1)), max(0, int(y1))
+            x2, y2 = min(w_img, int(x2)), min(h_img, int(y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            crop = crop_img[y1:y2, x1:x2]
+            if crop.size < 100:
+                continue
+            try:
+                span_list, _ = split_textblock(crop, crop_ratio=0.2, shrink=True, discard=True, recheck=False)
+            except Exception:
+                continue
+            if not span_list or len(span_list) <= 1:
+                continue
+            new_blks = []
+            for span in span_list:
+                if span.top is None or span.bottom is None or span.left is None or span.right is None:
+                    continue
+                ox1 = x1 + max(0, span.left)
+                oy1 = y1 + max(0, span.top)
+                ox2 = x1 + min(crop.shape[1], span.right)
+                oy2 = y1 + min(crop.shape[0], span.bottom)
+                if ox2 <= ox1 or oy2 <= oy1:
+                    continue
+                new_blk = copy.copy(blk)
+                new_blk.xyxy = [ox1, oy1, ox2, oy2]
+                new_blk.lines = [[[ox1, oy1], [ox2, oy1], [ox2, oy2], [ox1, oy2]]]
+                new_blk.text = [""]
+                new_blk.translation = ""
+                new_blks.append(new_blk)
+            if len(new_blks) <= 1:
+                continue
+            idx = blk_item.idx
+            self.imgtrans_proj.pages[page_name].pop(idx)
+            self.st_manager.deleteTextblkItemList([blk_item], [self.st_manager.pairwidget_list[idx]])
+            for i, nb in enumerate(new_blks):
+                self.imgtrans_proj.pages[page_name].insert(idx + i, nb)
+            self.st_manager.insertTextBlocksAt(idx, new_blks)
         self.canvas.setProjSaveState(False)
         self.global_search_widget.set_document_edited()
 

@@ -39,6 +39,8 @@ class ModuleConfig(Config):
     translate_source: str = '日本語'
     translate_target: str = '简体中文'
     check_need_inpaint: bool = True
+    inpaint_tile_size: int = 0   # 0 = no tiling (recommended); set 512–1024 only if OOM
+    inpaint_tile_overlap: int = 64   # overlap between tiles (px); only used when tile_size > 0
     load_model_on_demand: bool = False
     empty_runcache: bool = False
     finish_code: int = 15
@@ -184,6 +186,7 @@ class ProgramConfig(Config):
     manga_source_open_after_download: bool = False
     shortcuts: Dict = field(default_factory=dict)
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
+    region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:

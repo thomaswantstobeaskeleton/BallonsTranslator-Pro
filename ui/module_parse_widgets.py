@@ -7,7 +7,7 @@ from .custom_widget import ConfigComboBox, ParamComboBox, NoBorderPushBtn, Param
 from utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from utils.config import pcfg
 
-from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox
+from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox, QSpinBox
 from qtpy.QtCore import Qt, Signal, QTimer
 from qtpy.QtGui import QDoubleValidator
 
@@ -447,6 +447,32 @@ class InpaintConfigPanel(ModuleConfigParseWidget):
         self.setInpainter = self.setModule
         self.needInpaintChecker = ParamCheckerBox(self.tr('Let the program decide whether it is necessary to use the selected inpaint method.'))
         self.vlayout.addWidget(self.needInpaintChecker)
+        # Tile size and overlap for tiled inpainting (reduces VRAM on large images)
+        tile_hl = QHBoxLayout()
+        tile_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        tile_hl.addWidget(QLabel(self.tr('Inpaint tile size:')))
+        self.inpaint_tile_size_spin = QSpinBox()
+        self.inpaint_tile_size_spin.setRange(0, 2048)
+        self.inpaint_tile_size_spin.setSingleStep(256)
+        self.inpaint_tile_size_spin.setSpecialValueText(self.tr('Off'))
+        self.inpaint_tile_size_spin.setValue(getattr(pcfg.module, 'inpaint_tile_size', 0))
+        self.inpaint_tile_size_spin.setToolTip(self.tr('Off = best quality. Use 512–1024 only if you get out-of-memory errors; tiling can cause grey or blurry bubbles.'))
+        tile_hl.addWidget(self.inpaint_tile_size_spin)
+        tile_hl.addWidget(QLabel(self.tr('Overlap (px):')))
+        self.inpaint_tile_overlap_spin = QSpinBox()
+        self.inpaint_tile_overlap_spin.setRange(0, 512)
+        self.inpaint_tile_overlap_spin.setValue(getattr(pcfg.module, 'inpaint_tile_overlap', 64))
+        self.inpaint_tile_overlap_spin.setToolTip(self.tr('Overlap between tiles for seamless blending. Ignored when tile size is Off.'))
+        tile_hl.addWidget(self.inpaint_tile_overlap_spin)
+        self.vlayout.addLayout(tile_hl)
+        self.inpaint_tile_size_spin.valueChanged.connect(self._on_inpaint_tile_size_changed)
+        self.inpaint_tile_overlap_spin.valueChanged.connect(self._on_inpaint_tile_overlap_changed)
+
+    def _on_inpaint_tile_size_changed(self, value: int):
+        pcfg.module.inpaint_tile_size = value
+
+    def _on_inpaint_tile_overlap_changed(self, value: int):
+        pcfg.module.inpaint_tile_overlap = value
 
     def showEvent(self, e) -> None:
         self.p_layout.insertWidget(1, self.module_combobox)
