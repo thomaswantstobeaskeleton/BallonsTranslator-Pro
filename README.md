@@ -1,11 +1,43 @@
 # BallonsTranslatorPro
 
-**BallonsTranslatorPro**: everything modified or added compared to the original [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator): **all new models** (detection, OCR, inpainting, translation), **how to run each**, **settings and tuning** (inpaint sizing, mask dilation/kernel, text/box formatting), **optional dependency conflicts and workarounds**, and **all fixes and behavior changes**. It can be very long; use the table of contents to jump to a section.
+Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
+
+---
+
+## At a glance
+
+| Topic | Summary |
+|-------|---------|
+| **What** | Fork with 10+ detectors, 20+ OCR engines, translation context, batch queue, Manga source, and UI improvements |
+| **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
+| **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
+| **Community** | Preferred: ask upstream to add *"There's a fork with more advanced features here"* in their README. When helping others: *"I solved this like this"* + link to the specific code block. Don't spam. |
+
+---
+
+## Quick start
+
+1. **Clone and run:** `git clone <this-repo> && cd BallonsTranslator-Pro && python launch.py`
+2. **First run:** Installs base deps and downloads default models into `data/`
+3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
+4. **New modules** appear automatically; install only the dependencies for the modules you use
+
+---
+
+## Key highlights (point by point)
+
+- **Text detection:** 10+ detectors (CTD, Paddle, EasyOCR, YSGYolo, HF object-detection, MMOCR, Surya, Magi, CRAFT, DPText-DETR, etc.). **Box padding** (4–6 px) on most detectors to reduce clipped punctuation.
+- **OCR:** 20+ engines (Paddle, manga_ocr, Surya, TrOCR, GOT-OCR2, Ocean, InternVL2/3, HunyuanOCR, etc.). **Crop padding** on many OCRs to avoid clipped text.
+- **Inpainting:** lama_large_512px with **configurable mask dilation** (0–5); Simple LaMa, Diffusers (SD/SDXL/FLUX), LaMa ONNX, MAT, Fluently v4, etc.
+- **Translation context:** Glossary, previous-page context, series-level storage, optional **context summarization** when near model limit (LLM_API_Translator).
+- **UI:** Canvas right-click menu (merge blocks, move up/down, spell check, trim, case change, detect in region); **text eraser** tool; **batch queue**; **Manga source** (MangaDex search/download); **keyboard shortcuts** (customizable).
+- **Config panel:** Logical DPI, dark mode, display language, WebP lossless, typesetting defaults, dual text detection (primary + secondary detector).
 
 ---
 
 ## Table of contents
 
+- [Contributing & guidelines](CONTRIBUTING.md) — Git practices, community etiquette, upstream merge
 1. [Summary of modifications](#1-summary-of-modifications)
 2. [How to run the application](#2-how-to-run-the-application)
 3. [Text detection – all modules and how to run](#3-text-detection--all-modules-and-how-to-run)
@@ -31,15 +63,41 @@
 
 This fork adds **many new optional modules** and applies **fixes and setting improvements**. Original behavior and defaults are unchanged unless noted. New modules are discovered automatically via the existing registry (no changes to core launch or config flow). You only install extra dependencies for the modules you use.
 
-| Category | What was added / changed |
-|----------|---------------------------|
-| **Text detection** | MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), **CRAFT** (standalone), **HF object-detection** (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2 (optional repos). |
-| **OCR** | 20+ new OCR backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, **HunyuanOCR**, **Manga OCR Mobile** (TFLite), **Nemotron Parse** (full-page). |
-| **Inpainting** | Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), **RePaint**, **LaMa ONNX** (general + manga), **Qwen-Image-Edit**, **MAT** (repo+checkpoint), **CUHK Manga**, **Fluently v4**. |
-| **Translation** | **Translation context and glossary:** Cross-page and cross-chapter terminology consistency via project/series glossary, previous-page context, and optional **context summarization** when near the model limit. See [§6.1](#61-translation-context-and-glossary) and [§12.7](#127-translation-context-glossary-series-previous-pages-summarization). |
-| **Settings / fixes** | **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint_size** options per inpainter; small-bubble normalization for lama_mpe; **crop_padding** for OCRs; CTD **box score threshold** and **merge tolerance**; **hf_object_det** default model_id = ogkalu/comic-text-and-bubble-detector; optional dependency docs (craft_det, simple_lama). **Dual text detection:** Run a second detector and merge results (see [§12.9](#129-dual-text-detection-primary--secondary-detector)). **Config panel (General, Save, DL Module):** Logical DPI, display language, dark mode, config panel font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, default device, unload after idle, and more — all in UI and persisted. |
-| **UI / workflow / export** | **Canvas right-click menu:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all; **Spell check source text** and **Spell check translation** (pyenchant); **Trim whitespace**; **To uppercase** / **To lowercase**; **Gradient type** (Linear/Radial); **Text on path** (None/Circular/Arc, [#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)). **Text eraser tool:** In drawing mode, erase parts of text blocks by painting over them (mask-based; undo with Ctrl+Z). See [§12.10](#1210-text-eraser-tool). **Text edit panel:** Default width closer to minimum; less cramped layout (opacity label, format icons, spacing). See [§12.11](#1211-text-edit-panel-and-right-panel-layout). Menu items enabled/disabled by selection. **Translation context (project):** Edit menu and Translator config open a dialog to set project **series path** and **project glossary** for cross-chapter consistency. **Lossless WebP** (#1055) in Config → Save when format is WebP; Save and Export all pages respect it. **Manga / Comic source** (Tools menu): search MangaDex by title or by chapter URL, list chapters by language, download as 001/002… pages, optional open folder in app; config persistence and rate limiting. **Batch queue** (Tools → Batch queue...): process multiple folders in sequence with Pause/Resume/Cancel ([#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020)). **Default download folder** for chapters: `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty). **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) opens a dialog to view and customize keybinds for file, edit, view, go, canvas, format, and drawing actions; shortcuts persist in config. **Typesetting:** Option to **auto-adjust text size to fit text box** (Config → General: set **Font Size** to “decide by program” and enable **Auto layout”; line structure is preserved). **Font size list** includes more steps (e.g. 30, 32, 34, 40, 44 between 28 and 48) for finer control. **Drag-and-drop** of folder or images onto the canvas to open a project; copy-paste (File → Open) also works. See [§12](#12-ui-workflow-and-export-enhancements). |
-| **Documentation** | `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md` (tiered quality/accuracy), `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, **`docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md`** (design and implementation of translation context, glossary, series storage), this README. |
+### Text detection
+- MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), CRAFT (standalone), HF object-detection (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2
+- **Box padding** (4–6 px recommended) on CTD, Paddle, EasyOCR, YSGYolo, HF object-det, MMOCR, Surya — reduces clipped punctuation (?, !) and character edges
+
+### OCR
+- 20+ new backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, HunyuanOCR, Manga OCR Mobile (TFLite), Nemotron Parse (full-page)
+- **Crop padding** on many OCRs (0–24 px) to reduce clipped text at edges
+
+### Inpainting
+- Simple LaMa, Diffusers (SD 1.5, SD2 768, SDXL 1024, DreamShaper, FLUX Fill, Kandinsky), RePaint, LaMa ONNX (general + manga), Qwen-Image-Edit, MAT, CUHK Manga, Fluently v4
+- **Mask dilation** configurable (0–5) for lama_large_512px; **inpaint size** options per inpainter
+### Translation
+- **Translation context and glossary:** Cross-page and cross-chapter terminology consistency via project/series glossary, previous-page context, optional context summarization when near model limit. See [§6.1](#61-translation-context-and-glossary) and [§12.8](#128-translation-context-glossary-series-previous-pages-summarization).
+
+### Settings and fixes
+- CTD: box score threshold, merge tolerance, min box area, custom ONNX path
+- **Dual text detection:** Run a second detector and merge results. See [§12.9](#129-dual-text-detection-primary--secondary-detector).
+- Config panel: Logical DPI, display language, dark mode, font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, WebP lossless, default device, unload after idle — all persisted in config
+### UI and workflow (point by point)
+- **Canvas right-click:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all
+- **Spell check:** Spell check source text and translation (pyenchant)
+- **Text formatting:** Trim whitespace; To uppercase / To lowercase; Gradient type (Linear/Radial); Text on path (None/Circular/Arc, [#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138))
+- **Text eraser tool:** In drawing mode, erase parts of text blocks by painting over them (mask-based; undo with Ctrl+Z). See [§12.10](#1210-text-eraser-tool)
+- **Text edit panel:** Default width closer to minimum; less cramped layout. See [§12.11](#1211-text-edit-panel-and-right-panel-layout)
+- **Translation context (project):** Edit menu and Translator config open a dialog to set project series path and project glossary for cross-chapter consistency
+- **Lossless WebP** (#1055): Config → Save when format is WebP; Save and Export all pages respect it
+- **Manga / Comic source** (Tools menu): Search MangaDex by title or chapter URL; list chapters by language; download as 001/002… pages; optional open folder in app; config persistence and rate limiting
+- **Batch queue** (Tools → Batch queue...): Process multiple folders in sequence with Pause/Resume/Cancel ([#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020))
+- **Default download folder:** `~/BallonsTranslator/Downloaded Chapters` (created automatically when empty)
+- **Keyboard shortcuts:** View → Keyboard Shortcuts (Ctrl+K) to view and customize keybinds; shortcuts persist in config
+- **Typesetting:** Auto-adjust text size to fit text box (Config → General: Font Size "decide by program" + Auto layout); font size list includes 30, 32, 34, 40, 44 for finer control
+- **Drag-and-drop:** Folder or images onto the canvas to open a project; copy-paste (File → Open) also works
+
+### Documentation
+- `docs/BEST_MODELS_RESEARCH.md`, `docs/MODELS_REFERENCE.md`, `docs/QUALITY_RANKINGS.md`, `docs/OPTIONAL_DEPENDENCIES.md`, `docs/INSTALL_EXTRA_DETECTORS.md`, `docs/MANHUA_BEST_SETTINGS.md`, `docs/SETTINGS_UI_RECOMMENDATIONS.md`, `docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md`
 
 ---
 
@@ -251,7 +309,7 @@ Most behavior and display options are set in the **Config panel** (left bar → 
 - **General → Typesetting:** Defaults for new/unchanged blocks: font size, stroke, color, alignment, writing mode, font family, effect (decide by program vs use global); **Auto layout**; **To uppercase**; **Independent text styles per project**; **Show only custom fonts**.
 - **General → Save:** Result image format (PNG, JPG, WebP, JXL); **Quality**; **WebP lossless** (when format is WebP); Intermediate image format (PNG, JXL).
 - **General → Saladict / search:** Show mini menu when selecting text; Saladict shortcut; Search engine URL for lookups.
-- **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel. The **Translator** section includes **Translation context (project)...** to open the dialog for project series path and glossary (see [§12.7](#127-translation-context-glossary-series-previous-pages-summarization)).
+- **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel. The **Translator** section includes **Translation context (project)...** and **Test translator**. *Note: Test translator may fail when Load model on demand or Unload models after idle is enabled — the translator is only loaded when you run a pipeline; run a page first or temporarily disable those options when testing.* See [§12.7](#127-translation-context-glossary-series-previous-pages-summarization) for translation context.
 
 Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a concise list of implemented UI settings and possible future additions.
 
@@ -374,7 +432,7 @@ The main application and all other modules work with the versions in `requiremen
 
 - **Config:**  
   - Defaults in `config/config.json` (e.g. ctd box score threshold, detect_size, inpainter choice) are unchanged unless you alter them; new modules appear when their dependencies are installed.  
-  - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. **Test translator** (Translator) runs a quick check of the current API. Typesetting options use a single-column layout with a minimum content width so controls do not go off screen. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).  
+  - **Config panel** (left bar → gear): General (Logical DPI, display language, dark mode, config font scale, recent projects, confirm before Run, OCR spell-check, typesetting defaults, save format/WebP lossless, Saladict/search), DL Module (default device, load on demand, unload after idle), and module-specific params. **Test translator** (Translator) runs a quick check of the current API. *Note: Test translator may fail if "Unload models after idle" or "Load model on demand" is on — the translator may not be loaded until you run a pipeline.* Typesetting options use a single-column layout with a minimum content width so controls do not go off screen. All persisted. See [§7.7](#77-config-panel-general-save-dl-module).  
   - **Proxy:** `utils/proxy_utils.py` provides `normalize_proxy_url`, `create_httpx_transport`, and `create_httpx_client`; the LLM API translator uses them so proxy strings without a scheme (e.g. `127.0.0.1:7897`) are normalized to `http://...` and work with httpx.  
   - UI/workflow/export: canvas context menu (detect in region/on page, merge, move up/down, copy/paste translation, clear, select all), **Translation context (project)** (Edit menu and Translator config dialog for series path and glossary), lossless WebP, Manga / Comic source (Tools), and keyboard shortcuts are documented in [§12](#12-ui-workflow-and-export-enhancements). **Quit:** Close confirmation ("Are you sure you want to quit?"). **Open menu:** Order is Open Folder → Open Images → Open Project. **Page list:** Context menu supports Reveal in File Explorer, Translate selected images, Remove from project. **Drag-drop:** Dropping image files on the canvas opens a project from that folder. Config fields `imgsave_webp_lossless`, `manga_source_*`, and `shortcuts` are persisted.
 
@@ -547,7 +605,7 @@ You can **drag a folder or image files** onto the **canvas** to open them as a p
 - **Tools menu:** In addition to **Manga / Comic source...** and **Keyboard Shortcuts** (View), the **Tools** menu includes: **Manage models** (download/remove detection, OCR, inpainting models), **Batch export** (export all result images to a folder), **Check project** (validate project: missing images, invalid JSON), **Re-run detection only** / **Re-run OCR only** (run pipeline with only that stage, then restore previous stage flags), **Region merge tool** (dialog for merging), and **Export all pages**. Display language and dark mode can also be toggled from **View**.
 - **Config panel – WebP lossless:** The WebP lossless checkbox is shown in the Save section only when the result format is WebP; its **enabled** state is toggled by `_update_webp_lossless_visibility()` when the format combo changes, so you cannot turn on lossless when the format is not WebP.
 - **Config panel – Typesetting and width:** The **Typesetting** section (Font Size, Stroke Size, Font Color, Stroke Color, Effect, Alignment, Writing-mode, Font Family) uses a single-column layout so all dropdowns stay visible; the config content area has a minimum width so **Test translator** (Translator) and other right-side controls do not go off screen. A horizontal scrollbar appears if the panel is narrow.
-- **Test translator:** In **Config → DL Module**, the **Translator** section has a **Test translator** button that runs a short translation with the current API/key and shows success or error. **Proxy:** LLM API translator (and other modules using `utils/proxy_utils`) normalizes proxy URLs (e.g. `127.0.0.1:7897` → `http://127.0.0.1:7897`) so httpx accepts them without "Unknown scheme" errors.
+- **Test translator:** In **Config → DL Module**, the **Translator** section has a **Test translator** button that runs a short translation with the current API/key and shows success or error. **Note:** Having **Unload models after idle** or **Load model on demand** enabled can cause Test translator to fail sometimes (e.g. "No translator loaded"), because the translator may not be loaded until you run a pipeline. Run a page first, or temporarily disable those options when testing. **Proxy:** LLM API translator (and other modules using `utils/proxy_utils`) normalizes proxy URLs (e.g. `127.0.0.1:7897` → `http://127.0.0.1:7897`) so httpx accepts them without "Unknown scheme" errors.
 - **Canvas – context menu state:** Before showing the context menu, the canvas computes the number of selected blocks and total blocks, then sets `setEnabled(True/False)` on the **Merge selected blocks**, **Move block(s) up**, **Move block(s) down**, **Spell check source text**, **Spell check translation**, **Trim whitespace**, **To uppercase**, and **To lowercase** actions so they appear grayed out when not applicable (e.g. merge when fewer than 2 selected, move up when none or first block selected; spell check, trim, and case when no blocks selected).
 - **Export all pages:** Uses the same `imgsave_ext`, `imgsave_quality`, and `imgsave_webp_lossless` as the normal Save path, so Export all pages also respects the lossless WebP option when format is WebP.
 

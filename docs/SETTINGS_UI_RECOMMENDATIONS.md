@@ -22,7 +22,7 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **Default device** — Dropdown: "Default (use module default)" or a specific device (CPU, CUDA, etc.). Used when a module’s device param is set to "Default". Empty device params are filled from this when loading config.
 - **Run pipeline presets** — Run menu → Pipeline presets: "Full", "Detect + OCR only", "Translate only", "Inpaint only". Apply and sync the four stage toggles.
 - **OCR font detection** — OCR section: "Font Detection" checkbox with tooltip (detect font properties from image after OCR).
-- **Unload after idle** — Spinbox (0–120 minutes, 0 = off). Unloads DL models after N minutes with no Run or pipeline activity; timer resets when pipeline finishes.
+- **Unload after idle** — Spinbox (0–120 minutes, 0 = off). Unloads DL models after N minutes with no Run or pipeline activity; timer resets when pipeline finishes. *Note: With this or "Load model on demand" enabled, **Test translator** may fail sometimes ("No translator loaded") because the translator is only loaded when you run a pipeline — run a page first or temporarily disable those options when testing.*
 
 ### Tools menu
 - **Batch queue (#1020)** — **Tools → Batch queue...** opens a dialog to add multiple folders to a queue and run the pipeline on each in sequence (same behavior as headless `--exec_dirs`). **Add folder(s)...** adds one folder; **Add folder (include subfolders)** adds the selected folder and each of its immediate subfolders as separate items. **Pause** / **Resume** temporarily halt the pipeline; **Cancel queue** stops the current job and clears the remaining queue. The list shrinks as each folder is processed.
