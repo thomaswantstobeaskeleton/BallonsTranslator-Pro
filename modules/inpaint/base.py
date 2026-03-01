@@ -270,16 +270,34 @@ class OpenCVInpainter(InpainterBase):
     def __init__(self, **params) -> None:
         super().__init__(**params)
         self.inpaint_method = lambda img, mask, *args, **kwargs: cv2.inpaint(img, mask, 3, cv2.INPAINT_NS)
-        
-    
+
     def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
         return self.inpaint_method(img, mask)
 
     def is_computational_intensive(self) -> bool:
         return True
-    
+
     def is_cpu_intensive(self) -> bool:
         return True
+
+
+@register_inpainter('opencv-telea')
+class OpenCVTeleaInpainter(InpainterBase):
+    """OpenCV Telea inpainting (#126). Fast, CPU-only, no model download."""
+
+    def __init__(self, **params) -> None:
+        super().__init__(**params)
+        self.inpaint_method = lambda img, mask, *args, **kwargs: cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+
+    def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
+        return self.inpaint_method(img, mask)
+
+    def is_computational_intensive(self) -> bool:
+        return True
+
+    def is_cpu_intensive(self) -> bool:
+        return True
+    
 
 
 @register_inpainter('patchmatch')

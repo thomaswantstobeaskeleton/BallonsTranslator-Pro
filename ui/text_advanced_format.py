@@ -222,6 +222,49 @@ class TextAdvancedFormatPanel(PanelArea):
         vlayout.addLayout(opacity_layout)
         vlayout.addLayout(font_weight_layout)
         vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.blend_mode_combobox = SmallComboBox(
+            parent=self,
+            options=[self.tr('Normal'), self.tr('Multiply'), self.tr('Screen'), self.tr('Overlay'), self.tr('Darken'), self.tr('Lighten')]
+        )
+        self.blend_mode_combobox.setToolTip(self.tr("Blend mode for compositing with the page image"))
+        self.blend_mode_combobox.activated.connect(self.on_blend_mode_changed)
+        blend_label = SmallParamLabel(self.tr('Blend Mode'))
+        blend_layout = QHBoxLayout()
+        blend_layout.addWidget(blend_label)
+        blend_layout.addWidget(self.blend_mode_combobox)
+        blend_layout.addStretch(1)
+
+        self.outline_only_checker = TextCheckerLabel(self.tr('Outline only'))
+        self.outline_only_checker.setToolTip(self.tr("Draw stroke only, no fill (set stroke width > 0)"))
+        self.outline_only_checker.checkStateChanged.connect(lambda s: self.on_format_changed('outline_only', self.outline_only_checker.isChecked()))
+
+        self.overlay_opacity_box = SmallSizeComboBox([0, 1], 'overlay_opacity', self, init_value=1.)
+        self.overlay_opacity_box.setToolTip(self.tr("Foreground overlay image opacity"))
+        self.overlay_opacity_box.param_changed.connect(self.on_format_changed)
+        overlay_opacity_label = SmallParamLabel(self.tr('Overlay opacity'))
+        overlay_opacity_layout = QHBoxLayout()
+        overlay_opacity_layout.addWidget(overlay_opacity_label)
+        overlay_opacity_layout.addWidget(self.overlay_opacity_box)
+        overlay_opacity_layout.addStretch(1)
+
+        self.skew_x_box = SmallSizeComboBox([-0.5, 0.5], 'skew_x', self, init_value=0.)
+        self.skew_x_box.param_changed.connect(self.on_format_changed)
+        skew_x_label = SmallParamLabel(self.tr('Skew X'))
+        self.skew_y_box = SmallSizeComboBox([-0.5, 0.5], 'skew_y', self, init_value=0.)
+        self.skew_y_box.param_changed.connect(self.on_format_changed)
+        skew_y_label = SmallParamLabel(self.tr('Skew Y'))
+        skew_layout = QHBoxLayout()
+        skew_layout.addWidget(skew_x_label)
+        skew_layout.addWidget(self.skew_x_box)
+        skew_layout.addWidget(skew_y_label)
+        skew_layout.addWidget(self.skew_y_box)
+        skew_layout.addStretch(1)
+
+        vlayout.addLayout(blend_layout)
+        vlayout.addLayout(overlay_opacity_layout)
+        vlayout.addLayout(skew_layout)
+        vlayout.addWidget(self.outline_only_checker)
         vlayout.addWidget(self.shadow_group)
         vlayout.addWidget(self.gradient_group)
 
@@ -239,6 +282,9 @@ class TextAdvancedFormatPanel(PanelArea):
         idx = self.font_weight_combobox.currentIndex()
         if 0 <= idx < len(self.font_weight_values):
             self.on_format_changed('font_weight', self.font_weight_values[idx])
+
+    def on_blend_mode_changed(self):
+        self.on_format_changed('blend_mode', self.blend_mode_combobox.currentIndex())
 
     def set_active_format(self, font_format: FontFormat):
         self.active_format = font_format
@@ -263,4 +309,9 @@ class TextAdvancedFormatPanel(PanelArea):
         self.gradient_group.type_combobox.setCurrentIndex(getattr(font_format, 'gradient_type', 0))
         self.gradient_group.start_picker.setPickerColor(font_format.gradient_start_color)
         self.gradient_group.end_picker.setPickerColor(font_format.gradient_end_color)
+        self.blend_mode_combobox.setCurrentIndex(max(0, min(getattr(font_format, 'blend_mode', 0), 5)))
+        self.outline_only_checker.setCheckState(getattr(font_format, 'outline_only', False))
+        self.overlay_opacity_box.setValue(getattr(font_format, 'overlay_opacity', 1.0))
+        self.skew_x_box.setValue(getattr(font_format, 'skew_x', 0.0))
+        self.skew_y_box.setValue(getattr(font_format, 'skew_y', 0.0))
         # self.tate_chu_yoko_checker.setChecked(font_format.font)

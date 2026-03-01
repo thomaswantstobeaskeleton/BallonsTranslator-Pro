@@ -38,6 +38,7 @@ class ControlBlockItem(QGraphicsRectItem):
     DRAG_NONE = 0
     DRAG_RESHAPE = 1
     DRAG_ROTATE = 2
+    DRAG_WARP = 3  # PR #1105: drag quad corner
     CURSOR_IDX = -1
     def __init__(self, parent, idx: int):
         super().__init__(parent)
@@ -104,6 +105,10 @@ class ControlBlockItem(QGraphicsRectItem):
                 self.drag_mode = self.DRAG_RESHAPE
                 self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
                 blk_item.startReshape()
+            elif getattr(self.ctrl, 'warp_editing', False) and self.idx in (0, 2, 4, 6):
+                self.drag_mode = self.DRAG_WARP
+                self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+                self.ctrl.beginWarpEdit()
             else:
                 self.drag_mode = self.DRAG_ROTATE
                 self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
@@ -184,6 +189,10 @@ class ControlBlockItem(QGraphicsRectItem):
             rect = QRectF(new_xy.x(), new_xy.y(), crect.width(), crect.height())
             blk_item.setRect(rect)
 
+        elif self.drag_mode == self.DRAG_WARP:
+            local_pos = self.ctrl.mapFromScene(event.scenePos())
+            self.ctrl.updateWarpCornerFromLocal(self.idx, local_pos)
+
         elif self.drag_mode == self.DRAG_ROTATE:   # rotating
             rotate_vec = event.scenePos() - self.ctrl.sceneBoundingRect().center()
             rotation = np.rad2deg(math.atan2(rotate_vec.y(), rotate_vec.x()))
@@ -207,6 +216,8 @@ class ControlBlockItem(QGraphicsRectItem):
                 self.ctrl.blk_item.endReshape()
             if self.drag_mode == self.DRAG_ROTATE:
                 self.ctrl.blk_item.rotated.emit(self.ctrl.rotation())
+            if self.drag_mode == self.DRAG_WARP:
+                self.ctrl.endWarpEdit()
             self.drag_mode = self.DRAG_NONE
             
             self.ctrl.previewPixmap.setVisible(False)
@@ -219,6 +230,8 @@ class TextBlkShapeControl(QGraphicsRectItem):
     blk_item : TextBlkItem = None 
     ctrl_block: ControlBlockItem = None
     reshaping: bool = False
+    warp_editing: bool = False  # PR #1105: quad warp corner drag mode
+    _warp_before: dict = None   # snapshot before warp drag for undo
     
     def __init__(self, parent) -> None:
         super().__init__()
@@ -257,11 +270,15 @@ class TextBlkShapeControl(QGraphicsRectItem):
         self.blk_item = blk_item
         if blk_item is None:
             self.hide()
+            self.warp_editing = False
             return
         blk_item.under_ctrl = True
         blk_item.update()
         self.updateBoundingRect()
         self.show()
+        sc = self.scene()
+        if sc is not None:
+            self.setWarpEditing(getattr(sc, 'warp_edit_mode', False))
 
     def updateBoundingRect(self):
         if self.blk_item is None:
@@ -279,12 +296,30 @@ class TextBlkShapeControl(QGraphicsRectItem):
         self.updateControlBlocks()
 
     def updateControlBlocks(self):
+        blk = self.blk_item.blk if self.blk_item else None
+        warp_editing = getattr(self, 'warp_editing', False)
+        warp_quad = getattr(blk, 'warp_quad', None) if blk else None
+        if warp_editing and warp_quad is not None and len(warp_quad) == 4:
+            b_rect = self.rect()
+            w, h = b_rect.width(), b_rect.height()
+            for ii, ctrlblock in enumerate(self.ctrlblock_group):
+                if ii % 2 == 0:
+                    corner_idx = ii // 2
+                    nx, ny = warp_quad[corner_idx][0], warp_quad[corner_idx][1]
+                    hitbox_xy = ctrlidx_to_hitbox[ii][:2]
+                    pos = np.array([nx * w, ny * h]) + hitbox_xy * ctrlblock.edge_width
+                    ctrlblock.setPos(float(pos[0]), float(pos[1]))
+                    ctrlblock.show()
+                else:
+                    ctrlblock.hide()
+            return
         b_rect = self.rect()
         b_rect = [b_rect.x(), b_rect.y(), b_rect.width(), b_rect.height()]
         corner_pnts = xywh2xyxypoly(np.array([b_rect])).reshape(-1, 2)
         edge_pnts = (corner_pnts[[1, 2, 3, 0]] + corner_pnts) / 2
         pnts = [edge_pnts, corner_pnts]
         for ii, ctrlblock in enumerate(self.ctrlblock_group):
+            ctrlblock.show()
             is_corner = not ii % 2
             idx = ii // 2
             hitbox_xy = ctrlidx_to_hitbox[ii][:2]
@@ -300,6 +335,61 @@ class TextBlkShapeControl(QGraphicsRectItem):
         self.scene().clearSelection()
         if self.blk_item is not None:
             self.blk_item.endEdit()
+
+    def setWarpEditing(self, enabled: bool):
+        """PR #1105: Toggle quad warp corner editing. When enabling, set warp_mode='quad' and warp_quad to unit square if currently 'none'."""
+        self.warp_editing = bool(enabled)
+        if self.blk_item is None or self.blk_item.blk is None:
+            return
+        blk = self.blk_item.blk
+        if enabled and getattr(blk, 'warp_mode', None) == 'none':
+            blk.warp_mode = 'quad'
+            blk.warp_quad = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+        self.updateControlBlocks()
+        self.blk_item.update()
+
+    def beginWarpEdit(self):
+        """PR #1105: Snapshot current warp state for undo."""
+        if self.blk_item is None or self.blk_item.blk is None:
+            return
+        blk = self.blk_item.blk
+        self._warp_before = {
+            'warp_mode': getattr(blk, 'warp_mode', 'none'),
+            'warp_quad': [list(p) for p in getattr(blk, 'warp_quad', [[0,0],[1,0],[1,1],[0,1]])],
+        }
+
+    def updateWarpCornerFromLocal(self, ctrl_idx: int, local_pos: QPointF):
+        """PR #1105: Update warp_quad corner from shape-control-local position. ctrl_idx in (0,2,4,6)."""
+        if self.blk_item is None or self.blk_item.blk is None:
+            return
+        blk = self.blk_item.blk
+        quad = getattr(blk, 'warp_quad', None)
+        if quad is None or len(quad) != 4:
+            return
+        r = self.rect()
+        w, h = r.width(), r.height()
+        if w <= 0 or h <= 0:
+            return
+        corner_idx = ctrl_idx // 2
+        nx = max(0.0, min(1.0, local_pos.x() / w))
+        ny = max(0.0, min(1.0, local_pos.y() / h))
+        blk.warp_quad[corner_idx] = [nx, ny]
+        self.updateControlBlocks()
+        self.blk_item.update()
+
+    def endWarpEdit(self):
+        """PR #1105: Emit warped signal if state changed (for undo command)."""
+        if self.blk_item is None or self._warp_before is None:
+            self._warp_before = None
+            return
+        blk = self.blk_item.blk
+        after = {
+            'warp_mode': getattr(blk, 'warp_mode', 'none'),
+            'warp_quad': [list(p) for p in getattr(blk, 'warp_quad', [[0,0],[1,0],[1,1],[0,1]])],
+        }
+        if after != self._warp_before:
+            self.blk_item.warped.emit(self._warp_before, after)
+        self._warp_before = None
 
     def paint(self, painter: QPainter, option: 'QStyleOptionGraphicsItem', widget = ...) -> None:
         # Draw with normal composition; RasterOp_NotDestination inverts destination and produced

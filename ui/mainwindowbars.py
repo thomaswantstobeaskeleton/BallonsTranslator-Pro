@@ -107,6 +107,9 @@ class LeftBar(Widget):
 
         actionExportAsDoc = QAction(self.tr("Export as Doc"), self)
         self.export_doc = actionExportAsDoc.triggered
+        actionExportCurrentPageAs = QAction(self.tr("Export current page as..."), self)
+        actionExportCurrentPageAs.setToolTip(self.tr("Save current page result image in chosen format (PNG, JPEG, WebP, JXL)."))
+        self.export_current_page_as = actionExportCurrentPageAs.triggered
         actionImportFromDoc = QAction(self.tr("Import from Doc"), self)
         self.import_doc = actionImportFromDoc.triggered
 
@@ -132,6 +135,7 @@ class LeftBar(Widget):
         openMenu.addActions([
             actionSaveProj,
             actionExportAsDoc,
+            actionExportCurrentPageAs,
             actionImportFromDoc,
             actionExportSrcTxt,
             actionExportTranslationTxt,
@@ -379,6 +383,9 @@ class TitleBar(Widget):
         texteditAction.setShortcut(QKeySequence.fromString(get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None))))
         importTextStyles = QAction(self.tr('Import Text Styles'), self)
         exportTextStyles = QAction(self.tr('Export Text Styles'), self)
+        spellCheckPanelAction = QAction(self.tr('Spell check panel'), self)
+        spellCheckPanelAction.setToolTip(self.tr('Show spell check panel (PR #974).'))
+        self.spellcheck_panel_trigger = spellCheckPanelAction.triggered
         keyboardShortcutsAction = QAction(self.tr('Keyboard Shortcuts...'), self)
         keyboardShortcutsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.keyboard_shortcuts", getattr(pcfg, "shortcuts", None))))
         self.keyboard_shortcuts_trigger = keyboardShortcutsAction.triggered
@@ -387,9 +394,18 @@ class TitleBar(Widget):
 
         self.viewMenu = viewMenu = QMenu(self.viewToolBtn)
         viewMenu.addMenu(self.displayLanguageMenu)
-        viewMenu.addActions([drawBoardAction, texteditAction])
+        viewMenu.addActions([drawBoardAction, texteditAction, spellCheckPanelAction])
         viewMenu.addSeparator()
         viewMenu.addAction(keyboardShortcutsAction)
+        viewMenu.addSeparator()
+        helpMenu = QMenu(self.tr('Help'), self)
+        docAction = QAction(self.tr('Documentation'), self)
+        docAction.setToolTip(self.tr('Open project README (installation and usage).'))
+        aboutAction = QAction(self.tr('About'), self)
+        aboutAction.setToolTip(self.tr('Show application version and info.'))
+        helpMenu.addAction(docAction)
+        helpMenu.addAction(aboutAction)
+        viewMenu.addMenu(helpMenu)
         viewMenu.addSeparator()
         viewMenu.addAction(importTextStyles)
         viewMenu.addAction(exportTextStyles)
@@ -402,6 +418,8 @@ class TitleBar(Widget):
         self.importtstyle_trigger = importTextStyles.triggered
         self.exporttstyle_trigger = exportTextStyles.triggered
         self.darkmode_trigger = darkModeAction.triggered
+        self.help_doc_trigger = docAction.triggered
+        self.help_about_trigger = aboutAction.triggered
 
         mergeToolAction = QAction(self.tr('Region merge tool'), self)
         mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
@@ -443,6 +461,9 @@ class TitleBar(Widget):
         self.re_run_ocr_only_trigger = reRunOCRAction.triggered
         batchExportAction = QAction(self.tr('Export all pages'), self)
         self.batch_export_trigger = batchExportAction.triggered
+        batchExportAsAction = QAction(self.tr('Export all pages as...'), self)
+        batchExportAsAction.setToolTip(self.tr('Choose output folder and format (PNG, JPEG, WebP, JXL).'))
+        self.batch_export_as_trigger = batchExportAsAction.triggered
         validateProjAction = QAction(self.tr('Check project'), self)
         self.validate_project_trigger = validateProjAction.triggered
 
@@ -462,6 +483,7 @@ class TitleBar(Widget):
         toolsMenu.addAction(reRunDetectAction)
         toolsMenu.addAction(reRunOCRAction)
         toolsMenu.addAction(batchExportAction)
+        toolsMenu.addAction(batchExportAsAction)
         toolsMenu.addAction(validateProjAction)
         toolsMenu.addAction(mangaSourceAction)
         toolsMenu.addAction(batchQueueAction)

@@ -91,6 +91,16 @@ class FontFormat(Config):
     # Mesh warp presets (#1093): Arc, Arch, Bulge, Flag (Photoshop-like)
     warp_style: int = 0  # 0 = none, 1 = arc, 2 = arch, 3 = bulge, 4 = flag
     warp_strength: float = 0.5  # 0..1
+    # Blend mode for compositing block with scene (0=Normal, 1=Multiply, 2=Screen, 3=Overlay, 4=Darken, 5=Lighten)
+    blend_mode: int = 0
+    # Outline only: draw stroke, no fill (stroke-only text)
+    outline_only: bool = False
+    # Overlay image opacity (0..1) and block skew (shear) - synced to TextBlock
+    overlay_opacity: float = 1.0
+    skew_x: float = 0.0
+    skew_y: float = 0.0
+    # #35: per-character stroke color (list of [r,g,b], one per character; used for text-on-path)
+    stroke_rgb_per_char: List = field(default=None)  # optional
 
     deprecated_attributes: dict = field(default_factory = lambda: dict())
 

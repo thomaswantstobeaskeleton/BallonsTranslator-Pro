@@ -147,6 +147,36 @@ class RotateItemCommand(QUndoCommand):
         return True
 
 
+class WarpItemCommand(QUndoCommand):
+    """PR #1105: Undo/redo for quad warp changes."""
+    def __init__(self, item: TextBlkItem, before: dict, after: dict, shape_ctrl: TextBlkShapeControl):
+        super(WarpItemCommand, self).__init__()
+        self.item = item
+        self.before = before
+        self.after = after
+        self.shape_ctrl = shape_ctrl
+
+    def redo(self):
+        blk = self.item.blk
+        if blk is None:
+            return
+        blk.warp_mode = self.after.get('warp_mode', 'none')
+        blk.warp_quad = [list(p) for p in self.after.get('warp_quad', [[0,0],[1,0],[1,1],[0,1]])]
+        self.item.update()
+        if self.shape_ctrl.blk_item == self.item:
+            self.shape_ctrl.updateControlBlocks()
+
+    def undo(self):
+        blk = self.item.blk
+        if blk is None:
+            return
+        blk.warp_mode = self.before.get('warp_mode', 'none')
+        blk.warp_quad = [list(p) for p in self.before.get('warp_quad', [[0,0],[1,0],[1,1],[0,1]])]
+        self.item.update()
+        if self.shape_ctrl.blk_item == self.item:
+            self.shape_ctrl.updateControlBlocks()
+
+
 class AutoLayoutCommand(QUndoCommand):
     def __init__(self, items: List[TextBlkItem], old_rect_lst: List, old_html_lst: List, trans_widget_lst: List[TransTextEdit]):
         super(AutoLayoutCommand, self).__init__()

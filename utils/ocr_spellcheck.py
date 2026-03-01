@@ -75,3 +75,20 @@ def spell_check_textblocks(textblocks, **kwargs):
         if not getattr(blk, "text", None) or not isinstance(blk.text, list):
             continue
         blk.text = [spell_check_line(line) for line in blk.text]
+
+
+def get_spell_issues(text: str) -> list:
+    """Return list of (word, start_idx, end_idx, suggestions) for misspelled words. For SpellCheck panel."""
+    if not text or not _init_enchant() or _spell_checker is None:
+        return []
+    import re
+    issues = []
+    for m in re.finditer(r"[a-zA-Z]+(?:'[a-zA-Z]+)?", text):
+        word = m.group(0)
+        clean = "".join(c for c in word if c.isalpha() or c in "'-")
+        if not clean or _spell_checker.check(clean):
+            continue
+        suggs = _spell_checker.suggest(clean)
+        if suggs:
+            issues.append((word, m.start(), m.end(), suggs))
+    return issues

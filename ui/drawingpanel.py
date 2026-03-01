@@ -230,6 +230,12 @@ class RectPanel(Widget):
             self.tr('Use existing mask')
         ])
         self.methodComboBox.activated.connect(self.on_inpaint_seg_method_changed)
+        self.shapeComboBox = QComboBox()
+        self.shapeComboBox.setFixedHeight(CONFIG_COMBOBOX_HEIGHT)
+        self.shapeComboBox.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.shapeComboBox.addItems([self.tr('Rectangle'), self.tr('Ellipse')])
+        self.shapeComboBox.setToolTip(self.tr('Selection shape (#35).'))
+        self.shapeComboBox.activated.connect(self.on_shape_changed)
         self.autoChecker = QCheckBox(self.tr("Auto"))
         self.autoChecker.setToolTip(self.tr("run inpainting automatically."))
         self.autoChecker.stateChanged.connect(self.on_auto_changed)
@@ -256,8 +262,10 @@ class RectPanel(Widget):
         glayout.addWidget(self.dilate_slider, 0, 1)
         glayout.addWidget(self.erode_label, 1, 0)
         glayout.addWidget(self.erode_slider, 1, 1)
-        glayout.addWidget(self.autoChecker, 2, 0)
-        glayout.addWidget(self.methodComboBox, 2, 1)
+        glayout.addWidget(ToolNameLabel(100, self.tr('Shape')), 2, 0)
+        glayout.addWidget(self.shapeComboBox, 2, 1)
+        glayout.addWidget(self.autoChecker, 3, 0)
+        glayout.addWidget(self.methodComboBox, 3, 1)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -276,6 +284,9 @@ class RectPanel(Widget):
         
     def on_inpaint_seg_method_changed(self):
         pcfg.drawpanel.rectool_method = self.methodComboBox.currentIndex()
+
+    def on_shape_changed(self):
+        pcfg.drawpanel.rectool_shape = self.shapeComboBox.currentIndex()
 
     def on_auto_changed(self):
         if self.autoChecker.isChecked():
@@ -559,6 +570,7 @@ class DrawingPanel(Widget):
         self.rectPanel.erode_slider.setValue(config.recttool_erode_ksize)
         self.rectPanel.autoChecker.setChecked(config.rectool_auto)
         self.rectPanel.methodComboBox.setCurrentIndex(config.rectool_method)
+        self.rectPanel.shapeComboBox.setCurrentIndex(getattr(config, 'rectool_shape', 0))
         if config.current_tool == ImageEditMode.HandTool:
             self.handTool.setChecked(True)
         elif config.current_tool == ImageEditMode.InpaintTool:
@@ -907,11 +919,23 @@ class DrawingPanel(Widget):
             if y2 - y1 < 2 or x2 - x1 < 2:
                 self.canvas.image_edit_mode = ImageEditMode.RectTool
                 return
+            use_ellipse = (getattr(pcfg.drawpanel, 'rectool_shape', 0) == 1)
+            rh, rw = y2 - y1, x2 - x1
+            ellipse_mask = None
+            if use_ellipse:
+                ellipse_mask = np.zeros((rh, rw), dtype=np.uint8)
+                center = (rw // 2, rh // 2)
+                axes = (max(1, rw // 2), max(1, rh // 2))
+                cv2.ellipse(ellipse_mask, center, axes, 0, 0, 360, 255, -1)
             if mode == 0:
                 im = np.copy(img[y1: y2, x1: x2])
                 maskseg_method = get_maskseg_method()
                 inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=self.canvas.imgtrans_proj.mask_array[y1: y2, x1: x2])
                 mask = self.rectPanel.post_process_mask(inpaint_mask_array)
+                if use_ellipse and ellipse_mask is not None:
+                    if mask.ndim == 3:
+                        mask = mask[:, :, 0] if mask.shape[2] > 0 else np.zeros((rh, rw), dtype=np.uint8)
+                    mask = np.minimum(mask, ellipse_mask)
 
                 bground_rgb = bub_dict['bground_rgb']
                 need_inpaint = bub_dict['need_inpaint']
@@ -931,9 +955,20 @@ class DrawingPanel(Widget):
                     self.inpaint_mask_array = inpaint_mask_array
                     self.rect_inpaint_dict = inpaint_dict
             else:   # erasing
-                mask = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
-                erased = self.canvas.imgtrans_proj.img_array[y1: y2, x1: x2]
-                self.canvas.push_undo_command(InpaintUndoCommand(self.canvas, erased, mask, [x1, y1, x2, y2]))
+                img_view = self.canvas.imgtrans_proj.inpainted_array[y1:y2, x1:x2]
+                mask_view = self.canvas.imgtrans_proj.mask_array[y1:y2, x1:x2]
+                if use_ellipse and ellipse_mask is not None:
+                    orig_region = self.canvas.imgtrans_proj.img_array[y1:y2, x1:x2]
+                    redo_img = np.copy(img_view)
+                    redo_mask = np.copy(mask_view)
+                    inside = ellipse_mask > 0
+                    redo_img[inside] = orig_region[inside]
+                    redo_mask[inside] = 0
+                    self.canvas.push_undo_command(InpaintUndoCommand(self.canvas, redo_img, redo_mask, [x1, y1, x2, y2]))
+                else:
+                    mask = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
+                    erased = self.canvas.imgtrans_proj.img_array[y1: y2, x1: x2]
+                    self.canvas.push_undo_command(InpaintUndoCommand(self.canvas, erased, mask, [x1, y1, x2, y2]))
                 self.canvas.image_edit_mode = ImageEditMode.RectTool
             self.setCrossCursor()
 

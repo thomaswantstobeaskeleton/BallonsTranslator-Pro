@@ -361,6 +361,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | **Drawing Board** | Switch to drawing mode (P) |
 | **Text Editor** | Switch to text edit mode (T) |
 | **Keyboard Shortcuts...** | Customize keybinds (Ctrl+K) |
+| **Help** | Submenu: **Documentation** (open README), **About** (version) |
 | **Dark Mode** | Toggle dark theme |
 
 ---
@@ -524,6 +525,18 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Optional deps:** [docs/OPTIONAL_DEPENDENCIES.md](docs/OPTIONAL_DEPENDENCIES.md), [docs/INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md)
 - **Translation context:** [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
 - **UI/settings:** [docs/SETTINGS_UI_RECOMMENDATIONS.md](docs/SETTINGS_UI_RECOMMENDATIONS.md)
+
+### Upstream issues and PRs (dmMaze/BallonsTranslator)
+
+This fork implements or aligns with several upstream feature requests:
+
+- **[#126](https://github.com/dmMaze/BallonsTranslator/issues/126):** Eraser → **Text eraser** tool; **Help** menu (View → Help); **opacity** toggles; **natural sort**; **Escape** (text eraser + rect cancel); **model download** scripts: Linux (`scripts/download_models.sh`), **macOS** (`scripts/download_models_macos.sh`); **Export as** (Tools → Export all pages as…, File → Export current page as…) with format PNG/JPEG/WebP/JXL; **OpenCV-only inpainters** `opencv-tela` and `opencv-telea` (no model download). .kra/PSD export and optional detector–cleaner module not implemented.
+- **[#41](https://github.com/dmMaze/BallonsTranslator/issues/41):** **MangaInpainter** → **cuhk_manga_inpaint** (see [doc/INSTALL_CUHK_MANGA.md](doc/INSTALL_CUHK_MANGA.md)).
+- **[#35](https://github.com/dmMaze/BallonsTranslator/issues/35):** Text **opacity**; **shapes**: rect tool has **Ellipse** option; **per-letter stroke color** for text-on-path (`stroke_rgb_per_char`); font menu **long names** (min width 220px, 20 visible items).
+- **PR [#991](https://github.com/dmMaze/BallonsTranslator/pull/991):** **Translate selected images** in page list context menu.
+- **PR [#974](https://github.com/dmMaze/BallonsTranslator/pull/974):** **Spell check panel** (View → Spell check panel): Source/Translation, Check current page, list + Replace with suggestion (pyenchant). Context menu and OCR auto-correct unchanged.
+- **PR [#1105](https://github.com/dmMaze/BallonsTranslator/pull/1105):** Preset **warp** and **text eraser**; Escape. Interactive mesh/quad warp not implemented.
+- **PR [#1070](https://github.com/dmMaze/BallonsTranslator/pull/1070) (Image overlay):** Not implemented.
 
 ---
 

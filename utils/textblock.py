@@ -46,6 +46,16 @@ class TextBlock:
     region_inpaint_dict: Dict = None
     # Text eraser mask (#1093): same size as block in px, 255=show 0=erase (hole)
     text_mask: np.ndarray = None
+    # PR #1070: foreground image overlay (path relative to project directory, e.g. overlays/xxx.png)
+    foreground_image_path: str = None
+    overlay_opacity: float = 1.0  # 0..1 opacity for foreground overlay image
+    skew_x: float = 0.0  # horizontal skew (shear) for block content, typically -0.5..0.5
+    skew_y: float = 0.0  # vertical skew (shear) for block content
+    # PR #1105: interactive quad/mesh warp. warp_mode: 'none' | 'quad' | 'mesh'
+    warp_mode: str = 'none'
+    warp_quad: List = field(default_factory=lambda: [[0, 0], [1, 0], [1, 1], [0, 1]])  # 4 corners normalized [x,y]
+    warp_mesh_size: List = field(default_factory=lambda: [2, 2])  # [nx, ny] for mesh
+    warp_mesh: List = None  # list of normalized [x,y] points for mesh (None = use warp_quad only)
 
     fontformat: FontFormat = field(default_factory=lambda: FontFormat())
 

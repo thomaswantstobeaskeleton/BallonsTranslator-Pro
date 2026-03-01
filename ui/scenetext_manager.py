@@ -15,7 +15,7 @@ from .textitem import TextBlkItem, TextBlock
 from .canvas import Canvas
 from .textedit_area import TransTextEdit, SourceTextEdit, TransPairWidget, SelectTextMiniMenu, TextEditListScrollArea, QVBoxLayout, Widget
 from utils.fontformat import FontFormat
-from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, TextItemEditCommand, TextEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
+from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, WarpItemCommand, TextItemEditCommand, TextEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
 from .text_panel import FontFormatPanel
 from utils.config import pcfg
 from utils import shared
@@ -549,6 +549,7 @@ class SceneTextManager(QObject):
             blk_item.moved.connect(self.onTextBlkItemMoved)
             blk_item.reshaped.connect(self.onTextBlkItemReshaped)
             blk_item.rotated.connect(self.onTextBlkItemRotated)
+            blk_item.warped.connect(self.onTextBlkItemWarped)
             blk_item.push_undo_stack.connect(self.on_push_textitem_undostack)
             blk_item.undo_signal.connect(self.on_textedit_undo)
             blk_item.redo_signal.connect(self.on_textedit_redo)
@@ -571,6 +572,7 @@ class SceneTextManager(QObject):
         textblk_item.moved.connect(self.onTextBlkItemMoved)
         textblk_item.reshaped.connect(self.onTextBlkItemReshaped)
         textblk_item.rotated.connect(self.onTextBlkItemRotated)
+        textblk_item.warped.connect(self.onTextBlkItemWarped)
         textblk_item.push_undo_stack.connect(self.on_push_textitem_undostack)
         textblk_item.undo_signal.connect(self.on_textedit_undo)
         textblk_item.redo_signal.connect(self.on_textedit_redo)
@@ -716,6 +718,12 @@ class SceneTextManager(QObject):
         blk_item = self.txtblkShapeControl.blk_item
         if blk_item:
             self.canvas.push_undo_command(RotateItemCommand(blk_item, new_angle, self.txtblkShapeControl))
+
+    def onTextBlkItemWarped(self, before: dict, after: dict):
+        """PR #1105: Push undo command for quad warp change."""
+        item = self.sender()
+        if isinstance(item, TextBlkItem):
+            self.canvas.push_undo_command(WarpItemCommand(item, before, after, self.txtblkShapeControl))
 
     def onDeleteBlkItems(self, mode: int):
         selected_blks = self.canvas.selected_text_items()

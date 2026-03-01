@@ -224,6 +224,9 @@ class FontFamilyComboBox(QFontComboBox):
         self.setLineEdit(lineedit)
         self.emit_if_focused = emit_if_focused
         self.return_pressed = False
+        # #35: support long font names in dropdown
+        self.setMinimumWidth(220)
+        self.setMaxVisibleItems(20)
         
     def apply_fontfamily(self):
         ffamily = self.currentFont().family()

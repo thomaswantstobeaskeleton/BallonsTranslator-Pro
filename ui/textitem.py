@@ -1,4 +1,5 @@
 import math, re
+import os.path as osp
 import numpy as np
 import cv2
 from typing import List, Union, Tuple
@@ -7,7 +8,7 @@ from qtpy.QtWidgets import QGraphicsItem, QWidget, QGraphicsSceneHoverEvent, QGr
 from qtpy.QtCore import Qt, QRect, QRectF, QPointF, Signal, QSizeF
 from qtpy.QtGui import (QGradient, QKeyEvent, QFont, QTextCursor, QPixmap, QPainterPath, QTextDocument, 
                        QInputMethodEvent, QPainter, QPen, QColor, QTextCharFormat, QTextDocument, QLinearGradient, QRadialGradient,
-                       QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat, QImage, QBitmap, QRegion)
+                       QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat, QImage, QBitmap, QRegion, QTransform, QPolygonF)
 
 from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingType
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
@@ -19,6 +20,18 @@ from .text_graphical_effect import apply_shadow_effect
 
 TEXTRECT_SHOW_COLOR = QColor(30, 147, 229, 170)
 TEXTRECT_SELECTED_COLOR = QColor(248, 64, 147, 170)
+
+# Blend mode (fontformat.blend_mode) to QPainter.CompositionMode
+def _blend_mode_qt(mode: int):
+    modes = [
+        QPainter.CompositionMode.CompositionMode_SourceOver,
+        getattr(QPainter.CompositionMode, 'CompositionMode_Multiply', QPainter.CompositionMode.CompositionMode_SourceOver),
+        getattr(QPainter.CompositionMode, 'CompositionMode_Screen', QPainter.CompositionMode.CompositionMode_SourceOver),
+        getattr(QPainter.CompositionMode, 'CompositionMode_Overlay', QPainter.CompositionMode.CompositionMode_SourceOver),
+        getattr(QPainter.CompositionMode, 'CompositionMode_Darken', QPainter.CompositionMode.CompositionMode_SourceOver),
+        getattr(QPainter.CompositionMode, 'CompositionMode_Lighten', QPainter.CompositionMode.CompositionMode_SourceOver),
+    ]
+    return modes[mode] if 0 <= mode < len(modes) else modes[0]
 
 
 class TextBlkItem(QGraphicsTextItem):
@@ -38,6 +51,7 @@ class TextBlkItem(QGraphicsTextItem):
     undo_signal = Signal()
     push_undo_stack = Signal(int, bool)
     propagate_user_edited = Signal(int, str, bool)
+    warped = Signal(object, object)  # PR #1105: (before_state_dict, after_state_dict) when quad/mesh warp changes
 
     def __init__(self, blk: TextBlock = None, idx: int = 0, set_format=True, show_rect=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -76,6 +90,7 @@ class TextBlkItem(QGraphicsTextItem):
         self.setBoundingRegionGranularity(0)
         self.setFlags(QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable)
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
+        self._foreground_pixmap: QPixmap = None  # PR #1070 image overlay cache
 
     def inputMethodEvent(self, e: QInputMethodEvent):
         if self.pre_editing == False:
@@ -239,6 +254,9 @@ class TextBlkItem(QGraphicsTextItem):
             painter.setFont(font)
 
             if draw_stroke and stroke_px > 0:
+                per_char = getattr(ff, 'stroke_rgb_per_char', None)
+                if per_char and i < len(per_char) and len(per_char[i]) >= 3:
+                    stroke_pen.setColor(QColor(per_char[i][0], per_char[i][1], per_char[i][2]))
                 painter.setPen(stroke_pen)
                 painter.setBrush(Qt.GlobalColor.transparent)
                 painter.drawText(0, 0, ch)
@@ -274,12 +292,16 @@ class TextBlkItem(QGraphicsTextItem):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
         if use_path:
-            self._paint_text_on_path(painter, draw_stroke=paint_stroke, draw_fill=True)
+            self._paint_text_on_path(painter, draw_stroke=paint_stroke, draw_fill=not getattr(self.fontformat, 'outline_only', False))
         else:
-            if paint_stroke:
+            outline_only = getattr(self.fontformat, 'outline_only', False)
+            if outline_only and paint_stroke:
                 self.paint_stroke(painter)
             else:
-                self.document().drawContents(painter)
+                if paint_stroke:
+                    self.paint_stroke(painter)
+                if not outline_only:
+                    self.document().drawContents(painter)
 
         # shadow
         if paint_shadow:
@@ -304,6 +326,10 @@ class TextBlkItem(QGraphicsTextItem):
     def initTextBlock(self, blk: TextBlock = None, set_format=True):
         self.blk = blk
         self.fontformat = blk.fontformat
+        if blk is not None:
+            self.fontformat.overlay_opacity = getattr(blk, 'overlay_opacity', 1.0)
+            self.fontformat.skew_x = getattr(blk, 'skew_x', 0.0)
+            self.fontformat.skew_y = getattr(blk, 'skew_y', 0.0)
         if blk is None:
             xyxy = [0, 0, 0, 0]
             blk = TextBlock(xyxy)
@@ -558,8 +584,36 @@ class TextBlkItem(QGraphicsTextItem):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
             painter.fillRect(br, Qt.GlobalColor.transparent)
             painter.restore()
+        blk = getattr(self, 'blk', None)
+        skew_x = getattr(blk, 'skew_x', 0.0) or 0.0 if blk else 0.0
+        skew_y = getattr(blk, 'skew_y', 0.0) or 0.0 if blk else 0.0
+        if skew_x != 0 or skew_y != 0:
+            painter.save()
+            painter.shear(skew_x, skew_y)
         if self.is_editting():
             self._draw_accessories(painter)
+        elif self._has_warp():
+            # PR #1105: draw text+accessories as warped quad (no separate text/accessories)
+            bm = getattr(self.fontformat, 'blend_mode', 0)
+            painter.save()
+            painter.setCompositionMode(_blend_mode_qt(bm))
+            self._draw_warped_content(painter)
+            painter.restore()
+            if skew_x != 0 or skew_y != 0:
+                painter.restore()
+            br = self.boundingRect()
+            draw_rect = self.draw_rect and not self.under_ctrl
+            if self.isSelected() and not self.is_editting():
+                pen = QPen(TEXTRECT_SELECTED_COLOR, 3.5 / self.get_scale(), Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+                painter.drawRect(self.unpadRect(br))
+            elif draw_rect:
+                pen = QPen(TEXTRECT_SHOW_COLOR, 3 / self.get_scale(), Qt.PenStyle.SolidLine)
+                painter.setPen(pen)
+                painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+                painter.drawRect(self.unpadRect(br))
+            return
         option.state = QStyle.State_None
         # Prevent base class from filling with palette Base (e.g. brown/beige on some themes)
         painter.save()
@@ -568,6 +622,8 @@ class TextBlkItem(QGraphicsTextItem):
         pal = QPalette(option.palette)
         pal.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
         option.palette = pal
+        bm = getattr(self.fontformat, 'blend_mode', 0)
+        painter.setCompositionMode(_blend_mode_qt(bm))
         use_path = not self.is_editting() and getattr(self.fontformat, 'text_on_path', 0) != 0
         if not self.document().isEmpty():
             if use_path:
@@ -589,6 +645,8 @@ class TextBlkItem(QGraphicsTextItem):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
             self._draw_accessories(painter)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        if skew_x != 0 or skew_y != 0:
+            painter.restore()
 
     def _text_mask_region(self):
         """Build QRegion from blk.text_mask for clipping (#1093 text eraser). Returns None if no mask or mask is full (no clip needed)."""
@@ -624,6 +682,101 @@ class TextBlkItem(QGraphicsTextItem):
         if blk is None or getattr(blk, 'text_mask', None) is None:
             return False
         return np.all(blk.text_mask <= 0)
+
+    def _get_foreground_pixmap(self) -> Union[QPixmap, None]:
+        """Load and cache foreground overlay image (PR #1070). Returns None if none or load fails."""
+        blk = getattr(self, 'blk', None)
+        path = getattr(blk, 'foreground_image_path', None) if blk else None
+        if not path or not path.strip():
+            self._foreground_pixmap = None
+            return None
+        sc = self.scene()
+        if sc is None or not getattr(sc, 'imgtrans_proj', None):
+            return None
+        proj_dir = getattr(sc.imgtrans_proj, 'directory', None)
+        if not proj_dir:
+            return None
+        full_path = osp.normpath(osp.join(proj_dir, path))
+        if not osp.isfile(full_path):
+            self._foreground_pixmap = None
+            return None
+        if self._foreground_pixmap is not None and getattr(self, '_foreground_path', None) == full_path:
+            return self._foreground_pixmap
+        try:
+            self._foreground_pixmap = QPixmap(full_path)
+            self._foreground_path = full_path
+            if self._foreground_pixmap.isNull():
+                self._foreground_pixmap = None
+            return self._foreground_pixmap
+        except Exception:
+            self._foreground_pixmap = None
+            return None
+
+    def invalidate_foreground_cache(self):
+        """Call when blk.foreground_image_path changes (PR #1070)."""
+        self._foreground_pixmap = None
+        if hasattr(self, '_foreground_path'):
+            del self._foreground_path
+
+    def _has_warp(self) -> bool:
+        """True if block has quad or mesh warp enabled (PR #1105)."""
+        blk = getattr(self, 'blk', None)
+        if blk is None:
+            return False
+        mode = getattr(blk, 'warp_mode', None)
+        return mode in ('quad', 'mesh')
+
+    def _warp_quad_points_px(self):
+        """Return 4 corner points in item-local pixel coords from blk.warp_quad (PR #1105)."""
+        blk = getattr(self, 'blk', None)
+        if blk is None:
+            return None
+        quad = getattr(blk, 'warp_quad', None)
+        if not quad or len(quad) != 4:
+            return None
+        br = self.boundingRect()
+        w, h = br.width(), br.height()
+        return [QPointF(q[0] * w, q[1] * h) for q in quad]
+
+    def _apply_quad_warp(self, pixmap: QPixmap) -> Union[QPixmap, None]:
+        """Apply quad warp to pixmap using blk.warp_quad; returns new pixmap (PR #1105)."""
+        pts = self._warp_quad_points_px()
+        if pts is None or pixmap.isNull():
+            return pixmap
+        w, h = pixmap.width(), pixmap.height()
+        src_poly = QPolygonF([QPointF(0, 0), QPointF(w, 0), QPointF(w, h), QPointF(0, h)])
+        dst_poly = QPolygonF(pts)
+        tr = QTransform.quadToQuad(src_poly, dst_poly)
+        if not tr.isInvertible():
+            return pixmap
+        out = QPixmap(w, h)
+        out.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(out)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setTransform(tr)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        return out
+
+    def _draw_warped_content(self, painter: QPainter):
+        """Draw text+accessories as warped quad (PR #1105). Call when not editing and _has_warp()."""
+        pixmap = self.toPixmap()
+        if pixmap.isNull():
+            return
+        pts = self._warp_quad_points_px()
+        if not pts:
+            return
+        w, h = pixmap.width(), pixmap.height()
+        src_poly = QPolygonF([QPointF(0, 0), QPointF(w, 0), QPointF(w, h), QPointF(0, h)])
+        dst_poly = QPolygonF(pts)
+        tr = QTransform.quadToQuad(src_poly, dst_poly)
+        if not tr.isInvertible():
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setTransform(tr, True)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.restore()
 
     def _apply_warp_preset(self, pixmap: QPixmap, warp_style: int, strength: float) -> QPixmap:
         """Apply Photoshop-like warp presets (#1093): 1=Arc, 2=Arch, 3=Bulge, 4=Flag."""
@@ -671,6 +824,20 @@ class TextBlkItem(QGraphicsTextItem):
                     painter.setClipRegion(QRegion())
             else:
                 pass
+
+        # PR #1070: foreground image overlay
+        fg_pix = self._get_foreground_pixmap()
+        if fg_pix is not None:
+            painter.save()
+            blk = getattr(self, 'blk', None)
+            op = 1.0
+            if blk is not None:
+                op = max(0.0, min(1.0, getattr(blk, 'overlay_opacity', 1.0)))
+            if op < 1.0:
+                painter.setOpacity(op)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(br.toRect(), fg_pix)
+            painter.restore()
 
         draw_rect = self.draw_rect and not self.under_ctrl
         if self.isSelected() and not self.is_editting():
@@ -927,6 +1094,9 @@ class TextBlkItem(QGraphicsTextItem):
     def updateBlkFormat(self):
         fmt = self.get_fontformat()
         self.blk.fontformat.merge(fmt)
+        self.blk.overlay_opacity = getattr(fmt, 'overlay_opacity', 1.0)
+        self.blk.skew_x = getattr(fmt, 'skew_x', 0.0)
+        self.blk.skew_y = getattr(fmt, 'skew_y', 0.0)
 
     def set_cursor_cfmt(self, cursor: QTextCursor, cfmt: QTextCharFormat, merge_char: bool = False):
         doc_is_empty = self.document().isEmpty()
