@@ -38,6 +38,7 @@ ultralytics>=8.4.14
 beautifulsoup4
 colorama
 openai>=2.8.1
+pydantic
 pyyaml
 natsort
 py7zr

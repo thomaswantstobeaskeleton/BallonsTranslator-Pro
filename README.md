@@ -490,7 +490,7 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Box padding** (4–6 px recommended) on CTD, Paddle, EasyOCR, YSGYolo, HF object-det, MMOCR, Surya — reduces clipped punctuation (?, !) and character edges
 
 ### OCR
-- 20+ new backends: TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, HunyuanOCR, Manga OCR Mobile (TFLite), Nemotron Parse (full-page)
+- 20+ new backends: **PP-OCRv5** (paddle_rec_v5), **PaddleOCR-VL** (paddle_vl / PaddleOCRVLManga), TrOCR, GOT-OCR2, GLM-OCR, Donut, PaddleOCR-VL (HF), Qwen2-VL 7B, DeepSeek-OCR, LightOn, Chandra, DocOwl2, Nanonets, Ocean-OCR, InternVL2/3, Florence-2, MiniCPM-o, OCRFlux, HunyuanOCR, Manga OCR Mobile (TFLite), Nemotron Parse (full-page)
 - **Crop padding** on many OCRs (0–24 px) to reduce clipped text at edges
 
 ### Inpainting
@@ -588,6 +588,8 @@ If model downloads fail, use the original README links (MEGA / Google Drive) and
 
 Select the detector from the **Text detection** dropdown in the settings panel. Pair detection-only modules with an OCR (see [INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md) for which work with **none_ocr**).
 
+**Original vs this fork:** **ctd**, **paddle_det**, **easyocr_det**, **ysgyolo**, **stariver_ocr** are from the original BallonsTranslator. **paddle_det_v5** (PP-OCRv5 detection) and all other detectors in the "New" table were added in this fork.
+
 ### Original / built-in
 
 | Module | How to run | Notes |
@@ -619,12 +621,13 @@ Select the detector from the **Text detection** dropdown in the settings panel. 
 
 Select the OCR from the **OCR** dropdown. Install only the dependencies for the modules you use.
 
+**Original vs this fork:** **paddle_ocr**, **manga_ocr**, **easyocr_ocr**, **mmocr_ocr**, **mit32px/mit48px**, **google_vision**, **bing_ocr**, etc. are from the original BallonsTranslator. **paddle_rec_v5** (PP-OCRv5 recognition), **paddle_vl**, **PaddleOCRVLManga** (PaddleOCR-VL manga/server), and all other OCRs in the "New" table were added in this fork.
+
 ### Original / built-in
 
 | Module | How to run |
 |--------|-------------|
-| **paddle_rec_v5**, **paddle_ocr** | Paddle stack; select and set language, device. |
-| **PaddleOCRVLManga**, **paddle_vl** | VLM manga or server; select and configure. |
+| **paddle_ocr** | Paddle stack; select and set language, device. Pair with paddle_det. |
 | **manga_ocr** | Select **manga_ocr**; model in `data/models/manga-ocr-base` (auto-download). |
 | **easyocr_ocr**, **mmocr_ocr** | Pair with corresponding detector. |
 | **mit32px**, **mit48px**, **mit48px_ctc** | From manga-image-translator; select as needed. |
@@ -634,6 +637,8 @@ Select the OCR from the **OCR** dropdown. Install only the dependencies for the 
 
 | Module | Dependencies | How to run |
 |--------|--------------|------------|
+| **paddle_rec_v5** | `pip install paddlepaddle paddleocr` (3.x). | PP-OCRv5 recognition; pair with paddle_det_v5. Select and set language, device. |
+| **PaddleOCRVLManga**, **paddle_vl** | PaddleOCR-VL (manga or local server). | VLM manga or server; select and configure. |
 | **paddleocr_vl_hf** | `transformers` 5.x | Select **paddleocr_vl_hf**; use prompt "OCR:"; 109 languages, SOTA document. |
 | **surya_ocr** | `pip install surya-ocr` | Select **surya_ocr**; set language (e.g. Chinese (Simplified)), **Fix Latin misread** True for CJK; crop_padding 6–8. |
 | **trocr** | `transformers`, `torch`, `PIL` | Select **trocr**; good for printed/handwritten English. |
@@ -866,7 +871,7 @@ The main application and all other modules work with the versions in `requiremen
   `modules/textdetector/detector_mmocr.py`, `detector_paddle_v5.py`, `detector_surya.py`, `detector_magi.py`, `detector_textmamba.py`, `detector_craft.py`, `detector_hf_object_detection.py`, `detector_dptext_detr.py`, `detector_swintextspotter_v2.py` (existing in original may differ; this fork adds or modifies as listed).
 
 - **OCR:**  
-  `modules/ocr/ocr_trocr.py`, `ocr_got_ocr2.py`, `ocr_glm_ocr.py`, `ocr_donut.py`, `ocr_paddleocr_vl_hf.py`, `ocr_qwen2vl.py`, `ocr_deepseek.py`, `ocr_lighton.py`, `ocr_chandra.py`, `ocr_docowl2.py`, `ocr_nanonets.py`, `ocr_ocean.py`, `ocr_internvl2.py`, `ocr_internvl3.py`, `ocr_florence2.py`, `ocr_minicpm.py`, `ocr_ocrflux.py`, `ocr_hunyuan.py`, `ocr_manga_mobile.py`, `ocr_nemotron.py`.
+  `modules/ocr/ocr_trocr.py`, `ocr_paddle_rec_v5.py`, `ocr_paddle_VL.py`, `ocr_paddleVL_manga.py`, `ocr_got_ocr2.py`, `ocr_glm_ocr.py`, `ocr_donut.py`, `ocr_paddleocr_vl_hf.py`, `ocr_qwen2vl.py`, `ocr_deepseek.py`, `ocr_lighton.py`, `ocr_chandra.py`, `ocr_docowl2.py`, `ocr_nanonets.py`, `ocr_ocean.py`, `ocr_internvl2.py`, `ocr_internvl3.py`, `ocr_florence2.py`, `ocr_minicpm.py`, `ocr_ocrflux.py`, `ocr_hunyuan.py`, `ocr_manga_mobile.py`, `ocr_nemotron.py`.
 
 - **Inpainting:**  
   `modules/inpaint/inpaint_simple_lama.py`, `inpaint_diffusers_sd.py`, `inpaint_sd2.py`, `inpaint_sdxl.py`, `inpaint_dreamshaper.py`, `inpaint_flux_fill.py`, `inpaint_kandinsky.py`, `inpaint_fluently.py`, `inpaint_cuhk_manga.py`, `inpaint_repaint.py`, `inpaint_lama_onnx.py`, `inpaint_lama_manga_onnx.py`, `inpaint_qwen_image_edit.py`, `inpaint_mat.py`.
