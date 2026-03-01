@@ -83,6 +83,7 @@ Rebirth_of_the_Urban_Immortal_Cultivator/
 GITHUB_UPLOAD.md
 docs/CONNECT_GITHUB_AND_AUTO_PUSH.md
 COMMUNITY_RESPONSES.md
+docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db
@@ -104,3 +105,6 @@ desktop.ini
 # *.whl
 # .tox/
 # .ruff_cache/
+
+# Common Python artifacts (keep repo clean)
+*.pyc
