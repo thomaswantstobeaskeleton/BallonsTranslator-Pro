@@ -296,6 +296,7 @@ class MainWindow(mainwindow_cls):
         self.spellCheckPanel = SpellCheckPanel(self)
         self.spellCheckPanel.set_get_blocks(self._spellcheck_get_blocks)
         self.spellCheckPanel.set_apply_replacement(self._spellcheck_apply_replacement)
+        self.spellCheckPanel.close_requested.connect(self._on_spellcheck_panel_close)
         self.rightComicTransStackPanel.addWidget(self.spellCheckPanel)
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
@@ -898,12 +899,41 @@ class MainWindow(mainwindow_cls):
         )
 
     def _spellcheck_get_blocks(self):
-        """Return [(block_idx, text_lines, trans_lines), ...] for current page (PR #974)."""
+        """Return [(block_idx, text_lines, trans_lines), ...] for current page (PR #974).
+        Uses the scene's block list so the panel sees the same text blocks as the canvas/text panel.
+        """
+        # Prefer blocks from scene manager (current page as displayed); fallback to project
+        if getattr(self, 'st_manager', None) and getattr(self.st_manager, 'textblk_item_list', None):
+            result = []
+            for blk_item in self.st_manager.textblk_item_list:
+                blk = getattr(blk_item, 'blk', None)
+                if blk is None:
+                    continue
+                text_lines = getattr(blk, 'text', None)
+                if text_lines is None:
+                    text_lines = []
+                elif isinstance(text_lines, str):
+                    text_lines = text_lines.split('\n') if text_lines else []
+                trans = getattr(blk, 'translation', None) or ''
+                trans_lines = trans.split('\n') if isinstance(trans, str) else []
+                result.append((blk_item.idx, text_lines, trans_lines))
+            return result
+        if not getattr(self, 'imgtrans_proj', None) or getattr(self.imgtrans_proj, 'is_empty', True):
+            return []
         page = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
         return [
-            (i, getattr(blk, 'text', None) or [], (getattr(blk, 'translation', None) or '').split('\n'))
+            (i, _spellcheck_normalize_lines(getattr(blk, 'text', None)), (getattr(blk, 'translation', None) or '').split('\n'))
             for i, blk in enumerate(page)
         ]
+
+
+def _spellcheck_normalize_lines(text_attr):
+    """Return a list of strings from block text (list or string)."""
+    if text_attr is None:
+        return []
+    if isinstance(text_attr, str):
+        return text_attr.split('\n') if text_attr else []
+    return [line if isinstance(line, str) else str(line) for line in text_attr]
 
     def _spellcheck_apply_replacement(self, block_idx: int, line_idx: int, new_line: str, is_translation: bool):
         """Apply spell check replacement to block (PR #974)."""
@@ -986,6 +1016,10 @@ class MainWindow(mainwindow_cls):
             self.rightComicTransStackPanel.show()
             self.bottomBar.paintChecker.setChecked(True)
         self.rightComicTransStackPanel.setCurrentIndex(2)
+
+    def _on_spellcheck_panel_close(self):
+        """Switch right panel from spell check back to text panel."""
+        self.rightComicTransStackPanel.setCurrentIndex(1)
 
     def shortcutCtrlD(self):
         if self.centralStackWidget.currentIndex() == 0:

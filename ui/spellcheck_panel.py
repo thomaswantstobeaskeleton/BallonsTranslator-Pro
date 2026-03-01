@@ -21,6 +21,7 @@ class SpellCheckPanel(QWidget):
     """Panel that lists misspellings and allows applying suggestions."""
 
     replace_requested = Signal(int, int, str, bool)  # block_idx, line_idx, new_line, is_translation
+    close_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,6 +37,10 @@ class SpellCheckPanel(QWidget):
         self.check_btn = QPushButton(self.tr('Check current page'))
         self.check_btn.clicked.connect(self._on_check)
         row.addWidget(self.check_btn)
+        close_btn = QPushButton(self.tr('Close'))
+        close_btn.clicked.connect(self.close_requested.emit)
+        close_btn.setToolTip(self.tr('Close spell check panel'))
+        row.addWidget(close_btn)
         layout.addLayout(row)
         self.list_widget = QListWidget()
         self.list_widget.setMinimumHeight(120)
@@ -69,6 +74,13 @@ class SpellCheckPanel(QWidget):
         if not self._get_blocks:
             return
         blocks = self._get_blocks()
+        if not blocks:
+            QMessageBox.information(
+                self,
+                self.tr('Spell check'),
+                self.tr('No text blocks on the current page. Open a project, select a page with text blocks, then run detection/OCR if needed.'),
+            )
+            return
         use_translation = self.target_combo.currentIndex() == 1
         self._issues = []
         for block_idx, text_lines, trans_lines in blocks:
