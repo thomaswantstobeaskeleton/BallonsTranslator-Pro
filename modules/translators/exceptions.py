@@ -140,7 +140,8 @@ class ServerException(Exception):
 
 class AuthorizationException(Exception):
     def __init__(self, api_key, *args):
-        msg = 'Unauthorized access with the api key ' + api_key
+        masked = (api_key[:4] + "..." + api_key[-4:]) if api_key and len(api_key) > 8 else "(not set)"
+        msg = 'Unauthorized access with the api key ' + masked
         super().__init__(msg, *args)
 
 class TranslatorSetupFailure(Exception):

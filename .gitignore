@@ -23,6 +23,7 @@ PortableGit
 test_dir
 tmp
 logs
+*.log
 ballontrans_pylibs_win
 config/config.json
 config/config.local.json
@@ -81,6 +82,7 @@ Rebirth_of_the_Urban_Immortal_Cultivator/
 # Internal / maintainer-only (not for end-user downloads)
 GITHUB_UPLOAD.md
 docs/CONNECT_GITHUB_AND_AUTO_PUSH.md
+COMMUNITY_RESPONSES.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db
