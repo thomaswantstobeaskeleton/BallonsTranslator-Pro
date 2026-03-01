@@ -41,6 +41,10 @@ def patch_module_params(cfg_param, module_params, module_name: str = ''):
     module_key_set = set(module_params.keys())
     for ck in cfg_key_set:
         if ck not in module_key_set:
+            # Internal metadata keys are allowed and should not spam warnings.
+            if isinstance(ck, str) and ck.startswith('__'):
+                cfg_param.pop(ck)
+                continue
             LOGGER.warning(f'Found invalid {module_name} config: {ck}')
             cfg_param.pop(ck)
 
