@@ -112,6 +112,7 @@ class DrawPanelConfig(Config):
     current_tool: int = 0
     rectool_auto: bool = False
     rectool_method: int = 0
+    rectool_shape: int = 0  # 0 = Rectangle, 1 = Ellipse (#35)
     recttool_dilate_ksize: int = 0
     recttool_erode_ksize: int = 0
 
@@ -187,6 +188,7 @@ class ProgramConfig(Config):
     shortcuts: Dict = field(default_factory=dict)
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
+    context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:
@@ -239,6 +241,30 @@ pcfg = ProgramConfig()
 text_styles: List[FontFormat] = []
 active_format: FontFormat = None
 
+# Default keys for canvas context menu visibility (all True = show).
+CONTEXT_MENU_DEFAULT = {
+    'edit_copy': True, 'edit_paste': True, 'edit_copy_trans': True, 'edit_paste_trans': True,
+    'edit_copy_src': True, 'edit_paste_src': True, 'edit_delete': True, 'edit_delete_recover': True,
+    'edit_clear_src': True, 'edit_clear_trans': True, 'edit_select_all': True,
+    'text_spell_src': True, 'text_spell_trans': True, 'text_trim': True, 'text_upper': True, 'text_lower': True,
+    'text_strikethrough': True, 'text_gradient': True, 'text_on_path': True,
+    'block_merge': True, 'block_split': True, 'block_move_up': True, 'block_move_down': True,
+    'create_textbox': True,
+    'overlay_import': True, 'overlay_clear': True,
+    'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
+    'order_bring_front': True, 'order_send_back': True,
+    'format_apply': True, 'format_layout': True, 'format_angle': True, 'format_squeeze': True,
+    'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
+    'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
+}
+
+def context_menu_visible(key: str) -> bool:
+    """Whether the context menu action with this key should be shown. Missing key => True."""
+    if not hasattr(pcfg, 'context_menu') or not isinstance(pcfg.context_menu, dict):
+        return True
+    return pcfg.context_menu.get(key, True)
+
+
 def load_textstyle_from(p: str, raise_exception = False):
 
     if not osp.exists(p):
@@ -284,6 +310,13 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     
     global pcfg
     pcfg.merge(config)
+    # Merge context menu visibility with defaults (new keys default to True)
+    if hasattr(pcfg, 'context_menu') and isinstance(pcfg.context_menu, dict):
+        for k, v in CONTEXT_MENU_DEFAULT.items():
+            if k not in pcfg.context_menu:
+                pcfg.context_menu[k] = v
+    else:
+        pcfg.context_menu = dict(CONTEXT_MENU_DEFAULT)
     # Ensure all shortcut keys exist (merge defaults for any new action)
     try:
         from utils.shortcuts import get_default_shortcuts
