@@ -28,9 +28,9 @@ Suggestions for **General** and **DL Module** settings (and related UI) that are
 - **Batch queue (#1020)** — **Tools → Batch queue...** opens a dialog to add multiple folders to a queue and run the pipeline on each in sequence (same behavior as headless `--exec_dirs`). **Add folder(s)...** adds one folder; **Add folder (include subfolders)** adds the selected folder and each of its immediate subfolders as separate items. **Pause** / **Resume** temporarily halt the pipeline; **Cancel queue** stops the current job and clears the remaining queue. The list shrinks as each folder is processed.
 - **Re-run detection only** — Runs pipeline with only detection enabled; restores previous stage flags when done.
 - **Re-run OCR only** — Runs pipeline with only OCR enabled (re-recognize text, keep boxes); restores previous stage flags when done.
-- **Export all pages** — Exports all result images to a chosen folder (pages that have no result yet are reported as missing).
-- **Check project** — Validates project: missing image files, invalid project JSON; shows a report dialog.
-- **Manga / Comic source...** — Opens a dialog to search for manga/manhua/manhwa titles (via MangaDex API), list chapters by language, select chapters to download, and optionally open the downloaded chapter folder in BallonsTranslator to translate. Supports “data-saver” (smaller) or original quality. **Sources:** MangaDex (search by title) and MangaDex by chapter URL (paste a single chapter link). **Downloaded pages are saved as 001.ext, 002.ext, …** so BallonsTranslator loads them in the correct order. **Config:** Language, data-saver, download folder, and request delay (rate limiting) are persisted and restored. Optional “Request delay” (0–2 s) throttles API requests.
+- **Export all pages** — Exports all result images to a chosen folder (pages that have no result yet are reported as missing). Option **Also create PDF from exported images** builds a single `exported.pdf` in the output folder (requires `pip install img2pdf`).
+- **Check project** — Validates project: missing image files, invalid project JSON, and **duplicate/overlapping text blocks**; shows a report dialog. Overlap check reports page name and block index pairs for each overlapping pair.
+- **Manga / Comic source...** — Opens a dialog to search for manga/manhua/manhwa titles (via MangaDex API), list chapters by language, select chapters to download, and optionally open the downloaded chapter folder in BallonsTranslator to translate. Supports “data-saver” (smaller) or original quality. **Sources:** MangaDex (search by title), MangaDex by chapter URL (paste a single chapter link), **Comick** (search and chapter list via Comick Source API; download not supported), **GOMANGA** (search, chapter list, and download via [GOMANGA-API](https://gomanga-api.vercel.app)), **Manhwa Reader** (manhwa/webtoon: list via [Manhwa-Reader Vercel API](https://manhwa-reader.vercel.app/api/), search by filtering /api/all, chapter list and download via /api/info and /api/chapter; unofficial), and **Local folder** (open a folder of images as a project). **Downloaded pages are saved as 001.ext, 002.ext, …** so BallonsTranslator loads them in the correct order. **Config:** Language, data-saver, download folder, and request delay (rate limiting) are persisted and restored. Optional “Request delay” (0–2 s) throttles API requests.
 
 ### Other
 - **Config safety:** API keys removed from source; config.example.json used for safe upload and config handling.
@@ -88,11 +88,13 @@ Implemented in this codebase: Tool shortcut hints (Hand H, Inpaint J, Pen B, Rec
 
 ---
 
-## Possible future additions
+## Possible future additions (now implemented)
 
-- **Batch export to PDF** — Option in Export all pages to also build a single PDF from the exported images.
-- **Duplicate/overlapping block check** — In "Check project", optionally report duplicate or overlapping text blocks.
-- **More manga sources** — Add more sources to the Manga / Comic source dialog (e.g. other APIs or scrapers) alongside MangaDex.
+The following were listed as possible future additions and are now implemented in this codebase:
+
+- **Batch export to PDF** — In **Export all pages**, checkbox "Also create PDF from exported images" builds `exported.pdf` in the chosen folder. Implementation: `ui/export_dialog.py` (checkbox + `get_also_pdf()`), `ui/mainwindow.py` (`_do_batch_export` with optional `img2pdf.convert()`; user is prompted to install img2pdf if missing).
+- **Duplicate/overlapping block check** — **Check project** reports overlapping text blocks per page with block index pairs. Implementation: `ui/mainwindow.py` (`on_validate_project`), using `union_area()` from `utils/imgproc_utils.py` to detect intersection of block bounding boxes (supports both object-style and dict-style block data).
+- **More manga sources** — **Manga / Comic source** dialog includes **Local folder**, **Comick**, **GOMANGA**, and **Manhwa Reader**. Comick: search + chapter list (no download). GOMANGA: search + chapter list + download. Manhwa Reader: manhwa/webtoon via [Manhwa-Reader Vercel API](https://manhwa-reader.vercel.app/api/) — search by filtering GET /api/all, feed via GET /api/info/:slug, download via GET /api/chapter/:slug (image list). Implementation: `utils/manga_sources/manhwa_reader.py` (ManhwaReaderClient). Additional sources in `utils/manga_sources/`.
 
 ---
 

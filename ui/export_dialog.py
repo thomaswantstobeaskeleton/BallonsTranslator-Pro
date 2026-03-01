@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QComboBox,
     QFormLayout,
+    QCheckBox,
 )
 from qtpy.QtCore import Qt
 
@@ -47,6 +48,12 @@ class ExportFormatDialog(QDialog):
         for ext, name in EXPORT_FORMATS:
             self.format_combo.addItem(f'{name} ({ext})', ext)
         form.addRow(self.tr('Format:'), self.format_combo)
+
+        self.also_pdf_check = QCheckBox(self.tr('Also create PDF from exported images'))
+        self.also_pdf_check.setToolTip(self.tr('Build a single PDF file from the exported pages (requires img2pdf).'))
+        self.also_pdf_check.setChecked(False)
+        form.addRow('', self.also_pdf_check)
+
         layout.addLayout(form)
 
         btns = QHBoxLayout()
@@ -72,3 +79,6 @@ class ExportFormatDialog(QDialog):
 
     def get_extension(self) -> str:
         return self.format_combo.currentData()
+
+    def get_also_pdf(self) -> bool:
+        return self.also_pdf_check.isChecked()

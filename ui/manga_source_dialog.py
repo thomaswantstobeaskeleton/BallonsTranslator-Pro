@@ -31,7 +31,7 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
 )
 
-from utils.manga_sources import MangaDexClient
+from utils.manga_sources import MangaDexClient, ComickSourceClient, GomangaApiClient, ManhwaReaderClient
 from utils.config import pcfg, save_config, ProgramConfig
 from utils.logger import logger as LOGGER
 
@@ -61,14 +61,18 @@ class MangaSourceWorker(QObject):
     error = Signal(str)
     download_progress = Signal(int, int, str)  # current, total, chapter_display
     download_finished = Signal(str)  # path to folder that was downloaded
-    run_search = Signal(str)
-    run_feed = Signal(str, str)
-    run_download = Signal(object)  # (chapter_infos, base_dir, manga_title, data_saver)
+    run_search = Signal(str, str)   # title, source_id
+    run_feed = Signal(str, str, str)  # manga_id, lang, source_id
+    run_download = Signal(object)  # (chapter_infos, base_dir, manga_title, data_saver, source_id)
     run_load_chapter_url = Signal(str)
 
     def __init__(self):
         super().__init__()
-        self._client = MangaDexClient(timeout=30, request_delay=getattr(pcfg, 'manga_source_request_delay', 0.3))
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        self._mangadex = MangaDexClient(timeout=30, request_delay=delay)
+        self._comick = ComickSourceClient(timeout=30, request_delay=delay)
+        self._gomanga = GomangaApiClient(timeout=30, request_delay=delay)
+        self._manhwa_reader = ManhwaReaderClient(timeout=30, request_delay=delay)
         self._abort = False
         self.run_search.connect(self.do_search)
         self.run_feed.connect(self.do_feed)
@@ -78,23 +82,69 @@ class MangaSourceWorker(QObject):
     def abort(self):
         self._abort = True
 
-    def do_search(self, title: str):
+    def do_search(self, title: str, source_id: str):
         self._abort = False
-        self._client.request_delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
-        try:
-            results = self._client.search(title, limit=25)
-            self.search_finished.emit(results)
-        except Exception as e:
-            self.error.emit(str(e))
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        if source_id == "comick":
+            self._comick.request_delay = delay
+            try:
+                results = self._comick.search(title, limit=25)
+                self.search_finished.emit(results)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "gomanga":
+            self._gomanga.request_delay = delay
+            try:
+                results = self._gomanga.search(title, limit=25)
+                self.search_finished.emit(results)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "manhwa_reader":
+            self._manhwa_reader.request_delay = delay
+            try:
+                results = self._manhwa_reader.search(title, limit=25)
+                self.search_finished.emit(results)
+            except Exception as e:
+                self.error.emit(str(e))
+        else:
+            self._mangadex.request_delay = delay
+            try:
+                results = self._mangadex.search(title, limit=25)
+                self.search_finished.emit(results)
+            except Exception as e:
+                self.error.emit(str(e))
 
-    def do_feed(self, manga_id: str, lang: str):
+    def do_feed(self, manga_id: str, lang: str, source_id: str):
         self._abort = False
-        self._client.request_delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
-        try:
-            chapters = self._client.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
-            self.feed_finished.emit(chapters)
-        except Exception as e:
-            self.error.emit(str(e))
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        if source_id == "comick":
+            self._comick.request_delay = delay
+            try:
+                chapters = self._comick.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
+                self.feed_finished.emit(chapters)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "gomanga":
+            self._gomanga.request_delay = delay
+            try:
+                chapters = self._gomanga.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
+                self.feed_finished.emit(chapters)
+            except Exception as e:
+                self.error.emit(str(e))
+        elif source_id == "manhwa_reader":
+            self._manhwa_reader.request_delay = delay
+            try:
+                chapters = self._manhwa_reader.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
+                self.feed_finished.emit(chapters)
+            except Exception as e:
+                self.error.emit(str(e))
+        else:
+            self._mangadex.request_delay = delay
+            try:
+                chapters = self._mangadex.get_feed(manga_id, translated_language=lang, limit=500, order="asc")
+                self.feed_finished.emit(chapters)
+            except Exception as e:
+                self.error.emit(str(e))
 
     def do_download(
         self,
@@ -102,9 +152,23 @@ class MangaSourceWorker(QObject):
         base_dir: str,
         manga_title: str,
         data_saver: bool,
+        source_id: str = "mangadex",
     ):
+        if source_id == "comick":
+            self.error.emit(
+                "Download is not supported for Comick source. The API does not provide image URLs. "
+                "Use MangaDex for download, or open the chapter link in your browser."
+            )
+            return
         self._abort = False
-        self._client.request_delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        if source_id == "gomanga":
+            client = self._gomanga
+        elif source_id == "manhwa_reader":
+            client = self._manhwa_reader
+        else:
+            client = self._mangadex
+        client.request_delay = delay
         manga_safe = _sanitize_filename(manga_title)
         parent_dir = osp.join(base_dir, manga_safe)
         os.makedirs(parent_dir, exist_ok=True)
@@ -118,7 +182,7 @@ class MangaSourceWorker(QObject):
             ch_safe = _sanitize_filename(display)
             save_dir = osp.join(parent_dir, ch_safe)
             try:
-                result = self._client.download_chapter(
+                result = client.download_chapter(
                     ch_id,
                     save_dir,
                     data_saver=data_saver,
@@ -135,19 +199,22 @@ class MangaSourceWorker(QObject):
         self.download_finished.emit(parent_dir)
 
     def _do_download(self, payload: tuple):
-        """Slot for run_download: payload = (chapter_infos, base_dir, manga_title, data_saver)."""
-        self.do_download(payload[0], payload[1], payload[2], payload[3])
+        """Slot for run_download: payload = (chapter_infos, base_dir, manga_title, data_saver, source_id)."""
+        if len(payload) >= 5:
+            self.do_download(payload[0], payload[1], payload[2], payload[3], payload[4])
+        else:
+            self.do_download(payload[0], payload[1], payload[2], payload[3], "mangadex")
 
     def do_load_chapter_by_url(self, url_or_id: str):
         """Load a single chapter by MangaDex chapter URL or UUID. Emits feed_finished([ch]) or error."""
         self._abort = False
-        self._client.request_delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        self._mangadex.request_delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
         ch_id = _extract_mangadex_chapter_id(url_or_id)
         if not ch_id:
             self.error.emit("Invalid MangaDex chapter URL or ID.")
             return
         try:
-            ch = self._client.get_chapter_by_id(ch_id)
+            ch = self._mangadex.get_chapter_by_id(ch_id)
             if ch:
                 self.feed_finished.emit([ch])
             else:
@@ -187,6 +254,8 @@ class MangaSourceDialog(QDialog):
             else ProgramConfig.default_downloaded_chapters_dir()
         )
         self._is_url_source = False
+        self._is_local_folder = False
+        self._is_comick = False
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -199,7 +268,13 @@ class MangaSourceDialog(QDialog):
         self._source_combo = QComboBox()
         self._source_combo.addItem("MangaDex", "mangadex")
         self._source_combo.addItem(self.tr("MangaDex (by chapter URL)"), "mangadex_url")
-        self._source_combo.setToolTip(self.tr("Manga source. Use chapter URL to load a single chapter by link."))
+        self._source_combo.addItem("Comick", "comick")
+        self._source_combo.addItem("GOMANGA", "gomanga")
+        self._source_combo.addItem(self.tr("Manhwa Reader"), "manhwa_reader")
+        self._source_combo.addItem(self.tr("Local folder"), "local_folder")
+        self._source_combo.setToolTip(
+            self.tr("Manga source. MangaDex, GOMANGA, and Manhwa Reader support search and download. Comick supports search and chapter list only. Local folder opens a folder of images as a project.")
+        )
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
         row.addWidget(QLabel(self.tr("Source:")))
         row.addWidget(self._source_combo)
@@ -225,10 +300,20 @@ class MangaSourceDialog(QDialog):
         search_layout.addLayout(row_url)
         self._url_row_widgets = [self._url_edit, self._load_chapter_url_btn]
         self._search_row_widgets = [self._search_edit, self._search_btn]
+        row_local = QHBoxLayout()
+        self._local_folder_label = QLabel(self.tr("Open a folder of images to use as a project."))
+        self._open_local_folder_btn = QPushButton(self.tr("Open folder in BallonsTranslator"))
+        self._open_local_folder_btn.clicked.connect(self._on_open_local_folder)
+        row_local.addWidget(self._local_folder_label)
+        row_local.addWidget(self._open_local_folder_btn)
+        row_local.addStretch()
+        search_layout.addLayout(row_local)
+        self._local_folder_widgets = [self._local_folder_label, self._open_local_folder_btn]
         layout.addWidget(search_group)
 
         # --- Results (manga list) ---
         results_group = QGroupBox(self.tr("Results"))
+        self._results_group = results_group
         results_layout = QVBoxLayout(results_group)
         self._results_list = QListWidget()
         self._results_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -239,6 +324,7 @@ class MangaSourceDialog(QDialog):
 
         # --- Chapters ---
         ch_group = QGroupBox(self.tr("Chapters"))
+        self._ch_group = ch_group
         ch_layout = QVBoxLayout(ch_group)
         row_ch = QHBoxLayout()
         self._lang_combo = QComboBox()
@@ -289,6 +375,7 @@ class MangaSourceDialog(QDialog):
 
         # --- Download ---
         dl_group = QGroupBox(self.tr("Download"))
+        self._dl_group = dl_group
         dl_layout = QVBoxLayout(dl_group)
         row_dl = QHBoxLayout()
         self._folder_edit = QLineEdit()
@@ -348,15 +435,29 @@ class MangaSourceDialog(QDialog):
     def _on_source_changed(self, index: int):
         source = self._source_combo.currentData() if index >= 0 else None
         self._is_url_source = source == "mangadex_url"
+        self._is_local_folder = source == "local_folder"
+        self._is_comick = source == "comick"
         for w in self._search_row_widgets:
-            w.setVisible(not self._is_url_source)
+            w.setVisible(not self._is_url_source and not self._is_local_folder)
         for w in self._url_row_widgets:
             w.setVisible(self._is_url_source)
+        for w in self._local_folder_widgets:
+            w.setVisible(self._is_local_folder)
+        self._results_group.setVisible(not self._is_local_folder)
+        self._ch_group.setVisible(not self._is_local_folder)
+        self._dl_group.setVisible(not self._is_local_folder)
         if self._is_url_source:
             self._results_list.clear()
             self._manga_results = []
             self._load_ch_btn.setEnabled(False)
-        self._status_label.setText("" if self._is_url_source else self._status_label.text())
+        if self._is_comick:
+            self._download_btn.setToolTip(self.tr("Download is not supported for Comick. Use MangaDex to download, or open chapter links in your browser."))
+        else:
+            self._download_btn.setToolTip("")
+        if self._is_local_folder:
+            self._status_label.setText(self.tr("Click the button to open a folder of images as a project."))
+        elif self._is_url_source:
+            self._status_label.setText("" if self._is_url_source else self._status_label.text())
 
     def _on_load_chapter_url(self):
         url = self._url_edit.text().strip()
@@ -372,9 +473,12 @@ class MangaSourceDialog(QDialog):
         if not title:
             self._status_label.setText(self.tr("Enter a title to search."))
             return
+        source_id = self._source_combo.currentData() or "mangadex"
+        if source_id in ("mangadex_url", "local_folder"):
+            return
         self._status_label.setText(self.tr("Searching..."))
         self._search_btn.setEnabled(False)
-        self._worker.run_search.emit(title)
+        self._worker.run_search.emit(title, source_id)
 
     def _on_search_finished(self, results: list):
         self._search_btn.setEnabled(True)
@@ -406,10 +510,13 @@ class MangaSourceDialog(QDialog):
         manga_id = self._selected_manga.get("id")
         if not manga_id:
             return
+        source_id = self._source_combo.currentData() or "mangadex"
+        if source_id in ("mangadex_url", "local_folder"):
+            return
         lang = self._lang_combo.currentData() or "en"
         self._status_label.setText(self.tr("Loading chapters..."))
         self._load_ch_btn.setEnabled(False)
-        self._worker.run_feed.emit(manga_id, lang)
+        self._worker.run_feed.emit(manga_id, lang, source_id)
 
     def _on_feed_finished(self, chapters: list):
         self._load_ch_btn.setEnabled(True)
@@ -492,11 +599,13 @@ class MangaSourceDialog(QDialog):
         self._progress_bar.setValue(0)
         self._status_label.setText(self.tr("Downloading..."))
         self._download_btn.setEnabled(False)
+        source_id = self._source_combo.currentData() or "mangadex"
         self._worker.run_download.emit((
             checked,
             base_dir,
             self._selected_manga.get("title", "manga"),
             self._data_saver_check.isChecked(),
+            source_id,
         ))
 
     def _on_download_progress(self, current: int, total: int, display: str):
@@ -532,6 +641,13 @@ class MangaSourceDialog(QDialog):
         to_open = self._last_download_first_chapter or self._last_download_path
         if to_open and osp.isdir(to_open):
             self.open_folder_requested.emit(to_open)
+            self.accept()
+
+    def _on_open_local_folder(self):
+        start = self._folder_edit.text().strip() or self._download_base_dir or ""
+        folder = QFileDialog.getExistingDirectory(self, self.tr("Open folder in BallonsTranslator"), start)
+        if folder and osp.isdir(folder):
+            self.open_folder_requested.emit(folder)
             self.accept()
 
     def _on_worker_error(self, msg: str):
