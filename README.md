@@ -17,7 +17,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 ## Quick start
 
-1. **Clone and run:** `git clone <this-repo> && cd BallonsTranslator-Pro && python launch.py`
+1. **Clone and run:** `git clone [<this-repo>](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git) && cd BallonsTranslator-Pro && python launch.py`
 2. **First run:** Installs base deps and downloads default models into `data/`
 3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
 4. **New modules** appear automatically; install only the dependencies for the modules you use
