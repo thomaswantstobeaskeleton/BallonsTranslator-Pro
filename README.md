@@ -1068,6 +1068,7 @@ In **text edit mode**, right-clicking on the canvas (or after right-dragging a r
 
 **Implementation notes:**
 
+- **Create text box:** If you right-drag a rectangle before opening the context menu, **Create text box** uses that rectangle’s size and position (mapped to base layer coordinates and clamped to the image bounds). Otherwise the box is created at the right-click position with the default size.
 - **Merge:** The first selected block (by index) keeps its position; source and translation strings of all selected blocks are joined with newlines. Other selected blocks are removed from `imgtrans_proj.pages[page_name]` in **descending index order** (to avoid index shift), then removed from the scene and text panel via `SceneTextManager.deleteTextblkItemList`.
 - **Move up/down:** Implemented in `SceneTextManager.swap_block_positions(i, j)`: the two blocks are swapped in the project page list, in `textblk_item_list`, and in `pairwidget_list`; `.idx` is updated on both blocks and their pair widgets; the two widgets are removed from and re-inserted into the text panel layout so the on-screen order matches the new block order.
 - **Detect in region:** The canvas stores the last rubber-band rect. When you choose “Detect text in region”, that rect is passed to `ModuleManager.run_detect_region(rect, img_array, page_name)`, which crops the image, runs the detector, and offsets the resulting block coordinates back to full-image space. `detect_region_finished` is emitted; the main window appends the new blocks to the project and scene.

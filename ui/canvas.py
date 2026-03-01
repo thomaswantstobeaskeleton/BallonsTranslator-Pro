@@ -1062,11 +1062,20 @@ class Canvas(QGraphicsScene):
             if rst == create_textbox_act:
                 sp = getattr(self, '_context_menu_scene_pos', None)
                 if sp is not None and self.imgtrans_proj.img_valid:
-                    p = self.baseLayer.mapFromScene(sp)
                     br = self.baseLayer.rect()
-                    x = max(0, min(p.x(), br.right() - DEFAULT_TEXTBOX_WIDTH))
-                    y = max(0, min(p.y(), br.bottom() - DEFAULT_TEXTBOX_HEIGHT))
-                    rect = QRectF(QPointF(x, y), QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
+                    if saved_rect is not None and saved_rect.width() >= MIN_DRAG_SIZE and saved_rect.height() >= MIN_DRAG_SIZE:
+                        # Use the right-drag rectangle size and position (scene coords -> baseLayer coords)
+                        tl = self.baseLayer.mapFromScene(saved_rect.topLeft())
+                        br_pt = self.baseLayer.mapFromScene(saved_rect.bottomRight())
+                        rect = QRectF(tl, br_pt).normalized().intersected(br)
+                        if rect.isEmpty():
+                            p = self.baseLayer.mapFromScene(sp)
+                            rect = QRectF(QPointF(max(0, min(p.x(), br.right() - DEFAULT_TEXTBOX_WIDTH)), max(0, min(p.y(), br.bottom() - DEFAULT_TEXTBOX_HEIGHT))), QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
+                    else:
+                        p = self.baseLayer.mapFromScene(sp)
+                        x = max(0, min(p.x(), br.right() - DEFAULT_TEXTBOX_WIDTH))
+                        y = max(0, min(p.y(), br.bottom() - DEFAULT_TEXTBOX_HEIGHT))
+                        rect = QRectF(QPointF(x, y), QSizeF(DEFAULT_TEXTBOX_WIDTH, DEFAULT_TEXTBOX_HEIGHT))
                     self.end_create_textblock.emit(rect)
                 return
 
