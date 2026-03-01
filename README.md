@@ -104,6 +104,23 @@ For quality rankings (tier-based), see [docs/QUALITY_RANKINGS.md](docs/QUALITY_R
 
 ---
 
+### HF object detector (ogkalu) and labels_include
+
+**Goal:** Use the Hugging Face object detector with the default comic model and choose which text regions to detect (bubbles only, or bubbles + SFX/captions).
+
+1. **Install:** `pip install transformers torch`.
+2. **Config → Text detection** → select **hf_object_det**. The default **model_id** is `ogkalu/comic-text-and-bubble-detector` (RT-DETR fine-tuned for comic text and bubbles).
+3. **labels_include** — Comma-separated list of which classes to keep. The ogkalu model outputs three classes:
+   - **bubble** — Speech/thought bubble shape (the drawn balloon).
+   - **text_bubble** — Text inside a bubble.
+   - **text_free** — Text not in a bubble: sound effects (SFX), captions, signs, narrative.
+   - **Examples:** `bubble,text_bubble` = detect only bubbles (recommended when using HF as secondary in dual detection). `bubble,text_bubble,text_free` = detect everything (default). Leave empty to keep all classes.
+4. **score_threshold** (e.g. 0.35–0.4) — Min confidence for bubble/text_bubble. **score_threshold_text_free** — Threshold for text_free (often lower, e.g. 0.15–0.2). **box_padding** — 4–6 px recommended.
+
+See [Dual text detection](#dual-text-detection-primary--secondary) for using HF as secondary with Paddle v5 and suggested **labels_include** values.
+
+---
+
 ### Manga / Comic source (MangaDex)
 
 **Goal:** Search, download chapters, and open in BallonsTranslator.
@@ -442,7 +459,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 
 - [Contributing & guidelines](CONTRIBUTING.md) — Git practices, community etiquette, upstream merge
 - [Disclaimer: models and testing](#disclaimer-models-and-testing) — Not all modules tested; issues may persist
-- [Tutorials (step-by-step)](#tutorials-step-by-step) — Translation context, dual detection, Manga source, batch queue, canvas right-click, detect in region, OCR spell check, auto region merge, text eraser, text formatting, manage models, run presets, export/import, Tools menu, keyword substitution, project structure, text style presets, Saladict
+- [Tutorials (step-by-step)](#tutorials-step-by-step) — Translation context, dual detection, **HF object detector (labels_include)**, Manga source, batch queue, canvas right-click, detect in region, OCR spell check, auto region merge, text eraser, text formatting, manage models, run presets, export/import, Tools menu, keyword substitution, project structure, text style presets, Saladict
 1. [Summary of modifications](#1-summary-of-modifications)
 2. [How to run the application](#2-how-to-run-the-application)
 3. [Text detection – all modules and how to run](#3-text-detection--all-modules-and-how-to-run)
