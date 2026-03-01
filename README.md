@@ -361,6 +361,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | **Drawing Board** | Switch to drawing mode (P) |
 | **Text Editor** | Switch to text edit mode (T) |
 | **Keyboard Shortcuts...** | Customize keybinds (Ctrl+K) |
+| **Context menu options...** | Show/hide canvas right-click actions by category (Ctrl+Shift+O) |
 | **Help** | Submenu: **Documentation** (open README), **About** (version) |
 | **Dark Mode** | Toggle dark theme |
 
@@ -505,7 +506,7 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Dual text detection:** Run a second detector and merge results. See [§12.9](#129-dual-text-detection-primary--secondary-detector).
 - Config panel: Logical DPI, display language, dark mode, font scale, recent projects limit, confirm before Run, OCR spell-check, typesetting defaults, WebP lossless, default device, unload after idle — all persisted in config
 ### UI and workflow (point by point)
-- **Canvas right-click:** Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all
+- **Canvas right-click:** Categorized menu (Edit, Text, Block, Image/Overlay, Transform, Order, Format, Detect & Run); **Create text box** (right-click for default size, or right-drag to set size; Block → Create text box or **Ctrl+Shift+N** at cursor); **Configure menu...** to show/hide actions (also View → Context menu options, **Ctrl+Shift+O**); Detect text in region (right-drag rect) and on page; Merge selected blocks; Move block(s) up/down; Copy/Paste translation; Clear source/translation; Select all
 - **Spell check:** Spell check source text and translation (pyenchant)
 - **Text formatting:** Trim whitespace; To uppercase / To lowercase; Gradient type (Linear/Radial); Text on path (None/Circular/Arc, [#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138))
 - **Text eraser tool:** In drawing mode, erase parts of text blocks by painting over them (mask-based; undo with Ctrl+Z). See [§12.10](#1210-text-eraser-tool)
@@ -841,6 +842,7 @@ Open **View → Keyboard Shortcuts...** (Ctrl+K) to view and customize. Stored i
 | **View** | Drawing Board | P |
 | | Text Editor | T |
 | | Keyboard Shortcuts | Ctrl+K |
+| | Context menu options | Ctrl+Shift+O |
 | **Go** | Previous Page | PgUp |
 | | Next Page | PgDown |
 | | Previous (alt) | A |
@@ -853,6 +855,7 @@ Open **View → Keyboard Shortcuts...** (Ctrl+K) to view and customize. Stored i
 | | Select all blocks | Ctrl+A |
 | | Escape / Deselect | Escape |
 | | Delete (key) | Delete |
+| | Create text box | Ctrl+Shift+N |
 | **Format** | Bold | Ctrl+B |
 | | Italic | Ctrl+I |
 | | Underline | Ctrl+U |
@@ -1109,7 +1112,7 @@ A **Keyboard Shortcuts** dialog lets you view and customize keybinds for common 
 
 - **Opening the dialog:** **View → Keyboard Shortcuts...** or default shortcut **Ctrl+K** (configurable in the same dialog).
 - **Dialog features:** Filter by text or category; table of Category, Action, Shortcut (editable with **QKeySequenceEdit**); per-row **Reset** to default; **Reset all to default**; **Apply** (saves to config and updates all shortcuts immediately); **Cancel**.
-- **Actions covered:** File (Open folder, Save project); Edit (Undo, Redo, Page search, Global search, Merge tool); View (Drawing Board, Text Editor, Keyboard Shortcuts); Go (Prev/Next page, alternate keys); Canvas (Textblock mode, Zoom in/out, Delete, Space, Select all, Escape, Delete line); Format (Bold, Italic, Underline); Drawing tools (Hand, Inpaint, Pen, Rect). Keys are stored in portable form (e.g. `Ctrl+S`) and applied via `QKeySequence.fromString()`.
+- **Actions covered:** File (Open folder, Save project); Edit (Undo, Redo, Page search, Global search, Merge tool); View (Drawing Board, Text Editor, Keyboard Shortcuts, Context menu options); Go (Prev/Next page, alternate keys); Canvas (Textblock mode, Zoom in/out, Delete, Space, Select all, Escape, Delete line, **Create text box**); Format (Bold, Italic, Underline); Drawing tools (Hand, Inpaint, Pen, Rect). Keys are stored in portable form (e.g. `Ctrl+S`) and applied via `QKeySequence.fromString()`.
 - **Config:** `ProgramConfig.shortcuts` is a dict `action_id → key string`. On load, any missing action is filled from defaults so all schema actions always have a binding. **Apply** in the dialog writes to `pcfg.shortcuts`, calls `save_config()`, and emits `shortcuts_changed`; the main window’s `apply_shortcuts()` updates all QShortcuts, QActions (title bar, left bar), and drawing panel tool tips.
 
 **Files:** `utils/shortcuts.py` (schema, `get_default_shortcuts`, `get_shortcut_info`, `get_shortcut`), `utils/config.py` (`shortcuts` field, load_config shortcut merge), `ui/shortcuts_dialog.py` (ShortcutsDialog), `ui/mainwindowbars.py` (LeftBar and TitleBar `_shortcut_actions_*`, `apply_shortcuts`; View menu **Keyboard Shortcuts...**), `ui/mainwindow.py` (shortcut creation from config, `_shortcuts_list`, `_draw_shortcut_tools`, `apply_shortcuts`, `open_shortcuts_dialog`, connection to dialog’s `shortcuts_changed`).
