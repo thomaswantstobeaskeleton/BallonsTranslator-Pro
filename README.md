@@ -1,6 +1,6 @@
 # BallonsTranslatorPro
 
-**Repository:** [https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) · **Version:** 1.5.0
+**Repository:** [https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) · **Version:** 1.5.1
 
 Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
 
@@ -698,10 +698,12 @@ Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md
 
 - **detect_size:** e.g. 1280 (higher = better quality, slower). Up to 2400 supported.
 - **box score threshold:** 0.35–0.48 typical; lower = more boxes (e.g. 0.42–0.45 for manhua).
-- **merge font size tolerance:** e.g. 3.0; higher = merge more lines into one bubble.
+- **merge font size tolerance:** e.g. 3.0; higher = merge more lines into one bubble. **If boxes are too large**, try **lowering** this (e.g. 2.0 or 1.5) so fewer lines are merged per box.
 - **mask dilate size:** 2 default; kernel for mask dilation at detection stage.
 - **min box area:** 0 or 100–200 to drop tiny noise.
 - **custom_onnx_path:** Optional path to alternate ONNX (e.g. mayocream comic-text-detector); leave empty for default CTD ONNX.
+- **box_padding:** Pixels added around each box (default 5). **If boxes are too large**, set to **0** (or 1–2) to stop adding extra margin.
+- **box_shrink_px:** Shrink each box inward by this many pixels (0 = off). Use **4–12** when CTD boxes are too large; applied before box_padding.
 
 ### 7.2 Inpaint size and tiling (all inpainters)
 

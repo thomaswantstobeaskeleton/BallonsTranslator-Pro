@@ -4,7 +4,7 @@ import os
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, DEFAULT_DEVICE, DEVICE_SELECTOR, ProjImgTrans
-from .box_utils import expand_blocks
+from .box_utils import expand_blocks, shrink_blocks
 from .ctd import CTDModel
 
 CTD_ONNX_PATH = 'data/models/comictextdetector.pt.onnx'
@@ -59,6 +59,11 @@ class ComicTextDetector(TextDetectorBase):
             'type': 'line_editor',
             'value': 5,
             'description': 'Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.',
+        },
+        'box_shrink_px': {
+            'type': 'line_editor',
+            'value': 0,
+            'description': 'Shrink each box inward by this many pixels (0=off). Use when CTD boxes are too large (e.g. 4–12).',
         },
     }
     _load_model_keys = {'model'}
@@ -118,6 +123,18 @@ class ComicTextDetector(TextDetectorBase):
             min_area = 0
         self.model.min_box_area = min_area
         _, mask, blk_list = self.model(img)
+        
+        h_img, w_img = img.shape[:2]
+        shrink_val = 0
+        sp = self.params.get('box_shrink_px', {})
+        if isinstance(sp, dict):
+            v = sp.get('value', 0)
+            try:
+                shrink_val = max(0, min(50, int(v) if v not in (None, '') else 0))
+            except (TypeError, ValueError):
+                pass
+        if shrink_val > 0:
+            blk_list = shrink_blocks(blk_list, shrink_val, w_img, h_img)
         
         fnt_rsz = self.get_param_value('font size multiplier')
         fnt_max = self.get_param_value('font size max')
