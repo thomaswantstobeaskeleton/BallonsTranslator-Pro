@@ -8,6 +8,7 @@ import cv2
 from typing import Tuple, List, Any
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
+from .box_utils import expand_blocks
 from ..base import DEVICE_SELECTOR
 
 _MMOCR_AVAILABLE = False
@@ -83,6 +84,11 @@ if _MMOCR_AVAILABLE:
                 "type": "line_editor",
                 "value": 0.3,
                 "description": "Min detection score (0.2–0.6).",
+            },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.",
             },
             "description": "MMOCR text detection (DBNet etc.). Install: mim install mmengine mmcv mmdet mmocr",
         }

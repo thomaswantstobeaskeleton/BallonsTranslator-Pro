@@ -14,6 +14,7 @@ import cv2
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
+from .box_utils import expand_blocks
 from utils.textblock import sort_regions, mit_merge_textlines
 
 os.environ.setdefault("PPOCR_HOME", os.path.join("data", "models", "paddle-ocr"))
@@ -175,6 +176,11 @@ if _PADDLE_AVAILABLE:
                 "type": "line_editor",
                 "value": 4,
                 "description": "Shrink each box inward by this many pixels so it sits inside the bubble. 0 = off.",
+            },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6. Use when boxes are too tight.",
             },
             "merge_text_lines": {
                 "type": "checkbox",
@@ -358,13 +364,23 @@ if _PADDLE_AVAILABLE:
                 if shrink_px > 0:
                     for blk in blk_list:
                         _shrink_block(blk, shrink_px, w, h)
-                    mask = np.zeros((h, w), dtype=np.uint8)
-                    for blk in blk_list:
-                        for line_pts in blk.lines:
-                            pts = np.array(line_pts, dtype=np.int32)
-                            if pts.ndim == 1:
-                                pts = pts.reshape(-1, 2)
-                            cv2.fillPoly(mask, [pts], 255)
+                pad_val = 0
+                bp = self.params.get("box_padding", {})
+                if isinstance(bp, dict):
+                    try:
+                        v = bp.get("value", 0)
+                        pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
+                    except (TypeError, ValueError):
+                        pass
+                if pad_val > 0:
+                    blk_list = expand_blocks(blk_list, pad_val, w, h)
+                mask = np.zeros((h, w), dtype=np.uint8)
+                for blk in blk_list:
+                    for line_pts in blk.lines:
+                        pts = np.array(line_pts, dtype=np.int32)
+                        if pts.ndim == 1:
+                            pts = pts.reshape(-1, 2)
+                        cv2.fillPoly(mask, [pts], 255)
                 return mask, blk_list
 
             try:
@@ -479,11 +495,21 @@ if _PADDLE_AVAILABLE:
             if shrink_px > 0:
                 for blk in blk_list:
                     _shrink_block(blk, shrink_px, w, h)
-                mask = np.zeros((h, w), dtype=np.uint8)
-                for blk in blk_list:
-                    for line_pts in blk.lines:
-                        pts = np.array(line_pts, dtype=np.int32)
-                        if pts.ndim == 1:
-                            pts = pts.reshape(-1, 2)
-                        cv2.fillPoly(mask, [pts], 255)
+            pad_val = 0
+            bp = self.params.get("box_padding", {})
+            if isinstance(bp, dict):
+                try:
+                    v = bp.get("value", 0)
+                    pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
+                except (TypeError, ValueError):
+                    pass
+            if pad_val > 0:
+                blk_list = expand_blocks(blk_list, pad_val, w, h)
+            mask = np.zeros((h, w), dtype=np.uint8)
+            for blk in blk_list:
+                for line_pts in blk.lines:
+                    pts = np.array(line_pts, dtype=np.int32)
+                    if pts.ndim == 1:
+                        pts = pts.reshape(-1, 2)
+                    cv2.fillPoly(mask, [pts], 255)
             return mask, blk_list

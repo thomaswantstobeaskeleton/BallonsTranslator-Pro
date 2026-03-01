@@ -8,6 +8,7 @@ import cv2
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
+from .box_utils import expand_blocks
 from utils.textblock import sort_regions, mit_merge_textlines
 
 
@@ -96,6 +97,11 @@ if _EASYOCR_AVAILABLE:
             "merge_gap_px": {
                 "value": 50,
                 "description": "Merge blocks within this many pixels (reduces overlapping text in one bubble).",
+            },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 5,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.",
             },
             "description": "EasyOCR detection only (CRAFT/DBNet18).",
         }
@@ -220,4 +226,16 @@ if _EASYOCR_AVAILABLE:
             merge_gap = int(self.params.get("merge_gap_px", {}).get("value", 50))
             blk_list = _merge_nearby_blocks(blk_list, merge_gap)
             blk_list = sort_regions(blk_list)
+
+            pad_val = 0
+            bp = self.params.get("box_padding", {})
+            if isinstance(bp, dict):
+                v = bp.get("value", 5)
+                try:
+                    pad_val = max(0, min(24, int(v) if v not in (None, "") else 5))
+                except (TypeError, ValueError):
+                    pad_val = 5
+            if pad_val > 0:
+                blk_list = expand_blocks(blk_list, pad_val, w, h)
+
             return mask, blk_list

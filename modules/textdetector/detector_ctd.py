@@ -4,6 +4,7 @@ import os
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, DEFAULT_DEVICE, DEVICE_SELECTOR, ProjImgTrans
+from .box_utils import expand_blocks
 from .ctd import CTDModel
 
 CTD_ONNX_PATH = 'data/models/comictextdetector.pt.onnx'
@@ -53,6 +54,11 @@ class ComicTextDetector(TextDetectorBase):
             'type': 'line_editor',
             'value': '',
             'description': 'Optional: path to a custom ONNX model (e.g. mayocream/comic-text-detector-onnx). Leave empty to use built-in CTD ONNX. Used when device is CPU or when forcing ONNX.',
+        },
+        'box_padding': {
+            'type': 'line_editor',
+            'value': 5,
+            'description': 'Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.',
         },
     }
     _load_model_keys = {'model'}
@@ -124,6 +130,18 @@ class ComicTextDetector(TextDetectorBase):
                 sz = max(fnt_min, sz)
             blk.font_size = sz
             blk._detected_font_size = sz
+
+        pad_val = 0
+        bp = self.params.get('box_padding', {})
+        if isinstance(bp, dict):
+            v = bp.get('value', 5)
+            try:
+                pad_val = max(0, min(24, int(v) if v not in (None, '') else 5))
+            except (TypeError, ValueError):
+                pad_val = 5
+        if pad_val > 0:
+            h_img, w_img = img.shape[:2]
+            blk_list = expand_blocks(blk_list, pad_val, w_img, h_img)
 
         ksize = self.get_param_value('mask dilate size')
         if ksize > 0:

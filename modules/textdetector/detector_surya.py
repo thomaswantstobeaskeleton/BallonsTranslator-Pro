@@ -8,6 +8,7 @@ import cv2
 from typing import Tuple, List, Any
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
+from .box_utils import expand_blocks
 from ..base import DEVICE_SELECTOR
 from utils.textblock import sort_regions, mit_merge_textlines
 
@@ -169,6 +170,11 @@ if _SURYA_DET_AVAILABLE:
                 "value": 50,
                 "description": "Merge blocks within this many pixels.",
             },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.",
+            },
             "description": "Surya text detection (line-level). Install: pip install surya-ocr",
         }
         _load_model_keys = {"det_model", "det_processor"}
@@ -245,6 +251,24 @@ if _SURYA_DET_AVAILABLE:
                     pass
             blk_list = _merge_nearby_blocks(blk_list, merge_gap)
             blk_list = sort_regions(blk_list)
+            pad_val = 0
+            bp = self.params.get("box_padding", {})
+            if isinstance(bp, dict):
+                try:
+                    v = bp.get("value", 0)
+                    pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
+                except (TypeError, ValueError):
+                    pass
+            if pad_val > 0:
+                blk_list = expand_blocks(blk_list, pad_val, w, h)
+                mask = np.zeros((h, w), dtype=np.uint8)
+                for blk in blk_list:
+                    if blk.lines:
+                        pts = np.array(blk.lines[0], dtype=np.int32)
+                    else:
+                        x1, y1, x2, y2 = blk.xyxy
+                        pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+                    cv2.fillPoly(mask, [pts], 255)
             return mask, blk_list
 
         def updateParam(self, param_key: str, param_content):

@@ -11,6 +11,7 @@ import cv2
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, ProjImgTrans
+from .box_utils import expand_blocks
 from ..base import DEVICE_SELECTOR
 from utils.textblock import mit_merge_textlines
 
@@ -131,6 +132,11 @@ if _PADDLE_V5_AVAILABLE:
                 "type": "line_editor",
                 "value": 50,
                 "description": "Only merge if overlap ≥ this (px). For narrative text use 0 so vertical chars in a line merge.",
+            },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.",
             },
             "description": "PaddleOCR PP-OCRv5 text detection only (requires paddleocr 3.x).",
         }
@@ -308,6 +314,23 @@ if _PADDLE_V5_AVAILABLE:
                 except (TypeError, ValueError):
                     pass
                 blk_list = _merge_nearby_blocks(blk_list, gap, min_overlap_px=min_overlap)
+                mask = np.zeros((h, w), dtype=np.uint8)
+                for blk in blk_list:
+                    for line_pts in blk.lines:
+                        pts = np.array(line_pts, dtype=np.int32)
+                        if pts.ndim == 1:
+                            pts = pts.reshape(-1, 2)
+                        cv2.fillPoly(mask, [pts], 255)
+            pad_val = 0
+            bp = self.params.get("box_padding", {})
+            if isinstance(bp, dict):
+                try:
+                    v = bp.get("value", 0)
+                    pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
+                except (TypeError, ValueError):
+                    pass
+            if pad_val > 0:
+                blk_list = expand_blocks(blk_list, pad_val, w, h)
                 mask = np.zeros((h, w), dtype=np.uint8)
                 for blk in blk_list:
                     for line_pts in blk.lines:

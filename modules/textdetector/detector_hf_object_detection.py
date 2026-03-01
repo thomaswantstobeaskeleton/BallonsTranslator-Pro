@@ -3,11 +3,13 @@ Hugging Face object-detection detector – generic detector using any HF object-
 Default: ogkalu/comic-text-and-bubble-detector (RT-DETR fine-tuned for comic text and bubbles).
 Use model_id for other DETR/RT-DETR-style models. Requires: pip install transformers torch
 """
+import copy
 import numpy as np
 import cv2
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, DEVICE_SELECTOR
+from .box_utils import expand_blocks
 from utils.textblock import sort_regions
 
 
@@ -26,6 +28,38 @@ def _iou_xyxy(a, b):
     area_b = (bx2 - bx1) * (by2 - by1)
     union = area_a + area_b - inter
     return inter / union if union > 0 else 0.0
+
+
+def _inset_blocks(blk_list: List[TextBlock], ratio: float, img_w: int, img_h: int) -> List[TextBlock]:
+    """Shrink each block inward by ratio of its width/height."""
+    if ratio <= 0:
+        return blk_list
+    import copy as copy_mod
+    out = []
+    for blk in blk_list:
+        x1, y1, x2, y2 = blk.xyxy
+        w, h = x2 - x1, y2 - y1
+        if w <= 0 or h <= 0:
+            out.append(blk)
+            continue
+        dx = max(0, int(w * ratio))
+        dy = max(0, int(h * ratio))
+        x1n = min(x1 + dx, x2 - 1)
+        y1n = min(y1 + dy, y2 - 1)
+        x2n = max(x2 - dx, x1 + 1)
+        y2n = max(y2 - dy, y1 + 1)
+        x1n = max(0, min(x1n, img_w - 1))
+        y1n = max(0, min(y1n, img_h - 1))
+        x2n = max(0, min(x2n, img_w))
+        y2n = max(0, min(y2n, img_h))
+        if x2n <= x1n or y2n <= y1n:
+            out.append(blk)
+            continue
+        new_blk = copy.copy(blk)
+        new_blk.xyxy = [x1n, y1n, x2n, y2n]
+        new_blk.lines = [[[x1n, y1n], [x2n, y1n], [x2n, y2n], [x1n, y2n]]]
+        out.append(new_blk)
+    return out
 
 
 def _merge_overlapping_blocks(blk_list, iou_threshold):
@@ -106,7 +140,17 @@ if _HF_DET_AVAILABLE:
             "merge_overlap_iou": {
                 "type": "line_editor",
                 "value": 0.35,
-                "description": "Merge only when IoU >= this (0.3–0.5). Higher = don't merge adjacent bubbles; lower = merge more (risk merging 2 bubbles).",
+                "description": "Merge only when IoU >= this (0.3–0.5). Higher = don't merge adjacent bubbles; 1.0 = disable merge (one box per detection).",
+            },
+            "box_inset_ratio": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Shrink each box inward by this ratio of its width/height (0–0.2). E.g. 0.05 = 5% per side, box becomes 90% size. Does not split combined bubbles.",
+            },
+            "box_padding": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.",
             },
             "detect_min_side": {
                 "type": "line_editor",
@@ -306,7 +350,27 @@ if _HF_DET_AVAILABLE:
                     merge_iou = max(0.0, min(1.0, float(mo.get("value", 0.35))))
                 except (TypeError, ValueError):
                     pass
-            blk_list = _merge_overlapping_blocks(blk_list, merge_iou)
+            if merge_iou < 0.99:
+                blk_list = _merge_overlapping_blocks(blk_list, merge_iou)
+            inset_ratio = 0.0
+            bi = self.params.get("box_inset_ratio", {})
+            if isinstance(bi, dict):
+                try:
+                    inset_ratio = max(0.0, min(0.2, float(bi.get("value", 0))))
+                except (TypeError, ValueError):
+                    pass
+            if inset_ratio > 0:
+                blk_list = _inset_blocks(blk_list, inset_ratio, w, h)
+            pad_val = 0
+            bp = self.params.get("box_padding", {})
+            if isinstance(bp, dict):
+                try:
+                    v = bp.get("value", 0)
+                    pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
+                except (TypeError, ValueError):
+                    pass
+            if pad_val > 0:
+                blk_list = expand_blocks(blk_list, pad_val, w, h)
             blk_list = sort_regions(blk_list)
             mask = np.zeros((h, w), dtype=np.uint8)
             for blk in blk_list:

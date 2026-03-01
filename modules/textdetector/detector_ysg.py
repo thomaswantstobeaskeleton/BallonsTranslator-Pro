@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, DEVICE_SELECTOR
+from .box_utils import expand_blocks
 from utils.textblock import mit_merge_textlines, sort_regions, examine_textblk, sort_pnts
 from utils.imgproc_utils import xywh2xyxypoly
 from utils.proj_imgtrans import ProjImgTrans
@@ -82,7 +83,13 @@ class YSGYoloDetector(TextDetectorBase):
         },
         'mask dilate size': {
             'display_name': 'Mask dilate size', 'type': 'line_editor', 'value': 2
-        }
+        },
+        'box_padding': {
+            'type': 'line_editor',
+            'value': 5,
+            'display_name': 'Box padding',
+            'description': 'Pixels to add around each detected box (all sides). Reduces clipped punctuation (?, !) and character edges. Recommended 4–6.',
+        },
     }
 
     _load_model_keys = {'model'}
@@ -193,6 +200,17 @@ class YSGYoloDetector(TextDetectorBase):
                 sz = max(fnt_min, sz)
             blk.font_size = sz
             blk._detected_font_size = sz
+
+        pad_val = 0
+        bp = self.params.get('box_padding', {})
+        if isinstance(bp, dict):
+            v = bp.get('value', 5)
+            try:
+                pad_val = max(0, min(24, int(v) if v not in (None, '') else 5))
+            except (TypeError, ValueError):
+                pad_val = 5
+        if pad_val > 0:
+            blk_list = expand_blocks(blk_list, pad_val, im_w, im_h)
 
         ksize = self.get_param_value('mask dilate size')
         if ksize > 0:
