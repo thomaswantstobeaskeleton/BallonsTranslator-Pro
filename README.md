@@ -29,6 +29,7 @@ This fork adds **many new optional modules** (detectors, OCR engines, inpainters
 2. **First run:** Installs base deps and downloads default models into `data/`
 3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
 4. **New modules** appear automatically; install only the dependencies for the modules you use
+5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
 
 ---
 
@@ -372,7 +373,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | **Text Editor** | Switch to text edit mode (T) |
 | **Keyboard Shortcuts...** | Customize keybinds (Ctrl+K) |
 | **Context menu options...** | Show/hide canvas right-click actions by category (Ctrl+Shift+O) |
-| **Help** | Submenu: **Documentation** (open README), **About** (version) |
+| **Help** | **Documentation** (open README), **About** (version), **Update from GitHub** (pull latest changes; config preserved) |
 | **Dark Mode** | Toggle dark theme |
 
 ---
@@ -799,7 +800,7 @@ For **paddle_det**, **Strict bubble mode** applies stricter thresholds and filte
 
 Most behavior and display options are set in the **Config panel** (left bar → gear icon). All of the following are persisted in `config.json`.
 
-- **General → Startup:** Reopen last project on startup; **Recent projects limit** (5–30); **Logical DPI** (0 = system, 96/72 for font scaling; restart to apply); **Confirm before Run** (show Run/Continue/Cancel dialog); **After Run: Region merge** (Never / on all pages / on current page only — uses Region merge tool settings); **Dark mode** (synced with View → Dark Mode); **Display language** (UI language, same as View → Display Language); **Config panel font scale** (0.8–1.5, for this panel only).
+- **General → Startup:** Reopen last project on startup; **Recent projects limit** (5–30); **Auto update from GitHub on startup** (check for updates and pull on launch — *can cause issues or bad results*, e.g. merge conflicts or broken code; use with caution; config and local files are not overwritten); **Logical DPI** (0 = system, 96/72 for font scaling; restart to apply); **Confirm before Run** (show Run/Continue/Cancel dialog); **After Run: Region merge** (Never / on all pages / on current page only — uses Region merge tool settings); **Dark mode** (synced with View → Dark Mode); **Display language** (UI language, same as View → Display Language); **Config panel font scale** (0.8–1.5, for this panel only).
 - **General → OCR result:** **Spell check / Auto-correct OCR result** — after OCR, correct misspelled words when there is **exactly one suggestion** (e.g. "teh" → "the"); requires pyenchant and a system dictionary. Stored in `pcfg.ocr_spell_check`. Runs via `spell_check_textblocks` in OCR postprocess hooks (`utils/ocr_spellcheck.py`). See [OCR spell check / auto-correct](#ocr-spell-check--auto-correct-after-ocr) tutorial.
 - **General → Typesetting:** Defaults for new/unchanged blocks: font size, stroke, color, alignment, writing mode, font family, effect (decide by program vs use global); **Auto layout**; **To uppercase**; **Independent text styles per project**; **Show only custom fonts**.
 - **General → Save:** Result image format (PNG, JPG, WebP, JXL); **Quality**; **WebP lossless** (when format is WebP); Intermediate image format (PNG, JXL).
@@ -813,6 +814,7 @@ Module-specific params (CTD box score, mask dilation, inpaint_size, translator A
 | Config path | Key | Type | Default | Description |
 |-------------|-----|------|---------|-------------|
 | **General → Startup** | `open_recent_on_startup` | bool | true | Reopen last project on startup |
+| | `auto_update_from_github` | bool | false | Check for updates and pull from GitHub on startup; can cause issues (see Config panel tooltip) |
 | | `recent_proj_list_max` | int | 14 | Recent projects limit (5–30) |
 | | `logical_dpi` | int | 0 | 0 = system; 96/72 for font scaling (restart to apply) |
 | | `confirm_before_run` | bool | true | Show Run/Continue/Cancel dialog |
