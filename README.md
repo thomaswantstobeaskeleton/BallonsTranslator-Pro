@@ -29,7 +29,7 @@ This fork adds **many new optional modules** (detectors, OCR engines, inpainters
 2. **First run:** Installs base deps and downloads default models into `data/`. Transient connection errors (e.g. "Remote end closed connection") are retried automatically; if a download still fails, the log shows the path so you can download the file manually and restart.
 3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
 4. **New modules** appear automatically; install only the dependencies for the modules you use
-5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
+5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. *This only works if you cloned the repo with git (e.g. `git clone ...`). If you downloaded a ZIP, download the latest ZIP from GitHub and replace the folder to update.* Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
 
 ---
 
