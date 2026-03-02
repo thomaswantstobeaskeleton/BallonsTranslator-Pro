@@ -5,13 +5,17 @@ import traceback
 import re
 import shutil
 import os.path as osp
+import time
 from typing import List, Union, Optional, Any
 import hashlib
 from dataclasses import dataclass, field, is_dataclass
 import tempfile
 import uuid
 from urllib.request import Request, urlopen
+from urllib.error import URLError
 import ssl
+import http.client
+import socket
 
 import requests
 from tqdm import tqdm
@@ -24,6 +28,10 @@ shutil.register_archive_format('7zip', pack_7zarchive, description='7zip archive
 shutil.register_unpack_format('7zip', ['.7z'], unpack_7zarchive)
 
 READ_DATA_CHUNK = 128 * 1024
+
+# Retry transient connection errors (e.g. GitHub closing connection on large files)
+DOWNLOAD_MAX_RETRIES = 3
+DOWNLOAD_RETRY_DELAY_SEC = 5
 
 def calculate_sha256(filename):
     hash_sha256 = hashlib.sha256()
@@ -139,65 +147,90 @@ def download_url_to_file(
     original_ctx = ssl._create_default_https_context
     ssl._create_default_https_context = ssl._create_unverified_context  # https://stackoverflow.com/questions/50236117/scraping-ssl-certificate-verify-failed-error-for-http-en-wikipedia-org
 
-    file_size = None
-    req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
-
-    # We deliberately save it in a temp file and move it after
-    # download is complete. This prevents a local working checkpoint
-    # being overridden by a broken download.
-    # We deliberately do not use NamedTemporaryFile to avoid restrictive
-    # file permissions being applied to the downloaded file.
     dst = os.path.expanduser(dst)
-    for _ in range(tempfile.TMP_MAX):
-        tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
+    last_error = None
+    for attempt in range(DOWNLOAD_MAX_RETRIES + 1):
         try:
-            f = open(tmp_dst, "w+b")
-        except FileExistsError:
-            continue
-        break
-    else:
-        raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
+            req = Request(url, headers={"User-Agent": "torch.hub"})
+            u = urlopen(req)
+            meta = u.info()
+            if hasattr(meta, "getheaders"):
+                content_length = meta.getheaders("Content-Length")
+            else:
+                content_length = meta.get_all("Content-Length")
+            if content_length is not None and len(content_length) > 0:
+                file_size = int(content_length[0])
+            else:
+                file_size = None
 
-    try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
-        with tqdm(
-            total=file_size,
-            disable=not progress,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            while True:
-                buffer = u.read(READ_DATA_CHUNK)
-                if len(buffer) == 0:
-                    break
-                f.write(buffer)  # type: ignore[possibly-undefined]
+            # We deliberately save it in a temp file and move it after
+            # download is complete. This prevents a local working checkpoint
+            # being overridden by a broken download.
+            # We deliberately do not use NamedTemporaryFile to avoid restrictive
+            # file permissions being applied to the downloaded file.
+            for _ in range(tempfile.TMP_MAX):
+                tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
+                try:
+                    f = open(tmp_dst, "w+b")
+                except FileExistsError:
+                    continue
+                break
+            else:
+                raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
+
+            try:
                 if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
-                pbar.update(len(buffer))
+                    sha256 = hashlib.sha256()
+                with tqdm(
+                    total=file_size,
+                    disable=not progress,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                ) as pbar:
+                    while True:
+                        buffer = u.read(READ_DATA_CHUNK)
+                        if len(buffer) == 0:
+                            break
+                        f.write(buffer)  # type: ignore[possibly-undefined]
+                        if hash_prefix is not None:
+                            sha256.update(buffer)  # type: ignore[possibly-undefined]
+                        pbar.update(len(buffer))
 
-        f.close()
-        ssl._create_default_https_context = original_ctx
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
-        shutil.move(f.name, dst)
-    finally:
-        f.close()
-        if os.path.exists(f.name):
-            os.remove(f.name)
+                f.close()
+                u.close()
+                ssl._create_default_https_context = original_ctx
+                if hash_prefix is not None:
+                    digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
+                    if digest[: len(hash_prefix)] != hash_prefix:
+                        raise RuntimeError(
+                            f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
+                        )
+                shutil.move(f.name, dst)
+                return
+            finally:
+                f.close()
+                if os.path.exists(f.name):
+                    try:
+                        os.remove(f.name)
+                    except OSError:
+                        pass
+        except (http.client.RemoteDisconnected, http.client.IncompleteRead,
+                ConnectionResetError, BrokenPipeError, URLError, socket.timeout, TimeoutError) as e:
+            last_error = e
+            if attempt < DOWNLOAD_MAX_RETRIES:
+                delay = DOWNLOAD_RETRY_DELAY_SEC * (attempt + 1)
+                LOGGER.warning(f'Download connection error (attempt {attempt + 1}/{DOWNLOAD_MAX_RETRIES + 1}): {e}. Retrying in {delay}s ...')
+                time.sleep(delay)
+            else:
+                ssl._create_default_https_context = original_ctx
+                raise
+        except Exception:
+            ssl._create_default_https_context = original_ctx
+            raise
+    ssl._create_default_https_context = original_ctx
+    if last_error is not None:
+        raise last_error
 
 
 def check_local_file(local_file: str, sha256_precal: str = None, cache_hash: bool = False):

@@ -22,7 +22,7 @@ def download_and_check_module_files(module_class_list: List[BaseModule] = None):
             all_successful = download_and_check_files(**download_kwargs)
             if all_successful:
                 continue
-            LOGGER.error(f'Please save these files manually to sepcified path and restart the application, otherwise {module_class} will be unavailable.')
+            LOGGER.error(f'Please save these files manually to specified path and restart the application, otherwise {module_class} will be unavailable.')
 
 def prepare_pkuseg():
     try:
