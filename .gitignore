@@ -6,18 +6,21 @@ result
 data/models
 data/testpacks/eng_dontupload
 data/testpacks/testpacks
-data/*.png
 data/testpacks
+# Allow default text style to be committed; user files in config/textstyles still ignored
 config/textstyles
+!config/textstyles/default.json
 release
 libs
-icons
 .btrans_cache
+
+# icons/ is tracked (app assets); do not add to gitignore
 
 tmp.py
 dummy_scripts.py
 
-alphabet-all-*
+# Only ignore alphabet-all-* at repo root (data/alphabet-all-*.txt stays trackable)
+/alphabet-all-*
 *gitpython
 PortableGit
 test_dir
@@ -38,7 +41,6 @@ localtmp*
 .VSCodeCounter
 .idea
 *.zip
-*.ipynb
 *.dll
 *.so
 *.docx
@@ -50,19 +52,15 @@ localtmp*
 venv
 pip
 .DS_Store
-*.dic
-*.aff
-*.exc
 
-# Fonts: include font files so they push to repo (remove /* to track contents)
-# fonts/*
+# Fonts: shipped with the project for accessibility and built-in options — do not ignore fonts/
+# (fonts/* is intentionally not active; font files in fonts/ are tracked and distributed)
 !fonts/put fonts here.txt
 
-#venv and autoinstaller folders
+# venv and autoinstaller folders
 aria2c
 python
 git
-modules/experiments
 update_git.bat
 launch_win_venv.bat
 install_venv.bat
