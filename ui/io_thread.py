@@ -323,7 +323,10 @@ class GitUpdateThread(QThread):
     def run(self):
         try:
             if not osp.isdir(osp.join(self.repo_path, '.git')):
-                self.finished_with_result.emit(False, 'Not a git repository. Clone the project from GitHub first.')
+                self.finished_with_result.emit(False,
+                    'Update from GitHub only works when the project was cloned with git (e.g. git clone ...).\n\n'
+                    'You appear to have downloaded a ZIP from GitHub; ZIP downloads do not include git history, so in-app update is not available.\n\n'
+                    'To update: download the latest ZIP from the repository, extract it, and replace the project folder (or copy over the new files). Your config and data in config/ and data/ are in .gitignore, so backing up config.json and data/models/ before replacing is recommended.')
                 return
             r = subprocess.run(
                 ['git', 'fetch', 'origin'],
