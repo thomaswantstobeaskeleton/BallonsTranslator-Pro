@@ -16,6 +16,28 @@ INPAINTERS = Registry('inpainters')
 register_inpainter = INPAINTERS.register_module
 
 
+def _feather_weight_2d(h: int, w: int, feather_px: int) -> np.ndarray:
+    """Weight mask for blending: 1 in center, smooth falloff to 0 at edges. Reduces visible paste seams."""
+    if feather_px <= 0 or h < 3 or w < 3:
+        return np.ones((h, w), dtype=np.float32)
+    fy = np.linspace(0, 1, h, dtype=np.float32)
+    fx = np.linspace(0, 1, w, dtype=np.float32)
+    # Raised cosine: 1 in center, 0 at edges over feather_px
+    def fade(edge0: int, edge1: int, n: int) -> np.ndarray:
+        out = np.ones(n, dtype=np.float32)
+        if edge0 > 0:
+            t = np.linspace(1, 0, edge0, dtype=np.float32)
+            out[:edge0] = 0.5 * (1 + np.cos(np.pi * t))
+        if edge1 < n:
+            t = np.linspace(0, 1, n - edge1, dtype=np.float32)
+            out[edge1:] = 0.5 * (1 + np.cos(np.pi * t))
+        return out
+    wy = fade(feather_px, h - feather_px, h)
+    wx = fade(feather_px, w - feather_px, w)
+    w2d = wy[:, np.newaxis] * wx[np.newaxis, :]
+    return w2d
+
+
 def inpaint_handle_alpha_channel(original_alpha, mask):
     '''
     perhaps a better idea is to feed the alpha into inpainting model, but it'll double the cost  
@@ -58,39 +80,14 @@ class InpainterBase(BaseModule):
     
     def memory_safe_inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
         '''
-        handle cuda out of memory; optionally run tiled inpainting when tile_size is set.
+        Handle cuda OOM (fallback to CPU). Tiling is disabled for all inpainters to prevent
+        horizontal/vertical band and grid artifacts; use full-image mode or smaller inpaint_size if OOM.
         '''
         import torch
-        tile_size = getattr(pcfg.module, 'inpaint_tile_size', 0) or 0
-        tile_overlap = max(0, getattr(pcfg.module, 'inpaint_tile_overlap', 64) or 0)
-        h, w = img.shape[:2]
-        # Only tile when image is substantially larger than tile_size (avoids grey blobs on medium crops)
-        use_tiling = (
-            tile_size > 0
-            and (h > tile_size * 3 // 2 or w > tile_size * 3 // 2)
-            and tile_overlap < tile_size
-        )
 
         def do_inpaint(im, msk, blk_list=None):
             return self._inpaint(im, msk, blk_list)
 
-        if use_tiling:
-            try:
-                return self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
-            except Exception as e:
-                if DEFAULT_DEVICE == 'cuda' and isinstance(e, torch.cuda.OutOfMemoryError):
-                    soft_empty_cache()
-                    try:
-                        return self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
-                    except Exception as ee:
-                        if isinstance(ee, torch.cuda.OutOfMemoryError):
-                            self.logger.warning(f'CUDA OOM during tiled inpainting ({self.name}). Try smaller tile size or disable tiling.')
-                            self.moveToDevice('cpu')
-                            out = self._inpaint_tiled(img, mask, tile_size, tile_overlap, do_inpaint)
-                            precision = getattr(self, 'precision', None)
-                            self.moveToDevice('cuda', precision)
-                            return out
-                raise e
         try:
             return do_inpaint(img, mask, textblock_list)
         except Exception as e:
@@ -113,69 +110,39 @@ class InpainterBase(BaseModule):
             else:
                 raise e
 
-    def _inpaint_tiled(self, img: np.ndarray, mask: np.ndarray, tile_size: int, tile_overlap: int, do_inpaint) -> np.ndarray:
-        """Run inpainting in overlapping tiles and blend in overlap regions. do_inpaint(im, msk) -> inpainted crop."""
-        h, w = img.shape[:2]
-        stride = max(1, tile_size - tile_overlap)
-        out = np.zeros_like(img, dtype=np.float64)
-        weight_sum = np.zeros((h, w), dtype=np.float64)
-        # Tile bounds: [y1, y2, x1, x2] so that y2-y1 <= tile_size, x2-x1 <= tile_size
-        y_starts = list(range(0, h, stride))
-        x_starts = list(range(0, w, stride))
-        if y_starts[-1] + tile_size < h:
-            y_starts.append(max(0, h - tile_size))
-        if x_starts[-1] + tile_size < w:
-            x_starts.append(max(0, w - tile_size))
-        for y0 in y_starts:
-            for x0 in x_starts:
-                y1 = min(y0 + tile_size, h)
-                x1 = min(x0 + tile_size, w)
-                tile_img = img[y0:y1, x0:x1]
-                tile_mask = mask[y0:y1, x0:x1]
-                if np.sum(tile_mask > 127) == 0:
-                    out[y0:y1, x0:x1] += tile_img.astype(np.float64)
-                    weight_sum[y0:y1, x0:x1] += 1.0
-                    continue
-                tile_out = do_inpaint(tile_img, tile_mask, None)
-                th, tw = tile_out.shape[:2]
-                # Linear blend weight: 1 in center, 0 at tile edges over overlap zone
-                wy = np.ones((th,), dtype=np.float64)
-                wx = np.ones((tw,), dtype=np.float64)
-                if tile_overlap > 0:
-                    fade = np.linspace(1, 0, tile_overlap + 1, dtype=np.float64)
-                    wy[:tile_overlap + 1] = np.minimum(wy[:tile_overlap + 1], fade)
-                    wy[-tile_overlap - 1:] = np.minimum(wy[-tile_overlap - 1:], fade[::-1])
-                    wx[:tile_overlap + 1] = np.minimum(wx[:tile_overlap + 1], fade)
-                    wx[-tile_overlap - 1:] = np.minimum(wx[-tile_overlap - 1:], fade[::-1])
-                w2d = wy[:, np.newaxis] * wx[np.newaxis, :]
-                out[y0:y1, x0:x1] += tile_out.astype(np.float64) * w2d
-                weight_sum[y0:y1, x0:x1] += w2d
-        weight_sum[weight_sum < 1e-6] = 1.0
-        if out.ndim == 3:
-            out = (out / weight_sum[:, :, np.newaxis]).astype(img.dtype)
-        else:
-            out = (out / weight_sum).astype(img.dtype)
-        return np.clip(out, 0, 255).astype(img.dtype)
-
     def inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None, check_need_inpaint: bool = False) -> np.ndarray:
         
         if not self.all_model_loaded():
             self.load_model()
         
-        # Dilate mask so stroke edges, punctuation, and anti-aliased text are fully covered (reduces leftover/ghost text in bubbles)
-        # Kernel size and iterations control how much the mask grows: smaller kernel + fewer iterations = keep bubble shape, less over-inpaint
+        # Ensure mask and image dimensions match (e.g. mask loaded from file at different resolution)
+        im_h, im_w = img.shape[:2]
         mask = np.copy(mask)
         if mask.ndim == 3:
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        if mask.shape[0] != im_h or mask.shape[1] != im_w:
+            mask = cv2.resize(mask, (im_w, im_h), interpolation=cv2.INTER_NEAREST)
+        
+        # Binary mask: 255 = region to inpaint (hole); force strict 0/255 for C backends (OpenCV, PatchMatch)
         binary = (mask > 127).astype(np.uint8) * 255
-        dilate_iter = getattr(self, 'mask_dilation_iterations', 2)
+        mask = np.where(binary > 0, 255, 0).astype(np.uint8)
+        # Default 0: detector/refinement already dilate; extra dilation can over-expand and cause dark blobs for all models.
+        # Subclasses (e.g. LamaLarge) can set mask_dilation_iterations if they need a small margin.
+        dilate_iter = getattr(self, 'mask_dilation_iterations', 0)
         if dilate_iter > 0:
             k = getattr(self, 'mask_dilation_kernel_size', 2)
             k = max(2, min(5, int(k)))
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-            mask = cv2.dilate(binary, kernel, iterations=dilate_iter)
-        else:
-            mask = binary
+            mask = cv2.dilate(mask, kernel, iterations=dilate_iter)
+        mask = np.ascontiguousarray(mask)
+        
+        # Warn if mask is suspiciously large (often causes dark blobs with Lama; try opencv-telea or patchmatch, or re-run detection)
+        mask_ratio = np.sum(mask > 127) / (im_h * im_w)
+        if mask_ratio > 0.5:
+            self.logger.warning(
+                f'Inpaint mask covers {mask_ratio*100:.0f}% of the image. If you see dark blobs, try Config → Inpainting → opencv-telea or patchmatch, '
+                'or reduce detector "mask dilate size" and re-run detection.'
+            )
         
         # Handle RGBA images by preserving alpha channel
         original_alpha = None
@@ -184,6 +151,8 @@ class InpainterBase(BaseModule):
             img_rgb = img[:, :, :3]  # Use only RGB for inpainting
         else:
             img_rgb = img
+        if mask_ratio <= 0:
+            return np.concatenate([img_rgb, original_alpha], axis=2) if original_alpha is not None else np.ascontiguousarray(img_rgb.copy())
         
         if not self.inpaint_by_block or textblock_list is None:
             if check_need_inpaint:
@@ -206,6 +175,7 @@ class InpainterBase(BaseModule):
                         if original_alpha is not None:
                             return np.concatenate([result_rgb, original_alpha], axis=2)
                         return result_rgb
+            img_rgb = np.ascontiguousarray(img_rgb)
             result_rgb = self.memory_safe_inpaint(img_rgb, mask, textblock_list)
             # Recombine with alpha if original was RGBA
             if original_alpha is not None:
@@ -226,8 +196,8 @@ class InpainterBase(BaseModule):
                     excluded_labels = {s.strip().lower() for s in exclude_str.split(',') if s.strip()}
                     textblock_list = [b for b in textblock_list if (getattr(b, 'label', None) or '').strip().lower() not in excluded_labels]
             
-            # Crop enlargement ratio: lower = tighter crop, less risk of including adjacent bubbles and over-filling (was 1.7, often too large)
-            enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 1.2)
+            # Crop enlargement: use ratio 1.7 to match upstream (more context = better inpainting)
+            enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 1.7)
             for blk in textblock_list:
                 xyxy = blk.xyxy
                 xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=enlarge_ratio)
@@ -266,11 +236,25 @@ class InpainterBase(BaseModule):
                         # cv2.waitKey(0)
                 
                 if need_inpaint:
-                    inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(im, msk)
+                    result_crop = self.memory_safe_inpaint(im, msk)
+                    # Ensure result matches crop size (some models return different size due to stride/pad)
+                    ch, cw = im.shape[:2]
+                    if result_crop.shape[0] != ch or result_crop.shape[1] != cw:
+                        result_crop = cv2.resize(result_crop, (cw, ch), interpolation=cv2.INTER_LINEAR)
+                    # Feather blend at crop edges to avoid visible rectangular seams (striped/grid artifacts)
+                    feather_px = min(6, ch // 4, cw // 4)
+                    if feather_px > 0:
+                        w = _feather_weight_2d(ch, cw, feather_px)
+                        if result_crop.ndim == 3:
+                            w = w[:, :, np.newaxis]
+                        roi = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+                        blended = (w * result_crop.astype(np.float32) + (1 - w) * roi.astype(np.float32)).astype(np.uint8)
+                        inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = blended
+                    else:
+                        inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = result_crop
 
-                # Clear the enlarged crop in the mask so neighboring blocks don't see this region as 255
-                # (prevents double-inpaint and wrong mask context in overlapping margins)
-                mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = 0
+                # Clear only block bbox in mask (match upstream); keeps margin in mask for adjacent blocks
+                mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
             
             # Recombine with alpha if original was RGBA
             if original_alpha is not None:
@@ -346,7 +330,8 @@ class PatchmatchInpainter(InpainterBase):
     def __init__(self, **params) -> None:
         super().__init__(**params)
         from . import patch_match
-        self.inpaint_method = lambda img, mask, *args, **kwargs: patch_match.inpaint(img, mask, patch_size=3)
+        # patch_size 3 is too small and can cause dark/blocky artifacts; use 7 for better quality (paper uses ~8-15)
+        self.inpaint_method = lambda img, mask, *args, **kwargs: patch_match.inpaint(img, mask, patch_size=7)
     
     def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
         return self.inpaint_method(img, mask)
@@ -631,8 +616,8 @@ class LamaLarge(LamaInpainterMPE):
         'inpaint_enlarge_ratio': {
             'type': 'selector',
             'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7],
-            'value': 1.2,
-            'description': 'Crop margin ratio (1.1–1.7). Lower = tighter crop, keeps bubble shape. Higher = more context, risk of merging adjacent bubbles.',
+            'value': 1.7,
+            'description': 'Crop margin ratio (1.1–1.7). 1.7 = upstream default, more context for inpainting. Lower = tighter crop.',
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone']),
         'precision': {

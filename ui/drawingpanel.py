@@ -492,6 +492,16 @@ class DrawingPanel(Widget):
         self.canvas.gv.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.canvas.image_edit_mode = ImageEditMode.HandTool
 
+    def _ensure_mask_visible(self) -> None:
+        """When entering mask-editing (Rect/Inpaint), show the mask if it was hidden (transparency 0)."""
+        if not getattr(self.canvas.imgtrans_proj, "mask_valid", False):
+            return
+        if pcfg.mask_transparency > 0:
+            return
+        pcfg.mask_transparency = 0.5
+        self.maskTransperancySlider.setValue(50)
+        self.canvas.updateLayers()
+
     def on_use_inpainttool(self) -> None:
         if self.currentTool == self.textEraserTool:
             self.canvas.textLayer.hide()
@@ -504,6 +514,7 @@ class DrawingPanel(Widget):
         self.canvas.erasing_pen = self.inpaint_pen
         self.canvas.painting_shape = self.inpaintConfigPanel.shape
         self.toolConfigStackwidget.setCurrentWidget(self.inpaintConfigPanel)
+        self._ensure_mask_visible()
         if self.isVisible():
             self.canvas.gv.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.setInpaintCursor()
@@ -549,6 +560,7 @@ class DrawingPanel(Widget):
         self.toolConfigStackwidget.setCurrentWidget(self.rectPanel)
         self.canvas.gv.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.canvas.image_edit_mode = ImageEditMode.RectTool
+        self._ensure_mask_visible()
         self.setCrossCursor()
 
     def set_config(self, config: DrawPanelConfig):

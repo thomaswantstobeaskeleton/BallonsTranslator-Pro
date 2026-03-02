@@ -894,6 +894,8 @@ class ConfigPanel(Widget):
             self.inpaint_config_panel.exclude_labels_edit.blockSignals(True)
             self.inpaint_config_panel.exclude_labels_edit.setText(getattr(pcfg.module, 'inpaint_exclude_labels', '') or '')
             self.inpaint_config_panel.exclude_labels_edit.blockSignals(False)
+        if hasattr(self.inpaint_config_panel, 'full_image_checker'):
+            self.inpaint_config_panel.full_image_checker.setChecked(getattr(pcfg.module, 'inpaint_full_image', False))
         self.let_effect_combox.setCurrentIndex(pcfg.let_fnteffect_flag)
         self.let_fntsize_combox.setCurrentIndex(pcfg.let_fntsize_flag)
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)

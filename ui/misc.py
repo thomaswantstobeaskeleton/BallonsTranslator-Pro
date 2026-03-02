@@ -170,6 +170,10 @@ def parse_stylesheet(theme: str = '', reverse_icon: bool = False) -> str:
     C.SLIDERHANDLE_COLOR = hex2rgb(tgt_theme['@sliderHandleColor'])
     for key, val in tgt_theme.items():
         stylesheet = stylesheet.replace(key, val)
+    # Fallback for missing icons (e.g. when icons/ is gitignored and not present on clone)
+    _icons_dir = osp.join(C.PROGRAM_PATH, 'icons')
+    if not osp.exists(osp.join(_icons_dir, 'drawingtools_texteraser.svg')):
+        stylesheet = stylesheet.replace('drawingtools_texteraser.svg', 'drawingtools_pen.svg')
     return stylesheet
 
 

@@ -490,9 +490,10 @@ class LLM_OCR(OCRBase):
                 cropped_img = img[y1:y2, x1:x2]
                 _, buffer = cv2.imencode(".jpg", cropped_img)
                 img_base64 = base64.b64encode(buffer).decode("utf-8")
-                blk.text = self.ocr(img_base64, prompt_override=kwargs.get("prompt"))
+                result = self.ocr(img_base64, prompt_override=kwargs.get("prompt"))
+                blk.text = [result] if result else [""]
             else:
-                blk.text = ""
+                blk.text = [""]
 
     def ocr_img(self, img: np.ndarray, prompt: str = "") -> str:
         _, buffer = cv2.imencode(".jpg", img)

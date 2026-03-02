@@ -281,7 +281,7 @@ class MergeThread(ThreadBase):
                     success_count += 1
                 else:
                     fail_count += 1
-                    labels = set(s.get('label', '') for s in initial_shapes)
+                    labels = set(str(s.get('label') or '') for s in initial_shapes)
                     reason = f"No merge (count={initial_count}, labels: {', '.join(labels) or 'none'})"
                     failed_images.append((img_name, reason))
 

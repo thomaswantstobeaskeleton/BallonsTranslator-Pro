@@ -216,7 +216,7 @@ class TranslateThread(ModuleThread):
         series_path = ""
         if proj is not None:
             series_path = (getattr(proj, "series_context_path", None) or "").strip()
-        if not series_path and getattr(self.translator, "get_param_value", None):
+        if not series_path and getattr(self.translator, "params", None) and "series_context_path" in self.translator.params:
             series_path = (self.translator.get_param_value("series_context_path") or "").strip()
         if not series_path:
             series_path = DEFAULT_SERIES_ID
@@ -532,7 +532,7 @@ class ImgtransThread(QThread):
         if imgname not in pages_to_iterate:
             return
         series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
-        if not series_path and getattr(self.translator, "get_param_value", None):
+        if not series_path and getattr(self.translator, "params", None) and "series_context_path" in self.translator.params:
             series_path = (self.translator.get_param_value("series_context_path") or "").strip()
         if not series_path:
             series_path = DEFAULT_SERIES_ID
@@ -564,7 +564,7 @@ class ImgtransThread(QThread):
         if not blk_list or not hasattr(self.translator, "append_page_to_series_context"):
             return
         series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
-        if not series_path and getattr(self.translator, "get_param_value", None):
+        if not series_path and getattr(self.translator, "params", None) and "series_context_path" in self.translator.params:
             series_path = (self.translator.get_param_value("series_context_path") or "").strip()
         if not series_path:
             series_path = DEFAULT_SERIES_ID
@@ -733,10 +733,25 @@ class ImgtransThread(QThread):
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: inpainting (loading model if needed)')
                 if mask is None:
                     mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
+                
+                # When mask was loaded from file (no detection this run), rebuild it from current blk_list
+                # so that after Region merge the mask matches the merged blocks (avoids dark gaps / wrong regions).
+                if mask is not None and not cfg_module.enable_detect and blk_list:
+                    im_h, im_w = img.shape[:2]
+                    mask = np.zeros((im_h, im_w), dtype=np.uint8)
+                    for blk in blk_list:
+                        if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                            pts = np.array(blk.lines[0], dtype=np.int32)
+                        else:
+                            x1, y1, x2, y2 = blk.xyxy
+                            pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+                        cv2.fillPoly(mask, [pts], 255)
                     
                 if mask is not None:
                     try:
-                        inpainted = self.inpainter.inpaint(img, mask, blk_list)
+                        # Option: full-image inpainting bypasses per-block crops (avoids crop/mask issues with some models)
+                        blk_list_arg = None if getattr(cfg_module, 'inpaint_full_image', False) else blk_list
+                        inpainted = self.inpainter.inpaint(img, mask, blk_list_arg)
                         self.imgtrans_proj.save_inpainted(imgname, inpainted)
                     except Exception as e:
                         create_error_dialog(e, self.tr('Inpainting Failed.'), 'InpaintFailed')

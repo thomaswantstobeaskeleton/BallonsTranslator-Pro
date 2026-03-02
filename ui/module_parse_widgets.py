@@ -488,6 +488,18 @@ class InpaintConfigPanel(ModuleConfigParseWidget):
         exclude_hl.addWidget(self.exclude_labels_edit)
         self.vlayout.addLayout(exclude_hl)
 
+        # Full-image inpainting: bypass per-block crops (use if Lama/per-block gives bad results)
+        self.full_image_checker = QCheckBox(self.tr('Inpaint full image (no per-block crops)'))
+        self.full_image_checker.setChecked(getattr(pcfg.module, 'inpaint_full_image', False))
+        self.full_image_checker.setToolTip(self.tr(
+            'Process the whole image at once instead of cropping per text block. Uses more VRAM and can be slower, '
+            'but avoids crop/mask issues that cause bad results with some inpainting models (e.g. Lama). Try this if inpainting looks wrong.'))
+        self.full_image_checker.clicked.connect(self._on_full_image_checker_changed)
+        self.vlayout.addWidget(self.full_image_checker)
+
+    def _on_full_image_checker_changed(self):
+        pcfg.module.inpaint_full_image = self.full_image_checker.isChecked()
+
     def _on_exclude_labels_checker_changed(self):
         enabled = self.exclude_labels_checker.isChecked()
         pcfg.module.inpaint_exclude_labels_enabled = enabled
