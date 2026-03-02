@@ -1,6 +1,7 @@
 import numpy as np
 import os.path as osp
 import traceback
+import subprocess
 
 from qtpy.QtCore import Qt, Signal, QUrl, QThread
 from qtpy.QtGui import QImage, QPixmap
@@ -309,3 +310,74 @@ class MergeThread(ThreadBase):
                 LOGGER.error(f'Failed to write JSON: {e}')
         
         self.merge_finished.emit(success_count, fail_count)
+
+
+class GitUpdateThread(QThread):
+    """Background thread for 'Update from GitHub': fetch and merge remote changes without overwriting local config."""
+    finished_with_result = Signal(bool, str)  # success, message
+
+    def __init__(self, repo_path: str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.repo_path = repo_path
+
+    def run(self):
+        try:
+            if not osp.isdir(osp.join(self.repo_path, '.git')):
+                self.finished_with_result.emit(False, 'Not a git repository. Clone the project from GitHub first.')
+                return
+            r = subprocess.run(
+                ['git', 'fetch', 'origin'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if r.returncode != 0:
+                err = (r.stderr or r.stdout or '').strip() or 'Unknown error'
+                self.finished_with_result.emit(False, f'Fetch failed: {err}')
+                return
+            r = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if r.returncode != 0:
+                self.finished_with_result.emit(False, 'Could not determine current branch.')
+                return
+            branch = (r.stdout or '').strip() or 'main'
+            remote_ref = f'origin/{branch}'
+            r = subprocess.run(
+                ['git', 'rev-list', '--count', f'HEAD..{remote_ref}'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if r.returncode != 0:
+                self.finished_with_result.emit(False, f'Could not compare with {remote_ref}. Check remote name and branch.')
+                return
+            try:
+                behind = int((r.stdout or '0').strip())
+            except ValueError:
+                behind = 0
+            if behind == 0:
+                self.finished_with_result.emit(True, 'Already up to date.')
+                return
+            r = subprocess.run(
+                ['git', 'merge', remote_ref, '--no-edit'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if r.returncode != 0:
+                err = (r.stderr or r.stdout or '').strip() or 'Merge failed.'
+                self.finished_with_result.emit(False, f'Merge failed: {err}')
+                return
+            self.finished_with_result.emit(True, f'Updated successfully. {behind} commit(s) merged. Restart the app to use the new version.')
+        except subprocess.TimeoutExpired:
+            self.finished_with_result.emit(False, 'Update timed out.')
+        except Exception as e:
+            self.finished_with_result.emit(False, str(e))

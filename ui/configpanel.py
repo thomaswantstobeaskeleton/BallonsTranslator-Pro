@@ -455,6 +455,12 @@ class ConfigPanel(Widget):
         self.open_on_startup_checker, _ = generalConfigPanel.addCheckBox(self.tr('Reopen last project on startup'))
         self.open_on_startup_checker.stateChanged.connect(self.on_open_onstartup_changed)
 
+        self.auto_update_from_github_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Auto update from GitHub on startup'),
+            discription=self.tr('Check for updates and pull from GitHub when the app starts. Can cause issues or bad results (e.g. merge conflicts, broken code, unexpected behavior). Use only if you understand the risks. Your config and local files are not overwritten.')
+        )
+        self.auto_update_from_github_checker.stateChanged.connect(self.on_auto_update_from_github_changed)
+
         self.recent_proj_list_max_spin = QSpinBox()
         self.recent_proj_list_max_spin.setRange(5, 30)
         self.recent_proj_list_max_spin.setValue(14)
@@ -683,6 +689,9 @@ class ConfigPanel(Widget):
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
 
+    def on_auto_update_from_github_changed(self):
+        pcfg.auto_update_from_github = self.auto_update_from_github_checker.isChecked()
+
     def on_recent_proj_list_max_changed(self, value: int):
         pcfg.recent_proj_list_max = value
 
@@ -873,6 +882,8 @@ class ConfigPanel(Widget):
 
         if pcfg.open_recent_on_startup:
             self.open_on_startup_checker.setChecked(True)
+        if getattr(pcfg, 'auto_update_from_github', False):
+            self.auto_update_from_github_checker.setChecked(True)
 
         self.detect_config_panel.keep_existing_checker.setChecked(pcfg.module.keep_exist_textlines)
         if hasattr(self.detect_config_panel, 'dual_detect_checker'):

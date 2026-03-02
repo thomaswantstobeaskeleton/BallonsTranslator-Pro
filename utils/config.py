@@ -136,6 +136,8 @@ class ProgramConfig(Config):
     original_transparency: float = 0.
     open_recent_on_startup: bool = True
     recent_proj_list_max: int = 14
+    # When True, check for and pull GitHub updates on startup. Can cause issues or bad results; use with caution.
+    auto_update_from_github: bool = False
     logical_dpi: int = 0
     confirm_before_run: bool = True
     let_fntsize_flag: int = 0

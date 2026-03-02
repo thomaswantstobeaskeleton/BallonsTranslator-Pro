@@ -35,7 +35,7 @@ from .textedit_area import SourceTextEdit, SelectTextMiniMenu, TransTextEdit
 from .drawingpanel import DrawingPanel
 from .scenetext_manager import SceneTextManager, TextPanel, PasteSrcItemsCommand
 from .mainwindowbars import TitleBar, LeftBar, BottomBar
-from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread
+from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, GitUpdateThread
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
 from .textedit_commands import GlobalRepalceAllCommand
@@ -146,6 +146,9 @@ class MainWindow(mainwindow_cls):
             # https://bugreports.qt.io/browse/QTBUG-133215
             self.hideSystemTitleBar()
             self.showMaximized()
+
+        if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS) and getattr(pcfg, 'auto_update_from_github', False):
+            QTimer.singleShot(1500, self.on_update_from_github)
 
     def on_create_errdialog(self, error_msg: str, detail_traceback: str = '', exception_type: str = ''):
         try:
@@ -841,6 +844,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.context_menu_options_trigger.connect(self.shortcutContextMenuOptions)
         self.titleBar.help_doc_trigger.connect(self.on_help_documentation)
         self.titleBar.help_about_trigger.connect(self.on_help_about)
+        self.titleBar.help_update_from_github_trigger.connect(self.on_update_from_github)
 
         sc = getattr(pcfg, "shortcuts", None) or {}
         self._shortcuts_list = []  # (action_id, default_key, QShortcut)
@@ -923,6 +927,31 @@ class MainWindow(mainwindow_cls):
             self.tr('About'),
             self.tr('BallonsTranslatorPro — community fork') + f' {VERSION}\n\n' + self.tr('Deep learning–assisted comic/manga translation.')
         )
+
+    def on_update_from_github(self):
+        """Pull latest changes from GitHub (Help menu). Only updates tracked files; config and local files are preserved."""
+        from .custom_widget import ProgressMessageBox
+        progress = ProgressMessageBox(self.tr('Update from GitHub'))
+        progress.setTaskName(self.tr('Checking for updates...'))
+        progress.updateTaskProgress(0)
+        progress.show()
+        thread = GitUpdateThread(shared.PROGRAM_PATH)
+
+        def on_finished(success: bool, message: str):
+            progress.hide()
+            progress.deleteLater()
+            if hasattr(self, '_git_update_threads') and thread in self._git_update_threads:
+                self._git_update_threads.remove(thread)
+            if success:
+                create_info_dialog({'title': self.tr('Update from GitHub'), 'text': message})
+            else:
+                create_error_dialog(RuntimeError(message), self.tr('Update from GitHub'), 'GitUpdateThread')
+
+        thread.finished_with_result.connect(on_finished)
+        thread.start()
+        if not hasattr(self, '_git_update_threads'):
+            self._git_update_threads = []
+        self._git_update_threads.append(thread)
 
     def _spellcheck_get_blocks(self):
         """Return [(block_idx, text_lines, trans_lines), ...] for current page (PR #974).

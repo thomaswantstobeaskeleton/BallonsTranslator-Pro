@@ -408,8 +408,12 @@ class TitleBar(Widget):
         docAction.setToolTip(self.tr('Open project README (installation and usage).'))
         aboutAction = QAction(self.tr('About'), self)
         aboutAction.setToolTip(self.tr('Show application version and info.'))
+        updateFromGitHubAction = QAction(self.tr('Update from GitHub'), self)
+        updateFromGitHubAction.setToolTip(self.tr('Pull latest changes from GitHub. Keeps your config and local files unchanged.'))
         helpMenu.addAction(docAction)
         helpMenu.addAction(aboutAction)
+        helpMenu.addSeparator()
+        helpMenu.addAction(updateFromGitHubAction)
         viewMenu.addMenu(helpMenu)
         viewMenu.addSeparator()
         viewMenu.addAction(importTextStyles)
@@ -425,6 +429,7 @@ class TitleBar(Widget):
         self.darkmode_trigger = darkModeAction.triggered
         self.help_doc_trigger = docAction.triggered
         self.help_about_trigger = aboutAction.triggered
+        self.help_update_from_github_trigger = updateFromGitHubAction.triggered
 
         mergeToolAction = QAction(self.tr('Region merge tool'), self)
         mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
