@@ -375,6 +375,8 @@ def init_module_registries(target_modules=None):
 
     for k in target_modules:
         _load_module(**MODULE_SCRIPTS[k])
+    if target_modules is None or 'translator' in target_modules:
+        _refresh_ensemble_translator_options()
 
 
 def init_textdetector_registries():
@@ -391,4 +393,20 @@ def init_ocr_registries():
 
 def init_translator_registries():
     init_module_registries('translator')
+    _refresh_ensemble_translator_options()
+
+
+def _refresh_ensemble_translator_options():
+    """Refresh Ensemble (3+1) candidate/judge selector options so the full translator list is available."""
+    try:
+        from modules.translators import TRANSLATORS
+        ensemble = TRANSLATORS.module_dict.get('Ensemble (3+1)')
+        if ensemble is not None and hasattr(ensemble, 'params'):
+            from modules.translators.trans_ensemble import _valid_candidate_translators
+            valid = _valid_candidate_translators()
+            for key in ('candidate_1', 'candidate_2', 'candidate_3', 'judge_translator'):
+                if key in ensemble.params and isinstance(ensemble.params[key], dict):
+                    ensemble.params[key]['options'] = valid
+    except Exception as e:
+        LOGGER.warning('Could not refresh Ensemble translator options: %s', e)
 
