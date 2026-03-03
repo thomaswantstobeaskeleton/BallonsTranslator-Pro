@@ -382,6 +382,8 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
     show_OCR_keyword_window = Signal()
     show_translation_context_requested = Signal()
     test_translator_clicked = Signal()
+    copy_manual_prompt_requested = Signal()
+    paste_manual_response_requested = Signal()
 
     def __init__(self, module_name, scrollWidget: QWidget = None, *args, **kwargs) -> None:
         super().__init__(module_name, GET_VALID_TRANSLATORS, scrollWidget=scrollWidget, *args, **kwargs)
@@ -406,6 +408,30 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.translationContextBtn.clicked.connect(self.show_translation_context_requested.emit)
         self.translationContextBtn.setFixedWidth(500)
 
+        # Section 19: continue batch on soft translation failure (vs stop and show dialog)
+        self.soft_failure_continue_checker = QCheckBox(self.tr("Continue batch on soft translation failure"))
+        self.soft_failure_continue_checker.setToolTip(self.tr(
+            "When checked (default), non-critical translation failures (e.g. timeout, parse error) use a placeholder and continue the batch. "
+            "When unchecked, show an error dialog and stop like critical errors (auth, quota)."))
+        self.soft_failure_continue_checker.setChecked(getattr(pcfg.module, "translation_soft_failure_continue", True))
+        self.soft_failure_continue_checker.clicked.connect(self._on_soft_failure_continue_changed)
+        self.vlayout.addWidget(self.soft_failure_continue_checker)
+
+        # Section 10: manual translation clipboard helper (visible only when translator is "manual")
+        self.manual_helper_widget = QWidget(self)
+        manual_hl = QHBoxLayout(self.manual_helper_widget)
+        manual_hl.setContentsMargins(0, 4, 0, 4)
+        self.copyPromptBtn = QPushButton(self.tr("Copy prompt"), self.manual_helper_widget)
+        self.copyPromptBtn.setToolTip(self.tr("Copy the translation prompt (JSON with source texts) to clipboard. Paste into your tool, then paste the response back and click Paste response."))
+        self.copyPromptBtn.clicked.connect(self.copy_manual_prompt_requested.emit)
+        self.pasteResponseBtn = QPushButton(self.tr("Paste response"), self.manual_helper_widget)
+        self.pasteResponseBtn.setToolTip(self.tr("Paste JSON from clipboard into the response box and apply to blocks. Run Translate to use it."))
+        self.pasteResponseBtn.clicked.connect(self.paste_manual_response_requested.emit)
+        manual_hl.addWidget(self.copyPromptBtn)
+        manual_hl.addWidget(self.pasteResponseBtn)
+        manual_hl.addStretch()
+        self.manual_helper_widget.setVisible(False)
+
         st_layout = QHBoxLayout()
         st_layout.setSpacing(15)
         st_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -415,6 +441,7 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         st_layout.addWidget(self.target_combobox)
         
         self.vlayout.insertLayout(1, st_layout) 
+        self.vlayout.addWidget(self.manual_helper_widget)
         self.vlayout.addWidget(self.testTranslatorBtn)
         self.vlayout.addWidget(self.replaceOCRkeywordBtn)
         self.vlayout.addWidget(self.translationContextBtn)
@@ -438,6 +465,14 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.source_combobox.blockSignals(False)
         self.target_combobox.blockSignals(False)
         self.module_combobox.blockSignals(False)
+
+    def updateModuleParamWidget(self):
+        super().updateModuleParamWidget()
+        module = self.module_combobox.currentText()
+        self.manual_helper_widget.setVisible(module == "manual")
+
+    def _on_soft_failure_continue_changed(self):
+        pcfg.module.translation_soft_failure_continue = self.soft_failure_continue_checker.isChecked()
 
 
 class InpaintConfigPanel(ModuleConfigParseWidget):
@@ -543,7 +578,36 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         dual_hl.addWidget(self.dual_detect_checker)
         dual_hl.addWidget(QLabel(self.tr('Secondary:')))
         dual_hl.addWidget(self.secondary_detector_combobox)
+        self.secondary_outside_bubble_only_checker = QCheckBox(self.tr('Outside bubbles only'))
+        self.secondary_outside_bubble_only_checker.setToolTip(self.tr(
+            'Only add secondary detector boxes that are outside primary (bubble) regions. Use when primary is good at bubbles (e.g. YSGYOLO) and secondary is for signs/captions (e.g. EasyOCR).'))
+        self.secondary_outside_bubble_only_checker.setChecked(getattr(pcfg.module, 'secondary_detector_outside_bubble_only', False))
+        self.secondary_outside_bubble_only_checker.clicked.connect(self._on_secondary_outside_bubble_only_changed)
+        dual_hl.addWidget(self.secondary_outside_bubble_only_checker)
         self.vlayout.addLayout(dual_hl)
+        self.tertiary_detect_checker = QCheckBox(self.tr('Run third detector'))
+        self.tertiary_detect_checker.setToolTip(self.tr('Run a third text detector and merge results (e.g. primary + secondary + tertiary for maximum coverage).'))
+        self.tertiary_detect_checker.setChecked(getattr(pcfg.module, 'enable_tertiary_detect', False))
+        self.tertiary_detect_checker.clicked.connect(self._on_tertiary_detect_changed)
+        self.tertiary_detector_combobox = ConfigComboBox(scrollWidget=scrollWidget)
+        self.tertiary_detector_combobox.addItem('')
+        self.tertiary_detector_combobox.addItems(GET_VALID_TEXTDETECTORS())
+        self.tertiary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_tertiary', '') or '')
+        self.tertiary_detector_combobox.currentTextChanged.connect(self._on_tertiary_detector_changed)
+        tertiary_hl = QHBoxLayout()
+        tertiary_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        tertiary_hl.addWidget(self.tertiary_detect_checker)
+        tertiary_hl.addWidget(QLabel(self.tr('Tertiary:')))
+        tertiary_hl.addWidget(self.tertiary_detector_combobox)
+        self.vlayout.addLayout(tertiary_hl)
+        # Section 19: OSB layout fallbacks
+        self.osb_layout_fallbacks_checker = QCheckBox(self.tr("OSB layout fallbacks (vertical stack + restore original)"))
+        self.osb_layout_fallbacks_checker.setToolTip(self.tr(
+            "When checked (default), if layout fails for outside-speech-bubble (OSB) blocks, retry with vertical stacking; if that fails, restore the original image region. "
+            "Uncheck to only mark failed OSB blocks and restore original (no vertical retry)."))
+        self.osb_layout_fallbacks_checker.setChecked(getattr(pcfg.module, "osb_layout_fallbacks_enabled", True))
+        self.osb_layout_fallbacks_checker.clicked.connect(self._on_osb_layout_fallbacks_changed)
+        self.vlayout.addWidget(self.osb_layout_fallbacks_checker)
         # Secondary detector params (shown when dual detect is on and a secondary is selected)
         self.secondary_params_container = QWidget(self)
         secondary_params_outer = QVBoxLayout(self.secondary_params_container)
@@ -556,14 +620,83 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         self.secondary_visible_widget = None
         self.vlayout.addWidget(self.secondary_params_container)
         self._update_secondary_params_visibility()
+        # Tertiary detector params (shown when tertiary detect is on and a tertiary is selected)
+        self.tertiary_params_container = QWidget(self)
+        tertiary_params_outer = QVBoxLayout(self.tertiary_params_container)
+        tertiary_params_outer.setContentsMargins(0, 0, 0, 0)
+        tertiary_params_outer.addWidget(QLabel(self.tr('Tertiary detector params:')))
+        self.tertiary_params_layout = QHBoxLayout()
+        self.tertiary_params_layout.setContentsMargins(0, 0, 0, 0)
+        tertiary_params_outer.addLayout(self.tertiary_params_layout)
+        self.tertiary_param_widget_map = {}
+        self.tertiary_visible_widget = None
+        self.vlayout.addWidget(self.tertiary_params_container)
+        self._update_tertiary_params_visibility()
 
     def _on_dual_detect_changed(self):
         pcfg.module.enable_dual_detect = self.dual_detect_checker.isChecked()
         self._update_secondary_params_visibility()
 
+    def _on_osb_layout_fallbacks_changed(self):
+        pcfg.module.osb_layout_fallbacks_enabled = self.osb_layout_fallbacks_checker.isChecked()
+
     def _on_secondary_detector_changed(self, name: str):
         pcfg.module.textdetector_secondary = (name or '').strip()
         self._update_secondary_params_visibility()
+
+    def _on_secondary_outside_bubble_only_changed(self):
+        pcfg.module.secondary_detector_outside_bubble_only = self.secondary_outside_bubble_only_checker.isChecked()
+
+    def _on_tertiary_detect_changed(self):
+        pcfg.module.enable_tertiary_detect = self.tertiary_detect_checker.isChecked()
+        self._update_tertiary_params_visibility()
+
+    def _on_tertiary_detector_changed(self, name: str):
+        pcfg.module.textdetector_tertiary = (name or '').strip()
+        self._update_tertiary_params_visibility()
+
+    def _update_tertiary_params_visibility(self):
+        ter_enabled = self.tertiary_detect_checker.isChecked()
+        ter = (self.tertiary_detector_combobox.currentText() or '').strip()
+        if ter_enabled and ter and ter in getattr(self, 'module_dict', {}):
+            self.tertiary_params_container.show()
+            self._update_tertiary_param_widget()
+        else:
+            self.tertiary_params_container.hide()
+
+    def _update_tertiary_param_widget(self):
+        ter_name = (self.tertiary_detector_combobox.currentText() or '').strip()
+        if self.tertiary_visible_widget is not None:
+            self.tertiary_visible_widget.hide()
+            self.tertiary_params_layout.removeWidget(self.tertiary_visible_widget)
+            self.tertiary_visible_widget = None
+        if not ter_name or not getattr(self, 'module_dict', None) or ter_name not in self.module_dict:
+            return
+        if ter_name in self.tertiary_param_widget_map:
+            widget = self.tertiary_param_widget_map[ter_name]
+        else:
+            params = self.module_dict[ter_name]
+            if params is None:
+                return
+            widget = ParamWidget(params, scrollWidget=self)
+            widget.paramwidget_edited.connect(self._on_tertiary_param_edited)
+            self.tertiary_param_widget_map[ter_name] = widget
+        self.tertiary_params_layout.addWidget(widget)
+        widget.show()
+        self.tertiary_visible_widget = widget
+
+    def _on_tertiary_param_edited(self, param_key: str, param_content: dict):
+        ter_name = (self.tertiary_detector_combobox.currentText() or '').strip()
+        if not ter_name:
+            return
+        tparams = getattr(pcfg.module, 'textdetector_params', None) or {}
+        if ter_name not in tparams or param_key not in tparams[ter_name]:
+            return
+        val = param_content.get('content')
+        if val is None:
+            return
+        tparams[ter_name][param_key] = val
+        pcfg.module.textdetector_params = tparams
 
     def _update_secondary_params_visibility(self):
         dual = self.dual_detect_checker.isChecked()

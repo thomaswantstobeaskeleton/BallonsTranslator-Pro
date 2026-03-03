@@ -1,3 +1,4 @@
+import json
 import time
 import threading
 import copy
@@ -7,21 +8,25 @@ import os.path as osp
 import cv2
 import numpy as np
 from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer, QMutex, QWaitCondition
-from qtpy.QtWidgets import QFileDialog, QMessageBox
+from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
+from qtpy.QtGui import QClipboard
 
 from .funcmaps import get_maskseg_method
 from utils.logger import logger as LOGGER
+from utils.imgproc_utils import enlarge_window, union_area
 from utils.registry import Registry
-from utils.imgproc_utils import enlarge_window, get_block_mask, union_area
+from modules.inpaint.base import _clip_xyxy_to_image, _block_mask_polygon, _block_mask_polygons, build_mask_with_resolved_overlaps
 from utils.io_utils import imread, text_is_empty
 from modules.translators import MissingTranslatorParams
+from modules.translators.exceptions import CriticalTranslationError
 from modules.base import BaseModule, soft_empty_cache, GPUINTENSIVE_SET
 from modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, \
     GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, \
     BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
 import modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
-from utils.textblock import TextBlock, sort_regions, examine_textblk
+from utils.textblock import TextBlock, sort_regions, examine_textblk, remove_contained_boxes, deduplicate_primary_boxes
+from modules.textdetector.outside_text_processor import OSB_LABELS, filter_osb_overlapping_bubbles
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from utils.translator_test import test_translator
@@ -30,6 +35,12 @@ from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
 from utils.proj_imgtrans import ProjImgTrans
 from utils.config import pcfg, RunStatus
+from utils.image_upscale import (
+    apply_initial_upscale,
+    downscale_to_size,
+    processing_scale as get_processing_scale,
+)
+from utils.cancellation import CancelFlag
 cfg_module = pcfg.module
 
 
@@ -249,15 +260,37 @@ class TranslateThread(ModuleThread):
                     series_context_path=series_path or None,
                     next_page=next_page,
                 )
-        try:
-            self.translator.translate_textblk_lst(page)
-        except Exception as e:
-            create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
-        else:
+        skip = (
+            getattr(cfg_module, 'skip_already_translated', False)
+            and page
+            and all(getattr(b, 'translation', None) and str(b.translation).strip() for b in page)
+        )
+        if skip:
             if series_path and hasattr(self.translator, "append_page_to_series_context"):
                 sources = [blk.get_text() for blk in page]
                 translations = [getattr(blk, "translation", "") or "" for blk in page]
                 self.translator.append_page_to_series_context(series_path, sources, translations)
+        else:
+            try:
+                self.translator.translate_textblk_lst(page)
+            except CriticalTranslationError as e:
+                create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                self.stop_requested = True
+            except Exception as e:
+                if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                    create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                    self.stop_requested = True
+                else:
+                    LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                    placeholder = "[Translation failed]"
+                    for blk in page:
+                        if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                            blk.translation = placeholder
+            else:
+                if series_path and hasattr(self.translator, "append_page_to_series_context"):
+                    sources = [blk.get_text() for blk in page]
+                    translations = [getattr(blk, "translation", "") or "" for blk in page]
+                    self.translator.append_page_to_series_context(series_path, sources, translations)
         if emit_finished:
             self.finish_translate_page.emit(page_key)
 
@@ -382,45 +415,16 @@ class ImgtransThread(QThread):
     def textdetector(self) -> TextDetectorBase:
         return self.textdetect_thread.textdetector
 
-    def _run_dual_detect(self, img: np.ndarray, mask: np.ndarray, blk_list: List[TextBlock], im_w: int, im_h: int):
-        """Run secondary detector and merge blocks (add secondary blocks that don't overlap much with primary)."""
-        sec_name = (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
-        if not sec_name or sec_name not in GET_VALID_TEXTDETECTORS():
-            return mask, blk_list
-        if blk_list is None:
-            blk_list = []
-        try:
-            sec_class = TEXTDETECTORS.module_dict.get(sec_name)
-            if sec_class is None:
-                return mask, blk_list
-            merged_params = merge_config_module_params(
-                copy.deepcopy(cfg_module.get_params('textdetector')),
-                GET_VALID_TEXTDETECTORS(),
-                TEXTDETECTORS.get
-            )
-            params = merged_params.get(sec_name)
-            if isinstance(params, dict):
-                params = {k: v for k, v in params.items() if not k.startswith('__')}
-            sec_detector = sec_class(**params) if params and isinstance(params, dict) else sec_class()
-            if not pcfg.module.load_model_on_demand:
-                sec_detector.load_model()
-        except Exception as e:
-            LOGGER.warning('Could not create secondary detector %s: %s', sec_name, e)
-            return mask, blk_list
-        try:
-            mask2, blk_list_2 = sec_detector.detect(img, self.imgtrans_proj)
-        except Exception as e:
-            LOGGER.warning('Secondary detector %s failed: %s', sec_name, e)
-            return mask, blk_list
-        if blk_list_2 is None:
-            blk_list_2 = []
-        if not blk_list_2:
-            if mask is not None and mask2 is not None and mask.shape == mask2.shape:
-                mask = np.bitwise_or(mask, mask2)
-            elif mask is None and mask2 is not None:
-                mask = mask2
-            return mask, blk_list
+    def _run_extra_detectors(self, img: np.ndarray, mask: np.ndarray, blk_list: List[TextBlock], im_w: int, im_h: int, extra_names: List[str]):
+        """Run one or more extra detectors and merge blocks (IoU < 0.4). Used for secondary and tertiary."""
+        if not extra_names or blk_list is None:
+            blk_list = blk_list or []
+        valid = GET_VALID_TEXTDETECTORS()
+        primary_name = (getattr(cfg_module, 'textdetector', '') or '').strip()
         iou_threshold = 0.4
+        outside_bubble_only = getattr(cfg_module, 'secondary_detector_outside_bubble_only', False)
+        primary_blocks = list(blk_list) if outside_bubble_only else []
+
         def _iou(a: TextBlock, b: TextBlock) -> float:
             inter = union_area(a.xyxy, b.xyxy)
             if inter <= 0:
@@ -429,18 +433,71 @@ class ImgtransThread(QThread):
             area_b = (b.xyxy[2] - b.xyxy[0]) * (b.xyxy[3] - b.xyxy[1])
             union = area_a + area_b - inter
             return inter / union if union > 0 else 0.0
-        for blk in blk_list_2:
-            if getattr(blk, 'lines', None) and len(blk.lines) > 0:
-                examine_textblk(blk, im_w, im_h, sort=True)
-            max_iou = max((_iou(blk, p) for p in blk_list), default=0.0)
-            if max_iou < iou_threshold:
-                blk_list.append(blk)
-        blk_list = sort_regions(blk_list)
-        if mask is not None and mask2 is not None and mask.shape == mask2.shape:
-            mask = np.bitwise_or(mask, mask2)
-        elif mask is None and mask2 is not None:
-            mask = mask2
+
+        for sec_name in extra_names:
+            sec_name = (sec_name or '').strip()
+            if not sec_name or sec_name not in valid or sec_name == primary_name:
+                continue
+            try:
+                sec_class = TEXTDETECTORS.module_dict.get(sec_name)
+                if sec_class is None:
+                    continue
+                merged_params = merge_config_module_params(
+                    copy.deepcopy(cfg_module.get_params('textdetector')),
+                    valid,
+                    TEXTDETECTORS.get
+                )
+                params = merged_params.get(sec_name)
+                if isinstance(params, dict):
+                    params = {k: v for k, v in params.items() if not k.startswith('__')}
+                sec_detector = sec_class(**params) if params and isinstance(params, dict) else sec_class()
+                if not pcfg.module.load_model_on_demand:
+                    sec_detector.load_model()
+            except Exception as e:
+                LOGGER.warning('Could not create extra detector %s: %s', sec_name, e)
+                continue
+            try:
+                mask2, blk_list_2 = sec_detector.detect(img, self.imgtrans_proj)
+            except Exception as e:
+                LOGGER.warning('Extra detector %s failed: %s', sec_name, e)
+                continue
+            if blk_list_2 is None:
+                blk_list_2 = []
+            if outside_bubble_only and primary_blocks:
+                blk_list_2 = filter_osb_overlapping_bubbles(blk_list_2, primary_blocks, iou_threshold=0.10)
+            for blk in blk_list_2:
+                safe_xyxy = _clip_xyxy_to_image(blk.xyxy, im_w, im_h)
+                if safe_xyxy is None:
+                    continue
+                blk.xyxy = safe_xyxy
+                if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                    examine_textblk(blk, im_w, im_h, sort=True)
+                if outside_bubble_only:
+                    blk_list.append(blk)
+                else:
+                    max_iou = max((_iou(blk, p) for p in blk_list), default=0.0)
+                    if max_iou < iou_threshold:
+                        blk_list.append(blk)
+            blk_list = sort_regions(blk_list)
+            if mask is not None and mask2 is not None and mask.shape == mask2.shape:
+                mask = np.bitwise_or(mask, mask2)
+            elif mask is None and mask2 is not None:
+                mask = mask2
         return mask, blk_list
+
+    def _run_dual_detect(self, img: np.ndarray, mask: np.ndarray, blk_list: List[TextBlock], im_w: int, im_h: int):
+        """Section 14: Secondary (and optionally tertiary) detector merge. Builds extra list and calls _run_extra_detectors."""
+        primary = (getattr(cfg_module, 'textdetector', '') or '').strip()
+        secondary = (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
+        tertiary = (getattr(cfg_module, 'textdetector_tertiary', '') or '').strip()
+        extra = []
+        if getattr(cfg_module, 'enable_dual_detect', False) and secondary and secondary != primary:
+            extra.append(secondary)
+        if getattr(cfg_module, 'enable_tertiary_detect', False) and tertiary and tertiary != primary and tertiary not in extra:
+            extra.append(tertiary)
+        if not extra:
+            return mask, blk_list
+        return self._run_extra_detectors(img, mask, blk_list, im_w, im_h, extra)
 
     @property
     def ocr(self) -> OCRBase:
@@ -459,6 +516,8 @@ class ImgtransThread(QThread):
         self.pages_to_process = pages_to_process  # 保存需要处理的页面列表
         self.num_pages = len(self.imgtrans_proj.pages)
         self.stop_requested = False
+        self.cancel_flag = CancelFlag()
+        self.cancel_flag.reset()
         self._pause_requested = False
         self._resume_event.set()
         # 创建处理索引到实际页面索引的映射
@@ -469,6 +528,8 @@ class ImgtransThread(QThread):
     def requestStop(self):
         """请求停止当前任务"""
         self.stop_requested = True
+        if getattr(self, 'cancel_flag', None) is not None:
+            self.cancel_flag.request()
         self._pause_requested = False
         self._resume_event.set()
         # 同时停止翻译线程
@@ -489,6 +550,31 @@ class ImgtransThread(QThread):
         self.job = lambda : self._blktrans_pipeline(blk_list, tgt_img, mode, blk_ids, tgt_mask)
         self.start()
 
+    @staticmethod
+    def _cleaning_kwargs_for_block(blk_list: List[TextBlock], idx: int, x1: int, y1: int, x2: int, y2: int) -> dict:
+        """Section 16: self_xyxy and neighbor_xyxy_list in crop coords for adaptive shrink near conjoined junctions."""
+        blk = blk_list[idx]
+        crop_w, crop_h = x2 - x1, y2 - y1
+        try:
+            bx1, by1, bx2, by2 = float(blk.xyxy[0]), float(blk.xyxy[1]), float(blk.xyxy[2]), float(blk.xyxy[3])
+        except (IndexError, TypeError):
+            return {}
+        self_xyxy = [bx1 - x1, by1 - y1, bx2 - x1, by2 - y1]
+        margin = 20
+        neighbor_xyxy_list = []
+        for j, other in enumerate(blk_list):
+            if j == idx:
+                continue
+            try:
+                ox1, oy1, ox2, oy2 = float(other.xyxy[0]), float(other.xyxy[1]), float(other.xyxy[2]), float(other.xyxy[3])
+            except (IndexError, TypeError):
+                continue
+            if not (ox2 < x1 - margin or ox1 > x2 + margin or oy2 < y1 - margin or oy1 > y2 + margin):
+                nc = [max(0.0, ox1 - x1), max(0.0, oy1 - y1), min(float(crop_w), ox2 - x1), min(float(crop_h), oy2 - y1)]
+                if nc[2] > nc[0] and nc[3] > nc[1]:
+                    neighbor_xyxy_list.append(nc)
+        return {"self_xyxy": self_xyxy, "neighbor_xyxy_list": neighbor_xyxy_list}
+
     def _blktrans_pipeline(self, blk_list: List[TextBlock], tgt_img: np.ndarray, mode: int, blk_ids: List[int], tgt_mask):
         if mode >= 0 and mode < 3:
             try:
@@ -498,7 +584,18 @@ class ImgtransThread(QThread):
             self.finish_blktrans.emit(mode, blk_ids)
 
         if mode != 0 and mode < 3:
-            self.translate_thread.module.translate_textblk_lst(blk_list)
+            try:
+                self.translate_thread.module.translate_textblk_lst(blk_list)
+            except CriticalTranslationError as e:
+                create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+            except Exception as e:
+                if not getattr(pcfg.module, "translation_soft_failure_continue", True):
+                    create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                else:
+                    LOGGER.warning("Translation failed (soft): %s. Using placeholders.", e)
+                    for blk in blk_list:
+                        if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                            blk.translation = "[Translation failed]"
             self.finish_blktrans.emit(mode, blk_ids)
         if mode > 1:
             im_h, im_w = tgt_img.shape[:2]
@@ -511,7 +608,10 @@ class ImgtransThread(QThread):
                 if y2 - y1 > 2 and x2 - x1 > 2:
                     im = np.copy(tgt_img[y1: y2, x1: x2])
                     maskseg_method = get_maskseg_method()
-                    inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=tgt_mask[y1: y2, x1: x2])
+                    cleaning_kwargs = self._cleaning_kwargs_for_block(blk_list, ii, int(x1), int(y1), int(x2), int(y2))
+                    inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(
+                        im, mask=tgt_mask[y1: y2, x1: x2], **cleaning_kwargs
+                    )
                     # Dilate mask slightly so original text (e.g. Chinese) is fully covered and erased
                     if inpaint_mask_array is not None and inpaint_mask_array.size > 0:
                         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -613,17 +713,28 @@ class ImgtransThread(QThread):
         for imgname in pages_to_iterate:
             page_num += 1
             # 检查是否请求停止
-            if self.stop_requested:
+            if self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set()):
                 LOGGER.info('Image translation pipeline stopped by user')
                 break
-            while self._pause_requested and not self.stop_requested:
+            while self._pause_requested and not self.stop_requested and (getattr(self, 'cancel_flag', None) is None or not self.cancel_flag.is_set()):
                 self._resume_event.wait(timeout=0.3)
-            if self.stop_requested:
+            if self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set()):
                 break
             LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)} ({imgname}): starting')
             if cfg_module.enable_ocr and hasattr(self.ocr, 'restore_to_device'):
                 self.ocr.restore_to_device()
             img = self.imgtrans_proj.read_img(imgname)
+            orig_h, orig_w = img.shape[:2]
+            scale = 1.0
+            if getattr(cfg_module, 'image_upscale_initial', False):
+                try:
+                    factor = float(getattr(cfg_module, 'image_upscale_initial_factor', 2.0) or 2.0)
+                    policy = (getattr(cfg_module, 'upscale_policy_initial', None) or 'lanczos').strip().lower()
+                    if factor > 1.0 and policy != 'none':
+                        img = apply_initial_upscale(img, factor=factor, policy=policy)
+                        scale = factor
+                except Exception as e:
+                    LOGGER.warning("Initial upscale failed: %s", e)
             mask = blk_list = None
             need_save_mask = False
             blk_removed: List[TextBlock] = []
@@ -635,9 +746,30 @@ class ImgtransThread(QThread):
                     for blk in blk_list:
                         if getattr(blk, 'lines', None) and len(blk.lines) > 0:
                             examine_textblk(blk, im_w, im_h, sort=True)
+                    # Optional: collision-based merge (Dango-style) for word-level or many small blocks
+                    if getattr(cfg_module, 'merge_nearby_blocks_collision', False) and blk_list:
+                        try:
+                            from utils.ocr_result_merge import merge_blocks_horizontal, merge_blocks_vertical
+                            gap = float(getattr(cfg_module, 'merge_nearby_blocks_gap_ratio', 1.5) or 1.5)
+                            vertical_count = sum(1 for b in blk_list if getattr(b, 'vertical', False) or getattr(getattr(b, 'fontformat', None), 'vertical', False))
+                            if vertical_count > len(blk_list) / 2:
+                                blk_list = merge_blocks_vertical(blk_list, gap_ratio=gap)
+                            else:
+                                blk_list = merge_blocks_horizontal(blk_list, gap_ratio=gap, add_space_between=False)
+                            if mask is not None and blk_list:
+                                mask = build_mask_with_resolved_overlaps(blk_list, im_w, im_h)
+                                need_save_mask = True
+                        except Exception as e:
+                            LOGGER.warning('Collision merge failed: %s', e)
+                    # Section 14: primary detection deduplication and nested-box removal
+                    blk_list = remove_contained_boxes(blk_list)
+                    blk_list = deduplicate_primary_boxes(blk_list, iou_threshold=0.5)
                     if (getattr(cfg_module, 'enable_dual_detect', False) and
                             getattr(cfg_module, 'textdetector_secondary', '').strip() and
-                            cfg_module.textdetector_secondary != cfg_module.textdetector):
+                            cfg_module.textdetector_secondary != cfg_module.textdetector) or \
+                            (getattr(cfg_module, 'enable_tertiary_detect', False) and
+                            getattr(cfg_module, 'textdetector_tertiary', '').strip() and
+                            cfg_module.textdetector_tertiary != cfg_module.textdetector):
                         try:
                             mask, blk_list = self._run_dual_detect(img, mask, blk_list, im_w, im_h)
                         except Exception as e:
@@ -652,10 +784,76 @@ class ImgtransThread(QThread):
                     existed_mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
                     if existed_mask is not None:
                         mask = np.bitwise_or(mask, existed_mask)
+                # Optional: outside-speech-bubble (OSB) processing for detectors that set blk.label (e.g. HF object det "text_free").
+                if getattr(cfg_module, "enable_osb_pipeline", False):
+                    try:
+                        from modules.textdetector.outside_text_processor import (
+                            split_blocks_by_label,
+                            filter_osb_overlapping_bubbles,
+                            group_osb_blocks,
+                            apply_osb_style_defaults,
+                            expand_bubble_boxes_with_osb,
+                        )
+
+                        bubble_blks, osb_blks, other_blks = split_blocks_by_label(blk_list)
+                        osb_blks = filter_osb_overlapping_bubbles(
+                            osb_blks,
+                            bubble_blks,
+                            iou_threshold=float(getattr(cfg_module, "osb_exclude_bubble_iou", 0.10) or 0.10),
+                        )
+                        # Section 14: expand bubble boxes to contain overlapping OSB text (so SAM/mask includes all text)
+                        if cfg_module.osb_expand_bubbles_with_osb:
+                            expand_bubble_boxes_with_osb(bubble_blks, osb_blks, im_w, im_h)
+                        if getattr(cfg_module, "osb_group_nearby", True):
+                            gap_px = int(getattr(cfg_module, "osb_group_gap_px", 24) or 24)
+                            if getattr(cfg_module, "processing_scale_enabled", True):
+                                try:
+                                    pscale = get_processing_scale(im_w, im_h)
+                                    gap_px = max(4, int(round(gap_px * pscale)))
+                                except Exception:
+                                    pass
+                            osb_blks = group_osb_blocks(
+                                osb_blks,
+                                gap_px=gap_px,
+                            )
+                        if getattr(cfg_module, "osb_style_probe", False):
+                            apply_osb_style_defaults(img, osb_blks)
+                        blk_list = bubble_blks + other_blks + osb_blks
+                        blk_list = sort_regions(blk_list)
+                        # Keep mask consistent with updated blocks for "detect-only" runs.
+                        if mask is not None:
+                            im_h, im_w = img.shape[:2]
+                            if getattr(cfg_module, "resolve_mask_overlaps_bisector", True):
+                                mask = build_mask_with_resolved_overlaps(
+                                    blk_list, im_w, im_h,
+                                    text_blocks_for_nudge=osb_blks if osb_blks else None,
+                                )
+                            else:
+                                mask = np.zeros((im_h, im_w), dtype=np.uint8)
+                                for blk in blk_list:
+                                    for pts in _block_mask_polygons(blk, im_w, im_h):
+                                        if pts is not None and len(pts) >= 3:
+                                            cv2.fillPoly(mask, [pts], 255)
+                            need_save_mask = True
+                    except Exception as e:
+                        LOGGER.warning("OSB processing failed: %s", e)
+                # Optional: panel-aware ordering (improves translation context order and rendering sequence)
+                if getattr(cfg_module, "enable_panel_order", False):
+                    try:
+                        from modules.textdetector.panel_finder import reorder_textblocks_by_panels
+
+                        blk_list = reorder_textblocks_by_panels(
+                            img,
+                            blk_list,
+                            reading_direction=getattr(cfg_module, "panel_reading_direction", "auto"),
+                        )
+                    except Exception as e:
+                        LOGGER.warning("Panel reorder failed: %s", e)
                 self.imgtrans_proj.pages[imgname] = blk_list
 
                 if mask is not None and not cfg_module.enable_ocr:
-                    self.imgtrans_proj.save_mask(imgname, mask)
+                    mask_to_save = downscale_to_size(mask, orig_w, orig_h) if scale > 1 else mask
+                    self.imgtrans_proj.save_mask(imgname, mask_to_save)
                     need_save_mask = False
                     
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
@@ -668,7 +866,22 @@ class ImgtransThread(QThread):
             if cfg_module.enable_ocr:
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR running')
                 try:
-                    self.ocr.run_ocr(img, blk_list)
+                    # Optional one-step VLM translation: OCR module writes blk.translation directly from image.
+                    if (
+                        getattr(cfg_module, "translation_mode", "two_step") == "one_step_vlm"
+                        and getattr(cfg_module, "enable_translate", False)
+                        and hasattr(self.ocr, "run_ocr_translate")
+                    ):
+                        try:
+                            self.ocr.run_ocr_translate(img, blk_list, cfg_module.translate_source, cfg_module.translate_target)
+                            # Ensure source text exists for later editing (keep original OCR empty)
+                            for blk in blk_list:
+                                if getattr(blk, "text", None) is None:
+                                    blk.text = [""]
+                        except NotImplementedError:
+                            self.ocr.run_ocr(img, blk_list)
+                    else:
+                        self.ocr.run_ocr(img, blk_list)
                 except Exception as e:
                     create_error_dialog(e, self.tr('OCR Failed.'), 'OCRFailed')
                 self.ocr_counter += 1
@@ -703,10 +916,47 @@ class ImgtransThread(QThread):
                                         inpainted[y1: y2, x1: x2][mskpnt] = img[y1: y2, x1: x2][mskpnt]
                                     need_save_mask = True
                             if inpainted is not None and need_save_mask:
-                                self.imgtrans_proj.save_inpainted(imgname, inpainted)
+                                inpainted_to_save = downscale_to_size(inpainted, orig_w, orig_h) if scale > 1 else inpainted
+                                self.imgtrans_proj.save_inpainted(imgname, inpainted_to_save)
                             if need_save_mask:
-                                self.imgtrans_proj.save_mask(imgname, mask)
+                                mask_to_save = downscale_to_size(mask, orig_w, orig_h) if scale > 1 else mask
+                                self.imgtrans_proj.save_mask(imgname, mask_to_save)
                                 need_save_mask = False
+
+                # Optional: after OCR, filter margin page numbers for OSB blocks.
+                if getattr(cfg_module, "osb_page_number_filter", False):
+                    try:
+                        im_h, im_w = img.shape[:2]
+                        from modules.textdetector.outside_text_processor import filter_page_number_blocks_after_ocr
+
+                        blk_list_new, removed = filter_page_number_blocks_after_ocr(
+                            blk_list,
+                            im_w=im_w,
+                            im_h=im_h,
+                            margin_ratio=float(getattr(cfg_module, "osb_page_number_margin_ratio", 0.08) or 0.08),
+                        )
+                        if removed:
+                            blk_list.clear()
+                            blk_list += blk_list_new
+                            # Clear their mask so they won't be inpainted.
+                            if mask is None:
+                                mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
+                            if mask is not None:
+                                for blk in removed:
+                                    xywh = blk.bounding_rect()
+                                    blk_mask, xyxy = get_block_mask(xywh, mask, blk.angle)
+                                    x1, y1, x2, y2 = xyxy
+                                    if blk_mask is not None:
+                                        mask[y1: y2, x1: x2] = 0
+                                        need_save_mask = True
+                            if need_save_mask and mask is not None:
+                                mask_to_save = downscale_to_size(mask, orig_w, orig_h) if scale > 1 else mask
+                                self.imgtrans_proj.save_mask(imgname, mask_to_save)
+                                need_save_mask = False
+                            # Ensure page JSON uses filtered list
+                            self.imgtrans_proj.pages[imgname] = blk_list
+                    except Exception as e:
+                        LOGGER.warning("OSB page-number filter failed: %s", e)
 
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
                 self.update_ocr_progress.emit(self.ocr_counter)
@@ -716,15 +966,39 @@ class ImgtransThread(QThread):
                     soft_empty_cache()
 
             if need_save_mask and mask is not None:
-                self.imgtrans_proj.save_mask(imgname, mask)
+                mask_to_save = downscale_to_size(mask, orig_w, orig_h) if scale > 1 else mask
+                self.imgtrans_proj.save_mask(imgname, mask_to_save)
                 need_save_mask = False
 
             if cfg_module.enable_translate:
-                if self.parallel_trans:
+                # Skip translator stage for one-step VLM flow (already wrote blk.translation).
+                if getattr(cfg_module, "translation_mode", "two_step") == "one_step_vlm":
+                    self.translate_counter += 1
+                    self.update_translate_progress.emit(self.translate_counter)
+                elif getattr(cfg_module, 'skip_already_translated', False) and blk_list and all(
+                    getattr(b, 'translation', None) and str(b.translation).strip() for b in blk_list
+                ):
+                    self.translate_counter += 1
+                    self.update_translate_progress.emit(self.translate_counter)
+                elif self.parallel_trans:
                     self.translate_thread.push_pagekey_queue(imgname)
                 elif not low_vram_trans:
                     self._set_translation_context_for_page(imgname, pages_to_iterate)
-                    self.translator.translate_textblk_lst(blk_list)
+                    try:
+                        self.translator.translate_textblk_lst(blk_list)
+                    except CriticalTranslationError as e:
+                        create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                        self.stop_requested = True
+                        break
+                    except Exception as e:
+                        if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                            create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                            self.stop_requested = True
+                            break
+                        LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                        for blk in blk_list:
+                            if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                                blk.translation = "[Translation failed]"
                     self._append_page_to_series_context(imgname, blk_list)
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
@@ -734,25 +1008,35 @@ class ImgtransThread(QThread):
                 if mask is None:
                     mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
                 
-                # When mask was loaded from file (no detection this run), rebuild it from current blk_list
-                # so that after Region merge the mask matches the merged blocks (avoids dark gaps / wrong regions).
-                if mask is not None and not cfg_module.enable_detect and blk_list:
-                    im_h, im_w = img.shape[:2]
-                    mask = np.zeros((im_h, im_w), dtype=np.uint8)
-                    for blk in blk_list:
-                        if getattr(blk, 'lines', None) and len(blk.lines) > 0:
-                            pts = np.array(blk.lines[0], dtype=np.int32)
-                        else:
-                            x1, y1, x2, y2 = blk.xyxy
-                            pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
-                        cv2.fillPoly(mask, [pts], 255)
+                im_h, im_w = img.shape[:2]
+                # Always rebuild mask from blk_list so mask and blocks are from the same source (fixes HF and all detectors).
+                if mask is not None and blk_list:
+                    if getattr(cfg_module, "resolve_mask_overlaps_bisector", True):
+                        text_for_nudge = [b for b in blk_list if (getattr(b, "label", None) or "").strip().lower() in OSB_LABELS]
+                        mask = build_mask_with_resolved_overlaps(
+                            blk_list, im_w, im_h,
+                            text_blocks_for_nudge=text_for_nudge if text_for_nudge else None,
+                        )
+                    else:
+                        mask = np.zeros((im_h, im_w), dtype=np.uint8)
+                        for blk in blk_list:
+                            for pts in _block_mask_polygons(blk, im_w, im_h):
+                                if pts is not None and len(pts) >= 3:
+                                    cv2.fillPoly(mask, [pts], 255)
+                elif mask is not None:
+                    if mask.shape[0] != im_h or mask.shape[1] != im_w:
+                        mask = cv2.resize(mask, (im_w, im_h), interpolation=cv2.INTER_NEAREST)
+                    if mask.ndim == 3:
+                        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                
+                # Per-block needs blocks; if no blocks, fall back to full-image so mask is still inpainted.
+                blk_list_arg = None if getattr(cfg_module, 'inpaint_full_image', False) or not blk_list else blk_list
                     
                 if mask is not None:
                     try:
-                        # Option: full-image inpainting bypasses per-block crops (avoids crop/mask issues with some models)
-                        blk_list_arg = None if getattr(cfg_module, 'inpaint_full_image', False) else blk_list
                         inpainted = self.inpainter.inpaint(img, mask, blk_list_arg)
-                        self.imgtrans_proj.save_inpainted(imgname, inpainted)
+                        inpainted_to_save = downscale_to_size(inpainted, orig_w, orig_h) if scale > 1 else inpainted
+                        self.imgtrans_proj.save_inpainted(imgname, inpainted_to_save)
                     except Exception as e:
                         create_error_dialog(e, self.tr('Inpainting Failed.'), 'InpaintFailed')
                     
@@ -763,27 +1047,55 @@ class ImgtransThread(QThread):
             else:
                 if len(blk_removed) > 0:
                     self.imgtrans_proj.load_mask_by_imgname
-        
+            
+            # Scale back block coordinates to original resolution when initial upscale was used
+            if scale > 1.0 and blk_list:
+                for blk in blk_list:
+                    if getattr(blk, 'xyxy', None):
+                        blk.xyxy = [x / scale for x in blk.xyxy]
+                    if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                        blk.lines = [[[p[0] / scale, p[1] / scale] for p in line] for line in blk.lines]
+
         if cfg_module.enable_translate and low_vram_trans:
             unload_modules(self, ['textdetector', 'inpainter', 'ocr'])
             for imgname in pages_to_iterate:
                 # 检查是否请求停止
-                if self.stop_requested:
+                if self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set()):
                     LOGGER.info('Translation stopped by user')
                     break
-                while self._pause_requested and not self.stop_requested:
+                while self._pause_requested and not self.stop_requested and (getattr(self, 'cancel_flag', None) is None or not self.cancel_flag.is_set()):
                     self._resume_event.wait(timeout=0.3)
-                if self.stop_requested:
+                if self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set()):
                     break
                 self._set_translation_context_for_page(imgname, pages_to_iterate)
                 blk_list = self.imgtrans_proj.pages[imgname]
-                self.translator.translate_textblk_lst(blk_list)
+                skip = (
+                    getattr(cfg_module, 'skip_already_translated', False)
+                    and blk_list
+                    and all(getattr(b, 'translation', None) and str(b.translation).strip() for b in blk_list)
+                )
+                if not skip:
+                    try:
+                        self.translator.translate_textblk_lst(blk_list)
+                    except CriticalTranslationError as e:
+                        create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                        self.stop_requested = True
+                        break
+                    except Exception as e:
+                        if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                            create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                            self.stop_requested = True
+                            break
+                        LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                        for blk in blk_list:
+                            if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                                blk.translation = "[Translation failed]"
                 self._append_page_to_series_context(imgname, blk_list)
                 self.translate_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_TRANSLATE)
                 self.update_translate_progress.emit(self.translate_counter)
 
-        if self.stop_requested and (not cfg_module.enable_translate or not self.parallel_trans):
+        if (self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set())) and (not cfg_module.enable_translate or not self.parallel_trans):
             self.pipeline_stopped.emit()
 
     def detect_finished(self) -> bool:
@@ -907,6 +1219,8 @@ class ModuleManager(QObject):
         translator_panel.translator_changed.connect(self.setTranslator)
         translator_panel.paramwidget_edited.connect(self.on_translatorparam_edited)
         translator_panel.test_translator_clicked.connect(self.on_test_translator)
+        translator_panel.copy_manual_prompt_requested.connect(self.on_copy_manual_prompt)
+        translator_panel.paste_manual_response_requested.connect(self.on_paste_manual_response)
         from modules.translators.hooks import chs2cht
         BaseTranslator.register_preprocess_hooks({'keyword_sub': translate_preprocess})
         BaseTranslator.register_postprocess_hooks({'chs2cht': chs2cht, 'keyword_sub': translate_postprocess})
@@ -1025,10 +1339,17 @@ class ModuleManager(QObject):
         
         self.progress_msgbox.detect_bar.setVisible(cfg_module.enable_detect)
         if cfg_module.enable_detect:
-            dual = getattr(cfg_module, 'enable_dual_detect', False) and (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
-            if dual:
-                sec = getattr(cfg_module, 'textdetector_secondary', '') or ''
-                self.progress_msgbox.detect_bar.description = self.tr('Detecting (dual: {} + {}): ').format(cfg_module.textdetector, sec)
+            sec = (getattr(cfg_module, 'textdetector_secondary', '') or '').strip()
+            ter = (getattr(cfg_module, 'textdetector_tertiary', '') or '').strip()
+            dual = getattr(cfg_module, 'enable_dual_detect', False) and sec
+            tertiary = getattr(cfg_module, 'enable_tertiary_detect', False) and ter
+            if dual or tertiary:
+                parts = [cfg_module.textdetector]
+                if dual:
+                    parts.append(sec)
+                if tertiary:
+                    parts.append(ter)
+                self.progress_msgbox.detect_bar.description = self.tr('Detecting ({}): ').format(' + '.join(parts))
             else:
                 self.progress_msgbox.detect_bar.description = self.tr('Detecting: ')
         self.progress_msgbox.ocr_bar.setVisible(cfg_module.enable_ocr)
@@ -1281,6 +1602,119 @@ class ModuleManager(QObject):
                 btn.setEnabled(True)
                 btn.setText(self.tr("Test translator"))
         QTimer.singleShot(50, run)
+
+    def on_copy_manual_prompt(self):
+        """Section 10: Copy manual translation prompt (JSON) for current page to clipboard."""
+        proj = getattr(self, "imgtrans_proj", None)
+        if proj is None or getattr(proj, "is_empty", True) or not proj.current_img:
+            create_info_dialog(self.tr("Open a project and select a page with text blocks."), self.tr("Copy prompt"))
+            return
+        page_key = proj.current_img
+        blks = proj.pages.get(page_key, [])
+        src_list = []
+        for blk in blks:
+            text = getattr(blk, "text", None)
+            if isinstance(text, list):
+                src_list.append("\n".join(text).strip() if text else "")
+            else:
+                src_list.append(str(text or "").strip())
+        if not src_list:
+            create_info_dialog(self.tr("No source text on this page. Run OCR first."), self.tr("Copy prompt"))
+            return
+        lang_src = getattr(self.translator, "lang_source", "") if self.translator else (cfg_module.translate_source or "")
+        lang_tgt = getattr(self.translator, "lang_target", "") if self.translator else (cfg_module.translate_target or "")
+        prompt_obj = {
+            "instruction": (
+                "Translate each 'source' to the target language. Return JSON only.\n"
+                "Accepted response formats:\n"
+                "1) {\"translations\":[{\"id\":1,\"translation\":\"...\"}, ...]}\n"
+                "2) {\"1\":\"...\",\"2\":\"...\"}\n"
+                "3) [\"...\", \"...\", ...] (same order)\n"
+            ),
+            "source_language": lang_src,
+            "target_language": lang_tgt,
+            "items": [{"id": i + 1, "source": s} for i, s in enumerate(src_list)],
+        }
+        text = json.dumps(prompt_obj, ensure_ascii=False, indent=2)
+        cb = QApplication.clipboard()
+        if cb:
+            cb.setText(text, QClipboard.Mode.Clipboard)
+        create_info_dialog(self.tr("Prompt copied to clipboard. Paste it into your tool, then paste the response back and click Paste response."), self.tr("Copy prompt"))
+
+    def on_paste_manual_response(self):
+        """Section 10: Paste JSON from clipboard into manual translator response and optionally apply to blocks."""
+        proj = getattr(self, "imgtrans_proj", None)
+        if proj is None or getattr(proj, "is_empty", True) or not proj.current_img:
+            create_info_dialog(self.tr("Open a project and select a page with text blocks."), self.tr("Paste response"))
+            return
+        cb = QApplication.clipboard()
+        if not cb:
+            create_error_dialog(RuntimeError("No clipboard available."), self.tr("Paste response"))
+            return
+        raw = (cb.text() or "").strip()
+        if not raw:
+            create_info_dialog(self.tr("Clipboard is empty. Copy the response from your translation tool first."), self.tr("Paste response"))
+            return
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError as e:
+            create_error_dialog(e, self.tr("Paste response"))
+            return
+        page_key = proj.current_img
+        blks = proj.pages.get(page_key, [])
+        src_list = []
+        for blk in blks:
+            text = getattr(blk, "text", None)
+            if isinstance(text, list):
+                src_list.append("\n".join(text).strip() if text else "")
+            else:
+                src_list.append(str(text or "").strip())
+        n = len(src_list)
+        if n == 0:
+            create_info_dialog(self.tr("No source text on this page."), self.tr("Paste response"))
+            return
+        out = [""] * n
+        if isinstance(obj, list):
+            if len(obj) != n:
+                create_error_dialog(ValueError(self.tr("Response has %d items but page has %d blocks.") % (len(obj), n)), self.tr("Paste response"))
+                return
+            out = [str(x) if x is not None else "" for x in obj]
+        elif isinstance(obj, dict):
+            if "translations" in obj and isinstance(obj["translations"], list):
+                for el in obj["translations"]:
+                    if not isinstance(el, dict):
+                        continue
+                    try:
+                        idx = int(el.get("id", 0)) - 1
+                    except Exception:
+                        continue
+                    if 0 <= idx < n:
+                        out[idx] = str(el.get("translation") or "")
+            else:
+                for k, v in obj.items():
+                    try:
+                        idx = int(k) - 1
+                    except Exception:
+                        continue
+                    if 0 <= idx < n:
+                        out[idx] = str(v) if v is not None else ""
+        else:
+            create_error_dialog(ValueError(self.tr("Response must be JSON object or array.")), self.tr("Paste response"))
+            return
+        if "trans_manual" not in cfg_module.translator_params:
+            cfg_module.translator_params["trans_manual"] = {}
+        if "response_json" not in cfg_module.translator_params["trans_manual"]:
+            cfg_module.translator_params["trans_manual"]["response_json"] = {"type": "editor", "value": ""}
+        cfg_module.translator_params["trans_manual"]["response_json"]["value"] = raw
+        for i, blk in enumerate(blks):
+            if i < len(out):
+                blk.translation = out[i].split("\n") if out[i] else []
+        self.translator_panel.paramwidget_edited.emit("response_json", {"content": raw})
+        n = len(out)
+        create_info_dialog(
+            self.tr("Response applied to {} block(s). You can run Translate again or edit in the text panel.").format(n),
+            self.tr("Paste response"),
+        )
 
     def on_inpainterparam_edited(self, param_key: str, param_content: dict):
         if self.inpainter is not None:

@@ -26,6 +26,10 @@ class ModuleConfig(Config):
     enable_detect: bool = True
     enable_dual_detect: bool = False
     textdetector_secondary: str = ''
+    # When True, only add secondary (and tertiary) detector boxes that are outside primary bubbles (no in-bubble duplicates).
+    secondary_detector_outside_bubble_only: bool = False
+    enable_tertiary_detect: bool = False
+    textdetector_tertiary: str = ''
     keep_exist_textlines: bool = False
     enable_ocr: bool = True
     enable_translate: bool = True
@@ -48,8 +52,75 @@ class ModuleConfig(Config):
     inpaint_full_image: bool = False
     load_model_on_demand: bool = False
     empty_runcache: bool = False
+    # Optional: panel-aware reading order for block sorting (affects translation prompt order & typesetting sequence).
+    enable_panel_order: bool = False
+    # "auto" uses heuristic based on detected text orientation; "rtl" forces right-to-left; "ltr" forces left-to-right.
+    panel_reading_direction: str = "auto"
+    # Outside-speech-bubble (OSB) / text_free pipeline (optional, only works when detector sets blk.label, e.g. HF object det).
+    enable_osb_pipeline: bool = False
+    # Group nearby OSB boxes into larger regions (captions/SFX clusters).
+    osb_group_nearby: bool = True
+    osb_group_gap_px: int = 24
+    # Drop OSB boxes that overlap bubble boxes by IoU (to avoid double-processing text inside bubbles).
+    osb_exclude_bubble_iou: float = 0.10
+    # After OCR, remove small margin page-number-like OSB blocks (e.g. "12"). Requires OCR enabled.
+    osb_page_number_filter: bool = False
+    osb_page_number_margin_ratio: float = 0.08
+    # Probe OSB background and set readable fg/stroke defaults for rendering (does not override user styles later).
+    osb_style_probe: bool = False
+    # When True, OSB regions may be filled with median surrounding color if background is low-variance (faster/safer).
+    osb_fast_fill: bool = False
+    # Section 14: expand bubble boxes to fully contain overlapping OSB text so mask includes all text pixels.
+    osb_expand_bubbles_with_osb: bool = True
+    # Section 19: when OSB layout fails, retry with vertical stacking then restore original crop. Disable to only set restore_original_region on first failure.
+    osb_layout_fallbacks_enabled: bool = True
+    # Section 15: resolve overlapping mask regions by bisector split (and nudge for text boxes).
+    resolve_mask_overlaps_bisector: bool = True
+    # Section 16: cleaning quality — adaptive shrink at conjoined junctions, Otsu retry on failure.
+    cleaning_adaptive_shrink_junction: bool = True
+    cleaning_otsu_retry: bool = True
+    # Section 17: colored/gradient bubbles — classify and inpaint text-only; re-sample brightness for contrast.
+    colored_bubble_handling: bool = True
+    colored_bubble_resample_brightness: bool = True
+    # Translation workflow
+    # - two_step: OCR -> text translator (default)
+    # - one_step_vlm: OCR module performs translate-from-image and writes blk.translation directly (requires supported OCR, e.g. llm_ocr)
+    translation_mode: str = "two_step"
+    # When True (default), on soft translation failure (e.g. timeout, parse error) use placeholder and continue batch. When False, show dialog and stop like critical errors.
+    translation_soft_failure_continue: bool = True
+    # Skip translation for pages that already have all blocks translated (non-empty translation). Speeds up re-runs.
+    skip_already_translated: bool = False
+    # Optional: merge nearby text blocks using collision-based grouping (Dango-style). Off by default; enable for word-level OCR or many small blocks.
+    merge_nearby_blocks_collision: bool = False
+    merge_nearby_blocks_gap_ratio: float = 1.5  # vertical expansion ratio for horizontal merge; 1.5 = Dango-style
+    # Translation caching (saves API costs for deterministic settings/reruns)
+    translation_cache_enabled: bool = False
+    translation_cache_deterministic_only: bool = True
+    # Typesetting / layout (auto layout for translated text blocks)
+    layout_optimal_breaks: bool = True
+    layout_hyphenation: bool = True
+    layout_collision_check: bool = True
+    layout_collision_min_mask_ratio: float = 0.85
+    layout_collision_max_retries: int = 3
     finish_code: int = 15
     run_preset_name: str = 'Full'
+    # --- Section 6 / 6.1: Image upscaling & per-stage resizing ---
+    # Global default min side for OCR crop upscale (0 = off). Per-OCR params (e.g. EasyOCR upscale_min_side) override when set.
+    ocr_upscale_min_side: int = 0
+    # Initial upscale: before detection/OCR (improves small text). Pipeline runs on upscaled image then downscales results to original size.
+    image_upscale_initial: bool = False
+    image_upscale_initial_factor: float = 2.0
+    # Final output upscale: 2x (or factor) when saving result image.
+    image_upscale_final: bool = False
+    image_upscale_final_factor: float = 2.0
+    # Auto-scale pipeline params by image area (processing_scale = sqrt(area/1e6)) for fonts, padding, morphology, thresholds.
+    processing_scale_enabled: bool = True
+    # Per-stage resize policy: none | lanczos (model/model_lite reserved for future).
+    upscale_policy_initial: str = "lanczos"
+    upscale_policy_final: str = "lanczos"
+    # Section 7: Caching + memory / stability
+    pipeline_cache_enabled: bool = False  # When True, in-memory pipeline cache can be used (get_pipeline_cache(True))
+    inpaint_spill_to_disk_after_blocks: int = 0  # When >0, write intermediate inpainted image to temp file every N blocks to reduce peak RAM/VRAM (e.g. 8 or 12)
 
     def get_params(self, module_key: str, for_saving=False) -> dict:
         d = self[module_key + '_params']
@@ -120,6 +191,13 @@ class DrawPanelConfig(Config):
     rectool_shape: int = 0  # 0 = Rectangle, 1 = Ellipse (#35)
     recttool_dilate_ksize: int = 0
     recttool_erode_ksize: int = 0
+    # Optional: SAM2/SAM3 refinement for balloon masks (used by the inpaint mask-seg method).
+    # Requires transformers with SAM2/SAM3 support; if unavailable, the app falls back gracefully.
+    sam_maskrefine_model_id: str = "facebook/sam2.1-hiera-large"
+    # Empty => auto-select ("cuda" if available else "cpu"). You can also set "cuda" / "cpu".
+    sam_maskrefine_device: str = ""
+    # Expand the prompt box around the coarse mask by this many pixels (crop-local coords).
+    sam_maskrefine_padding_px: int = 12
 
 @nested_dataclass
 class ProgramConfig(Config):
@@ -177,6 +255,9 @@ class ProgramConfig(Config):
     imgsave_webp_lossless: bool = False
     imgsave_ext: str = '.png'
     intermediate_imgsave_ext: str = '.png'
+    supersampling_factor: int = 1  # 1 = off, 2..4 render at Nx then downscale for smoother edges
+    # Section 10: Canvas view mode for QA (original / debug boxes-masks / translated / normal).
+    canvas_view_mode: str = "normal"  # "normal" | "original" | "debug" | "translated"
     show_text_style_preset: bool = True
     expand_tstyle_panel: bool = True
     show_text_effect_panel: bool = True
@@ -196,6 +277,8 @@ class ProgramConfig(Config):
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
     context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
+    huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
+    translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:
@@ -265,6 +348,28 @@ CONTEXT_MENU_DEFAULT = {
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
 }
 
+# Section 9: canonical key order when saving config (clean diffs, easier debugging)
+CONFIG_KEY_ORDER = (
+    "module", "drawpanel", "global_fontformat", "recent_proj_list", "show_page_list",
+    "imgtrans_paintmode", "imgtrans_textedit", "imgtrans_textblock", "mask_transparency", "original_transparency",
+    "open_recent_on_startup", "recent_proj_list_max", "auto_update_from_github", "logical_dpi", "confirm_before_run",
+    "let_fntsize_flag", "let_fntstroke_flag", "let_fntcolor_flag", "let_fnt_scolor_flag", "let_fnteffect_flag",
+    "let_alignment_flag", "let_writing_mode_flag", "let_family_flag", "let_autolayout_flag", "let_uppercase_flag",
+    "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path",
+    "fsearch_case", "fsearch_whole_word", "fsearch_regex", "fsearch_range",
+    "gsearch_case", "gsearch_whole_word", "gsearch_regex", "gsearch_range",
+    "darkmode", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
+    "saladict_shortcut", "search_url", "ocr_sublist", "restore_ocr_empty", "pre_mt_sublist", "mt_sublist",
+    "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
+    "supersampling_factor", "show_text_style_preset", "expand_tstyle_panel", "show_text_effect_panel",
+    "expand_teffect_panel", "text_advanced_format_panel", "expand_tadvanced_panel", "config_panel_font_scale",
+    "default_device", "unload_after_idle_minutes", "ocr_spell_check",
+    "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
+    "manga_source_request_delay", "manga_source_open_after_download",
+    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
+    "huggingface_token", "translator_last_model_by_provider",
+)
+
 def context_menu_visible(key: str) -> bool:
     """Whether the context menu action with this key should be shown. Missing key => True."""
     if not hasattr(pcfg, 'context_menu') or not isinstance(pcfg.context_menu, dict):
@@ -313,10 +418,25 @@ def load_config(config_path: str = shared.CONFIG_PATH):
             config = ProgramConfig()
     else:
         LOGGER.info(f'{shared.CONFIG_PATH} does not exist, new config file will be created.')
-        config = ProgramConfig()
+        example_path = osp.join(osp.dirname(shared.CONFIG_PATH), 'config.example.json')
+        if osp.isfile(example_path):
+            try:
+                config = ProgramConfig.load(example_path)
+                LOGGER.info(f'Loaded recommended defaults from {example_path}.')
+            except Exception as e:
+                LOGGER.warning(f'Could not load config.example.json: {e}. Using code defaults.')
+                config = ProgramConfig()
+        else:
+            config = ProgramConfig()
     
     global pcfg
     pcfg.merge(config)
+    # Section 9: clamp numeric settings to valid ranges to avoid silent broken pipeline
+    try:
+        from utils.validation import clamp_settings
+        clamp_settings(pcfg)
+    except Exception:
+        pass
     # Merge context menu visibility with defaults (new keys default to True)
     if hasattr(pcfg, 'context_menu') and isinstance(pcfg.context_menu, dict):
         for k, v in CONTEXT_MENU_DEFAULT.items():
@@ -357,6 +477,15 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     except Exception:
         pass
 
+    # Section 8: apply HuggingFace token from config so gated models and Xet use it
+    try:
+        token = (getattr(pcfg, 'huggingface_token', None) or '').strip()
+        if token:
+            from utils.model_manager import get_model_manager
+            get_model_manager().set_hf_token(token)
+    except Exception:
+        pass
+
     p = pcfg.text_styles_path
     if not osp.exists(pcfg.text_styles_path):
         dp = osp.join(shared.DEFAULT_TEXTSTYLE_DIR, 'default.json')
@@ -369,14 +498,28 @@ def load_config(config_path: str = shared.CONFIG_PATH):
             LOGGER.info(f'New text style file created at {dp}.')
     load_textstyle_from(p)
 
+    # Create config.json on first run so ZIP users get recommended defaults from config.example.json
+    if not osp.exists(shared.CONFIG_PATH):
+        save_config()
+
 
 def json_dump_program_config(obj, **kwargs):
-    def _default(obj):
-        if isinstance(obj, (np.ndarray, np.ScalarType)):
-            return serialize_np(obj)
-        elif isinstance(obj, ModuleConfig):
-            return obj.get_saving_params()
-        return obj.__dict__
+    def _default(o):
+        if isinstance(o, (np.ndarray, np.ScalarType)):
+            return serialize_np(o)
+        elif isinstance(o, ModuleConfig):
+            return o.get_saving_params()
+        elif type(o).__name__ == "ProgramConfig":
+            # Section 9: canonical key order for clean diffs
+            ordered = {}
+            for k in CONFIG_KEY_ORDER:
+                if hasattr(o, k):
+                    ordered[k] = getattr(o, k)
+            for k in o.__dict__:
+                if k not in ordered:
+                    ordered[k] = getattr(o, k)
+            return ordered
+        return o.__dict__
     return json.dumps(obj, default=lambda o: _default(o), ensure_ascii=False, **kwargs)
 
 

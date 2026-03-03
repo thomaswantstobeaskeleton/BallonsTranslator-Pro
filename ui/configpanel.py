@@ -386,6 +386,7 @@ class ConfigPanel(Widget):
         label_canvas = self.tr('Canvas')
     
         dltableitem.appendRows([
+            TableItem(self.tr('Image upscaling'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_text_det, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_text_ocr, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_inpaint, _config_font_size(CONFIG_FONTSIZE_TABLE)),
@@ -415,6 +416,29 @@ class ConfigPanel(Widget):
         self.empty_runcache_checker, msublock = checkbox_with_label(self.tr('Empty cache after RUN'), discription=self.tr('Empty cache after RUN to save memory.'))
         dlConfigPanel.vlayout.addWidget(msublock)
         self.empty_runcache_checker.stateChanged.connect(self.on_runcache_changed)
+        self.skip_already_translated_checker, skip_sublock = checkbox_with_label(
+            self.tr('Skip already translated'),
+            discription=self.tr('Do not call translator for pages where every block already has a translation.')
+        )
+        dlConfigPanel.vlayout.addWidget(skip_sublock)
+        self.skip_already_translated_checker.stateChanged.connect(self._on_skip_already_translated_changed)
+        self.merge_nearby_blocks_checker, merge_sublock = checkbox_with_label(
+            self.tr('Merge nearby blocks (collision)'),
+            discription=self.tr('Merge detection boxes that are close (Dango-style). Use when OCR returns many small boxes.')
+        )
+        dlConfigPanel.vlayout.addWidget(merge_sublock)
+        self.merge_nearby_blocks_checker.stateChanged.connect(self._on_merge_nearby_blocks_changed)
+        self.merge_nearby_blocks_gap_spin = QDoubleSpinBox()
+        self.merge_nearby_blocks_gap_spin.setRange(0.3, 3.0)
+        self.merge_nearby_blocks_gap_spin.setSingleStep(0.1)
+        self.merge_nearby_blocks_gap_spin.setValue(float(getattr(pcfg.module, 'merge_nearby_blocks_gap_ratio', 1.5)))
+        self.merge_nearby_blocks_gap_spin.valueChanged.connect(self._on_merge_nearby_blocks_gap_changed)
+        merge_gap_sublock = ConfigSubBlock(
+            self.merge_nearby_blocks_gap_spin,
+            self.tr('Merge gap ratio'),
+            discription=self.tr('Vertical expansion ratio for horizontal merge (e.g. 1.5 = Dango-style).')
+        )
+        dlConfigPanel.vlayout.addWidget(merge_gap_sublock)
         self.unload_model_btn = QPushButton(parent=self)
         self.unload_model_btn.setFixedWidth(500)
         self.unload_model_btn.setText(self.tr('Unload All Models'))
@@ -433,6 +457,54 @@ class ConfigPanel(Widget):
         self.unload_after_idle_spin.valueChanged.connect(self.on_unload_after_idle_changed)
         sublock_idle = ConfigSubBlock(self.unload_after_idle_spin, self.tr('Unload models after idle (minutes)'), discription=self.tr('0 = disabled. Unload DL models after N minutes of no Run or canvas activity.'))
         dlConfigPanel.vlayout.addWidget(sublock_idle)
+
+        dlConfigPanel.addTextLabel(self.tr('Image upscaling (Section 6)'))
+        self.image_upscale_initial_checker, _ = checkbox_with_label(
+            self.tr('Initial upscale before detection/OCR'),
+            discription=self.tr('Upscale page before pipeline (improves small text). Results are scaled back to original size.')
+        )
+        self.image_upscale_initial_checker.stateChanged.connect(self._on_image_upscale_initial_changed)
+        dlConfigPanel.vlayout.addWidget(_)
+        self.image_upscale_initial_factor_spin = QDoubleSpinBox()
+        self.image_upscale_initial_factor_spin.setRange(1.5, 4.0)
+        self.image_upscale_initial_factor_spin.setSingleStep(0.5)
+        self.image_upscale_initial_factor_spin.setValue(getattr(pcfg.module, 'image_upscale_initial_factor', 2.0))
+        self.image_upscale_initial_factor_spin.valueChanged.connect(self._on_image_upscale_initial_factor_changed)
+        sublock_ini = ConfigSubBlock(self.image_upscale_initial_factor_spin, self.tr('Initial upscale factor'), discription=self.tr('e.g. 2 = 2x before detection/OCR.'))
+        dlConfigPanel.vlayout.addWidget(sublock_ini)
+        self.image_upscale_final_checker, _ = checkbox_with_label(
+            self.tr('Final upscale when saving result'),
+            discription=self.tr('Upscale result image when saving (e.g. 2x for nicer export).')
+        )
+        self.image_upscale_final_checker.stateChanged.connect(self._on_image_upscale_final_changed)
+        dlConfigPanel.vlayout.addWidget(_)
+        self.image_upscale_final_factor_spin = QDoubleSpinBox()
+        self.image_upscale_final_factor_spin.setRange(1.5, 4.0)
+        self.image_upscale_final_factor_spin.setSingleStep(0.5)
+        self.image_upscale_final_factor_spin.setValue(getattr(pcfg.module, 'image_upscale_final_factor', 2.0))
+        self.image_upscale_final_factor_spin.valueChanged.connect(self._on_image_upscale_final_factor_changed)
+        sublock_fin = ConfigSubBlock(self.image_upscale_final_factor_spin, self.tr('Final upscale factor'), discription=self.tr('e.g. 2 = 2x when saving result.'))
+        dlConfigPanel.vlayout.addWidget(sublock_fin)
+        self.processing_scale_checker, _ = checkbox_with_label(
+            self.tr('Auto-scale pipeline params by image area'),
+            discription=self.tr('Scale padding/gaps by image size so settings behave consistently across resolutions.')
+        )
+        self.processing_scale_checker.stateChanged.connect(self._on_processing_scale_changed)
+        dlConfigPanel.vlayout.addWidget(_)
+        self.ocr_upscale_min_side_spin = QSpinBox()
+        self.ocr_upscale_min_side_spin.setRange(0, 2048)
+        self.ocr_upscale_min_side_spin.setSpecialValueText(self.tr('Off'))
+        self.ocr_upscale_min_side_spin.setValue(getattr(pcfg.module, 'ocr_upscale_min_side', 0))
+        self.ocr_upscale_min_side_spin.valueChanged.connect(self._on_ocr_upscale_min_side_changed)
+        sublock_ocr_upscale = ConfigSubBlock(self.ocr_upscale_min_side_spin, self.tr('OCR crop upscale min side (global)'), discription=self.tr('If >0, upscale small crops so longer side >= this before OCR (e.g. 512). Per-OCR params override when set.'))
+        dlConfigPanel.vlayout.addWidget(sublock_ocr_upscale)
+        self.inpaint_spill_after_spin = QSpinBox()
+        self.inpaint_spill_after_spin.setRange(0, 64)
+        self.inpaint_spill_after_spin.setSpecialValueText(self.tr('Off'))
+        self.inpaint_spill_after_spin.setValue(getattr(pcfg.module, 'inpaint_spill_to_disk_after_blocks', 0))
+        self.inpaint_spill_after_spin.valueChanged.connect(self._on_inpaint_spill_after_changed)
+        sublock_spill = ConfigSubBlock(self.inpaint_spill_after_spin, self.tr('Inpaint: spill to disk after N blocks'), discription=self.tr('When >0, write intermediate result to temp file every N blocks to reduce peak RAM/VRAM on long pages (e.g. 8 or 12).'))
+        dlConfigPanel.vlayout.addWidget(sublock_spill)
 
         dlConfigPanel.addTextLabel(label_text_det)
         self.detect_config_panel = TextDetectConfigPanel(self.tr('Detector'), scrollWidget=self)
@@ -668,6 +740,15 @@ class ConfigPanel(Widget):
     def on_runcache_changed(self):
         pcfg.module.empty_runcache = self.empty_runcache_checker.isChecked()
 
+    def _on_skip_already_translated_changed(self):
+        pcfg.module.skip_already_translated = self.skip_already_translated_checker.isChecked()
+
+    def _on_merge_nearby_blocks_changed(self):
+        pcfg.module.merge_nearby_blocks_collision = self.merge_nearby_blocks_checker.isChecked()
+
+    def _on_merge_nearby_blocks_gap_changed(self, value):
+        pcfg.module.merge_nearby_blocks_gap_ratio = float(value)
+
     def on_keepline_clicked(self):
         pcfg.module.keep_exist_textlines = self.detect_config_panel.keep_existing_checker.isChecked()
 
@@ -740,6 +821,27 @@ class ConfigPanel(Widget):
 
     def on_unload_after_idle_changed(self, value: int):
         pcfg.unload_after_idle_minutes = value
+
+    def _on_image_upscale_initial_changed(self):
+        pcfg.module.image_upscale_initial = self.image_upscale_initial_checker.isChecked()
+
+    def _on_image_upscale_initial_factor_changed(self, value: float):
+        pcfg.module.image_upscale_initial_factor = value
+
+    def _on_image_upscale_final_changed(self):
+        pcfg.module.image_upscale_final = self.image_upscale_final_checker.isChecked()
+
+    def _on_image_upscale_final_factor_changed(self, value: float):
+        pcfg.module.image_upscale_final_factor = value
+
+    def _on_processing_scale_changed(self):
+        pcfg.module.processing_scale_enabled = self.processing_scale_checker.isChecked()
+
+    def _on_ocr_upscale_min_side_changed(self, value: int):
+        pcfg.module.ocr_upscale_min_side = value
+
+    def _on_inpaint_spill_after_changed(self, value: int):
+        pcfg.module.inpaint_spill_to_disk_after_blocks = value
 
     def on_check_download_module_files(self):
         try:
@@ -890,6 +992,12 @@ class ConfigPanel(Widget):
             self.detect_config_panel.dual_detect_checker.setChecked(getattr(pcfg.module, 'enable_dual_detect', False))
         if hasattr(self.detect_config_panel, 'secondary_detector_combobox'):
             self.detect_config_panel.secondary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_secondary', '') or '')
+        if hasattr(self.detect_config_panel, 'secondary_outside_bubble_only_checker'):
+            self.detect_config_panel.secondary_outside_bubble_only_checker.setChecked(getattr(pcfg.module, 'secondary_detector_outside_bubble_only', False))
+        if hasattr(self.detect_config_panel, 'tertiary_detect_checker'):
+            self.detect_config_panel.tertiary_detect_checker.setChecked(getattr(pcfg.module, 'enable_tertiary_detect', False))
+        if hasattr(self.detect_config_panel, 'tertiary_detector_combobox'):
+            self.detect_config_panel.tertiary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_tertiary', '') or '')
         if hasattr(self.inpaint_config_panel, 'inpaint_tile_size_spin'):
             self.inpaint_config_panel.inpaint_tile_size_spin.blockSignals(True)
             self.inpaint_config_panel.inpaint_tile_size_spin.setValue(getattr(pcfg.module, 'inpaint_tile_size', 0))
@@ -940,6 +1048,26 @@ class ConfigPanel(Widget):
         self._update_webp_lossless_visibility()
         self.load_model_checker.setChecked(pcfg.module.load_model_on_demand)
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)
+        if hasattr(self, 'skip_already_translated_checker'):
+            self.skip_already_translated_checker.setChecked(getattr(pcfg.module, 'skip_already_translated', False))
+        if hasattr(self, 'merge_nearby_blocks_checker'):
+            self.merge_nearby_blocks_checker.setChecked(getattr(pcfg.module, 'merge_nearby_blocks_collision', False))
+        if hasattr(self, 'merge_nearby_blocks_gap_spin'):
+            self.merge_nearby_blocks_gap_spin.setValue(float(getattr(pcfg.module, 'merge_nearby_blocks_gap_ratio', 1.5)))
+        if hasattr(self, 'image_upscale_initial_checker'):
+            self.image_upscale_initial_checker.setChecked(getattr(pcfg.module, 'image_upscale_initial', False))
+        if hasattr(self, 'image_upscale_initial_factor_spin'):
+            self.image_upscale_initial_factor_spin.setValue(float(getattr(pcfg.module, 'image_upscale_initial_factor', 2.0)))
+        if hasattr(self, 'image_upscale_final_checker'):
+            self.image_upscale_final_checker.setChecked(getattr(pcfg.module, 'image_upscale_final', False))
+        if hasattr(self, 'image_upscale_final_factor_spin'):
+            self.image_upscale_final_factor_spin.setValue(float(getattr(pcfg.module, 'image_upscale_final_factor', 2.0)))
+        if hasattr(self, 'processing_scale_checker'):
+            self.processing_scale_checker.setChecked(getattr(pcfg.module, 'processing_scale_enabled', True))
+        if hasattr(self, 'ocr_upscale_min_side_spin'):
+            self.ocr_upscale_min_side_spin.setValue(int(getattr(pcfg.module, 'ocr_upscale_min_side', 0)))
+        if hasattr(self, 'inpaint_spill_after_spin'):
+            self.inpaint_spill_after_spin.setValue(int(getattr(pcfg.module, 'inpaint_spill_to_disk_after_blocks', 0)))
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
