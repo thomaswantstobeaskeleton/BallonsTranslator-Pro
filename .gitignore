@@ -7,6 +7,7 @@ data/models
 data/testpacks/eng_dontupload
 data/testpacks/testpacks
 data/testpacks
+data/translation_context
 # Allow default text style to be committed; user files in config/textstyles still ignored
 config/textstyles
 !config/textstyles/default.json
@@ -27,6 +28,7 @@ test_dir
 tmp
 logs
 *.log
+stariver_ocr_error.txt
 ballontrans_pylibs_win
 config/config.json
 config/config.local.json
@@ -84,6 +86,7 @@ COMMUNITY_RESPONSES.md
 docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md
 RELEASE_NOTES.md
 NOTES.md
+docs/UPSTREAM_IMPLEMENTATION_IDEAS_local.md
 docs/*_local.md
 docs/*-local.md
 
