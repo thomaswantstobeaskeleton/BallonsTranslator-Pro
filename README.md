@@ -15,6 +15,8 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
 
 
+**Recent additions:** **Secondary detector — outside bubbles only** (Config → Detector: use primary for bubbles e.g. YSGYolo, secondary e.g. EasyOCR for signs/captions only). **Ensemble (3+1) translator** now shows all translators in candidate/judge dropdowns with improved Zh→En defaults (Google, nllb200, LLM_API_Translator; judge LLM_API_Translator; use OpenRouter in LLM_API params). **Merge settings:** detector merge_gap_px (e.g. EasyOCR) and **Merge nearby blocks (collision)** in Config → DL Module to fix small text boxes. New docs: [TROUBLESHOOTING](docs/TROUBLESHOOTING.md), [STARRIVER](docs/STARRIVER.md), [CONJOINED_MODELS](docs/CONJOINED_MODELS.md), [DANGO_REFERENCE](docs/DANGO_REFERENCE.md). **Config:** Fresh installs use `config/config.example.json` as the template; your `config/config.json` is never overwritten by updates.
+
 ---
 
 ### Disclaimer: models and testing
@@ -26,10 +28,33 @@ This fork adds **many new optional modules** (detectors, OCR engines, inpainters
 ## Quick start
 
 1. **Clone and run:** `git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git && cd BallonsTranslator-Pro && python launch.py`
-2. **First run:** Installs base deps and downloads default models into `data/`. Transient connection errors (e.g. "Remote end closed connection") are retried automatically; if a download still fails, the log shows the path so you can download the file manually and restart.
+2. **First run:** Installs base deps and downloads default models into `data/`. If `config.json` is missing (e.g. fresh ZIP), the app loads **recommended defaults** from `config/config.example.json` and creates `config.json`. Transient connection errors (e.g. "Remote end closed connection") are retried automatically; if a download still fails, the log shows the path so you can download the file manually and restart.
 3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
 4. **New modules** appear automatically; install only the dependencies for the modules you use
 5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. *This only works if you cloned the repo with git (e.g. `git clone ...`). If you downloaded a ZIP, download the latest ZIP from GitHub and replace the folder to update.* Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
+
+### Portable / one-click setup (Section 11)
+
+For a **portable-style** install (e.g. copy folder and run elsewhere):
+
+1. **Setup script (optional)**  
+   - **Windows:** run `setup.bat` to create a venv and install dependencies (or run `python launch.py` directly; it will install base deps and PyTorch).  
+   - **Linux / macOS:** run `./setup.sh` (or `bash setup.sh`) for the same.
+
+2. **Torch**  
+   `launch.py` **auto-detects** GPU and installs the right PyTorch build (NVIDIA CUDA, AMD ROCm on Windows, or CPU). You can override with env **TORCH_COMMAND** (e.g. a custom `pip install torch ...` command) before the first run. Use `--reinstall-torch` to force reinstall.
+
+3. **Fonts**  
+   Pre-bundled fonts are in **`fonts/`**. Add `.ttf` / `.otf` / `.ttc` / `.pfb` there; they are loaded at startup. No need to move them for portable use.
+
+4. **Models**  
+   Default models download to **`data/`** (e.g. `data/models/`). To move or backup: copy the whole **`data/`** folder (and optionally **`config/`**) to the new location and point the app at the same project root (or keep the folder structure so `data/` and `config/` stay next to `launch.py`).
+
+5. **Output**  
+   Translated pages and project files are saved **inside the project folder** you open (File → Open Folder / Open Images). Export paths (Tools → Export all pages) are chosen in the dialog. No central “output” folder—each project is self-contained.
+
+6. **Troubleshooting**  
+   See **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for GPU OOM, HuggingFace gated models, provider keys, and dependency conflicts.
 
 ---
 
@@ -117,6 +142,8 @@ For quality rankings (tier-based), see [docs/QUALITY_RANKINGS.md](docs/QUALITY_R
    - **text_free** — Text not in a bubble: sound effects (SFX), captions, signs, narrative.
    - **Examples:** `bubble,text_bubble` = detect only bubbles (recommended when using HF as secondary in dual detection). `bubble,text_bubble,text_free` = detect everything (default). Leave empty to keep all classes.
 4. **score_threshold** (e.g. 0.35–0.4) — Min confidence for bubble/text_bubble. **score_threshold_text_free** — Threshold for text_free (often lower, e.g. 0.15–0.2). **box_padding** — 4–6 px recommended.
+
+**Inpainting with HF object detector:** The **ogkalu/comic-text-and-bubble-detector** model outputs separate boxes for bubbles and text (e.g. `bubble`, `text_bubble`). Overlapping and nested boxes are merged (by IoU and containment) so each speech bubble is inpainted once. Use **merge_overlap_iou** (default 0.35) to control merging; lower = merge more, 1.0 = no merge.
 
 See [Dual text detection](#dual-text-detection-primary--secondary) for using HF as secondary with Paddle v5 and suggested **labels_include** values.
 
@@ -439,7 +466,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | `data/translation_context/<series_id>/` | Series glossary (`glossary.txt`), recent context (`recent_context.json`) |
 | `data/libs/` | Some runtime libraries |
 | `config/config.json` | User config (modules, shortcuts, save format, etc.) |
-| `config/config.example.json` | Example config keys |
+| `config/config.example.json` | Recommended defaults (used on first run when config.json is missing) |
 | `fonts/` | Custom fonts (370+ included) |
 | `~/BallonsTranslator/Downloaded Chapters` | Default Manga source download folder |
 
@@ -534,6 +561,7 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Drag-and-drop:** Folder or images onto the canvas to open a project; copy-paste (File → Open) also works
 
 ### Documentation
+- **Troubleshooting:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — GPU OOM, HuggingFace gated models, provider keys, dependency conflicts
 - **Recommended settings:** [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md) — detection, OCR, inpainting for manhua (Chinese comics)
 - **Quality rankings:** [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md), [docs/BEST_MODELS_RESEARCH.md](docs/BEST_MODELS_RESEARCH.md), [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
 - **Optional deps:** [docs/OPTIONAL_DEPENDENCIES.md](docs/OPTIONAL_DEPENDENCIES.md), [docs/INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md)
@@ -835,7 +863,7 @@ Module-specific params (CTD box score, mask dilation, inpaint_size, translator A
 | | `inpaint_tile_overlap` | int | 64 | Overlap between tiles (px) |
 | | `inpaint_exclude_labels_enabled` | bool | false | When true, exclude blocks by label (see **Exclude certain labels from inpainting**) |
 | | `inpaint_exclude_labels` | str | '' | Comma-separated labels to exclude (e.g. `other, scene`); used when above is true |
-| | `inpaint_full_image` | bool | false | When true, inpaint whole image at once (no per-block crops); try if Lama gives bad results |
+| | `inpaint_full_image` | bool | false | When true, inpaint whole image at once (no per-block crops); try if Lama gives bad results. |
 | **Manga source** | `manga_source_lang` | str | 'en' | Chapter feed language |
 | | `manga_source_data_saver` | bool | false | Use data-saver images |
 | | `manga_source_download_dir` | str | '' | Default: `~/BallonsTranslator/Downloaded Chapters` |
@@ -906,6 +934,11 @@ Some optional modules require dependency versions that **conflict** with the mai
 | **simple_lama** | `simple-lama-inpainting` needs **pillow<10**; project uses **Pillow 10.x**. | Use **lama_large_512px**, **lama_onnx**, or **lama_manga_onnx** instead; or downgrade Pillow in a separate venv. |
 
 The main application and all other modules work with the versions in `requirements.txt`.
+
+### Console / log messages (Windows)
+
+- **`qt.qpa.screen: "Unable to open monitor interface to \\\\.\\DISPLAY1:" "Unknown error 0xe0000225."`**  
+  If you see this in the console or logs, the monitor/display is likely **disabled in Windows Device Manager**. Re-enable the display adapter (e.g. **Device Manager → Display adapters → enable** or re-enable the monitor under **Monitors**). The app may still run, but Qt cannot open the display interface until a monitor is enabled.
 
 ---
 
@@ -1028,6 +1061,7 @@ The main application and all other modules work with the versions in `requiremen
 
 | Document | Description |
 |----------|-------------|
+| **docs/TROUBLESHOOTING.md** | GPU OOM, HuggingFace gated models, provider API keys, dependency conflicts; quick reference table. |
 | **docs/QUALITY_RANKINGS.md** | Tier-based quality/accuracy rankings for all detection, OCR, and translation modules; task-based SOTA (document vs manga vs multilingual); sanity-check notes. |
 | **docs/MODELS_REFERENCE.md** | Map of recommended models to BallonsTranslator modules; quick reference and “not integrated” list. |
 | **docs/BEST_MODELS_RESEARCH.md** | Detailed research on OCR, detection, inpainting; benchmarks and recommendations. |
