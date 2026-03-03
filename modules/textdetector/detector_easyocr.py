@@ -153,10 +153,13 @@ if _EASYOCR_AVAILABLE:
                 horizontal_list_agg, free_list_agg = self.reader.detect(img, **detect_kw)
             except Exception as e:
                 err_msg = str(e)
-                # Windows + CUDA: deform_conv_cuda often not available; fall back to CPU
-                if ("deform_conv" in err_msg or "not imported successfully" in err_msg) and "cuda" in err_msg.lower():
+                err_lower = err_msg.lower()
+                # CUDA OOM or deform_conv failure: fall back to CPU for this and future runs
+                if ("out of memory" in err_lower or "deform_conv" in err_msg or "not imported successfully" in err_msg) and (
+                    "cuda" in err_lower or "cuda" in str(type(e).__name__).lower()
+                ):
                     self.logger.warning(
-                        "EasyOCR CUDA failed (deform_conv not available on this system). Falling back to CPU for detection."
+                        "EasyOCR detector hit GPU OOM or CUDA error. Falling back to CPU for detection."
                     )
                     self.reader = None
                     self.params["gpu"]["value"] = False
@@ -164,10 +167,10 @@ if _EASYOCR_AVAILABLE:
                     try:
                         horizontal_list_agg, free_list_agg = self.reader.detect(img, **detect_kw)
                     except Exception as e2:
-                        self.logger.error(f"EasyOCR det failed: {e2}")
+                        self.logger.error("EasyOCR det failed after CPU fallback: %s", e2)
                         return mask, blk_list
                 else:
-                    self.logger.error(f"EasyOCR det failed: {e}")
+                    self.logger.error("EasyOCR det failed: %s", e)
                     return mask, blk_list
 
             horizontal_list = horizontal_list_agg[0] if horizontal_list_agg else []

@@ -22,8 +22,8 @@ try:
     _NEMOTRON_AVAILABLE = True
     # Postprocessing from HF repo (same cache as model)
     try:
-        from huggingface_hub import hf_hub_download
-        post_path = hf_hub_download("nvidia/NVIDIA-Nemotron-Parse-v1.1", "postprocessing.py")
+        from utils.model_manager import get_model_manager
+        post_path = get_model_manager().hf_hub_download("nvidia/NVIDIA-Nemotron-Parse-v1.1", "postprocessing.py")
         import importlib.util
         spec = importlib.util.spec_from_file_location("nemotron_postprocessing", post_path)
         mod = importlib.util.module_from_spec(spec)

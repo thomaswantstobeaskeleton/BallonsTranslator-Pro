@@ -14,6 +14,17 @@ warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*
 # Disable Paddle oneDNN before any Paddle import (avoids ConvertPirAttribute2RuntimeAttribute error on Windows)
 os.environ["FLAGS_use_mkldnn"] = "0"
 
+# PyTorch allocator fragmentation mitigation (Section 7: fewer CUDA OOMs from fragmentation)
+if "PYTORCH_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_ALLOC_CONF"] = "max_split_size_mb:512"
+
+# Faster HuggingFace downloads (Section 8): enable Xet when HF token is present
+try:
+    from utils.model_manager import enable_hf_xet_if_token_in_env
+    enable_hf_xet_if_token_in_env()
+except Exception:
+    pass
+
 BRANCH = 'main'
 VERSION = '1.7.0'
 
@@ -140,6 +151,13 @@ def main():
         os.environ['BALLOONTRANS_DEBUG'] = '1'
 
     os.environ['QT_API'] = args.qt_api
+
+    # Faster HuggingFace downloads (Section 8): enable Xet when HF token is present in env
+    try:
+        from utils.model_manager import enable_hf_xet_if_token_in_env
+        enable_hf_xet_if_token_in_env()
+    except Exception:
+        pass
 
     commit = commit_hash()
 

@@ -30,8 +30,19 @@ class StariverDetector(TextDetectorBase):
             'type': 'checkbox',
             'value': True
         },
-        "detect_scale": "3",
+        "detect_scale": {
+            "type": "selector",
+            "options": [1, 2, 3, 4],
+            "value": 3,
+            "description": "Scale 1–4; caps longest side (e.g. 1536*scale). Lower = faster/smaller; higher = more detail.",
+        },
         "merge_threshold": "2.0",
+        "pre_ocr_border": {
+            "type": "selector",
+            "options": [0, 2, 3, 5, 8, 10],
+            "value": 0,
+            "description": "Pixels of white border added around image before sending (0=off). Can help edge text.",
+        },
         "low_accuracy_mode": {
             'type': 'checkbox',
             'value': False
@@ -79,11 +90,20 @@ class StariverDetector(TextDetectorBase):
 
     @property
     def detect_scale(self):
-        return int(self.params['detect_scale'])
+        p = self.params.get('detect_scale')
+        if isinstance(p, dict):
+            return int(p.get('value', 3))
+        return int(p) if p is not None else 3
 
     @property
     def merge_threshold(self):
         return float(self.params['merge_threshold'])
+
+    @property
+    def pre_ocr_border(self):
+        p = self.params.get('pre_ocr_border', 0)
+        v = p.get('value', 0) if isinstance(p, dict) else (p or 0)
+        return max(0, min(20, int(v)))
 
     @property
     def low_accuracy_mode(self):
@@ -149,14 +169,35 @@ class StariverDetector(TextDetectorBase):
             self.logger.error(
                 'Starriver detector token is not set.')
             raise ValueError('Starriver detector token is not set.')
+        orig_im_h, orig_im_w = img.shape[:2]
         if self.low_accuracy_mode:
             self.logger.info('Starriver detector is in low-accuracy mode.')
             short_side = 768
         else:
             short_side = 1536
 
-        # Compute scale factor
+        # Optional: cap longest side by detect_scale (Dango-style) to reduce API failures on large images
+        try:
+            scale_param = min(4, max(1, int(self.detect_scale)))
+        except (TypeError, ValueError):
+            scale_param = 3
+        longest_side_max = 1536 * scale_param
         height, width = img.shape[:2]
+        if max(height, width) > longest_side_max:
+            r = longest_side_max / max(height, width)
+            new_w = int(width * r)
+            new_h = int(height * r)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            height, width = new_h, new_w
+
+        pad = self.pre_ocr_border
+        if pad > 0:
+            img = cv2.copyMakeBorder(
+                img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(255, 255, 255)
+            )
+            height, width = img.shape[:2]
+
+        # Scale to short_side for API (original logic: scale so min dimension = short_side)
         scale = short_side / min(height, width)
 
         # Compute new dimensions
@@ -173,8 +214,9 @@ class StariverDetector(TextDetectorBase):
         # Log scale and dimensions
         self.logger.debug(f'Image scale: {scale}, size: {new_width}x{new_height}')
 
-        # Encode image to base64
-        img_encoded = cv2.imencode('.jpg', img_scaled)[1]
+        # Encode image to base64 (PNG for RGBA/WebP to preserve alpha)
+        enc_ext = '.png' if (img_scaled.ndim == 3 and img_scaled.shape[2] == 4) else '.jpg'
+        img_encoded = cv2.imencode(enc_ext, img_scaled)[1]
         img_base64 = base64.b64encode(img_encoded).decode('utf-8')
 
         payload = {
@@ -265,10 +307,37 @@ class StariverDetector(TextDetectorBase):
             return None, []
         mask = self.expand_mask(mask)
 
-        # scale back to original size
+        # Scale back from img_scaled to (width, height)
         if scale < 1:
-            mask = cv2.resize(mask, (width, height),
-                              interpolation=cv2.INTER_NEAREST)
+            mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
+
+        # Map from (width, height) to original image size
+        content_w = width - 2 * pad
+        content_h = height - 2 * pad
+        if pad > 0:
+            mask = mask[pad : height - pad, pad : width - pad]
+            for blk in blk_list:
+                blk.xyxy = [
+                    blk.xyxy[0] - pad, blk.xyxy[1] - pad,
+                    blk.xyxy[2] - pad, blk.xyxy[3] - pad,
+                ]
+                blk.lines = [
+                    np.array([[p[0] - pad, p[1] - pad] for p in ln.tolist()], dtype=np.float32)
+                    for ln in blk.lines
+                ]
+        if content_w != orig_im_w or content_h != orig_im_h:
+            mask = cv2.resize(mask, (orig_im_w, orig_im_h), interpolation=cv2.INTER_NEAREST)
+            sx = orig_im_w / content_w if content_w else 1.0
+            sy = orig_im_h / content_h if content_h else 1.0
+            for blk in blk_list:
+                blk.xyxy = [
+                    int(blk.xyxy[0] * sx), int(blk.xyxy[1] * sy),
+                    int(blk.xyxy[2] * sx), int(blk.xyxy[3] * sy),
+                ]
+                blk.lines = [
+                    np.array([[p[0] * sx, p[1] * sy] for p in ln.tolist()], dtype=np.float32)
+                    for ln in blk.lines
+                ]
         self.logger.debug(f'Result mask shape: {mask.shape}')
         return mask, blk_list
 

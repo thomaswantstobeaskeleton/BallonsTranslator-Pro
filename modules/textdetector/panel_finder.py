@@ -5,6 +5,7 @@ Finds panel order for manga page.
 import json
 import sys
 from pathlib import Path
+from typing import List
 
 import cv2 as cv
 import numpy as np
@@ -141,6 +142,155 @@ def draw_contours(im, contours):
     img = Image.fromarray(im_contour)
 
     return img
+
+
+def order_panels_xyxy(panel_bboxes_xyxy: List[List[int]], right_to_left: bool) -> List[int]:
+    """
+    Return indices of panels in reading order.
+
+    Strategy:
+    - Group panels that overlap vertically.
+    - Sort groups top-to-bottom by y.
+    - Sort within each group by x (rtl = descending, ltr = ascending), with y as tie-breaker.
+    """
+    if not panel_bboxes_xyxy:
+        return []
+    bboxes_xywh = [xyxy_to_xywh(b) for b in panel_bboxes_xyxy]
+    groups = generate_vertical_bounding_box_groups_indices(bboxes_xywh)
+
+    def group_key(g):
+        ys = [bboxes_xywh[i][1] for i in g]
+        return float(min(ys)) if ys else 0.0
+
+    ordered_indices: List[int] = []
+    for group in sorted(groups, key=group_key):
+        def within_key(i: int):
+            x, y, w, h = bboxes_xywh[i]
+            return (-x if right_to_left else x, y, w * h)
+
+        ordered_indices.extend(sorted(group, key=within_key))
+    return ordered_indices
+
+
+def _intersection_area_xyxy(a: List[int], b: List[int]) -> int:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    x1 = max(ax1, bx1)
+    y1 = max(ay1, by1)
+    x2 = min(ax2, bx2)
+    y2 = min(ay2, by2)
+    if x2 <= x1 or y2 <= y1:
+        return 0
+    return int((x2 - x1) * (y2 - y1))
+
+
+def assign_boxes_to_panels(text_bboxes_xyxy: List[List[int]], panel_bboxes_xyxy: List[List[int]]) -> List[int]:
+    """
+    Assign each text box to a panel index.
+
+    Uses max intersection first; if no intersection, uses nearest distance.
+    Returns list of panel indices (same length as text_bboxes_xyxy). If no panels, all -1.
+    """
+    if not text_bboxes_xyxy:
+        return []
+    if not panel_bboxes_xyxy:
+        return [-1 for _ in text_bboxes_xyxy]
+
+    out: List[int] = []
+    for box in text_bboxes_xyxy:
+        areas = [_intersection_area_xyxy(box, p) for p in panel_bboxes_xyxy]
+        best = int(np.argmax(areas)) if areas else -1
+        if best >= 0 and areas[best] > 0:
+            out.append(best)
+            continue
+
+        try:
+            text_poly = polygon_from_xyxy(*box)
+            best_dist = float("inf")
+            best_idx = 0
+            for i, p in enumerate(panel_bboxes_xyxy):
+                panel_poly = polygon_from_xyxy(*p)
+                nearest_pts = nearest_points(text_poly, panel_poly)
+                dist = nearest_pts[0].distance(nearest_pts[1])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+                    if dist == 0:
+                        break
+            out.append(best_idx)
+        except Exception:
+            out.append(0)
+    return out
+
+
+def reorder_textblocks_by_panels(
+    img: np.ndarray,
+    blk_list: list,
+    reading_direction: str = "auto",
+) -> list:
+    """
+    Section 13: Panel-aware reading order (bin to panels, then spatial sort).
+    Detect panels, sort panels in Z-flow; assign bubbles to panels (or nearest);
+    within each panel use hybrid spatial sort (bands + columns); append unassigned at end.
+
+    reading_direction: "auto" | "rtl" | "ltr"
+    """
+    if blk_list is None or len(blk_list) < 2:
+        return blk_list
+    if img is None or img.size == 0:
+        return blk_list
+
+    from utils.textblock import sort_regions
+
+    rd = (reading_direction or "auto").strip().lower()
+    if rd not in {"auto", "rtl", "ltr"}:
+        rd = "auto"
+    if rd == "auto":
+        nr = len(blk_list)
+        nv = sum(1 for b in blk_list if getattr(b, "vertical", False))
+        right_to_left = (nv / nr) > 0.5 if nr > 0 else False
+    else:
+        right_to_left = (rd == "rtl")
+
+    try:
+        if img.ndim == 3 and img.shape[2] == 4:
+            img_rgb = cv.cvtColor(img, cv.COLOR_RGBA2RGB)
+        else:
+            img_rgb = img
+        pil_img = Image.fromarray(img_rgb.astype(np.uint8), mode="RGB")
+    except Exception:
+        return sort_regions(blk_list, right_to_left=right_to_left)
+
+    try:
+        panel_bboxes = calc_panel_bboxes_xyxy(pil_img)
+    except Exception:
+        return sort_regions(blk_list, right_to_left=right_to_left)
+    if not panel_bboxes:
+        return sort_regions(blk_list, right_to_left=right_to_left)
+
+    panel_order = order_panels_xyxy(panel_bboxes, right_to_left=right_to_left)
+    if not panel_order:
+        return sort_regions(blk_list, right_to_left=right_to_left)
+
+    text_boxes = [getattr(b, "xyxy", None) for b in blk_list]
+    if any(b is None or len(b) != 4 for b in text_boxes):
+        return sort_regions(blk_list, right_to_left=right_to_left)
+
+    assigned = assign_boxes_to_panels(text_boxes, panel_bboxes)
+    panel_to_blks = {i: [] for i in range(len(panel_bboxes))}
+    extra: List = []
+    for blk, pi in zip(blk_list, assigned):
+        if pi is None or int(pi) < 0 or int(pi) >= len(panel_bboxes):
+            extra.append(blk)
+        else:
+            panel_to_blks[int(pi)].append(blk)
+
+    out: List = []
+    for pi in panel_order:
+        out.extend(sort_regions(panel_to_blks.get(int(pi), []), right_to_left=right_to_left))
+    if extra:
+        out.extend(sort_regions(extra, right_to_left=right_to_left))
+    return out
 
 
 def save_draw_contours(path: Path | str):

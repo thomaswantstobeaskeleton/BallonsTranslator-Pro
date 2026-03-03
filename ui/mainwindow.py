@@ -23,10 +23,11 @@ from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
-from .misc import parse_stylesheet, set_html_family, QKEY
+from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
+from utils.zip_batch import ZipBatchManager
 from .canvas import Canvas
 from .configpanel import ConfigPanel
 from .translation_context_dialog import TranslationContextDialog
@@ -51,6 +52,7 @@ from .batch_queue_dialog import BatchQueueDialog
 from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
 from .image_edit import ImageEditMode
+
 
 class PageListView(QListWidget):
 
@@ -105,6 +107,8 @@ class MainWindow(mainwindow_cls):
         super().__init__()
         self._batch_cancelled = False
         self._batch_queue_dialog = None
+        self._zip_batch = ZipBatchManager()
+        self._current_batch_dir = None
 
         shared.create_errdialog_in_mainthread = self.create_errdialog.emit
         self.create_errdialog.connect(self.on_create_errdialog)
@@ -167,8 +171,16 @@ class MainWindow(mainwindow_cls):
             LOGGER.error(traceback.format_exc())
 
     def on_create_infodialog(self, info_dict: dict):
-        QMessageBox.StandardButton.NoButton
+        # Normalize: callers may pass create_info_dialog({'title': '...', 'text': '...'}) so info_msg is a dict
+        info_msg = info_dict.get('info_msg')
+        if isinstance(info_msg, dict) and 'text' in info_msg:
+            title = info_msg.get('title') or ''
+            info_dict = {**info_dict, 'info_msg': info_msg['text']}
+        else:
+            title = None
         dialog = MessageBox(**info_dict)
+        if title:
+            dialog.setWindowTitle(title)
         dialog.show()   # exec_ will block main thread
 
     def register_view_widget(self, widget: ViewWidget):
@@ -543,6 +555,11 @@ class MainWindow(mainwindow_cls):
         self.centralStackWidget.setCurrentIndex(0)
         if self.leftBar.needleftStackWidget():
             self.leftStackWidget.show()
+            if self.leftBar.showPageListLabel.isChecked():
+                self.leftStackWidget.setCurrentWidget(self.pageList)
+                self.pageList.setHidden(False)
+            else:
+                self.leftStackWidget.setCurrentWidget(self.global_search_widget)
         else:
             self.leftStackWidget.hide()
 
@@ -708,6 +725,7 @@ class MainWindow(mainwindow_cls):
             if self.leftBar.globalSearchChecker.isChecked():
                 self.leftBar.globalSearchChecker.setChecked(False)
             self.leftStackWidget.setCurrentWidget(self.pageList)
+            self.pageList.setHidden(False)
         else:
             self.leftStackWidget.hide()
         pcfg.show_page_list = setup
@@ -1248,6 +1266,11 @@ class MainWindow(mainwindow_cls):
     def _on_batch_cancel(self):
         self._batch_cancelled = True
         self.exec_dirs = []
+        # Cleanup any extracted ZIP temp dirs
+        try:
+            self._zip_batch.cleanup_all()
+        except Exception:
+            pass
         self.module_manager.stopImgtransPipeline()
 
     def _on_batch_item_started(self, path: str):
@@ -1496,13 +1519,49 @@ class MainWindow(mainwindow_cls):
         dlg = ExportFormatDialog(self, initial_dir=initial)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+        export_as_zip = dlg.get_export_as_zip()
+        zip_path = (dlg.get_zip_path() or '').strip()
+        if export_as_zip and not zip_path:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Choose a path for the ZIP file.'))
+            return
         out_dir = dlg.get_folder()
-        if not out_dir:
+        if not export_as_zip and not out_dir:
             QMessageBox.information(self, self.tr('Export'), self.tr('Select an output folder.'))
             return
-        self._do_batch_export(out_dir, ext=dlg.get_extension(), also_pdf=dlg.get_also_pdf())
+        temp_export_dir = None
+        if export_as_zip:
+            import tempfile
+            temp_export_dir = tempfile.mkdtemp(prefix='ballons_export_')
+            out_dir = temp_export_dir
+        try:
+            self._do_batch_export(
+                out_dir,
+                ext=dlg.get_extension(),
+                also_pdf=dlg.get_also_pdf(),
+                show_message=not export_as_zip,
+                clean_after_export=dlg.get_clean_after_export() if not export_as_zip else False,
+            )
+            if export_as_zip and zip_path and osp.isdir(out_dir):
+                import zipfile
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for root, _dirs, files in os.walk(out_dir):
+                        for f in files:
+                            path = osp.join(root, f)
+                            zf.write(path, osp.relpath(path, out_dir))
+                msg = self.tr('Exported as ZIP: {}').format(zip_path)
+                if dlg.get_clean_after_export():
+                    self.imgtrans_proj.clean_mask_and_inpainted_cache()
+                    msg += '\n' + self.tr('Cache cleaned.')
+                QMessageBox.information(self, self.tr('Export'), msg)
+        finally:
+            if temp_export_dir and osp.isdir(temp_export_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_export_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
-    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False):
+    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False):
         try:
             from utils.io_utils import imread, imwrite
             result_dir = self.imgtrans_proj.result_dir()
@@ -1544,7 +1603,11 @@ class MainWindow(mainwindow_cls):
                     msg += '\n' + self.tr('PDF export failed: {}').format(str(e))
             if missing:
                 msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
-            QMessageBox.information(self, self.tr('Export'), msg)
+            if clean_after_export and self.imgtrans_proj is not None:
+                self.imgtrans_proj.clean_mask_and_inpainted_cache()
+                msg += '\n' + self.tr('Cache cleaned.')
+            if show_message:
+                QMessageBox.information(self, self.tr('Export'), msg)
         except Exception as e:
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
@@ -1752,6 +1815,18 @@ class MainWindow(mainwindow_cls):
         # Render the final result image properly
         try:
             img = self.canvas.render_result_img()
+            # Optional final upscale (Section 6: 2x output for nicer export)
+            if getattr(pcfg.module, 'image_upscale_final', False):
+                try:
+                    factor = float(getattr(pcfg.module, 'image_upscale_final_factor', 2.0) or 2.0)
+                    policy = (getattr(pcfg.module, 'upscale_policy_final', None) or 'lanczos').strip().lower()
+                    if factor > 1.0 and policy != 'none':
+                        from utils.image_upscale import apply_upscale_final
+                        if hasattr(img, 'bits'):
+                            img = pixmap2ndarray(img, keep_alpha=self.imgtrans_proj.current_has_alpha())
+                        img = apply_upscale_final(img, factor=factor, policy=policy)
+                except Exception as e:
+                    LOGGER.warning("Final upscale failed: %s", e)
             imsave_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)
             save_params = {'ext': pcfg.imgsave_ext, 'quality': pcfg.imgsave_quality}
             if pcfg.imgsave_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
@@ -1914,6 +1989,13 @@ class MainWindow(mainwindow_cls):
         self.postprocess_mt_toggle = True
         if pcfg.module.empty_runcache and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             self.module_manager.unload_all_models()
+            try:
+                from utils.pipeline_cache import get_pipeline_cache
+                cache = get_pipeline_cache(True)
+                if cache is not None:
+                    cache.clear()
+            except Exception:
+                pass
         else:
             self._reset_idle_unload_timer()
         if shared.args.export_translation_txt:
@@ -1921,6 +2003,21 @@ class MainWindow(mainwindow_cls):
         if shared.args.export_source_txt:
             self.on_export_txt('source')
         if shared.HEADLESS or shared.HEADLESS_CONTINUOUS or getattr(self, 'exec_dirs', None) is not None:
+            # If this project dir was extracted from a ZIP, copy results out before moving on.
+            try:
+                if self._current_batch_dir:
+                    handled, job, copied = self._zip_batch.on_project_finished(self._current_batch_dir)
+                    if handled and job is not None:
+                        LOGGER.info(
+                            f'ZIP batch: copied {copied} file(s) for {self._current_batch_dir} -> {job.output_root}'
+                        )
+                        finished_jobs = self._zip_batch.finalize_finished_jobs()
+                        for fj in finished_jobs:
+                            LOGGER.info(
+                                f'ZIP batch finished: {fj.zip_path} -> {fj.output_root}'
+                            )
+            except Exception as e:
+                LOGGER.warning(f'ZIP batch output copy failed: {e}')
             self.run_next_dir()
             return
         self.maybe_auto_run_region_merge()
@@ -2887,11 +2984,34 @@ class MainWindow(mainwindow_cls):
         if not isinstance(exec_dirs, List):
             exec_dirs = [x.strip() for x in exec_dirs.split(',') if x.strip()]
         valid_dirs = []
+        from utils.validation import normalize_zip_file_input, validate_batch_input_path
         for d in exec_dirs:
-            if osp.exists(d):
-                valid_dirs.append(osp.normpath(osp.abspath(d)))
+            d = normalize_zip_file_input(d)
+            if not d:
+                continue
+            try:
+                path, kind = validate_batch_input_path(d)
+            except ValueError as e:
+                LOGGER.warning(str(e))
+                continue
+            if kind == "zip":
+                if not osp.isfile(path) or not path.lower().endswith(".zip"):
+                    continue
+                try:
+                    job = self._zip_batch.add_zip(path)
+                    if not job.project_dirs:
+                        LOGGER.warning(f'ZIP contains no images: {path}')
+                        continue
+                    LOGGER.info(
+                        f'ZIP batch: extracted {osp.basename(path)} -> {job.extracted_root} '
+                        f'({len(job.project_dirs)} folder(s) with images), output -> {job.output_root}'
+                    )
+                    valid_dirs.extend(job.project_dirs)
+                except Exception as e:
+                    LOGGER.warning(f'Failed to extract ZIP {path}: {e}')
+                    continue
             else:
-                LOGGER.warning(f'target directory {d} does not exist.')
+                valid_dirs.append(path)
         self.exec_dirs = valid_dirs
         self._batch_cancelled = False
         self.run_next_dir()
@@ -2901,6 +3021,10 @@ class MainWindow(mainwindow_cls):
             while self.imsave_thread.isRunning():
                 time.sleep(0.1)
             LOGGER.info('finished translating all dirs.')
+            try:
+                self._zip_batch.cleanup_all()
+            except Exception:
+                pass
             if self._batch_cancelled:
                 self.batch_queue_cancelled.emit()
                 self._batch_cancelled = False
@@ -2922,6 +3046,7 @@ class MainWindow(mainwindow_cls):
                 self.app.quit()
             return
         d = self.exec_dirs.pop(0)
+        self._current_batch_dir = d
         self.batch_queue_item_started.emit(d)
         LOGGER.info(f'translating {d} ...')
         self.openDir(d)
@@ -2954,6 +3079,44 @@ class MainWindow(mainwindow_cls):
             widget.set_expend_area(expend=getattr(pcfg, widget.config_expand_name), set_config=False)
             widget.view_hide_btn_clicked.connect(self.on_hide_view_widget)
             widget.setVisible(visible)
+
+        # Section 10: Canvas view mode (original / debug / translated / normal) + Fit to width
+        self.titleBar.viewMenu.addSeparator()
+        from qtpy.QtGui import QActionGroup
+        self._canvas_view_group = QActionGroup(self)
+        self._canvas_view_group.setExclusive(True)
+        mode_actions = []
+        for mode, label in [
+            ("normal", self.tr("Canvas: Normal")),
+            ("original", self.tr("Canvas: Original")),
+            ("debug", self.tr("Canvas: Debug (boxes/masks)")),
+            ("translated", self.tr("Canvas: Translated")),
+        ]:
+            act = QAction(label, self.titleBar)
+            act.setCheckable(True)
+            act.setChecked(getattr(pcfg, "canvas_view_mode", "normal") == mode)
+            act.setProperty("canvas_view_mode", mode)
+            act.triggered.connect(self._on_canvas_view_mode_triggered)
+            self._canvas_view_group.addAction(act)
+            self.titleBar.viewMenu.addAction(act)
+            mode_actions.append((mode, act))
+        self._canvas_view_mode_actions = dict(mode_actions)
+        fit_action = QAction(self.tr("Canvas: Fit to width"), self.titleBar)
+        fit_action.setToolTip(self.tr("Zoom canvas so image width fits the view."))
+        fit_action.triggered.connect(self._on_canvas_fit_to_width)
+        self.titleBar.viewMenu.addAction(fit_action)
+
+    def _on_canvas_view_mode_triggered(self):
+        action = self.sender()
+        if not isinstance(action, QAction):
+            return
+        mode = action.property("canvas_view_mode")
+        if mode:
+            pcfg.canvas_view_mode = mode
+            self.canvas.updateLayers()
+
+    def _on_canvas_fit_to_width(self):
+        self.canvas.fitToWidth()
 
     def action_set_view_visible(self):
         action: QAction = self.sender()

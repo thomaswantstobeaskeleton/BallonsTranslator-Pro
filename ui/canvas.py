@@ -408,14 +408,69 @@ class Canvas(QGraphicsScene):
             if blk_item.isSelected():
                 blk_item.setSelected(False)
 
-        result = ndarray2pixmap(self.imgtrans_proj.inpainted_array, return_qimg=True)
-        canvas_sz = self.img_window_size()
-        painter = QPainter(result)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Hide OSB blocks that fell back to restore_original_region so we don't draw text on top.
+        hidden_osb_items = []
+        for item in self.items():
+            if isinstance(item, TextBlkItem) and getattr(getattr(item, "blk", None), "restore_original_region", False):
+                if item.isVisible():
+                    item.hide()
+                    hidden_osb_items.append(item)
 
-        rect = QRectF(0, 0, canvas_sz.width(), canvas_sz.height())
-        self.render(painter, rect, rect)   #  produce blurred result if target/source rect not specified #320
-        painter.end()
+        # Optional supersampling: render at Nx then downscale (smoother edges / better small text)
+        ss = 1
+        try:
+            ss = int(getattr(pcfg, "supersampling_factor", 1) or 1)
+        except Exception:
+            ss = 1
+        ss = max(1, min(4, ss))
+
+        # OSB fallback: restore original image region for blocks that failed layout (Section 19).
+        base_arr = np.copy(self.imgtrans_proj.inpainted_array)
+        current_img = getattr(self.imgtrans_proj, "current_img", None)
+        blk_list = self.imgtrans_proj.pages.get(current_img, []) if current_img else []
+        img_array = self.imgtrans_proj.img_array
+        im_h, im_w = base_arr.shape[:2]
+        for blk in blk_list:
+            if not getattr(blk, "restore_original_region", False):
+                continue
+            xyxy = getattr(blk, "xyxy", None)
+            if not xyxy or len(xyxy) != 4:
+                continue
+            x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+            x1, x2 = max(0, min(x1, im_w)), max(0, min(x2, im_w))
+            y1, y2 = max(0, min(y1, im_h)), max(0, min(y2, im_h))
+            if x2 > x1 and y2 > y1 and img_array is not None and img_array.shape[:2] == base_arr.shape[:2]:
+                base_arr[y1:y2, x1:x2] = img_array[y1:y2, x1:x2]
+
+        base_qimg = ndarray2pixmap(base_arr, return_qimg=True)
+        canvas_sz = self.img_window_size()
+        if ss <= 1:
+            result = base_qimg
+            painter = QPainter(result)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = QRectF(0, 0, canvas_sz.width(), canvas_sz.height())
+            self.render(painter, rect, rect)   #  produce blurred result if target/source rect not specified #320
+            painter.end()
+        else:
+            # Render scene into a bigger QImage, then downscale to base size.
+            w = int(canvas_sz.width())
+            h = int(canvas_sz.height())
+            big = QImage(w * ss, h * ss, QImage.Format.Format_ARGB32)
+            big.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(big)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.scale(ss, ss)
+            rect = QRectF(0, 0, w, h)
+            self.render(painter, rect, rect)
+            painter.end()
+
+            # Composite big render over base image (scaled)
+            result = QImage(base_qimg)  # copy
+            p2 = QPainter(result)
+            p2.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            p2.drawImage(QRectF(0, 0, w, h), big, QRectF(0, 0, w * ss, h * ss))
+            p2.end()
         
         if tlayer_opacity_before != 1:
             self.textLayer.setOpacity(tlayer_opacity_before)
@@ -428,6 +483,8 @@ class Canvas(QGraphicsScene):
             if self.vscroll_bar.value() != vb_pos:
                 self.vscroll_bar.setValue(vb_pos)
         self.inpaintLayer.show()
+        for item in hidden_osb_items:
+            item.show()
 
         return result
     
@@ -436,15 +493,38 @@ class Canvas(QGraphicsScene):
         if not self.imgtrans_proj.img_valid:
             return
         
+        view_mode = getattr(pcfg, "canvas_view_mode", "normal")
         inpainted_as_base = self.imgtrans_proj.inpainted_valid
         
         if inpainted_as_base:
             self.base_pixmap = ndarray2pixmap(self.imgtrans_proj.inpainted_array)
+        else:
+            self.base_pixmap = ndarray2pixmap(self.imgtrans_proj.img_array)
+
+        if view_mode == "original":
+            pixmap = ndarray2pixmap(self.imgtrans_proj.img_array)
+            self.inpaintLayer.setPixmap(pixmap)
+            return
+
+        if view_mode == "translated" and inpainted_as_base:
+            pixmap = self.base_pixmap.copy()
+            self.inpaintLayer.setPixmap(pixmap)
+            return
 
         pixmap = self.base_pixmap.copy()
         painter = QPainter(pixmap)
         origin = QPoint(0, 0)
 
+        if view_mode == "debug":
+            # Debug: show base image + mask overlay (boxes/masks) for QA
+            if self.imgtrans_proj.mask_valid:
+                painter.setOpacity(0.5)
+                painter.drawPixmap(origin, ndarray2pixmap(self.imgtrans_proj.mask_array))
+            painter.end()
+            self.inpaintLayer.setPixmap(pixmap)
+            return
+
+        # normal
         if self.imgtrans_proj.img_valid and pcfg.original_transparency > 0:
             painter.setOpacity(pcfg.original_transparency)
             if inpainted_as_base:
@@ -490,6 +570,19 @@ class Canvas(QGraphicsScene):
             self.adjustScrollBar(self.gv.verticalScrollBar(), factor)
             self.scalefactor_changed.emit()
         self.setSceneRect(0, 0, self.baseLayer.sceneBoundingRect().width(), self.baseLayer.sceneBoundingRect().height())
+
+    def fitToWidth(self):
+        """Section 10: Zoom canvas so image width fits the view width."""
+        if not self.gv.isVisible() or not self.imgtrans_proj.img_valid or self.base_pixmap is None:
+            return
+        view_w = max(1, self.gv.viewport().width())
+        img_w = self.base_pixmap.width()
+        if img_w <= 0:
+            return
+        target_scale = view_w / img_w
+        target_scale = np.clip(target_scale, CANVAS_SCALE_MIN, CANVAS_SCALE_MAX)
+        factor = target_scale / self.scale_factor
+        self.scaleImage(factor)
 
     def onViewResized(self):
         gv_w, gv_h = self.gv.geometry().width(), self.gv.geometry().height()

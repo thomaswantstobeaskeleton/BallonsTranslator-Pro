@@ -10,6 +10,7 @@ import openai
 import httpx
 
 from .base import register_OCR, OCRBase, TextBlock
+from utils.ocr_preprocess import preprocess_for_ocr
 
 
 @register_OCR("llm_ocr")
@@ -208,6 +209,11 @@ class LLM_OCR(OCRBase):
             "value": "auto",
             "description": "Controls image detail level for vision models.",
         },
+        "upscale_min_side": {
+            "type": "line_editor",
+            "value": 0,
+            "description": "If >0, upscale crop so longer side >= this before sending to VLM (e.g. 512). Helps tiny text. 0 = use global default from Config.",
+        },
         "prompt": {
             "type": "editor",
             "value": "Perform OCR on the provided manga image snippet. The language is **{language}**.\nRecognize all text, including handwritten sound effects (SFX).\n**CRITICAL INSTRUCTION:** If you see jumbled characters, it is likely vertical text that was read horizontally. First, mentally reconstruct the correct vertical text.\n**OUTPUT FORMATTING:** All recognized text from the image must be consolidated into a **single, continuous horizontal line**. Do not use newlines.\nYour final output must be ONLY the recognized text. No explanations.",
@@ -215,8 +221,13 @@ class LLM_OCR(OCRBase):
         },
         "system_prompt": {
             "type": "editor",
-            "value": "You are a specialized OCR engine for manga and comics. Your primary function is to accurately extract and consolidate all recognized text from an image into a **single, continuous horizontal line**. You must return only the raw, recognized text. You do not interpret, translate, or explain the content. You are designed to intelligently handle common OCR errors, such as reconstructing jumbled characters that result from misreading vertical text.",
-            "description": "Optional system prompt to guide the model's behavior.",
+            "value": (
+                "You are a specialized OCR engine for manga and comics.\n"
+                "- Transcribe all text exactly. Ignore ruby/furigana readings and emphasis markers as separate content; output the main text only.\n"
+                "- Output a single continuous horizontal line per image. No line numbers or labels unless you use strict numbered format (1: ... 2: ...) when multiple segments are requested.\n"
+                "- Return only the raw recognized text, no explanations."
+            ),
+            "description": "Section 18: Dedicated OCR transcription prompt. Optional; leave empty to use the default above.",
         },
         "proxy": {
             "value": "",
@@ -230,6 +241,18 @@ class LLM_OCR(OCRBase):
         "max_response_tokens": {
             "value": 4096,
             "description": "Maximum number of tokens in the LLM's response.",
+        },
+        "temperature": {
+            "value": 0.0,
+            "description": "Sampling temperature. Set to 0 for deterministic OCR/translate output.",
+        },
+        "translate_prompt": {
+            "type": "editor",
+            "value": (
+                "Translate the text in this comic/manga image into {target_language}. "
+                "Return ONLY the translated text (no quotes, no markdown). Keep line breaks if the text clearly has multiple lines."
+            ),
+            "description": "Prompt used for one-step image->translation when translation_mode=one_step_vlm.",
         },
         "description": "OCR using various vision-capable LLMs.",
     }
@@ -245,7 +268,7 @@ class LLM_OCR(OCRBase):
 
     def _initialize_client(self, api_key_to_use: str):
         endpoint = self.endpoint
-        provider = self.provider
+        provider = self._effective_provider_for_model()
         if not endpoint:
             if provider == "OpenAI":
                 endpoint = "https://api.openai.com/v1"
@@ -274,6 +297,23 @@ class LLM_OCR(OCRBase):
         self.client = openai.OpenAI(
             api_key=api_key_to_use, base_url=endpoint, http_client=http_client
         )
+
+    def _effective_provider_for_model(self) -> str:
+        try:
+            if self.override_model:
+                return self.provider
+            m = (self.model or "").strip()
+            if ": " in m:
+                prefix = m.split(": ", 1)[0].strip().upper()
+                if prefix == "OAI":
+                    return "OpenAI"
+                if prefix == "GGL":
+                    return "Google"
+                if prefix == "OPENROUTER":
+                    return "OpenRouter"
+            return self.provider
+        except Exception:
+            return self.provider
 
     # --- Property Getters (similar to translator) ---
     @property
@@ -341,6 +381,13 @@ class LLM_OCR(OCRBase):
             return float(self.get_param_value("delay"))
         except (ValueError, TypeError):
             return 1.0
+
+    @property
+    def temperature(self) -> float:
+        try:
+            return float(self.get_param_value("temperature"))
+        except (ValueError, TypeError):
+            return 0.0
 
     def _respect_delay(self):
         # This logic is identical to the one in LLM_API_Translator
@@ -438,7 +485,8 @@ class LLM_OCR(OCRBase):
                 "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
             }
 
-            if self.provider in ["OpenAI", "Google", "OpenRouter"]:
+            provider = self._effective_provider_for_model()
+            if provider in ["OpenAI", "Google", "OpenRouter"]:
                 detail_setting = self.detail_level
                 if detail_setting in ["low", "high"]:
                     image_content_part["image_url"]["detail"] = detail_setting
@@ -465,6 +513,7 @@ class LLM_OCR(OCRBase):
                 model=model_name,
                 messages=messages,
                 max_tokens=self.max_response_tokens,
+                temperature=self.temperature,
             )
 
             if response.choices and response.choices[0].message.content:
@@ -480,14 +529,67 @@ class LLM_OCR(OCRBase):
             self.logger.error(f"OCR error: {e}")
             return f"[ERROR: {type(e).__name__}]"
 
-    def _ocr_blk_list(
-        self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs
-    ):
+    def run_ocr_translate(self, img: np.ndarray, blk_list: List[TextBlock], source_lang: str, target_lang: str, *args, **kwargs) -> List[TextBlock]:
+        """
+        One-step VLM translation: fill blk.translation directly from image crops.
+        """
+        if img.ndim == 3 and img.shape[-1] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
         im_h, im_w = img.shape[:2]
+        upscale_min = 0
+        try:
+            upscale_min = int(self.get_param_value("upscale_min_side") or 0)
+        except (TypeError, ValueError):
+            pass
+        if upscale_min <= 0:
+            try:
+                from utils.config import pcfg
+                upscale_min = int(getattr(pcfg.module, "ocr_upscale_min_side", 0) or 0)
+            except Exception:
+                pass
+        prompt_tmpl = (self.get_param_value("translate_prompt") or "").strip()
+        if not prompt_tmpl:
+            prompt_tmpl = "Translate the text in this image into {target_language}. Return only the translated text."
+        prompt = prompt_tmpl.format(target_language=str(target_lang))
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
             if 0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h:
                 cropped_img = img[y1:y2, x1:x2]
+                cropped_img = preprocess_for_ocr(cropped_img, recipe="none", upscale_min_side=upscale_min)
+                try:
+                    ok, buffer = cv2.imencode(".jpg", cropped_img)
+                except Exception:
+                    ok, buffer = False, None
+                if not ok or buffer is None:
+                    blk.translation = ""
+                    continue
+                img_base64 = base64.b64encode(buffer).decode("utf-8")
+                result = self.ocr(img_base64, prompt_override=prompt)
+                blk.translation = result or ""
+            else:
+                blk.translation = ""
+        return blk_list
+
+    def _ocr_blk_list(
+        self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs
+    ):
+        im_h, im_w = img.shape[:2]
+        upscale_min = 0
+        try:
+            upscale_min = int(self.get_param_value("upscale_min_side") or 0)
+        except (TypeError, ValueError):
+            pass
+        if upscale_min <= 0:
+            try:
+                from utils.config import pcfg
+                upscale_min = int(getattr(pcfg.module, "ocr_upscale_min_side", 0) or 0)
+            except Exception:
+                pass
+        for blk in blk_list:
+            x1, y1, x2, y2 = blk.xyxy
+            if 0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h:
+                cropped_img = img[y1:y2, x1:x2]
+                cropped_img = preprocess_for_ocr(cropped_img, recipe="none", upscale_min_side=upscale_min)
                 _, buffer = cv2.imencode(".jpg", cropped_img)
                 img_base64 = base64.b64encode(buffer).decode("utf-8")
                 result = self.ocr(img_base64, prompt_override=kwargs.get("prompt"))

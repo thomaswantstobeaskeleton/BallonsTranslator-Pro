@@ -82,6 +82,13 @@ class OCRBase(BaseModule):
 
         return blk_list
 
+    def run_ocr_translate(self, img: np.ndarray, blk_list: List[TextBlock], source_lang: str, target_lang: str, *args, **kwargs) -> List[TextBlock]:
+        """
+        Optional: one-step VLM flow (image -> translation) implemented by specific OCR modules.
+        Default: not supported.
+        """
+        raise NotImplementedError
+
     def _ocr_blk_list(self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs) -> None:
         raise NotImplementedError
 

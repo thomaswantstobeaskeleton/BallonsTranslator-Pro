@@ -35,9 +35,11 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
 
 def create_info_dialog(info_msg, btn_type=None, modal: bool = False, frame_less: bool = False, signal_slot_map_list: List[Dict] = None):
     '''
-        Popup a info dialog in main thread
+        Popup a info dialog in main thread.
+        info_msg can be a string or a dict with 'title' and 'text' keys.
     '''
-    LOGGER.info(info_msg)
+    log_msg = info_msg.get('text', info_msg) if isinstance(info_msg, dict) else info_msg
+    LOGGER.info(log_msg)
     if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
         shared.create_infodialog_in_mainthread({'info_msg': info_msg, 'btn_type': btn_type, 'modal': modal, 'frame_less': frame_less, 'signal_slot_map_list': signal_slot_map_list})
 

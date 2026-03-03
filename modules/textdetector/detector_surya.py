@@ -163,12 +163,12 @@ if _SURYA_DET_AVAILABLE:
             "merge_text_lines": {
                 "type": "checkbox",
                 "value": True,
-                "description": "Merge nearby lines into one bubble (recommended for comics / dense text).",
+                "description": "Merge nearby lines into one bubble (recommended for comics / dense text). Disable to get one box per line.",
             },
             "merge_gap_px": {
                 "type": "line_editor",
-                "value": 50,
-                "description": "Merge blocks within this many pixels.",
+                "value": 12,
+                "description": "Merge blocks only when within this many pixels. 0 = no merging (one box per detected line; keeps close bubbles separate). 10–15 = merge only very close lines.",
             },
             "box_padding": {
                 "type": "line_editor",
@@ -230,8 +230,17 @@ if _SURYA_DET_AVAILABLE:
             mask, blk_list = _predictions_to_mask_blocks(h, w, predictions, min_score)
             if not blk_list:
                 return mask, blk_list
+            merge_gap = 12
+            mg = self.params.get("merge_gap_px", {})
+            if isinstance(mg, dict):
+                try:
+                    merge_gap = max(0, int(float(mg.get("value", 12))))
+                except (TypeError, ValueError):
+                    pass
             merge_lines = self.params.get("merge_text_lines", {}).get("value", True)
-            if merge_lines and len(blk_list) > 0:
+            # When merge_gap_px is 0, skip line grouping so each detection line stays one box
+            # (avoids two close bubbles being merged by mit_merge_textlines).
+            if merge_lines and merge_gap > 0 and len(blk_list) > 0:
                 pts_list = [line_pts for blk in blk_list for line_pts in blk.lines]
                 if pts_list:
                     blk_list = mit_merge_textlines(pts_list, width=w, height=h)
@@ -242,13 +251,6 @@ if _SURYA_DET_AVAILABLE:
                             if pts.ndim == 1:
                                 pts = pts.reshape(-1, 2)
                             cv2.fillPoly(mask, [pts], 255)
-            merge_gap = 50
-            mg = self.params.get("merge_gap_px", {})
-            if isinstance(mg, dict):
-                try:
-                    merge_gap = max(0, int(float(mg.get("value", 50))))
-                except (TypeError, ValueError):
-                    pass
             blk_list = _merge_nearby_blocks(blk_list, merge_gap)
             blk_list = sort_regions(blk_list)
             pad_val = 0

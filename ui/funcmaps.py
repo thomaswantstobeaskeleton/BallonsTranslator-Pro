@@ -1,7 +1,7 @@
 from utils.io_utils import build_funcmap
 from utils.fontformat import FontFormat
 from utils.config import pcfg
-from utils.textblock_mask import canny_flood, connected_canny_flood, existing_mask
+from utils.textblock_mask import canny_flood, connected_canny_flood, existing_mask, sam_refine_ballon_mask
 
 # Build base function map
 handle_ffmt_change = build_funcmap('ui.fontformat_commands', 
@@ -10,4 +10,4 @@ handle_ffmt_change = build_funcmap('ui.fontformat_commands',
 
 
 def get_maskseg_method():
-    return [canny_flood, connected_canny_flood, existing_mask][pcfg.drawpanel.rectool_method]
+    return [canny_flood, connected_canny_flood, existing_mask, sam_refine_ballon_mask][pcfg.drawpanel.rectool_method]

@@ -3,11 +3,14 @@ import cv2
 from typing import Dict, List
 from collections import OrderedDict
 import sys
+import os
+import tempfile
 
 from utils.registry import Registry
-from utils.textblock_mask import extract_ballon_mask
+from utils.textblock_mask import extract_ballon_mask, classify_bubble_colored
 from utils.imgproc_utils import enlarge_window
 from utils.config import pcfg
+from utils.io_utils import imread, imwrite
 
 from ..base import BaseModule, DEFAULT_DEVICE, soft_empty_cache, DEVICE_SELECTOR, GPUINTENSIVE_SET, TORCH_DTYPE_MAP, BF16_SUPPORTED
 from ..textdetector import TextBlock
@@ -36,6 +39,223 @@ def _feather_weight_2d(h: int, w: int, feather_px: int) -> np.ndarray:
     wx = fade(feather_px, w - feather_px, w)
     w2d = wy[:, np.newaxis] * wx[np.newaxis, :]
     return w2d
+
+
+def _resample_inpainted_brightness(result_crop: np.ndarray, text_mask: np.ndarray, ballon_mask: np.ndarray) -> None:
+    """
+    Section 17: Re-sample brightness of the inpainted region to match surrounding balloon
+    for better text contrast. Modifies result_crop in-place.
+    """
+    if result_crop is None or result_crop.size == 0 or text_mask is None or ballon_mask is None:
+        return
+    if result_crop.shape[:2] != text_mask.shape or text_mask.shape != ballon_mask.shape:
+        return
+    if result_crop.ndim != 3 or result_crop.shape[2] < 3:
+        return
+    interior = (ballon_mask > 127) & (text_mask <= 127)
+    inpainted = (text_mask > 127) & (ballon_mask > 127)
+    n_surround = int(np.sum(interior))
+    n_inpaint = int(np.sum(inpainted))
+    if n_surround < 16 or n_inpaint < 16:
+        return
+    rgb = result_crop[:, :, :3].astype(np.float32)
+    gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+    target_lum = float(np.median(gray[interior]))
+    mean_inpaint = float(np.mean(gray[inpainted]))
+    if mean_inpaint <= 0:
+        return
+    scale = target_lum / mean_inpaint
+    scale = max(0.5, min(2.0, scale))
+    for c in range(3):
+        result_crop[:, :, c] = np.where(
+            inpainted,
+            np.clip(rgb[:, :, c] * scale, 0, 255).astype(np.uint8),
+            result_crop[:, :, c],
+        )
+
+
+def _clip_xyxy_to_image(xyxy, im_w: int, im_h: int):
+    """Return [x1, y1, x2, y2] as integers clipped to image bounds; None if degenerate.
+    Use for per-block inpainting so dual-detection merged blocks (possibly float or OOB) are safe."""
+    if xyxy is None or len(xyxy) < 4:
+        return None
+    try:
+        x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+    except (TypeError, ValueError):
+        return None
+    x1, x2 = min(x1, x2), max(x1, x2)
+    y1, y2 = min(y1, y2), max(y1, y2)
+    x1 = max(0, min(int(round(x1)), im_w))
+    x2 = max(0, min(int(round(x2)), im_w))
+    y1 = max(0, min(int(round(y1)), im_h))
+    y2 = max(0, min(int(round(y2)), im_h))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
+def _block_mask_polygon(blk, im_w: int, im_h: int):
+    """Return polygon for block as (n, 2) int32 for fillPoly; None if degenerate.
+    Block coordinates must be in page space (same as image size im_w x im_h).
+    Uses blk.lines[0] when valid (e.g. HF object det, CTD), else xyxy bbox.
+    Clips all points to [0, im_w-1] x [0, im_h-1] for cv2.fillPoly."""
+    xyxy = _clip_xyxy_to_image(getattr(blk, 'xyxy', None), im_w, im_h)
+    if xyxy is None:
+        return None
+    x1, y1, x2, y2 = xyxy
+    # fillPoly expects indices in range; clamp so we never exceed (im_w-1, im_h-1)
+    x2 = min(x2, im_w - 1)
+    y2 = min(y2, im_h - 1)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    lines = getattr(blk, 'lines', None)
+    if lines and len(lines) > 0:
+        try:
+            pts = np.array(lines[0], dtype=np.int32)
+            if pts.ndim != 2 or pts.shape[0] < 3 or pts.shape[1] != 2:
+                pts = None
+            else:
+                pts = np.clip(pts, [0, 0], [im_w - 1, im_h - 1])
+        except (TypeError, ValueError, IndexError):
+            pts = None
+    else:
+        pts = None
+    if pts is None:
+        pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+    return pts
+
+
+def _block_mask_polygons(blk, im_w: int, im_h: int):
+    """Return list of polygons for block, each (n, 2) int32 for fillPoly.
+    Uses ALL blk.lines (like Paddle/CTD mask build); HF has one line per block.
+    Ensures mask rebuild and per-block inpainting use the same shapes."""
+    xyxy = _clip_xyxy_to_image(getattr(blk, 'xyxy', None), im_w, im_h)
+    if xyxy is None:
+        return []
+    x1, y1, x2, y2 = xyxy
+    default_pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+    lines = getattr(blk, 'lines', None)
+    if not lines or len(lines) == 0:
+        return [default_pts]
+    out = []
+    for line in lines:
+        try:
+            pts = np.array(line, dtype=np.int32)
+            if pts.ndim != 2 or pts.shape[0] < 3 or pts.shape[1] != 2:
+                out.append(default_pts)
+            else:
+                pts = np.clip(pts, [0, 0], [im_w - 1, im_h - 1])
+                if pts.shape[0] >= 3:
+                    out.append(pts)
+        except (TypeError, ValueError, IndexError):
+            out.append(default_pts)
+    return out if out else [default_pts]
+
+
+def _block_center_xyxy(xyxy) -> tuple:
+    """(cx, cy) from xyxy."""
+    if not xyxy or len(xyxy) < 4:
+        return (0.0, 0.0)
+    return ((xyxy[0] + xyxy[2]) * 0.5, (xyxy[1] + xyxy[3]) * 0.5)
+
+
+def _bisector_side(px: float, py: float, ci: tuple, cj: tuple, nudge: float = 0.0) -> int:
+    """Return 0 if (px,py) is on side of center i (relative to bisector between i and j), else 1. With nudge, line is shifted toward j by nudge (positive = more pixels go to j)."""
+    mx = (ci[0] + cj[0]) * 0.5
+    my = (ci[1] + cj[1]) * 0.5
+    vx = cj[0] - ci[0]
+    vy = cj[1] - ci[1]
+    # (px,py) on i's side when (p - M) · (cj - ci) <= 0 (i.e. dot <= 0). Add nudge: use dot <= nudge so positive nudge gives more to j.
+    dot = (px - mx) * vx + (py - my) * vy
+    return 0 if dot <= nudge else 1
+
+
+def _compute_bisector_nudge(
+    center_i: tuple,
+    center_j: tuple,
+    text_boxes_xyxy: List,
+    im_w: int,
+    im_h: int,
+) -> float:
+    """
+    Section 15: Nudge bisector so text bbox corners do not fall on the wrong bubble side.
+    Returns a nudge value (added to dot threshold): positive = shift bisector toward j so more overlap goes to j.
+    """
+    if not text_boxes_xyxy:
+        return 0.0
+    mx = (center_i[0] + center_j[0]) * 0.5
+    my = (center_i[1] + center_j[1]) * 0.5
+    vx = center_j[0] - center_i[0]
+    vy = center_j[1] - center_i[1]
+    nudge = 0.0
+    for box in text_boxes_xyxy:
+        if not box or len(box) < 4:
+            continue
+        x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+        # Which bubble owns this text box? Use center of text box and assign to nearer bubble center.
+        tx = (x1 + x2) * 0.5
+        ty = (y1 + y2) * 0.5
+        di = (tx - center_i[0]) ** 2 + (ty - center_i[1]) ** 2
+        dj = (tx - center_j[0]) ** 2 + (ty - center_j[1]) ** 2
+        owner_is_i = di <= dj
+        dot_center = (tx - mx) * vx + (ty - my) * vy
+        # If text center is on the "wrong" side of bisector (owner i but dot > 0, or owner j but dot < 0), nudge so it ends on correct side.
+        if owner_is_i and dot_center > 0:
+            nudge = max(nudge, dot_center)
+        elif not owner_is_i and dot_center < 0:
+            nudge = min(nudge, dot_center)
+    return nudge
+
+
+def build_mask_with_resolved_overlaps(
+    blk_list: List,
+    im_w: int,
+    im_h: int,
+    text_blocks_for_nudge: List = None,
+) -> np.ndarray:
+    """
+    Section 15: Build a single mask from block polygons, resolving overlaps by bisector split
+    (and optional nudge so text boxes stay on the correct bubble side). Prevents double-cleaning
+    and improves per-bubble typesetting masks.
+    """
+    im_h, im_w = int(im_h), int(im_w)
+    if im_h <= 0 or im_w <= 0 or not blk_list:
+        return np.zeros((im_h, im_w), dtype=np.uint8)
+    claim = np.full((im_h, im_w), -1, dtype=np.int32)
+    centers = []
+    for blk in blk_list:
+        xyxy = getattr(blk, "xyxy", None)
+        centers.append(_block_center_xyxy(xyxy) if xyxy and len(xyxy) >= 4 else (0.0, 0.0))
+    text_boxes = None
+    if text_blocks_for_nudge:
+        text_boxes = [getattr(b, "xyxy", None) for b in text_blocks_for_nudge]
+        text_boxes = [b for b in text_boxes if b is not None and len(b) >= 4]
+    for idx, blk in enumerate(blk_list):
+        polys = _block_mask_polygons(blk, im_w, im_h)
+        if not polys:
+            continue
+        tmp = np.zeros((im_h, im_w), dtype=np.uint8)
+        for pts in polys:
+            if pts is not None and len(pts) >= 3:
+                cv2.fillPoly(tmp, [np.asarray(pts, dtype=np.int32)], 255)
+        ys, xs = np.where(tmp > 0)
+        ci = centers[idx]
+        for y, x in zip(ys, xs):
+            px, py = float(x), float(y)
+            prev = int(claim[y, x])
+            if prev < 0:
+                claim[y, x] = idx
+                continue
+            cj = centers[prev]
+            nudge = 0.0
+            if text_boxes:
+                nudge = _compute_bisector_nudge(ci, cj, text_boxes, im_w, im_h)
+            side = _bisector_side(px, py, ci, cj, nudge)
+            if side == 0:
+                claim[y, x] = idx
+            # else keep claim[y,x] = prev
+    mask = (claim >= 0).astype(np.uint8) * 255
+    return mask
 
 
 def inpaint_handle_alpha_channel(original_alpha, mask):
@@ -85,49 +305,62 @@ class InpainterBase(BaseModule):
         '''
         import torch
 
+        def _is_oom(exc):
+            if isinstance(exc, torch.cuda.OutOfMemoryError):
+                return True
+            if isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower():
+                return True
+            return False
+
         def do_inpaint(im, msk, blk_list=None):
             return self._inpaint(im, msk, blk_list)
 
         try:
             return do_inpaint(img, mask, textblock_list)
         except Exception as e:
-            if DEFAULT_DEVICE == 'cuda' and isinstance(e, torch.cuda.OutOfMemoryError):
-                soft_empty_cache()
-                try:
-                    return self._inpaint(img, mask, textblock_list)
-                except Exception as ee:
-                    if isinstance(ee, torch.cuda.OutOfMemoryError):
-                        self.logger.warning(f'CUDA out of memory while calling {self.name}, fall back to cpu...\n\
-                                            if running into it frequently, consider lowering the inpaint_size')
-                        self.moveToDevice('cpu')
-                        inpainted = self._inpaint(img, mask, textblock_list)
-                        precision = None
-                        if hasattr(self, 'precision'):
-                            precision = self.precision
-                        self.moveToDevice('cuda', precision)
-
-                        return inpainted
-            else:
+            if DEFAULT_DEVICE != 'cuda' or not _is_oom(e):
                 raise e
+            soft_empty_cache()
+            try:
+                return self._inpaint(img, mask, textblock_list)
+            except Exception as ee:
+                if not _is_oom(ee):
+                    raise ee
+                self.logger.warning(
+                    'CUDA out of memory while calling %s, fall back to cpu. '
+                    'If this happens often, set Inpainter device to CPU or lower inpaint_size.',
+                    self.name,
+                )
+                self.moveToDevice('cpu')
+                try:
+                    inpainted = self._inpaint(img, mask, textblock_list)
+                finally:
+                    precision = getattr(self, 'precision', None)
+                    self.moveToDevice('cuda', precision)
+                return inpainted
 
     def inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None, check_need_inpaint: bool = False) -> np.ndarray:
-        
+        """
+        Inpaint image using mask and optional per-block list (e.g. from HF object det).
+        Contract: mask and textblock_list must be in page coordinates (same size as img).
+        Mask is normalized to shape (im_h, im_w), dtype uint8, values 0 or 255.
+        """
         if not self.all_model_loaded():
             self.load_model()
-        
-        # Ensure mask and image dimensions match (e.g. mask loaded from file at different resolution)
+
         im_h, im_w = img.shape[:2]
-        mask = np.copy(mask)
+        # Regulate mask to actual page size: same shape as image, 2D, binary 0/255
+        mask = np.asarray(mask, dtype=np.uint8)
         if mask.ndim == 3:
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         if mask.shape[0] != im_h or mask.shape[1] != im_w:
             mask = cv2.resize(mask, (im_w, im_h), interpolation=cv2.INTER_NEAREST)
+        mask = np.copy(mask)
         
         # Binary mask: 255 = region to inpaint (hole); force strict 0/255 for C backends (OpenCV, PatchMatch)
         binary = (mask > 127).astype(np.uint8) * 255
         mask = np.where(binary > 0, 255, 0).astype(np.uint8)
-        # Default 0: detector/refinement already dilate; extra dilation can over-expand and cause dark blobs for all models.
-        # Subclasses (e.g. LamaLarge) can set mask_dilation_iterations if they need a small margin.
+        # Subclasses (e.g. LamaLarge) can set mask_dilation_iterations if they need a small margin
         dilate_iter = getattr(self, 'mask_dilation_iterations', 0)
         if dilate_iter > 0:
             k = getattr(self, 'mask_dilation_kernel_size', 2)
@@ -167,14 +400,18 @@ class InpainterBase(BaseModule):
                     ballon_area = np.sum(ballon_msk > 0)
                     min_ballon_area_for_median = 40000
                     if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
-                        result_rgb = img_rgb.copy()
-                        if np.all(average_bg_color >= 220):
-                            average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
-                        result_rgb[np.where(ballon_msk > 0)] = average_bg_color
-                        # Recombine with alpha if original was RGBA
-                        if original_alpha is not None:
-                            return np.concatenate([result_rgb, original_alpha], axis=2)
-                        return result_rgb
+                        is_colored = (
+                            classify_bubble_colored(img_rgb, ballon_msk, mask, min_interior_pixels=64)
+                            if getattr(pcfg.module, 'colored_bubble_handling', True) else False
+                        )
+                        if not is_colored:
+                            result_rgb = img_rgb.copy()
+                            if np.all(average_bg_color >= 220):
+                                average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
+                            result_rgb[np.where(ballon_msk > 0)] = average_bg_color
+                            if original_alpha is not None:
+                                return np.concatenate([result_rgb, original_alpha], axis=2)
+                            return result_rgb
             img_rgb = np.ascontiguousarray(img_rgb)
             result_rgb = self.memory_safe_inpaint(img_rgb, mask, textblock_list)
             # Recombine with alpha if original was RGBA
@@ -198,8 +435,19 @@ class InpainterBase(BaseModule):
             
             # Crop enlargement: use ratio 1.7 to match upstream (more context = better inpainting)
             enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 1.7)
-            for blk in textblock_list:
-                xyxy = blk.xyxy
+            spill_after_blocks = int(getattr(pcfg.module, 'inpaint_spill_to_disk_after_blocks', 0) or 0)
+            temp_spill_path = None
+            if spill_after_blocks > 0 and len(textblock_list) > spill_after_blocks:
+                try:
+                    fd = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                    temp_spill_path = fd.name
+                    fd.close()
+                except Exception:
+                    temp_spill_path = None
+            for idx, blk in enumerate(textblock_list):
+                xyxy = _clip_xyxy_to_image(blk.xyxy, im_w, im_h)
+                if xyxy is None:
+                    continue
                 xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=enlarge_ratio)
                 # Skip blocks with degenerate crop (e.g. zero-area bbox or invalid enlarge_window result)
                 crop_w = xyxy_e[2] - xyxy_e[0]
@@ -207,40 +455,100 @@ class InpainterBase(BaseModule):
                 if crop_w < 2 or crop_h < 2:
                     continue
                 im = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
-                msk = mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
-                # Skip if this crop has no text mask left (e.g. already covered by a previous block's enlarged region)
+                # Use a crop mask that contains ONLY this block. Draw ALL polygons of the block
+                # (HF = 1 polygon, Paddle/CTD = multiple lines) so mask matches rebuild.
+                crop_x0, crop_y0 = xyxy_e[0], xyxy_e[1]
+                polygons = _block_mask_polygons(blk, im_w, im_h)
+                if not polygons:
+                    continue
+                msk = np.zeros((crop_h, crop_w), dtype=np.uint8)
+                for pts in polygons:
+                    pts_crop = pts - np.array([crop_x0, crop_y0], dtype=np.int32)
+                    pts_crop[:, 0] = np.clip(pts_crop[:, 0], 0, crop_w - 1)
+                    pts_crop[:, 1] = np.clip(pts_crop[:, 1], 0, crop_h - 1)
+                    cv2.fillPoly(msk, [pts_crop], 255)
+                # Skip if this block has no visible area in crop (degenerate after clip)
                 if np.sum(msk > 127) == 0:
                     continue
                 need_inpaint = True
+                is_colored_bubble = False
+                ballon_msk = None
+                # Optional OSB fast-fill: for outside text (text_free) regions with low-variance background,
+                # fill the masked region with median surrounding color instead of calling heavy models.
+                osb_fast_fill = bool(getattr(pcfg.module, 'enable_osb_pipeline', False)) and bool(getattr(pcfg.module, 'osb_fast_fill', False))
+                blk_label = (getattr(blk, 'label', None) or '').strip().lower()
+                is_osb = blk_label in {'text_free', 'osb', 'outside', 'caption', 'sfx'}
+                if osb_fast_fill and is_osb:
+                    try:
+                        # sample a ring around the mask inside the enlarged crop
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+                        dil = cv2.dilate((msk > 127).astype(np.uint8), kernel, iterations=1)
+                        ring = (dil > 0) & (msk <= 127)
+                        ys, xs = np.where(ring)
+                        if ys.size > 64:
+                            px = im[ys, xs].astype(np.float32)
+                            bg = np.median(px, axis=0).astype(np.uint8)
+                            std = float(np.max(np.std(px - bg.astype(np.float32), axis=0)))
+                            # If background is close to solid, fill directly.
+                            if std < 8.0:
+                                im[np.where(msk > 127)] = bg
+                                need_inpaint = False
+                    except Exception:
+                        pass
                 if self.check_need_inpaint or check_need_inpaint:
                     ballon_msk, non_text_msk = extract_ballon_mask(im, msk)
-                    if ballon_msk is not None:
-                        non_text_region = np.where(non_text_msk > 0)
-                        non_text_px = im[non_text_region]
-                        average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
-                        std_rgb = np.std(non_text_px - average_bg_color, axis=0)
-                        std_max = np.max(std_rgb)
-                        inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
-                        ballon_area = np.sum(ballon_msk > 0)
-                        # Skip median fill for small balloons so they get proper inpainting
-                        min_ballon_area_for_median = 40000  # ~200x200
-                        if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
+                    non_text_region = np.where(non_text_msk > 0)
+                    non_text_px = im[non_text_region]
+                    average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
+                    std_rgb = np.std(non_text_px - average_bg_color, axis=0)
+                    std_max = np.max(std_rgb)
+                    inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
+                    ballon_area = np.sum(ballon_msk > 0)
+                    # Skip median fill for small balloons so they get proper inpainting
+                    min_ballon_area_for_median = 40000  # ~200x200
+                    if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
+                        # Section 17: if colored/gradient bubble, inpaint text-only instead of median-fill
+                        if getattr(pcfg.module, 'colored_bubble_handling', True):
+                            is_colored_bubble = classify_bubble_colored(im, ballon_msk, msk, min_interior_pixels=64)
+                        else:
+                            is_colored_bubble = False
+                        if not is_colored_bubble:
                             need_inpaint = False
                             # Use pure white for speech bubbles when median is already near white
                             if np.all(average_bg_color >= 220):
                                 average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
                             im[np.where(ballon_msk > 0)] = average_bg_color
-                        # cv2.imshow('im', im)
-                        # cv2.imshow('ballon', ballon_msk)
-                        # cv2.imshow('non_text', non_text_msk)
-                        # cv2.waitKey(0)
+                    # cv2.imshow('im', im)
+                    # cv2.imshow('ballon', ballon_msk)
+                    # cv2.imshow('non_text', non_text_msk)
+                    # cv2.waitKey(0)
                 
                 if need_inpaint:
-                    result_crop = self.memory_safe_inpaint(im, msk)
+                    try:
+                        result_crop = self.memory_safe_inpaint(im, msk)
+                    except Exception:
+                        # Fallback: fill with median surrounding pixels (prevents total failure on OSB-heavy pages)
+                        try:
+                            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+                            dil = cv2.dilate((msk > 127).astype(np.uint8), kernel, iterations=1)
+                            ring = (dil > 0) & (msk <= 127)
+                            ys, xs = np.where(ring)
+                            if ys.size > 32:
+                                px = im[ys, xs].astype(np.float32)
+                                bg = np.median(px, axis=0).astype(np.uint8)
+                            else:
+                                bg = np.array([255, 255, 255], dtype=np.uint8)
+                            result_crop = im.copy()
+                            result_crop[np.where(msk > 127)] = bg
+                        except Exception:
+                            raise
                     # Ensure result matches crop size (some models return different size due to stride/pad)
                     ch, cw = im.shape[:2]
                     if result_crop.shape[0] != ch or result_crop.shape[1] != cw:
                         result_crop = cv2.resize(result_crop, (cw, ch), interpolation=cv2.INTER_LINEAR)
+                    # Section 17: re-sample brightness of inpainted region for better text contrast on colored bubbles
+                    if is_colored_bubble and ballon_msk is not None and getattr(pcfg.module, 'colored_bubble_resample_brightness', True):
+                        _resample_inpainted_brightness(result_crop, msk, ballon_msk)
                     # Feather blend at crop edges to avoid visible rectangular seams (striped/grid artifacts)
                     feather_px = min(6, ch // 4, cw // 4)
                     if feather_px > 0:
@@ -253,8 +561,25 @@ class InpainterBase(BaseModule):
                     else:
                         inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = result_crop
 
-                # Clear only block bbox in mask (match upstream); keeps margin in mask for adjacent blocks
-                mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
+                # Clear this block's region in the mask (all polygons) so we don't double-process.
+                # Must match how the mask was built (all lines per block).
+                for pts in _block_mask_polygons(blk, im_w, im_h):
+                    if pts is not None and len(pts) >= 3:
+                        cv2.fillPoly(mask, [pts], 0)
+
+                # Temp-file spill to disk (Section 7): reduce peak RAM/VRAM on long pages with many regions
+                if temp_spill_path is not None and spill_after_blocks > 0 and (idx + 1) % spill_after_blocks == 0 and (idx + 1) < len(textblock_list):
+                    try:
+                        imwrite(temp_spill_path, inpainted, ext='.png')
+                        inpainted = imread(temp_spill_path)
+                    except Exception:
+                        pass
+            
+            if temp_spill_path is not None and os.path.isfile(temp_spill_path):
+                try:
+                    os.remove(temp_spill_path)
+                except Exception:
+                    pass
             
             # Recombine with alpha if original was RGBA
             if original_alpha is not None:
@@ -540,6 +865,12 @@ class LamaInpainterMPE(InpainterBase):
                 with torch.autocast(device_type=self.device, dtype=precision):
                     img_inpainted_torch = self.model(img_torch, mask_torch, rel_pos, direct)
             except Exception as e:
+                is_oom = (
+                    isinstance(e, torch.cuda.OutOfMemoryError)
+                    or (isinstance(e, RuntimeError) and "out of memory" in str(e).lower())
+                )
+                if is_oom:
+                    raise
                 self.logger.error(e)
                 self.logger.error(f'{precision} inference is not supported for this device, use fp32 instead.')
                 img_inpainted_torch = self.model(img_torch, mask_torch, rel_pos, direct)
@@ -597,9 +928,11 @@ class LamaLarge(LamaInpainterMPE):
                 768,
                 1024,
                 1536,
+                1920,
                 2048
             ],
             'value': 1024,
+            'description': 'Max side (px) for each bubble crop before feeding to model. Match detect_max_side (e.g. 1920) for high-res pages; lower saves VRAM.',
         },
         'mask_dilation': {
             'type': 'selector',
@@ -650,6 +983,9 @@ class LamaLarge(LamaInpainterMPE):
 
     def _load_model(self):
         device = self.params['device']['value']
+        if not (device and str(device).strip()):
+            from ..base import DEFAULT_DEVICE
+            device = DEFAULT_DEVICE
         precision = self.params['precision']['value']
 
         self.model = load_lama_mpe(r'data/models/lama_large_512px.ckpt', device='cpu', use_mpe=False, large_arch=True)

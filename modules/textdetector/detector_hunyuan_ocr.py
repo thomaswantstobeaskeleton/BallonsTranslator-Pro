@@ -34,6 +34,17 @@ except ImportError:
 _HUNYUAN_OCR_CODE_REPO = "lvyufeng/HunyuanOCR"
 
 
+def _force_eager_attention_on_config(config: Any) -> None:
+    """Set _attn_implementation='eager' on config and nested configs to avoid sparse/SDPA permute errors."""
+    if config is None:
+        return
+    setattr(config, "_attn_implementation", "eager")
+    for key in ("vision_config", "text_config"):
+        sub = getattr(config, key, None)
+        if sub is not None and sub is not config:
+            setattr(sub, "_attn_implementation", "eager")
+
+
 def _cv2_to_pil_rgb(img: np.ndarray) -> "Image.Image":
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
@@ -63,7 +74,7 @@ def _clean_repeated_substrings(text: str) -> str:
 def _parse_spotting_output(raw: str) -> List[Tuple[List[Tuple[int, int]], str]]:
     """
     Parse HunyuanOCR spotting output into list of (polygon_points, text).
-    Tries: JSON array of {box/poly, text}; then regex for [[x,y,...]], "text" or similar.
+    Tries: JSON array of {box/poly, text}; JSON inside markdown code block; regex for [[x,y,...]], "text".
     Returns list of (pts, text); pts as [(x,y), ...] or 4 corners; text may be "".
     """
     raw = raw.strip()
@@ -71,10 +82,11 @@ def _parse_spotting_output(raw: str) -> List[Tuple[List[Tuple[int, int]], str]]:
         return []
     out: List[Tuple[List[Tuple[int, int]], str]] = []
 
-    # Try full string as JSON array
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
+    def _parse_json_array(s: str) -> bool:
+        try:
+            data = json.loads(s)
+            if not isinstance(data, list):
+                return False
             for item in data:
                 if not isinstance(item, dict):
                     continue
@@ -91,18 +103,38 @@ def _parse_spotting_output(raw: str) -> List[Tuple[List[Tuple[int, int]], str]]:
                             pts.append((int(p[0]), int(p[1])))
                         elif isinstance(p, (int, float)):
                             if len(box) >= 4 and len(pts) < 2:
-                                # flat [x1,y1,x2,y2]
                                 pts = [(int(box[0]), int(box[1])), (int(box[2]), int(box[3]))]
+                            elif len(box) >= 8 and len(pts) == 0:
+                                pts = [
+                                    (int(box[0]), int(box[1])),
+                                    (int(box[2]), int(box[3])),
+                                    (int(box[4]), int(box[5])),
+                                    (int(box[6]), int(box[7])),
+                                ]
                             break
                     if len(pts) >= 2:
                         if len(pts) == 2:
                             x1, y1, x2, y2 = pts[0][0], pts[0][1], pts[1][0], pts[1][1]
                             pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
                         out.append((pts, str(text)))
-            if out:
+            return len(out) > 0
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    # Strip markdown code block if present
+    json_str = raw
+    for pattern in (r"```(?:json)?\s*([\s\S]*?)```", r"```\s*([\s\S]*?)```"):
+        m = re.search(pattern, raw, re.IGNORECASE)
+        if m:
+            json_str = m.group(1).strip()
+            if _parse_json_array(json_str):
                 return out
-    except (json.JSONDecodeError, TypeError):
-        pass
+            out.clear()
+
+    # Try full string as JSON array
+    if _parse_json_array(raw):
+        return out
+    out.clear()
 
     # Try to find JSON array inside the string
     match = re.search(r'\[[\s\S]*\]', raw)
@@ -177,12 +209,37 @@ if _HUNYUAN_AVAILABLE:
                 "value": True,
                 "description": "Use bfloat16 when available.",
             },
+            "spotting_prompt": {
+                "type": "selector",
+                "options": ["json_cn", "json_en", "default_cn"],
+                "value": "json_cn",
+                "description": "Prompt for spotting. json_cn/json_en ask for JSON only (best for parsing boxes).",
+            },
             "description": "HunyuanOCR full-image spotting (det + rec). Pair with none_ocr to keep text.",
         }
         _load_model_keys = {"processor", "model"}
 
+        # Prompts that explicitly request JSON so the model returns parseable box+text.
+        SPOTTING_PROMPT_JSON_CN = (
+            "检测并识别图片中的所有文字。"
+            "仅输出一个JSON数组，不要其他任何内容。"
+            "每个元素格式：{\"box\": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]], \"text\": \"识别的文字\"}。"
+            "box为四个顶点坐标，顺时针或逆时针均可。"
+        )
+        SPOTTING_PROMPT_JSON_EN = (
+            "Detect and recognize all text in the image. "
+            "Output only a JSON array, nothing else. "
+            "Each element: {\"box\": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]], \"text\": \"recognized text\"}. "
+            "box is four corner points, clockwise or counterclockwise."
+        )
         SPOTTING_PROMPT_CN = "检测并识别图片中的文字，将文本坐标格式化输出。"
         SPOTTING_PROMPT_EN = "Detect and recognize text in the image, output text with coordinates in JSON format."
+
+        _SPOTTING_PROMPTS = {
+            "json_cn": SPOTTING_PROMPT_JSON_CN,
+            "json_en": SPOTTING_PROMPT_JSON_EN,
+            "default_cn": SPOTTING_PROMPT_CN,
+        }
 
         def __init__(self, **params) -> None:
             super().__init__(**params)
@@ -190,6 +247,10 @@ if _HUNYUAN_AVAILABLE:
             self.processor = None
             self.model = None
             self._model_name = None
+
+        def _get_spotting_prompt(self) -> str:
+            key = (self.params.get("spotting_prompt") or {}).get("value", "json_cn")
+            return self._SPOTTING_PROMPTS.get(key, self.SPOTTING_PROMPT_JSON_CN)
 
         def _load_model(self):
             model_name = (
@@ -242,9 +303,14 @@ if _HUNYUAN_AVAILABLE:
                         ) from e
                 else:
                     raise
-            load_kw = {"trust_remote_code": True}
+            load_kw = {"trust_remote_code": True, "attn_implementation": "eager"}
             if config is not None:
                 load_kw["config"] = config
+                # Ensure eager attention is used; config from hub may not have attn_implementation,
+                # which causes permute(sparse_coo) errors in vision and text attention.
+                setattr(config, "_attn_implementation", "eager")
+                if getattr(config, "vision_config", None) is not None:
+                    setattr(config.vision_config, "_attn_implementation", "eager")
             try:
                 self.model = AutoModelForImageTextToText.from_pretrained(
                     model_name, torch_dtype=dtype, **load_kw
@@ -309,13 +375,15 @@ if _HUNYUAN_AVAILABLE:
                             model_class._finalize_model_loading = staticmethod(_safe_finalize_model_loading)  # type: ignore[assignment]
 
                         self.model = model_class.from_pretrained(
-                            model_name, config=config, torch_dtype=dtype
+                            model_name, config=config, torch_dtype=dtype, attn_implementation="eager"
                         )
                     except Exception as load_e:
                         self.logger.warning(f"HunyuanOCR model load via code repo failed: {load_e}")
                         if "dtype" in str(load_e):
                             try:
-                                self.model = model_class.from_pretrained(model_name, config=config)
+                                self.model = model_class.from_pretrained(
+                                    model_name, config=config, attn_implementation="eager"
+                                )
                             except Exception:
                                 raise load_e
                         else:
@@ -323,13 +391,14 @@ if _HUNYUAN_AVAILABLE:
                 else:
                     self.logger.warning(f"HunyuanOCR detector load failed: {model_err}; trying default dtype.")
                     self.model = AutoModelForImageTextToText.from_pretrained(
-                        model_name, **load_kw
+                        model_name, attn_implementation="eager", **load_kw
                     )
             except Exception as e:
                 self.logger.warning(f"HunyuanOCR detector load failed: {e}; trying default dtype.")
                 self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_name, **load_kw
+                    model_name, attn_implementation="eager", **load_kw
                 )
+            _force_eager_attention_on_config(self.model.config)
             self.model.to(self.device)
 
         def _run_spotting(self, pil_img: "Image.Image") -> str:
@@ -344,7 +413,7 @@ if _HUNYUAN_AVAILABLE:
                         "role": "user",
                         "content": [
                             {"type": "image", "image": tmp_path},
-                            {"type": "text", "text": self.SPOTTING_PROMPT_CN},
+                            {"type": "text", "text": self._get_spotting_prompt()},
                         ],
                     },
                 ]
@@ -399,17 +468,20 @@ if _HUNYUAN_AVAILABLE:
             pil_img = _cv2_to_pil_rgb(img)
             raw = self._run_spotting(pil_img)
             if not raw:
-                # Spotting failed on this environment (e.g. sparse permute issue) – fall back to
-                # a single full-page box so downstream OCR can still run.
-                full_pts = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)]
-                blk = TextBlock(xyxy=[0, 0, w - 1, h - 1], lines=[full_pts])
-                blk.language = "unknown"
-                blk._detected_font_size = max(h // 20, 12)
-                blk.text = [""]
-                blk_list.append(blk)
-                cv2.fillPoly(mask, [np.array(full_pts, dtype=np.int32)], 255)
+                self.logger.warning(
+                    "HunyuanOCR detector: spotting returned no output. "
+                    "Try another detector or check model/device. Returning no boxes."
+                )
                 return mask, blk_list
             parsed = _parse_spotting_output(raw)
+            if not parsed:
+                self.logger.warning(
+                    "HunyuanOCR detector: could not parse any boxes from model output. "
+                    "Try Settings → Detector → spotting_prompt = 'json_cn' or 'json_en'. "
+                    "Raw output (first 400 chars): %s",
+                    raw[:400] if len(raw) > 400 else raw,
+                )
+                return mask, blk_list
             for pts, text in parsed:
                 if len(pts) < 3:
                     continue

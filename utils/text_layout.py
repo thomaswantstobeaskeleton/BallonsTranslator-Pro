@@ -378,7 +378,12 @@ def layout_text(
     max_central_width=np.inf,
     src_is_cjk=False,
     tgt_is_cjk=False,
-    ref_src_lines = False
+    ref_src_lines = False,
+    forced_lines: List[List[str]] = None,
+    forced_wl_lines: List[List[int]] = None,
+    collision_check: bool = True,
+    collision_min_mask_ratio: float = 0.85,
+    collision_max_retries: int = 3,
 ) -> Tuple[str, List]:
 
     angle = blk.angle
@@ -443,13 +448,94 @@ def layout_text(
         new_cx, new_cy = new_origin[0] + new_rel_cx, new_origin[1] + new_rel_cy
         centroid = [int(new_cx), int(new_cy)]
 
-    if alignment == TextAlignment.Center:
-        lines, adjust_xy = layout_lines_aligncenter(blk, mask, words, centroid, wl_list, delimiter_len, line_height, spacing, delimiter, 
-                                         max_central_width, ref_src_lines=ref_src_lines, srcline_wlist=srcline_wlist,
-                                         start_from_top=start_from_top)    
+    def _layout_once(_max_width):
+        if forced_lines and forced_wl_lines and len(forced_lines) == len(forced_wl_lines):
+            # Forced line groups (from DP). Position as centered lines around centroid.
+            bh, bw = mask.shape[:2]
+            n_lines = max(1, len(forced_lines))
+            total_h = n_lines * line_height
+            top_y = int(centroid[1] - total_h / 2)
+            top_y = max(0, min(top_y, bh - 1))
+            out_lines = []
+            for i, (wline, wlline) in enumerate(zip(forced_lines, forced_wl_lines)):
+                text = delimiter.join(wline).strip()
+                if not text:
+                    continue
+                length = int(sum(wlline) + delimiter_len * max(0, len(wlline) - 1))
+                pos_x = int(centroid[0] - length / 2)
+                pos_y = int(top_y + i * line_height)
+                out_lines.append(Line(text, pos_x, pos_y, length, spacing))
+            if not out_lines:
+                return None, (0, 0)
+            return out_lines, (0, 0)
+
+        if alignment == TextAlignment.Center:
+            return layout_lines_aligncenter(
+                blk,
+                mask,
+                words,
+                centroid,
+                wl_list,
+                delimiter_len,
+                line_height,
+                spacing,
+                delimiter,
+                _max_width,
+                ref_src_lines=ref_src_lines,
+                srcline_wlist=srcline_wlist,
+                start_from_top=start_from_top,
+            )
+        return layout_lines_alignside(
+            blk,
+            mask,
+            words,
+            centroid,
+            wl_list,
+            delimiter_len,
+            line_height,
+            spacing,
+            delimiter,
+            False,
+            _max_width,
+            ref_src_lines=ref_src_lines,
+            srcline_wlist=srcline_wlist,
+        )
+
+    # Collision-aware retries by shrinking available width
+    retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
+    maxw = max_central_width
+    if maxw == np.inf:
+        maxw = mask.shape[1]
+    for attempt in range(retries):
+        cur_maxw = max(16, int(maxw * (0.92 ** attempt)))
+        lines, adjust_xy = _layout_once(cur_maxw)
+        if not lines:
+            continue
+
+        # Compute bounding rect in mask coords
+        pos_x_lst = np.array([ln.pos_x for ln in lines], dtype=np.int64)
+        pos_r_lst = np.array([max(ln.pos_x, 0) + int(ln.length) for ln in lines], dtype=np.int64)
+        canvas_l, canvas_r = int(pos_x_lst.min()), int(pos_r_lst.max())
+        canvas_t, canvas_b = int(lines[0].pos_y), int(lines[-1].pos_y + line_height)
+        bh, bw = mask.shape[:2]
+        canvas_l2 = max(0, min(canvas_l, bw - 1))
+        canvas_r2 = max(1, min(canvas_r, bw))
+        canvas_t2 = max(0, min(canvas_t, bh - 1))
+        canvas_b2 = max(1, min(canvas_b, bh))
+
+        if collision_check:
+            roi = mask[canvas_t2:canvas_b2, canvas_l2:canvas_r2]
+            if roi.size > 0:
+                inside = float(np.mean(roi > 220))
+                if inside < float(collision_min_mask_ratio):
+                    continue
+        # success
+        break
     else:
-        lines, adjust_xy = layout_lines_alignside(blk, mask, words, centroid, wl_list, delimiter_len, line_height, spacing, delimiter, False, max_central_width, 
-                                       ref_src_lines=ref_src_lines, srcline_wlist=srcline_wlist)
+        # last try: no collision check / fallback
+        lines, adjust_xy = _layout_once(maxw)
+        if not lines:
+            return "", [0, 0, 0, 0], False, (0, 0)
     
     concated_text = []
     pos_x_lst, pos_right_lst = [], []

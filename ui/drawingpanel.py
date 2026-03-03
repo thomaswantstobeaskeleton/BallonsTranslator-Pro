@@ -227,7 +227,8 @@ class RectPanel(Widget):
         self.methodComboBox.addItems([
             self.tr('Canny + flood'),
             self.tr('Connected Canny'),
-            self.tr('Use existing mask')
+            self.tr('Use existing mask'),
+            self.tr('SAM refine balloon (SAM2/SAM3)')
         ])
         self.methodComboBox.activated.connect(self.on_inpaint_seg_method_changed)
         self.shapeComboBox = QComboBox()
@@ -942,7 +943,11 @@ class DrawingPanel(Widget):
             if mode == 0:
                 im = np.copy(img[y1: y2, x1: x2])
                 maskseg_method = get_maskseg_method()
-                inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=self.canvas.imgtrans_proj.mask_array[y1: y2, x1: x2])
+                # Section 16: pass self_xyxy (full crop) and no neighbors so config cleaning flags apply
+                cleaning_kwargs = {"self_xyxy": [0, 0, float(rw), float(rh)], "neighbor_xyxy_list": []}
+                inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(
+                    im, mask=self.canvas.imgtrans_proj.mask_array[y1: y2, x1: x2], **cleaning_kwargs
+                )
                 mask = self.rectPanel.post_process_mask(inpaint_mask_array)
                 if use_ellipse and ellipse_mask is not None:
                     if mask.ndim == 3:
@@ -956,6 +961,7 @@ class DrawingPanel(Widget):
                 inpaint_dict['need_inpaint'] = need_inpaint
                 inpaint_dict['bground_rgb'] = bground_rgb
                 inpaint_dict['ballon_mask'] = ballon_mask
+                inpaint_dict['is_colored_bubble'] = bub_dict.get('is_colored_bubble', False)
                 user_preview_mask = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
                 user_preview_mask[:, :, [0, 2, 3]] = (mask[:, :, np.newaxis] / 2).astype(np.uint8)
                 self.inpaint_mask_item.setPixmap(ndarray2pixmap(user_preview_mask))
@@ -988,9 +994,11 @@ class DrawingPanel(Widget):
         img = inpaint_dict['img']
         mask = inpaint_dict['mask']
         need_inpaint = inpaint_dict['need_inpaint']
+        # Section 17: colored bubbles must use inpainter (text-only), not median fill
+        use_inpainter = need_inpaint or inpaint_dict.get('is_colored_bubble', False)
         bground_rgb = inpaint_dict['bground_rgb']
         ballon_mask = inpaint_dict['ballon_mask']
-        if not need_inpaint and pcfg.module.check_need_inpaint:
+        if not use_inpainter and pcfg.module.check_need_inpaint:
             bg_pixel_value = [bground_rgb[ii] for ii in range(3)]
             balloon_areas = np.where(ballon_mask > 0)
             if len(img.shape) == 3 and img.shape[2] == 4:

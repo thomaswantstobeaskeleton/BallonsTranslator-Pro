@@ -15,6 +15,11 @@ from .box_utils import expand_blocks
 from ..base import DEVICE_SELECTOR
 from utils.textblock import mit_merge_textlines
 
+try:
+    from utils.split_text_region import split_textblock
+except ImportError:
+    split_textblock = None
+
 os.environ.setdefault("PPOCR_HOME", os.path.join("data", "models", "paddle-ocr"))
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 # Disable oneDNN/MKLDNN to avoid "ConvertPirAttribute2RuntimeAttribute not support" with PP-OCRv5_server_det on some Paddle versions
@@ -63,6 +68,55 @@ def _merge_nearby_blocks(
         if not combined:
             merged.append(blk)
     return merged
+
+
+def _split_block_by_image_gap(
+    img: np.ndarray, blk: TextBlock, min_block_height: int = 40, min_span_height: int = 15
+) -> List[TextBlock]:
+    """If the block appears to span two regions (e.g. two bubbles), split by vertical gap in the crop. Returns [blk] if no split."""
+    if split_textblock is None:
+        return [blk]
+    x1, y1, x2, y2 = blk.xyxy
+    bw, bh = x2 - x1, y2 - y1
+    if bh < min_block_height or bw < 30:
+        return [blk]
+    try:
+        crop = img[y1:y2 + 1, x1:x2 + 1]
+        if crop.size == 0:
+            return [blk]
+        if crop.ndim == 3:
+            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = np.asarray(crop, dtype=np.uint8)
+        span_list, _ = split_textblock(
+            gray, crop_ratio=0, discard=True, shrink=True, recheck=False
+        )
+        if not span_list or len(span_list) < 2:
+            return [blk]
+        out = []
+        for s in span_list:
+            sh = (s.bottom - s.top) if s.bottom is not None and s.top is not None else 0
+            if sh < min_span_height:
+                continue
+            left_im = x1 + (s.left or 0)
+            right_im = x1 + (s.right or bw)
+            top_im = y1 + (s.top or 0)
+            bottom_im = y1 + (s.bottom or bh)
+            if bottom_im - top_im < min_span_height:
+                continue
+            pts = [
+                [left_im, top_im],
+                [right_im, top_im],
+                [right_im, bottom_im],
+                [left_im, bottom_im],
+            ]
+            new_blk = TextBlock(xyxy=[left_im, top_im, right_im, bottom_im], lines=[pts])
+            new_blk.language = getattr(blk, "language", "unknown")
+            new_blk._detected_font_size = max(bottom_im - top_im, 12)
+            out.append(new_blk)
+        return out if len(out) >= 2 else [blk]
+    except Exception:
+        return [blk]
 
 
 _PADDLE_V5_AVAILABLE = False
@@ -116,22 +170,27 @@ if _PADDLE_V5_AVAILABLE:
             "merge_text_lines": {
                 "type": "checkbox",
                 "value": True,
-                "description": "Merge nearby lines into one bubble (recommended for comics / dense text).",
+                "description": "Merge nearby lines into one bubble. When 'Merge overlapping blocks' is off and gap is 0, this is skipped so each line stays one box (keeps two close bubbles separate).",
             },
             "merge_overlapping_blocks": {
                 "type": "checkbox",
                 "value": True,
-                "description": "Merge only overlapping boxes into one (fixes 2 boxes in 1 bubble; keeps separate bubbles separate).",
+                "description": "Merge only overlapping boxes into one (fixes 2 boxes in 1 bubble). Off + gap 0 = no merging at all (one box per detected line).",
             },
             "merge_overlapping_gap_px": {
                 "type": "line_editor",
                 "value": 0,
-                "description": "Max gap (px) to merge. For narrative/vertical text not in bubbles, try 15–30 so nearby chars merge into lines.",
+                "description": "Max gap (px) to merge. 0 = no line grouping (one box per detected line; keeps two close bubbles separate). Use 15–30 only for narrative text.",
             },
             "merge_min_overlap_px": {
                 "type": "line_editor",
                 "value": 50,
                 "description": "Only merge if overlap ≥ this (px). For narrative text use 0 so vertical chars in a line merge.",
+            },
+            "split_cross_bubble_lines": {
+                "type": "checkbox",
+                "value": True,
+                "description": "Split a single detection that spans two bubbles into two blocks (uses image gap detection). Turn off if it splits normal blocks.",
             },
             "box_padding": {
                 "type": "line_editor",
@@ -288,8 +347,22 @@ if _PADDLE_V5_AVAILABLE:
                     cv2.fillPoly(mask, [pts], 255)
             if not blk_list:
                 return mask, blk_list
+            merge_overlap = self.params.get("merge_overlapping_blocks", {}).get("value", True)
+            merge_gap = 0
+            min_overlap = 50
+            try:
+                g = self.params.get("merge_overlapping_gap_px", {})
+                if isinstance(g, dict):
+                    merge_gap = max(0, int(float(g.get("value", 0))))
+                mo = self.params.get("merge_min_overlap_px", {})
+                if isinstance(mo, dict):
+                    min_overlap = max(0, int(float(mo.get("value", 50))))
+            except (TypeError, ValueError):
+                pass
             merge_lines = self.params.get("merge_text_lines", {}).get("value", True)
-            if merge_lines:
+            # Only run line grouping when gap > 0. When gap is 0 we keep one box per detected line
+            # so two close bubbles are never merged by mit_merge_textlines (even if overlap merge is on).
+            if merge_lines and merge_gap > 0 and len(blk_list) > 0:
                 pts_list = [line_pts for blk in blk_list for line_pts in blk.lines]
                 if pts_list:
                     blk_list = mit_merge_textlines(pts_list, width=w, height=h)
@@ -300,19 +373,8 @@ if _PADDLE_V5_AVAILABLE:
                             if pts.ndim == 1:
                                 pts = pts.reshape(-1, 2)
                             cv2.fillPoly(mask, [pts], 255)
-            merge_overlap = self.params.get("merge_overlapping_blocks", {}).get("value", True)
             if merge_overlap and len(blk_list) > 1:
-                gap = 0
-                min_overlap = 50
-                try:
-                    g = self.params.get("merge_overlapping_gap_px", {})
-                    if isinstance(g, dict):
-                        gap = max(0, int(float(g.get("value", 0))))
-                    mo = self.params.get("merge_min_overlap_px", {})
-                    if isinstance(mo, dict):
-                        min_overlap = max(0, int(float(mo.get("value", 50))))
-                except (TypeError, ValueError):
-                    pass
+                gap = merge_gap
                 blk_list = _merge_nearby_blocks(blk_list, gap, min_overlap_px=min_overlap)
                 mask = np.zeros((h, w), dtype=np.uint8)
                 for blk in blk_list:
@@ -321,6 +383,21 @@ if _PADDLE_V5_AVAILABLE:
                         if pts.ndim == 1:
                             pts = pts.reshape(-1, 2)
                         cv2.fillPoly(mask, [pts], 255)
+            split_cross = self.params.get("split_cross_bubble_lines", {}).get("value", True)
+            if split_cross and split_textblock is not None and len(blk_list) > 0:
+                new_list = []
+                for blk in blk_list:
+                    split_blks = _split_block_by_image_gap(img, blk)
+                    new_list.extend(split_blks)
+                if len(new_list) != len(blk_list):
+                    blk_list = new_list
+                    mask = np.zeros((h, w), dtype=np.uint8)
+                    for blk in blk_list:
+                        for line_pts in blk.lines:
+                            pts = np.array(line_pts, dtype=np.int32)
+                            if pts.ndim == 1:
+                                pts = pts.reshape(-1, 2)
+                            cv2.fillPoly(mask, [pts], 255)
             pad_val = 0
             bp = self.params.get("box_padding", {})
             if isinstance(bp, dict):

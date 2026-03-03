@@ -152,3 +152,19 @@ class MissingTranslatorParams(Exception):
 
 class TranslatorNotValid(Exception):
     pass
+
+
+class CriticalTranslationError(Exception):
+    """
+    Raised when translation must stop the batch (auth, quota, rate limit after retries, etc.).
+    Pipeline should show error and stop; do not continue with placeholders.
+    """
+    def __init__(self, message: str, cause=None):
+        self.message = message
+        self.cause = cause
+        super().__init__(message)
+
+    def __str__(self):
+        if self.cause is not None:
+            return f"{self.message}: {self.cause}"
+        return self.message

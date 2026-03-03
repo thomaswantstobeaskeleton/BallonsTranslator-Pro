@@ -139,6 +139,12 @@ class GPTTranslator(BaseTranslator):
     @property
     def max_tokens(self) -> int:
         return self.params['max tokens']
+
+    def is_deterministic(self) -> bool:
+        try:
+            return float(self.temperature) <= 0.0
+        except Exception:
+            return False
     
     @property
     def top_p(self) -> float:
@@ -188,6 +194,10 @@ class GPTTranslator(BaseTranslator):
         """Store previous/next page context for continuity (used when building prompts)."""
         self._translation_context_previous_pages = previous_pages if previous_pages is not None else []
         self._translation_context_next_page = next_page if isinstance(next_page, dict) else None
+        try:
+            super().set_translation_context(previous_pages, project_glossary, series_context_path, next_page)
+        except Exception:
+            pass
 
     def _context_previous_pages_count(self) -> int:
         try:

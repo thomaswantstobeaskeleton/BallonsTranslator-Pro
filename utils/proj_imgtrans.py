@@ -450,6 +450,18 @@ class ProjImgTrans:
             else:
                 ext = pcfg.imgsave_ext
         return osp.join(self.result_dir(), osp.splitext(imgname)[0]+ext)
+
+    def clean_mask_and_inpainted_cache(self) -> None:
+        """Remove mask and inpainted cache files to free disk space (e.g. after export)."""
+        for d in (self.mask_dir(), self.inpainted_dir()):
+            if osp.isdir(d):
+                for name in os.listdir(d):
+                    p = osp.join(d, name)
+                    try:
+                        if osp.isfile(p):
+                            os.remove(p)
+                    except OSError as e:
+                        LOGGER.warning('Failed to remove cache file %s: %s', p, e)
         
     def backup(self):
         raise NotImplementedError

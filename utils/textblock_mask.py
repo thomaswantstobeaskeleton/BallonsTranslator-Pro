@@ -1,10 +1,139 @@
 import cv2
 import numpy as np
-from typing import Tuple
+from typing import Tuple, List, Optional
 from .imgproc_utils import draw_connected_labels
 from .stroke_width_calculator import strokewidth_check
+from .logger import logger as LOGGER
 
 opencv_inpaint = lambda img, mask: cv2.inpaint(img, mask, 3, cv2.INPAINT_NS)
+
+
+def _cleaning_flags_from_kwargs(kwargs: dict) -> Tuple[bool, bool]:
+    """Resolve Section 16 cleaning flags from kwargs or config (pcfg.module)."""
+    try:
+        from .config import pcfg
+        cleaning_otsu = kwargs.get("cleaning_otsu_retry")
+        if cleaning_otsu is None:
+            cleaning_otsu = getattr(pcfg.module, "cleaning_otsu_retry", True)
+        cleaning_adaptive = kwargs.get("cleaning_adaptive_shrink")
+        if cleaning_adaptive is None:
+            cleaning_adaptive = getattr(pcfg.module, "cleaning_adaptive_shrink_junction", True)
+        return bool(cleaning_otsu), bool(cleaning_adaptive)
+    except Exception:
+        return bool(kwargs.get("cleaning_otsu_retry", True)), bool(kwargs.get("cleaning_adaptive_shrink", True))
+
+
+def _build_junction_zone_mask(
+    crop_h: int,
+    crop_w: int,
+    self_xyxy: List[float],
+    other_xyxy_list: List[List[float]],
+    margin_px: int = 12,
+) -> np.ndarray:
+    """
+    Binary mask (crop_h x crop_w), 255 in junction zones: strips along crop edges
+    that face a neighboring block. Used so we apply smaller shrink there (no pinching).
+    """
+    if not other_xyxy_list or margin_px <= 0:
+        return np.zeros((crop_h, crop_w), dtype=np.uint8)
+    try:
+        x1, y1, x2, y2 = float(self_xyxy[0]), float(self_xyxy[1]), float(self_xyxy[2]), float(self_xyxy[3])
+    except (IndexError, TypeError):
+        return np.zeros((crop_h, crop_w), dtype=np.uint8)
+    junction = np.zeros((crop_h, crop_w), dtype=np.uint8)
+    use_left = use_right = use_top = use_bottom = False
+    for o in other_xyxy_list:
+        if not o or len(o) < 4:
+            continue
+        ox1, oy1, ox2, oy2 = float(o[0]), float(o[1]), float(o[2]), float(o[3])
+        if not (oy2 <= y1 or oy1 >= y2):
+            if ox2 <= x1 + margin_px and x1 - ox2 <= margin_px * 2:
+                use_left = True
+            if ox1 >= x2 - margin_px and ox1 - x2 <= margin_px * 2:
+                use_right = True
+        if not (ox2 <= x1 or ox1 >= x2):
+            if oy2 <= y1 + margin_px and y1 - oy2 <= margin_px * 2:
+                use_top = True
+            if oy1 >= y2 - margin_px and oy1 - y2 <= margin_px * 2:
+                use_bottom = True
+    m = min(margin_px, crop_w // 2, crop_h // 2)
+    if m <= 0:
+        return junction
+    if use_left:
+        junction[:, :m] = 255
+    if use_right:
+        junction[:, crop_w - m:] = 255
+    if use_top:
+        junction[:m, :] = 255
+    if use_bottom:
+        junction[crop_h - m:, :] = 255
+    return junction
+
+
+def _adaptive_shrink_ballon(
+    ballon_mask: np.ndarray,
+    junction_mask: np.ndarray,
+    full_shrink_px: int = 1,
+    junction_shrink_px: int = 0,
+) -> np.ndarray:
+    """Erode ballon_mask with full_shrink_px; in junction zones use junction_shrink_px (smaller)."""
+    if full_shrink_px <= 0:
+        return ballon_mask
+    if junction_mask is None or junction_mask.size == 0 or np.max(junction_mask) == 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * full_shrink_px + 1,) * 2)
+        return cv2.erode(ballon_mask, kernel)
+    kernel_full = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * full_shrink_px + 1,) * 2)
+    eroded_full = cv2.erode(ballon_mask, kernel_full)
+    if junction_shrink_px <= 0:
+        return np.where(junction_mask > 0, ballon_mask, eroded_full).astype(np.uint8)
+    kernel_j = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * junction_shrink_px + 1,) * 2)
+    eroded_j = cv2.erode(ballon_mask, kernel_j)
+    return np.where(junction_mask > 0, eroded_j, eroded_full).astype(np.uint8)
+
+
+def classify_bubble_colored(
+    img: np.ndarray,
+    ballon_mask: np.ndarray,
+    text_mask: np.ndarray,
+    min_interior_pixels: int = 64,
+) -> bool:
+    """
+    Section 17: Classify bubble interior via grayscale histogram + ratios.
+    Returns True if the bubble is colored/gradient (not plain white/light), so we should
+    inpaint only the text mask instead of median-filling the whole balloon.
+    """
+    if img is None or img.size == 0 or ballon_mask is None or text_mask is None:
+        return False
+    if img.shape[:2] != ballon_mask.shape[:2] or ballon_mask.shape != text_mask.shape:
+        return False
+    interior = (ballon_mask > 127) & (text_mask <= 127)
+    n = int(np.sum(interior))
+    if n < min_interior_pixels:
+        return False
+    if len(img.shape) == 3 and img.shape[2] >= 3:
+        rgb = img[:, :, :3]
+        if img.shape[2] == 4:
+            rgb = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+        px = rgb[interior]
+        gray = 0.299 * px[:, 0] + 0.587 * px[:, 1] + 0.114 * px[:, 2]
+    else:
+        gray = np.asarray(img, dtype=np.float64)
+        if gray.ndim == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        gray = gray[interior]
+    g_mean = float(np.mean(gray))
+    g_std = float(np.std(gray))
+    if g_mean < 240:
+        return True
+    if g_std > 25:
+        return True
+    if len(img.shape) == 3 and img.shape[2] >= 3:
+        px = img[:, :, :3][interior]
+        ch_std = np.std(px, axis=0)
+        if np.max(ch_std) > 18:
+            return True
+    return False
+
 
 def show_img_by_dict(imgdicts):
     for keyname in imgdicts.keys():
@@ -12,29 +141,35 @@ def show_img_by_dict(imgdicts):
     cv2.waitKey(0)
 
 # 计算文本rgb均值
-def letter_calculator(img, mask, bground_rgb, show_process=False):
+def letter_calculator(img, mask, bground_rgb, show_process=False, use_otsu=False):
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    # rgb to grey
     aver_bground_rgb = 0.299 * bground_rgb[0] + 0.587 * bground_rgb[1] + 0.114 * bground_rgb[2]
     thresh_low = 127
-    retval, threshed = cv2.threshold(gray, 127, 255, cv2.THRESH_OTSU)
-
+    if use_otsu:
+        retval, threshed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    else:
+        retval, threshed = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
     if aver_bground_rgb < thresh_low:
         threshed = 255 - threshed
     threshed = 255 - threshed
 
-    
     threshed = cv2.bitwise_and(threshed, mask)
-    le_region = np.where(threshed==255)
+    le_region = np.where(threshed == 255)
     mat_region = img[le_region]
 
+    if mat_region.shape[0] == 0 and not use_otsu:
+        # Second chance: Otsu thresholding (section 16)
+        retval, threshed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if aver_bground_rgb < thresh_low:
+            threshed = 255 - threshed
+        threshed = 255 - threshed
+        threshed = cv2.bitwise_and(threshed, mask)
+        le_region = np.where(threshed == 255)
+        mat_region = img[le_region]
+
     if mat_region.shape[0] == 0:
-        # retval, threshed = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
-        # cv2.imshow("xxx", threshed)
-        # cv2.imshow("2xxx", img)
-        # cv2.waitKey(0)
         return [-1, -1, -1], threshed
-    
+
     letter_rgb = np.mean(mat_region, axis=0).astype(int).tolist()
     
     if show_process:
@@ -98,7 +233,8 @@ def bground_calculator(buble_img, back_ground_mask, dilate=True):
     return bground_aver, bground_region, sd
 
 # 输入：文本块roi，分割出文本mask，根据mask计算文本bgr均值和标准差，决定纯色覆盖/inpaint修复
-def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
+def canny_flood(img, show_process=False, inpaint_sdthresh=10, force_otsu=False, **kwargs):
+    cleaning_otsu_retry, cleaning_adaptive_shrink = _cleaning_flags_from_kwargs(kwargs)
     # cv2.setNumThreads(4)
     WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
@@ -159,8 +295,17 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
     retval, ballon_mask = cv2.threshold(ballon_mask, 1, 255, cv2.THRESH_BINARY)
     ballon_mask = cv2.bitwise_not(ballon_mask, ballon_mask)
 
+    # Section 16: adaptive shrink in junction zones (smaller shrink near conjoined bubbles)
+    self_xyxy = kwargs.get("self_xyxy")
+    other_xyxy_list = kwargs.get("neighbor_xyxy_list") or []
+    if self_xyxy and len(self_xyxy) >= 4 and (other_xyxy_list or cleaning_adaptive_shrink):
+        jmask = _build_junction_zone_mask(h, w, self_xyxy, other_xyxy_list, margin_px=12)
+        if np.max(jmask) > 0:
+            ballon_mask = _adaptive_shrink_ballon(ballon_mask, jmask, full_shrink_px=1, junction_shrink_px=0)
+
     detected_edges = cv2.dilate(detected_edges, kernel, iterations = 1)
     for ii in range(2):
+        ballon_mask_prev = ballon_mask.copy()
         detected_edges = cv2.bitwise_and(detected_edges, ballon_mask)
         mask = np.copy(detected_edges)
         bgarea1, _, _, rect = cv2.floodFill(mask, mask=None, seedPoint=(0, 0),  flags=4, newVal=(127), loDiff=(difres, difres, difres), upDiff=(difres, difres, difres))
@@ -168,6 +313,10 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
         txt_area = min(img_area - bgarea1, img_area - bgarea2)
         ratio_ob = txt_area / outer_area
         ballon_mask = cv2.erode(ballon_mask, kernel,iterations = 1)
+        if self_xyxy and len(self_xyxy) >= 4 and (other_xyxy_list or cleaning_adaptive_shrink):
+            jmask = _build_junction_zone_mask(h, w, self_xyxy, other_xyxy_list, margin_px=12)
+            if np.max(jmask) > 0:
+                ballon_mask = np.where(jmask > 0, ballon_mask_prev, ballon_mask).astype(np.uint8)
         if ratio_ob < 0.85:
             break
 
@@ -186,7 +335,7 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
     threshed = np.zeros((img.shape[0], img.shape[1]), np.uint8)
 
     if bground_aver[0] != -1:
-        letter_aver, threshed = letter_calculator(img, mask, bground_aver, show_process=show_process)
+        letter_aver, threshed = letter_calculator(img, mask, bground_aver, show_process=show_process, use_otsu=force_otsu)
         if letter_aver[0] != -1:
             mask = cv2.dilate(threshed, kernel, iterations=1)
             inner_rect = cv2.boundingRect(cv2.findNonZero(mask))
@@ -196,6 +345,14 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
         need_inpaint = False
     else:
         need_inpaint = True
+    is_colored = False
+    try:
+        if getattr(__import__("utils.config", fromlist=["pcfg"]).pcfg.module, "colored_bubble_handling", True):
+            is_colored = classify_bubble_colored(img, ballon_mask, mask, min_interior_pixels=64)
+            if is_colored:
+                need_inpaint = True
+    except Exception:
+        pass
     if show_process:
         print(f"\nneed_inpaint: {need_inpaint}, sd: {sd}, {type(inner_rect)}")
         show_img_by_dict({"outermask": ballon_mask, "detect": detected_edges, "mask": mask})
@@ -212,12 +369,26 @@ def canny_flood(img, show_process=False, inpaint_sdthresh=10, **kwargs):
     bub_dict = {"rgb": letter_aver,
                 "bground_rgb": bground_aver,
                 "inner_rect": inner_rect,
-                "need_inpaint": need_inpaint}
+                "need_inpaint": need_inpaint,
+                "is_colored_bubble": is_colored}
+    
+    # Section 16: Otsu retry if fixed threshold gave empty/invalid result
+    if not force_otsu and cleaning_otsu_retry:
+        bad = (
+            (mask is None or mask.size == 0 or np.sum(mask > 0) == 0)
+            or (isinstance(letter_aver, (list, tuple)) and len(letter_aver) >= 1 and letter_aver[0] == -1)
+        )
+        if bad:
+            return canny_flood(
+                img, show_process=show_process, inpaint_sdthresh=inpaint_sdthresh,
+                force_otsu=True, **{k: v for k, v in kwargs.items() if k not in ("force_otsu",)}
+            )
     
     return mask, ballon_mask, bub_dict
 
 # 输入：文本块roi，分割出文本mask，根据mask计算文本bgr均值和标准差，决定纯色覆盖/inpaint修复
-def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_strokewidth_check=0, **kwargs):
+def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_strokewidth_check=0, force_otsu=False, **kwargs):
+    cleaning_otsu_retry, cleaning_adaptive_shrink = _cleaning_flags_from_kwargs(kwargs)
 
     # Handle RGBA images by converting to RGB for processing
     if len(img.shape) == 3 and img.shape[2] == 4:
@@ -310,11 +481,25 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
     chanel = img[:, :, channel_index] if channel_index < 3 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     ret, thresh = cv2.threshold(chanel, 1, 255, cv2.THRESH_OTSU+cv2.THRESH_BINARY)
     
+    # Optional: fixed threshold first, then Otsu on retry (section 16)
+    if force_otsu:
+        pass  # already Otsu above
+    # else we keep Otsu for connected path; retry below if result bad
+    
     # reverse to get white text on black bg
     if reverse:
         thresh = 255 - thresh
     num_labels, labels, stats, centroids, ballon_mask = find_outermask(thresh)
     img_area = img.shape[0] * img.shape[1]
+
+    # Section 16: adaptive shrink in junction zones
+    self_xyxy = kwargs.get("self_xyxy")
+    other_xyxy_list = kwargs.get("neighbor_xyxy_list") or []
+    if self_xyxy and len(self_xyxy) >= 4 and (other_xyxy_list or cleaning_adaptive_shrink):
+        jmask = _build_junction_zone_mask(ballon_mask.shape[0], ballon_mask.shape[1], self_xyxy, other_xyxy_list, margin_px=12)
+        if np.max(jmask) > 0:
+            ballon_mask = _adaptive_shrink_ballon(ballon_mask, jmask, full_shrink_px=1, junction_shrink_px=0)
+
     text_mask = np.zeros((img.shape[0], img.shape[1]), np.uint8)
     max_ind = np.argmax(stats[:, 4])
     for lab in (range(num_labels)):
@@ -342,6 +527,14 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
         need_inpaint = False
     else:
         need_inpaint = True
+    is_colored = False
+    try:
+        if getattr(__import__("utils.config", fromlist=["pcfg"]).pcfg.module, "colored_bubble_handling", True):
+            is_colored = classify_bubble_colored(img, ballon_mask, text_mask, min_interior_pixels=64)
+            if is_colored:
+                need_inpaint = True
+    except Exception:
+        pass
 
     if show_process:
         print(f"\nuse inpaint: {need_inpaint}, sd: {sd}, {type(inner_rect)}")
@@ -352,14 +545,272 @@ def connected_canny_flood(img, show_process=False, inpaint_sdthresh=10, apply_st
     bub_dict = {"rgb": text_color,
                 "bground_rgb": bground_aver,
                 "inner_rect": inner_rect,
-                "need_inpaint": need_inpaint}
+                "need_inpaint": need_inpaint,
+                "is_colored_bubble": is_colored}
+    
+    # Section 16: Otsu retry (retry whole cleaning with force_otsu)
+    if not force_otsu and cleaning_otsu_retry:
+        bad = (
+            (mask is None or mask.size == 0 or np.sum(mask > 0) == 0)
+            or (text_color is not None and np.all(np.array(text_color) == 0))
+        )
+        if bad:
+            return connected_canny_flood(
+                img, show_process=show_process, inpaint_sdthresh=inpaint_sdthresh,
+                apply_strokewidth_check=apply_strokewidth_check, force_otsu=True,
+                **{k: v for k, v in kwargs.items() if k != "force_otsu"}
+            )
     
     return mask, ballon_mask, bub_dict
 
 
 def existing_mask(img, mask: np.ndarray):
-    bub_dict = {"rgb": [0, 0, 0],"bground_rgb": [255, 255, 255],"need_inpaint": True}
+    bub_dict = {"rgb": [0, 0, 0],"bground_rgb": [255, 255, 255],"need_inpaint": True, "is_colored_bubble": False}
     return mask, mask, bub_dict
+
+
+_SAM_REFINER = None
+_SAM_REFINER_INIT_ERR = None
+_SAM_REFINER_WARNED = False
+
+
+def _clamp(v: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(v)))
+
+
+def _bbox_from_mask(mask: np.ndarray, pad: int = 0) -> Tuple[int, int, int, int]:
+    ys, xs = np.where(mask > 0)
+    if ys.size == 0 or xs.size == 0:
+        return -1, -1, -1, -1
+    y1 = int(ys.min())
+    y2 = int(ys.max()) + 1
+    x1 = int(xs.min())
+    x2 = int(xs.max()) + 1
+    if pad > 0:
+        h, w = mask.shape[:2]
+        x1 = _clamp(x1 - pad, 0, w - 1)
+        y1 = _clamp(y1 - pad, 0, h - 1)
+        x2 = _clamp(x2 + pad, 1, w)
+        y2 = _clamp(y2 + pad, 1, h)
+    return x1, y1, x2, y2
+
+
+def _point_from_mask(mask: np.ndarray) -> Tuple[int, int]:
+    ys, xs = np.where(mask > 0)
+    if ys.size == 0 or xs.size == 0:
+        h, w = mask.shape[:2]
+        return int(w // 2), int(h // 2)
+    return int(xs.mean()), int(ys.mean())
+
+
+class _SamMaskRefiner:
+    def __init__(self, model_id: str, device: str = "") -> None:
+        self.model_id = (model_id or "").strip() or "facebook/sam2.1-hiera-large"
+        self._device_pref = (device or "").strip().lower()
+        self._model = None
+        self._processor = None
+        self._backend = None  # "sam2" | "sam3"
+
+    def _resolve_device(self):
+        import torch
+
+        if self._device_pref in {"cuda", "cpu"}:
+            return self._device_pref
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    def _ensure_loaded(self):
+        if self._model is not None and self._processor is not None:
+            return
+
+        # Lazy import so the app still works without SAM-capable transformers.
+        model_id = self.model_id
+        device = self._resolve_device()
+
+        try:
+            if "sam3" in model_id.lower():
+                from transformers import Sam3TrackerModel, Sam3TrackerProcessor
+
+                self._backend = "sam3"
+                self._processor = Sam3TrackerProcessor.from_pretrained(model_id)
+                self._model = Sam3TrackerModel.from_pretrained(model_id)
+            else:
+                from transformers import Sam2Model, Sam2Processor
+
+                self._backend = "sam2"
+                self._processor = Sam2Processor.from_pretrained(model_id)
+                self._model = Sam2Model.from_pretrained(model_id)
+        except Exception as e:
+            raise RuntimeError(
+                "SAM refine balloon requires a newer `transformers` build with SAM2/SAM3 classes, "
+                f"and access to the model ({model_id}). Original error: {e}"
+            ) from e
+
+        try:
+            self._model.to(device)
+        except Exception:
+            pass
+
+        try:
+            self._model.eval()
+        except Exception:
+            pass
+
+    def _select_best_mask(self, cand_masks: np.ndarray, coarse_mask: np.ndarray) -> np.ndarray:
+        """
+        cand_masks: (K, H, W) bool/uint8
+        coarse_mask: (H, W) uint8
+        """
+        if cand_masks is None or cand_masks.size == 0:
+            return None
+        coarse = (coarse_mask > 0)
+        best_iou = -1.0
+        best = None
+        for k in range(int(cand_masks.shape[0])):
+            m = cand_masks[k].astype(bool)
+            inter = float(np.logical_and(m, coarse).sum())
+            union = float(np.logical_or(m, coarse).sum())
+            iou = inter / union if union > 0 else 0.0
+            if iou > best_iou:
+                best_iou = iou
+                best = m
+        return best
+
+    def refine(self, img_rgb: np.ndarray, coarse_mask: np.ndarray, pad_px: int = 12) -> np.ndarray:
+        self._ensure_loaded()
+
+        if coarse_mask is None or coarse_mask.size == 0:
+            return None
+
+        # Normalize inputs
+        if img_rgb.ndim == 3 and img_rgb.shape[2] == 4:
+            img_rgb = cv2.cvtColor(img_rgb, cv2.COLOR_RGBA2RGB)
+
+        h, w = img_rgb.shape[:2]
+        x1, y1, x2, y2 = _bbox_from_mask(coarse_mask, pad=int(pad_px))
+        if x1 < 0 or y1 < 0 or x2 <= x1 or y2 <= y1:
+            return None
+
+        from PIL import Image
+        import torch
+
+        image = Image.fromarray(img_rgb.astype(np.uint8), mode="RGB")
+        device = getattr(self._model, "device", None) or self._resolve_device()
+
+        if self._backend == "sam3":
+            px, py = _point_from_mask(coarse_mask)
+            input_points = [[[[int(px), int(py)]]]]
+            input_labels = [[[1]]]
+            inputs = self._processor(
+                images=image,
+                input_points=input_points,
+                input_labels=input_labels,
+                return_tensors="pt",
+            )
+        else:
+            input_boxes = torch.tensor([[[float(x1), float(y1), float(x2), float(y2)]]])
+            inputs = self._processor(images=image, input_boxes=input_boxes, return_tensors="pt")
+
+        try:
+            inputs = inputs.to(device)
+        except Exception:
+            pass
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        # post_process_masks returns a list per image; each is typically (num_objects, num_masks, H, W)
+        try:
+            pp = self._processor.post_process_masks(outputs.pred_masks, inputs["original_sizes"])
+        except Exception:
+            # Some builds expect CPU tensors
+            pp = self._processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])
+        masks = pp[0]
+
+        # Flatten to (K, H, W)
+        if hasattr(masks, "cpu"):
+            masks_np = masks.cpu().numpy()
+        else:
+            masks_np = np.asarray(masks)
+
+        if masks_np.ndim == 4:
+            # (Nobj, Nmasks, H, W) -> take first object, all candidate masks
+            masks_np = masks_np[0]
+        elif masks_np.ndim == 3:
+            pass
+        else:
+            return None
+
+        # Threshold
+        cand = masks_np > 0.5
+        best = self._select_best_mask(cand, coarse_mask)
+        if best is None:
+            return None
+
+        refined = (best.astype(np.uint8) * 255)
+        # Ensure same size as input
+        if refined.shape[0] != h or refined.shape[1] != w:
+            refined = cv2.resize(refined, (w, h), interpolation=cv2.INTER_NEAREST)
+        return refined
+
+
+def _get_sam_refiner() -> _SamMaskRefiner:
+    global _SAM_REFINER, _SAM_REFINER_INIT_ERR
+    if _SAM_REFINER is not None:
+        return _SAM_REFINER
+    if _SAM_REFINER_INIT_ERR is not None:
+        raise _SAM_REFINER_INIT_ERR
+
+    try:
+        from utils.config import pcfg
+
+        model_id = getattr(pcfg.drawpanel, "sam_maskrefine_model_id", "") or "facebook/sam2.1-hiera-large"
+        device = getattr(pcfg.drawpanel, "sam_maskrefine_device", "") or ""
+    except Exception:
+        model_id = "facebook/sam2.1-hiera-large"
+        device = ""
+
+    try:
+        _SAM_REFINER = _SamMaskRefiner(model_id=model_id, device=device)
+        return _SAM_REFINER
+    except Exception as e:
+        _SAM_REFINER_INIT_ERR = e
+        raise
+
+
+def sam_refine_ballon_mask(img, show_process=False, inpaint_sdthresh=10, **kwargs):
+    """
+    Mask-seg method: run existing canny+flood, then refine the balloon mask with SAM2/SAM3.
+
+    - If SAM isn't available (missing/old transformers, model access), falls back to `canny_flood`.
+    - Returns (text_mask, balloon_mask, bub_dict) like other methods.
+    """
+    # Start from the current stable heuristic
+    text_mask, ballon_mask, bub_dict = canny_flood(img, show_process=show_process, inpaint_sdthresh=inpaint_sdthresh, **kwargs)
+
+    if ballon_mask is None or ballon_mask.size == 0:
+        return text_mask, ballon_mask, bub_dict
+
+    try:
+        from utils.config import pcfg
+
+        pad_px = int(getattr(pcfg.drawpanel, "sam_maskrefine_padding_px", 12) or 12)
+    except Exception:
+        pad_px = 12
+
+    try:
+        refiner = _get_sam_refiner()
+        refined = refiner.refine(img, ballon_mask, pad_px=pad_px)
+        if refined is not None and refined.size > 0:
+            ballon_mask = refined
+            if text_mask is not None and text_mask.shape == ballon_mask.shape:
+                text_mask = cv2.bitwise_and(text_mask, ballon_mask)
+    except Exception as e:
+        global _SAM_REFINER_WARNED
+        if not _SAM_REFINER_WARNED:
+            _SAM_REFINER_WARNED = True
+            LOGGER.warning(f"SAM refine balloon unavailable; falling back to Canny+flood. ({e})")
+
+    return text_mask, ballon_mask, bub_dict
 
 
 def extract_ballon_mask(img: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

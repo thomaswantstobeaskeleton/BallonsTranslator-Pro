@@ -33,8 +33,8 @@ def _post_process(text: str) -> str:
 def _load_tflite_and_tokenizer(cache_dir: str):
     global _interpreter_enc, _interpreter_dec, _tokenizer
     try:
-        from huggingface_hub import snapshot_download
-        root = snapshot_download("bluolightning/manga-ocr-mobile", cache_dir=cache_dir or None)
+        from utils.model_manager import get_model_manager
+        root = get_model_manager().snapshot_download("bluolightning/manga-ocr-mobile", cache_dir=cache_dir)
         base = os.path.join(root, "v1_fp16")
         enc_path = os.path.join(base, "encoder.tflite")
         dec_path = os.path.join(base, "decoder.tflite")

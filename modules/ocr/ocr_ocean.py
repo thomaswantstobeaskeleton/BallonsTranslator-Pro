@@ -167,8 +167,8 @@ if _OCEAN_AVAILABLE:
             # Ocean-OCR custom code (processor_ocean, etc.) lives in the HF repo; add to path so
             # transformers' check_imports can find it when loading trust_remote_code.
             try:
-                from huggingface_hub import snapshot_download
-                ocean_repo_path = snapshot_download(repo_id=model_name)
+                from utils.model_manager import get_model_manager
+                ocean_repo_path = get_model_manager().snapshot_download(model_name)
                 if ocean_repo_path and ocean_repo_path not in sys.path:
                     sys.path.insert(0, ocean_repo_path)
             except Exception as e:

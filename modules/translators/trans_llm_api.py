@@ -17,6 +17,7 @@ from utils.series_context_store import (
     merge_glossary_no_dupes,
 )
 from .base import BaseTranslator, register_translator
+from .exceptions import CriticalTranslationError
 
 
 class InvalidNumTranslations(Exception):
@@ -111,11 +112,12 @@ class LLM_API_Translator(BaseTranslator):
             "value": (
                 "You are an expert translator for comics and dialogue. Translate the given text snippets naturally and concisely. "
                 "Use consistent terminology for the same concept (e.g. stick to one term for recurring ideas). "
+                "Cohesion and styling: keep dialogue tone consistent and match character voice across snippets. "
                 "Output MUST be valid JSON only: a single object with key 'translations', a list of objects with 'id' (integer) and 'translation' (string). "
                 "No markdown, no code fences, no extra text.\n"
                 "Example: {\"translations\": [{\"id\": 1, \"translation\": \"Translated text.\"}]}"
             ),
-            "description": "System message for the LLM. For z-ai/glm-4.5-air and similar: keep it short; emphasize JSON-only output and consistent terms.",
+            "description": "Section 18: Dedicated translation system prompt (cohesion rules, styling guide). For z-ai/glm-4.5-air: keep short; emphasize JSON-only and consistent terms.",
         },
         "translation_glossary": {
             "type": "editor",
@@ -283,6 +285,11 @@ class LLM_API_Translator(BaseTranslator):
         self._translation_project_glossary = project_glossary or []
         if series_context_path is not None:
             self._translation_series_context_path = (series_context_path or "").strip()
+        # Also store for base cache key
+        try:
+            super().set_translation_context(previous_pages, project_glossary, series_context_path, next_page)
+        except Exception:
+            pass
 
     def append_page_to_series_context(self, series_context_path: str, sources: List[str], translations: List[str]) -> None:
         """Append one translated page to the series context store for cross-chapter consistency."""
@@ -310,8 +317,16 @@ class LLM_API_Translator(BaseTranslator):
             series_glossary,
         )
         if glossary_entries:
-            gl_str = "; ".join(f"{s} -> {t}" for s, t in glossary_entries)
-            parts.append(f"\n\nUse these exact translations for terms when they appear: {gl_str}")
+            # Section 18: Rosetta-style models get glossary as JSON list for systematic injection
+            model_name = (self.override_model or self.model or "").strip()
+            if ": " in model_name:
+                model_name = model_name.split(": ", 1)[1]
+            if "rosetta" in model_name.lower():
+                gl_list = json.dumps([{"source": s, "target": t} for s, t in glossary_entries], ensure_ascii=False)
+                parts.append(f"\n\nGlossary (use these exact translations when the source term appears):\n{gl_list}")
+            else:
+                gl_str = "; ".join(f"{s} -> {t}" for s, t in glossary_entries)
+                parts.append(f"\n\nUse these exact translations for terms when they appear: {gl_str}")
         series = (self.get_param_value("series_context_prompt") or "").strip()
         if series:
             parts.append(f"\n\nContext: {series}")
@@ -324,9 +339,9 @@ class LLM_API_Translator(BaseTranslator):
         except (TypeError, ValueError):
             return 0
 
-    def _initialize_client(self, api_key_to_use: str) -> bool:
+    def _initialize_client(self, api_key_to_use: str, provider_override: Optional[str] = None) -> bool:
         endpoint = self.endpoint
-        provider = self.provider
+        provider = provider_override or self.provider
         if not endpoint:
             if provider == "Google":
                 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -365,6 +380,50 @@ class LLM_API_Translator(BaseTranslator):
             self.logger.error(f"Failed to initialize OpenAI client: {e}")
             self.client = None
             return False
+
+    def is_deterministic(self) -> bool:
+        try:
+            return float(self.temperature) <= 0.0
+        except Exception:
+            return False
+
+    def _effective_provider_for_model(self) -> str:
+        """
+        If user picked a model with a provider prefix (e.g. "GGL: ...") but provider selector mismatches,
+        route to the implied provider to avoid sending Gemini model names to OpenAI endpoints, etc.
+        """
+        try:
+            if self.override_model:
+                return self.provider
+            m = (self.model or "").strip()
+            if ": " in m:
+                prefix = m.split(": ", 1)[0].strip().upper()
+                if prefix == "OAI":
+                    return "OpenAI"
+                if prefix == "GGL":
+                    return "Google"
+                if prefix == "XAI":
+                    return "Grok"
+                if prefix == "OPENROUTER":
+                    return "OpenRouter"
+            return self.provider
+        except Exception:
+            return self.provider
+
+    def _build_generation_config(self, provider: str, model_name: str) -> dict:
+        """
+        Section 18: Central (provider, model) -> API param names, reasoning toggles, max token caps.
+        Returns dict to merge into chat completion api_args.
+        """
+        cfg = {}
+        if provider == "OpenAI":
+            cfg["frequency_penalty"] = self.frequency_penalty
+            cfg["presence_penalty"] = self.presence_penalty
+        max_tok = self.max_tokens
+        if provider == "Google" and max_tok > 8192:
+            max_tok = 8192
+        cfg["max_tokens"] = max_tok
+        return cfg
 
     # --- Property getters ---
     @property
@@ -539,7 +598,7 @@ class LLM_API_Translator(BaseTranslator):
             self._respect_delay()
             try:
                 for prompt, num_src in self._assemble_prompts([src], to_lang=to_lang):
-                    parsed = self._request_translation(prompt)
+                    parsed = self._request_translation(prompt, expected_count=1)
                     if (
                         parsed
                         and parsed.translations
@@ -613,8 +672,20 @@ class LLM_API_Translator(BaseTranslator):
             self.logger.error("No API keys provided in parameters.")
             return None
 
+        def _warn_if_invalid(provider: str, key: str) -> None:
+            try:
+                from utils.validation import validate_api_key
+                ok, msg = validate_api_key(provider, key, strict=False)
+                if not ok and msg:
+                    self.logger.warning("API key validation: %s", msg)
+            except Exception:
+                pass
+
+        provider = self._effective_provider_for_model()
+
         if not api_keys:
             if self._respect_key_limit(single_key):
+                _warn_if_invalid(provider, single_key)
                 now = time.time()
                 count, start_time = self.key_usage.get(single_key, (0, now))
                 if now - start_time >= 60:
@@ -629,6 +700,7 @@ class LLM_API_Translator(BaseTranslator):
             index = (start_index + i) % len(api_keys)
             key = api_keys[index]
             if self._respect_key_limit(key):
+                _warn_if_invalid(provider, key)
                 now = time.time()
                 count, start_time = self.key_usage.get(key, (0, now))
                 self.key_usage[key] = (count + 1, start_time)
@@ -733,6 +805,32 @@ class LLM_API_Translator(BaseTranslator):
                 break
         return out if out else []
 
+    def _parse_numbered_list_response(self, raw: str, expected_count: Optional[int] = None) -> Optional[List[dict]]:
+        """
+        Section 18: Parse "1: ..." / "1. ..." style responses; fill missing IDs with [missing] placeholder.
+        Returns list of {"id": i, "translation": str}. If expected_count given, list has ids 1..expected_count;
+        otherwise uses max id found in raw.
+        """
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        pattern = re.compile(r"^\s*(\d+)\s*[.:)]\s*(.*)$", re.MULTILINE)
+        found = {}
+        for m in pattern.finditer(raw):
+            idx = int(m.group(1))
+            text = (m.group(2) or "").strip()
+            if 1 <= idx <= (expected_count or 999):
+                found[idx] = text
+        if not found:
+            return None
+        count = expected_count if expected_count is not None else max(found.keys())
+        count = max(count, max(found.keys()))
+        placeholder = "[missing]"
+        return [
+            {"id": i, "translation": found.get(i, placeholder)}
+            for i in range(1, count + 1)
+        ]
+
     def _request_raw_completion(
         self, messages: List[dict], max_tokens: int = 1024
     ) -> Optional[str]:
@@ -759,17 +857,41 @@ class LLM_API_Translator(BaseTranslator):
             return completion.choices[0].message.content.strip()
         return None
 
+    def request_custom_completion(
+        self, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+    ) -> Optional[str]:
+        """
+        One-off completion with custom system and user prompts (e.g. for ensemble judge).
+        Uses same API key/client as normal translation. Returns content string or None.
+        """
+        provider = self._effective_provider_for_model()
+        current_api_key = "lm-studio" if provider == "LLM Studio" else self._select_api_key()
+        if not current_api_key and provider != "LLM Studio":
+            self.logger.warning("No API key for custom completion.")
+            return None
+        if provider == "LLM Studio" and not self.endpoint:
+            return None
+        if not self._initialize_client(current_api_key, provider_override=provider):
+            return None
+        self._respect_delay()
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        return self._request_raw_completion(messages, max_tokens=max_tokens)
+
     def _request_context_summary(self, long_context: str, max_chars: int) -> str:
         """Ask the model to summarize long_context to under max_chars; on failure, truncate."""
         current_api_key = "lm-studio"
-        if self.provider != "LLM Studio":
+        provider = self._effective_provider_for_model()
+        if provider != "LLM Studio":
             current_api_key = self._select_api_key()
             if not current_api_key:
                 self.logger.warning("No API key for context summary; truncating.")
                 return "...\n" + long_context[-max_chars:]
-        if self.provider == "LLM Studio" and not self.endpoint:
+        if provider == "LLM Studio" and not self.endpoint:
             return "...\n" + long_context[-max_chars:]
-        if not self._initialize_client(current_api_key):
+        if not self._initialize_client(current_api_key, provider_override=provider):
             return "...\n" + long_context[-max_chars:]
         self._respect_delay()
         system = (
@@ -790,19 +912,20 @@ class LLM_API_Translator(BaseTranslator):
             return summary
         return "...\n" + long_context[-max_chars:]
 
-    def _request_translation(self, prompt: str) -> Optional[TranslationResponse]:
+    def _request_translation(self, prompt: str, expected_count: Optional[int] = None) -> Optional[TranslationResponse]:
+        provider = self._effective_provider_for_model()
         current_api_key = "lm-studio"
-        if self.provider != "LLM Studio":
+        if provider != "LLM Studio":
             current_api_key = self._select_api_key()
             if not current_api_key:
                 raise ConnectionError("No available API key found.")
 
-        if self.provider == "LLM Studio" and not self.endpoint:
+        if provider == "LLM Studio" and not self.endpoint:
             raise ValueError(
                 "Endpoint must be specified when using the LLM Studio provider (e.g., http://localhost:1234/v1)."
             )
 
-        if not self._initialize_client(current_api_key):
+        if not self._initialize_client(current_api_key, provider_override=provider):
             raise ConnectionError("Failed to initialize API client.")
 
         self._respect_delay()
@@ -810,6 +933,15 @@ class LLM_API_Translator(BaseTranslator):
         model_name = self.override_model or self.model
         if ": " in model_name:
             model_name = model_name.split(": ", 1)[1]
+
+        # Section 9: remember last-used model per provider for config / UI
+        try:
+            from utils import config as utils_config
+            if not hasattr(utils_config.pcfg, "translator_last_model_by_provider"):
+                utils_config.pcfg.translator_last_model_by_provider = {}
+            utils_config.pcfg.translator_last_model_by_provider[provider] = model_name
+        except Exception:
+            pass
 
         messages = [
             {"role": "system", "content": self._build_system_prompt()},
@@ -823,20 +955,26 @@ class LLM_API_Translator(BaseTranslator):
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
         }
+        api_args.update(self._build_generation_config(provider, model_name))
 
-        if self.provider == "LLM Studio":
+        # Section 18: OpenRouter reasoning models may need higher max_tokens
+        if provider == "OpenRouter":
+            try:
+                from utils.endpoints.openrouter import openrouter_is_reasoning_model
+                if openrouter_is_reasoning_model(current_api_key, model_name, self.proxy):
+                    api_args["max_tokens"] = max(api_args.get("max_tokens", 4096), 8192)
+            except Exception:
+                pass
+
+        if provider == "LLM Studio":
             self.logger.debug("Using 'json_schema' mode for LLM Studio.")
             api_args["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"schema": TranslationResponse.model_json_schema()},
             }
-        elif self.provider in ["OpenAI", "Grok", "Google", "OpenRouter"]:
-            self.logger.debug(f"Using 'json_object' mode for {self.provider}.")
+        elif provider in ["OpenAI", "Grok", "Google", "OpenRouter"]:
+            self.logger.debug(f"Using 'json_object' mode for {provider}.")
             api_args["response_format"] = {"type": "json_object"}
-
-        if self.provider == "OpenAI":
-            api_args["frequency_penalty"] = self.frequency_penalty
-            api_args["presence_penalty"] = self.presence_penalty
 
         try:
             completion = self.client.chat.completions.create(**api_args)
@@ -844,7 +982,7 @@ class LLM_API_Translator(BaseTranslator):
             err_str = str(e).lower()
             # Some models (e.g. StepFun via OpenRouter) don't support response_format json_object; retry without it
             if (
-                self.provider in ["OpenAI", "Grok", "Google", "OpenRouter"]
+                provider in ["OpenAI", "Grok", "Google", "OpenRouter"]
                 and "response_format" in err_str
                 and "not supported" in err_str
                 and "response_format" in api_args
@@ -965,12 +1103,26 @@ class LLM_API_Translator(BaseTranslator):
                         else:
                             raise e
                     except Exception as repair_err:
-                        self.logger.error(
-                            f"Pydantic validation or JSON parsing failed even after attempting fix: {repair_err}"
-                        )
-                        self.logger.debug(f"Raw JSON content from API: {raw_content}")
-                        raise e
+                        pass
+                # 4) Section 18: numbered-list "1: ..." style with missing-item placeholders
+                if validated_response is None and expected_count is not None and expected_count > 0:
+                    try:
+                        numbered = self._parse_numbered_list_response(raw_content, expected_count)
+                        if numbered and len(numbered) >= 1:
+                            validated_response = TranslationResponse(translations=[
+                                TranslationElement(id=x["id"], translation=x["translation"])
+                                for x in numbered
+                            ])
+                            self.logger.info(
+                                "Successfully parsed response as numbered list (missing entries filled with placeholder)."
+                            )
+                    except Exception:
+                        pass
                 if validated_response is None:
+                    self.logger.error(
+                        "Pydantic validation or JSON parsing failed even after attempting fix."
+                    )
+                    self.logger.debug(f"Raw content from API: {raw_content}")
                     raise e
         else:
             self.logger.warning("No valid message content in API response.")
@@ -1006,7 +1158,7 @@ class LLM_API_Translator(BaseTranslator):
 
             while True:
                 try:
-                    parsed_response = self._request_translation(prompt)
+                    parsed_response = self._request_translation(prompt, expected_count=num_src)
 
                     if not parsed_response or not parsed_response.translations:
                         raise ValueError(
@@ -1071,12 +1223,10 @@ class LLM_API_Translator(BaseTranslator):
                             self.rate_limit_delay, api_retry_attempt, self.retry_attempts,
                         )
                     if api_retry_attempt >= self.retry_attempts:
-                        self.logger.error(
-                            "Fatal Error: Failed to connect to API after %s attempts.",
-                            self.retry_attempts,
+                        raise CriticalTranslationError(
+                            f"Failed to connect to API after {self.retry_attempts} attempts.",
+                            cause=e,
                         )
-                        translations.extend([f"[ERROR: API Failed]"] * num_src)
-                        break
                     # Use longer delay for rate limit so upstream can recover
                     delay = self.rate_limit_delay if is_rate_limit else self.retry_timeout
                     time.sleep(delay)
@@ -1088,14 +1238,10 @@ class LLM_API_Translator(BaseTranslator):
                             f"Empty or invalid API response. Attempt {api_retry_attempt}/{self.retry_attempts}."
                         )
                         if api_retry_attempt >= self.retry_attempts:
-                            self.logger.warning(
-                                "Batch failed after retries. Trying each snippet one-by-one (single-item fallback)."
+                            raise CriticalTranslationError(
+                                "Empty or invalid API response after retries.",
+                                cause=e,
                             )
-                            fallback = self._translate_single_item_fallback(
-                                src_list, to_lang, "[ERROR: Empty Response]"
-                            )
-                            translations.extend(fallback)
-                            break
                         time.sleep(self.retry_timeout)
                     else:
                         self.logger.error(
@@ -1126,6 +1272,14 @@ class LLM_API_Translator(BaseTranslator):
                     openai.BadRequestError,
                     openai.AuthenticationError,
                 ) as e:
+                    err_msg = str(e).lower()
+                    is_auth = isinstance(e, openai.AuthenticationError)
+                    is_quota = "quota" in err_msg or "limit exceeded" in err_msg
+                    if is_auth or is_quota:
+                        raise CriticalTranslationError(
+                            "Authentication or quota error; cannot continue.",
+                            cause=e,
+                        )
                     self.logger.error(
                         f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"
                     )
@@ -1140,3 +1294,9 @@ class LLM_API_Translator(BaseTranslator):
 
         if param_key in ["proxy", "multiple_keys", "apikey", "provider", "endpoint"]:
             self.client = None
+            if param_key == "apikey" or param_key == "provider":
+                try:
+                    from utils.endpoints.openrouter import openrouter_clear_models_cache
+                    openrouter_clear_models_cache()
+                except Exception:
+                    pass

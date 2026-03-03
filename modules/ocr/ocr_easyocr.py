@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 
 from .base import OCRBase, register_OCR, DEVICE_SELECTOR, TextBlock
+from utils.ocr_preprocess import preprocess_for_ocr
 
 _EASYOCR_AVAILABLE = False
 try:
@@ -45,6 +46,17 @@ if _EASYOCR_AVAILABLE:
                 "value": 4,
                 "description": "Pixels to add around each box when cropping (0–24).",
             },
+            "preprocess_recipe": {
+                "type": "selector",
+                "options": ["none", "clahe", "clahe+sharpen", "otsu", "adaptive", "denoise"],
+                "value": "none",
+                "description": "Optional preprocessing for hard OCR cases (contrast/noise).",
+            },
+            "upscale_min_side": {
+                "type": "line_editor",
+                "value": 0,
+                "description": "If >0, upscale crop so its longer side >= this (e.g. 512). Helps tiny text. 0 = off.",
+            },
             "description": "EasyOCR recognition on crops (pair with easyocr_det or any detector).",
         }
         _load_model_keys = {"reader"}
@@ -77,6 +89,17 @@ if _EASYOCR_AVAILABLE:
             if img.ndim == 3 and img.shape[2] == 4:
                 img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
             pad = max(0, min(24, int(self.params.get("crop_padding", {}).get("value", 4))))
+            recipe = (self.params.get("preprocess_recipe", {}) or {}).get("value", "none") or "none"
+            try:
+                upscale_min_side = int((self.params.get("upscale_min_side", {}) or {}).get("value", 0) or 0)
+            except (TypeError, ValueError):
+                upscale_min_side = 0
+            if upscale_min_side <= 0:
+                try:
+                    from utils.config import pcfg
+                    upscale_min_side = int(getattr(pcfg.module, "ocr_upscale_min_side", 0) or 0)
+                except Exception:
+                    pass
             for blk in blk_list:
                 x1, y1, x2, y2 = blk.xyxy
                 if pad > 0:
@@ -91,6 +114,7 @@ if _EASYOCR_AVAILABLE:
                 if crop.size == 0:
                     blk.text = [""]
                     continue
+                crop = preprocess_for_ocr(crop, recipe=recipe, upscale_min_side=upscale_min_side)
                 try:
                     results = self.reader.readtext(crop)
                 except Exception as e:

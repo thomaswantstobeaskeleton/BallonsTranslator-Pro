@@ -564,37 +564,147 @@ class TextBlock:
         return True
 
 
-def sort_regions(regions: List[TextBlock], right_to_left=None) -> List[TextBlock]:
-    # from manga image translator
-    # Sort regions from right to left, top to bottom
-    
-    nr = len(regions)
-    if right_to_left is None and nr > 0:
-        nv = 0
-        for r in regions:
-            if r.vertical:
-                nv += 1
-        right_to_left = nv / nr > 0
-    
-    sorted_regions = []
-    for region in sorted(regions, key=lambda region: region.center()[1]):
-        for i, sorted_region in enumerate(sorted_regions):
-            if region.center()[1] > sorted_region.xyxy[3]:
-                continue
-            if region.center()[1] < sorted_region.xyxy[1]:
-                sorted_regions.insert(i + 1, region)
-                break
+def _box_area_xyxy(xyxy) -> float:
+    if not xyxy or len(xyxy) != 4:
+        return 0.0
+    return max(0, (xyxy[2] - xyxy[0]) * (xyxy[3] - xyxy[1]))
 
-            # y center of region inside sorted_region so sort by x instead
-            if right_to_left and region.center()[0] > sorted_region.center()[0]:
-                sorted_regions.insert(i, region)
+
+def _iou_blocks(a: TextBlock, b: TextBlock) -> float:
+    """IoU of two blocks by xyxy."""
+    inter = union_area(a.xyxy, b.xyxy)
+    if inter <= 0:
+        return 0.0
+    area_a = _box_area_xyxy(a.xyxy)
+    area_b = _box_area_xyxy(b.xyxy)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _ioa_xyxy(inner_xyxy, outer_xyxy) -> float:
+    """Intersection over area of inner (IoA): how much of inner is inside outer."""
+    inter = union_area(inner_xyxy, outer_xyxy)
+    if inter <= 0:
+        return 0.0
+    area_inner = _box_area_xyxy(inner_xyxy)
+    return inter / area_inner if area_inner > 0 else 0.0
+
+
+def remove_contained_boxes(blk_list: List[TextBlock]) -> List[TextBlock]:
+    """
+    Section 14: Remove boxes that are fully contained inside another (by IoA).
+    Keeps outer boxes; removes nested/duplicate inner boxes.
+    """
+    if not blk_list or len(blk_list) <= 1:
+        return list(blk_list)
+    out = []
+    for blk in blk_list:
+        xyxy = getattr(blk, "xyxy", None)
+        if not xyxy or len(xyxy) != 4:
+            out.append(blk)
+            continue
+        contained = False
+        for other in blk_list:
+            if other is blk:
+                continue
+            oxyxy = getattr(other, "xyxy", None)
+            if not oxyxy or len(oxyxy) != 4:
+                continue
+            if _box_area_xyxy(oxyxy) <= _box_area_xyxy(xyxy):
+                continue
+            if _ioa_xyxy(xyxy, oxyxy) >= 0.99:
+                contained = True
                 break
-            if not right_to_left and region.center()[0] < sorted_region.center()[0]:
-                sorted_regions.insert(i, region)
+        if not contained:
+            out.append(blk)
+    return out
+
+
+def deduplicate_primary_boxes(
+    blk_list: List[TextBlock],
+    iou_threshold: float = 0.5,
+) -> List[TextBlock]:
+    """
+    Section 14: Remove duplicates via IoU; keep the one with larger area when IoU >= threshold.
+    (No confidence in TextBlock, so we use area as proxy for "keep best".)
+    """
+    if not blk_list or len(blk_list) <= 1:
+        return list(blk_list)
+    # Sort by area descending so we keep larger when duplicate
+    with_area = [(blk, _box_area_xyxy(getattr(blk, "xyxy", []))) for blk in blk_list]
+    with_area.sort(key=lambda x: x[1], reverse=True)
+    out = []
+    for blk, _ in with_area:
+        xyxy = getattr(blk, "xyxy", None)
+        if not xyxy or len(xyxy) != 4:
+            out.append(blk)
+            continue
+        is_dup = False
+        for kept in out:
+            if _iou_blocks(blk, kept) >= iou_threshold:
+                is_dup = True
                 break
-        else:
-            sorted_regions.append(region)
-    return sorted_regions
+        if not is_dup:
+            out.append(blk)
+    return out
+
+
+def _spatial_sort_hybrid(
+    regions: List[TextBlock],
+    right_to_left: bool,
+    gap_threshold_ratio: float = 0.4,
+) -> List[TextBlock]:
+    """
+    Section 13: Hybrid spatial sorting for slightly offset bubbles.
+    Group items into bands by vertical overlap / center distance, then into columns
+    within bands; tuned thresholds keep offset bubbles together (prevents incorrect
+    reordering on imperfect layouts).
+    """
+    if len(regions) <= 1:
+        return list(regions)
+    heights = [r.xyxy[3] - r.xyxy[1] for r in regions]
+    med_h = float(np.median(heights)) if heights else 50.0
+    gap = max(8, gap_threshold_ratio * med_h)
+
+    # Sort by top (y1) then left (x1) for deterministic band building
+    by_top = sorted(regions, key=lambda r: (r.xyxy[1], r.xyxy[0]))
+    bands = []
+    for r in by_top:
+        y1, y2 = r.xyxy[1], r.xyxy[3]
+        placed = False
+        for band in bands:
+            for b in band:
+                by1, by2 = b.xyxy[1], b.xyxy[3]
+                if not (y2 < by1 - gap or y1 > by2 + gap):
+                    band.append(r)
+                    placed = True
+                    break
+            if placed:
+                break
+        if not placed:
+            bands.append([r])
+
+    bands_sorted = sorted(bands, key=lambda band: min(b.xyxy[1] for b in band))
+    out = []
+    for band in bands_sorted:
+        band_sorted = sorted(
+            band,
+            key=lambda b: (-b.center()[0] if right_to_left else b.center()[0], b.center()[1]),
+        )
+        out.extend(band_sorted)
+    return out
+
+
+def sort_regions(regions: List[TextBlock], right_to_left=None) -> List[TextBlock]:
+    # Section 13: use hybrid spatial sort (bands + columns) for better reading order
+    # when bubbles are slightly offset; preserves top-to-bottom then column order.
+    nr = len(regions)
+    if nr == 0:
+        return []
+    if right_to_left is None:
+        nv = sum(1 for r in regions if getattr(r, "vertical", False))
+        right_to_left = nv / nr > 0
+    return _spatial_sort_hybrid(regions, right_to_left)
 
 
 def examine_textblk(blk: TextBlock, im_w: int, im_h: int, sort: bool = False) -> None:

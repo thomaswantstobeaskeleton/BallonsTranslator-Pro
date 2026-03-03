@@ -138,8 +138,9 @@ class OCRStariver(OCRBase):
             "force_expand": self.force_expand
         }
 
+        enc_ext = '.png' if (img.ndim == 3 and img.shape[2] == 4) else '.jpg'
         img_base64 = base64.b64encode(
-            cv2.imencode('.jpg', img)[1]).decode('utf-8')
+            cv2.imencode(enc_ext, img)[1]).decode('utf-8')
         payload["image"] = img_base64
 
         response = requests.post(self.url, data=json.dumps(payload))

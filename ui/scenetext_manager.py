@@ -22,6 +22,8 @@ from utils import shared
 from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
+from utils.line_breaking import find_optimal_breaks_dp, split_long_token_with_hyphenation
+from modules.textdetector.outside_text_processor import OSB_LABELS
 
 # Layout tuning: keep text inside bubbles and avoid overflow/tiny text (see layout_textblk)
 LAYOUT_FIT_RATIO = 0.80  # fit text to this fraction of region (strict = no overflow)
@@ -823,6 +825,9 @@ class SceneTextManager(QObject):
         '''
         auto text layout, vertical writing is not supported yet.
         '''
+        is_osb = (getattr(blkitem.blk, "label", None) or "").strip().lower() in OSB_LABELS
+        if is_osb:
+            setattr(blkitem.blk, "restore_original_region", False)
 
         img = self.imgtrans_proj.img_array
         if img is None:
@@ -985,7 +990,50 @@ class SceneTextManager(QObject):
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
 
-        new_text, xywh, start_from_top, adjust_xy = layout_text(
+        # Optional: DP optimal breaks + hyphenation for non-CJK text (improves ugly wraps)
+        forced_lines = None
+        forced_wl_lines = None
+        try:
+            if (
+                not tgt_is_cjk
+                and getattr(pcfg.module, "layout_optimal_breaks", True)
+                and region_rect is not None
+                and len(region_rect) >= 4
+            ):
+                maxw_px = int(max(32, min(region_rect[2], bounding_rect[2]) * 0.95))
+
+                def measure_token(s: str) -> int:
+                    return int(ffmt.horizontalAdvance(s))
+
+                expanded_words = []
+                expanded_wl = []
+                for w0 in words:
+                    parts = split_long_token_with_hyphenation(
+                        w0,
+                        measure=measure_token,
+                        max_width=maxw_px,
+                        hyphenate=bool(getattr(pcfg.module, "layout_hyphenation", True)),
+                    )
+                    for p, pw in parts:
+                        expanded_words.append(p)
+                        expanded_wl.append(int(pw))
+                if expanded_words:
+                    words = expanded_words
+                    wl_list = expanded_wl
+                ends = find_optimal_breaks_dp(wl_list, max_width=maxw_px, delimiter_width=int(delimiter_len))
+                forced_lines = []
+                forced_wl_lines = []
+                start = 0
+                for e in ends:
+                    forced_lines.append(words[start:e])
+                    forced_wl_lines.append(wl_list[start:e])
+                    start = e
+        except Exception:
+            forced_lines = None
+            forced_wl_lines = None
+
+        try:
+            new_text, xywh, start_from_top, adjust_xy = layout_text(
             blkitem.blk,
             mask, 
             mask_xyxy, 
@@ -999,67 +1047,123 @@ class SceneTextManager(QObject):
             max_central_width,
             src_is_cjk=src_is_cjk,
             tgt_is_cjk=tgt_is_cjk,
-            ref_src_lines=ref_src_lines
+            ref_src_lines=ref_src_lines,
+            forced_lines=forced_lines,
+            forced_wl_lines=forced_wl_lines,
+            collision_check=bool(getattr(pcfg.module, "layout_collision_check", True)),
+            collision_min_mask_ratio=float(getattr(pcfg.module, "layout_collision_min_mask_ratio", 0.85) or 0.85),
+            collision_max_retries=int(getattr(pcfg.module, "layout_collision_max_retries", 3) or 3),
         )
-        if not (new_text and new_text.strip()):
-            return
+            if not (new_text and new_text.strip()):
+                return
 
-        # font size post adjustment: force text to stay inside bubble/region
-        post_resize_ratio = 1
-        if adaptive_fntsize:
-            downscale_constraint = 0.5
-            w = xywh[2]
-            post_resize_ratio = np.clip(max(region_rect[2] / w, downscale_constraint), 0, 1)
-            resize_ratio *= post_resize_ratio
-        elif region_rect is not None and len(region_rect) >= 4:
-            # If laid-out text overflows region, scale down so it fits inside bubble with margin
-            rw, rh = region_rect[2], region_rect[3]
-            w, h = xywh[2], xywh[3]
-            if rw > 0 and rh > 0 and (w > rw or h > rh):
-                fit_ratio = min(rw / w, rh / h) * LAYOUT_FIT_RATIO
-                fit_ratio = max(fit_ratio, LAYOUT_FIT_RATIO_MIN)
-                post_resize_ratio = fit_ratio
+            # font size post adjustment: force text to stay inside bubble/region
+            post_resize_ratio = 1
+            if adaptive_fntsize:
+                downscale_constraint = 0.5
+                w = xywh[2]
+                post_resize_ratio = np.clip(max(region_rect[2] / w, downscale_constraint), 0, 1)
                 resize_ratio *= post_resize_ratio
+            elif region_rect is not None and len(region_rect) >= 4:
+                # If laid-out text overflows region, scale down so it fits inside bubble with margin
+                rw, rh = region_rect[2], region_rect[3]
+                w, h = xywh[2], xywh[3]
+                if rw > 0 and rh > 0 and (w > rw or h > rh):
+                    fit_ratio = min(rw / w, rh / h) * LAYOUT_FIT_RATIO
+                    fit_ratio = max(fit_ratio, LAYOUT_FIT_RATIO_MIN)
+                    post_resize_ratio = fit_ratio
+                    resize_ratio *= post_resize_ratio
 
-        if post_resize_ratio != 1:
-            cx, cy = xywh[0] + xywh[2] / 2, xywh[1] + xywh[3] / 2
-            w, h = xywh[2] * post_resize_ratio, xywh[3] * post_resize_ratio
-            xywh = [int(cx - w / 2), int(cy - h / 2), int(w), int(h)]
+            if post_resize_ratio != 1:
+                cx, cy = xywh[0] + xywh[2] / 2, xywh[1] + xywh[3] / 2
+                w, h = xywh[2] * post_resize_ratio, xywh[3] * post_resize_ratio
+                xywh = [int(cx - w / 2), int(cy - h / 2), int(w), int(h)]
 
-        if resize_ratio != 1:
-            new_font_size = max(1.0, blkitem.font().pointSizeF() * resize_ratio)
-            if new_font_size < LAYOUT_MIN_FONT_PT:
-                new_font_size = LAYOUT_MIN_FONT_PT
-                resize_ratio = new_font_size / max(1.0, blkitem.font().pointSizeF())
-            blkitem.textCursor().clearSelection()
-            blkitem.setFontSize(new_font_size)
-            blk_font.setPointSizeF(new_font_size)
+            if resize_ratio != 1:
+                new_font_size = max(1.0, blkitem.font().pointSizeF() * resize_ratio)
+                if new_font_size < LAYOUT_MIN_FONT_PT:
+                    new_font_size = LAYOUT_MIN_FONT_PT
+                    resize_ratio = new_font_size / max(1.0, blkitem.font().pointSizeF())
+                blkitem.textCursor().clearSelection()
+                blkitem.setFontSize(new_font_size)
+                blk_font.setPointSizeF(new_font_size)
 
-        if restore_charfmts:
-            char_fmts = blkitem.get_char_fmts()        
+            if restore_charfmts:
+                char_fmts = blkitem.get_char_fmts()        
         
+            ffmt = QFontMetricsF(blk_font)
+            maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
+            # Height: ensure minimum (single-line/descenders) and add bottom padding so last line doesn't sit on edge
+            layout_h = max(int(xywh[3]), line_height)
+            layout_h = int(layout_h * LAYOUT_HEIGHT_PADDING)
+            blkitem.set_size(maxw * LAYOUT_WIDTH_STROKE_FACTOR, layout_h, set_layout_maxsize=True)
+            blkitem.setPlainText(new_text)
+            blkitem._ensure_transparent_document_background()
+            if len(self.pairwidget_list) > blkitem.idx:
+                self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
+            if restore_charfmts:
+                self.restore_charfmts(blkitem, text, new_text, char_fmts)
+            blkitem.squeezeBoundingRect()
+            # Clamp block to image bounds so text never draws outside the panel
+            abr = blkitem.absBoundingRect(qrect=True)
+            x, y, w, h = abr.x(), abr.y(), abr.width(), abr.height()
+            if w > 0 and h > 0:
+                x2 = max(0, min(x, im_w - w))
+                y2 = max(0, min(y, im_h - h))
+                if x2 != x or y2 != y:
+                    blkitem.setRect([x2, y2, w, h], repaint=True)
+            return True
+        except Exception:
+            if is_osb:
+                if getattr(pcfg.module, "osb_layout_fallbacks_enabled", True):
+                    try:
+                        self._layout_osb_vertical_fallback(blkitem, text, im_w, im_h, blk_font)
+                        return
+                    except Exception:
+                        setattr(blkitem.blk, "restore_original_region", True)
+                else:
+                    setattr(blkitem.blk, "restore_original_region", True)
+            else:
+                raise
+    
+    def _layout_osb_vertical_fallback(self, blkitem: TextBlkItem, text: str, im_w: int, im_h: int, blk_font: QFont) -> None:
+        """OSB last-chance fallback: stack lines vertically. Used when normal layout fails."""
+        blk = blkitem.blk
+        xyxy = getattr(blk, "xyxy", None)
+        if not xyxy or len(xyxy) != 4:
+            raise ValueError("Block has no valid xyxy")
+        x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+        x1, x2 = max(0, min(x1, im_w)), max(0, min(x2, im_w))
+        y1, y2 = max(0, min(y1, im_h)), max(0, min(y2, im_h))
+        box_w = max(1, x2 - x1)
+        box_h = max(1, y2 - y1)
+        lines = [s.strip() for s in (text or "").split("\n") if s.strip()]
+        if not lines:
+            return
         ffmt = QFontMetricsF(blk_font)
-        maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
-        # Height: ensure minimum (single-line/descenders) and add bottom padding so last line doesn't sit on edge
-        layout_h = max(int(xywh[3]), line_height)
-        layout_h = int(layout_h * LAYOUT_HEIGHT_PADDING)
-        blkitem.set_size(maxw * LAYOUT_WIDTH_STROKE_FACTOR, layout_h, set_layout_maxsize=True)
+        line_height = int(round(ffmt.height() * 1.2))
+        max_line_w = max(ffmt.horizontalAdvance(ln) for ln in lines)
+        total_h = len(lines) * line_height
+        scale = 1.0
+        if total_h > box_h or max_line_w > box_w:
+            scale = min(box_h / max(total_h, 1), box_w / max(max_line_w, 1), 1.0)
+            scale = max(scale, 0.4)
+        if scale != 1.0:
+            new_pt = max(LAYOUT_MIN_FONT_PT, blk_font.pointSizeF() * scale)
+            blk_font.setPointSizeF(new_pt)
+            ffmt = QFontMetricsF(blk_font)
+            line_height = int(round(ffmt.height() * 1.2))
+            max_line_w = max(ffmt.horizontalAdvance(ln) for ln in lines)
+            total_h = len(lines) * line_height
+        new_text = "\n".join(lines)
+        layout_w = int(max_line_w * LAYOUT_WIDTH_STROKE_FACTOR)
+        layout_h = int(total_h * LAYOUT_HEIGHT_PADDING)
+        blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
         blkitem.setPlainText(new_text)
         blkitem._ensure_transparent_document_background()
         if len(self.pairwidget_list) > blkitem.idx:
             self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
-        if restore_charfmts:
-            self.restore_charfmts(blkitem, text, new_text, char_fmts)
         blkitem.squeezeBoundingRect()
-        # Clamp block to image bounds so text never draws outside the panel
-        abr = blkitem.absBoundingRect(qrect=True)
-        x, y, w, h = abr.x(), abr.y(), abr.width(), abr.height()
-        if w > 0 and h > 0:
-            x2 = max(0, min(x, im_w - w))
-            y2 = max(0, min(y, im_h - h))
-            if x2 != x or y2 != y:
-                blkitem.setRect([x2, y2, w, h], repaint=True)
-        return True
     
     def restore_charfmts(self, blkitem: TextBlkItem, text: str, new_text: str, char_fmts: List[QTextCharFormat]):
         cursor = blkitem.textCursor()

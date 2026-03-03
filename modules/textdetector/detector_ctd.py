@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import os
+import torch
 from typing import Tuple, List
 
 from .base import register_textdetectors, TextDetectorBase, TextBlock, DEFAULT_DEVICE, DEVICE_SELECTOR, ProjImgTrans
@@ -122,8 +123,26 @@ class ComicTextDetector(TextDetectorBase):
         except (TypeError, ValueError):
             min_area = 0
         self.model.min_box_area = min_area
-        _, mask, blk_list = self.model(img)
-        
+        try:
+            _, mask, blk_list = self.model(img)
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+            err_msg = str(e).lower()
+            if "out of memory" not in err_msg:
+                raise
+            self.logger.warning("CTD detector hit GPU OOM. Falling back to CPU for this run.")
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                cpu_model = load_ctd_model(CTD_TORCH_PATH, "cpu", self.detect_size)
+                _, mask, blk_list = cpu_model(img)
+                del cpu_model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception as e2:
+                self.logger.error("CTD det failed after CPU fallback: %s", e2)
+                h_img, w_img = img.shape[:2]
+                return np.zeros((h_img, w_img), dtype=np.uint8), []
+
         h_img, w_img = img.shape[:2]
         shrink_val = 0
         sp = self.params.get('box_shrink_px', {})

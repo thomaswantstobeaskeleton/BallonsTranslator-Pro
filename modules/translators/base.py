@@ -10,6 +10,8 @@ from ..base import BaseModule, DEVICE_SELECTOR
 from utils.registry import Registry
 from utils.io_utils import text_is_empty, normalize_line_breaks
 from utils.logger import logger as LOGGER
+from utils.translation_cache import TranslationCache
+from utils.config import pcfg
 
 TRANSLATORS = Registry('translators')
 register_translator = TRANSLATORS.register_module
@@ -139,11 +141,12 @@ class BaseTranslator(BaseModule):
         except InvalidSourceOrTargetLanguage as e:
             if raise_unsupported_lang:
                 raise e
-            else:
-                lang_source = self.supported_src_list[0]
-                lang_target = self.supported_tgt_list[0]
-                self.set_source(lang_source)
-                self.set_target(lang_target)
+            if not self.supported_src_list or not self.supported_tgt_list:
+                raise e
+            lang_source = self.supported_src_list[0]
+            lang_target = self.supported_tgt_list[0]
+            self.set_source(lang_source)
+            self.set_target(lang_target)
 
     def _setup_translator(self):
         raise NotImplementedError
@@ -225,7 +228,29 @@ class BaseTranslator(BaseModule):
             callback(translations = translations, textblocks = textblk_lst, translator = self, source_text = text_list)
 
         if len(text_list) > 0:
-            _translations = self.translate(text_list)
+            # Optional deterministic translation caching
+            use_cache = bool(getattr(pcfg.module, "translation_cache_enabled", False))
+            det_only = bool(getattr(pcfg.module, "translation_cache_deterministic_only", True))
+            cache_hit = None
+            cache = None
+            cache_key = None
+            if use_cache and (not det_only or self.is_deterministic()):
+                try:
+                    cache = TranslationCache()
+                    cache_key = self._build_translation_cache_key(text_list)
+                    cache_hit = cache.get(cache_key)
+                except Exception:
+                    cache_hit = None
+
+            if cache_hit and isinstance(cache_hit, dict) and cache_hit.get("translations") and cache_hit.get("sources") == text_list:
+                _translations = cache_hit.get("translations")
+            else:
+                _translations = self.translate(text_list)
+                if cache is not None and cache_key is not None:
+                    try:
+                        cache.set(cache_key, {"sources": text_list, "translations": _translations})
+                    except Exception:
+                        pass
             for ii, idx in enumerate(non_empty_ids):
                 translations[idx] = _translations[ii]
 
@@ -237,7 +262,45 @@ class BaseTranslator(BaseModule):
 
     def set_translation_context(self, previous_pages=None, project_glossary=None, series_context_path=None, next_page=None):
         """Optional: set cross-page context and project glossary before translate_textblk_lst. next_page: optional {"sources": [...]} for next page context. Base implementation does nothing."""
-        pass
+        # Store a context blob for cache keys (subclasses may override and still call super()).
+        try:
+            self._cache_translation_context = {
+                "previous_pages": previous_pages or [],
+                "project_glossary": project_glossary or [],
+                "series_context_path": (series_context_path or "") if series_context_path is not None else None,
+                "next_page": next_page if next_page and isinstance(next_page, dict) else None,
+            }
+        except Exception:
+            self._cache_translation_context = None
+
+    def is_deterministic(self) -> bool:
+        """
+        Whether translations are expected to be deterministic for the current settings.
+        LLM-based translators should override (e.g. temperature==0).
+        """
+        return True
+
+    def _cache_relevant_params(self) -> dict:
+        """Return a stable, non-secret subset of params for cache keys."""
+        out = {}
+        for k, v in (getattr(self, "params", {}) or {}).items():
+            if k.lower() in {"apikey", "api_key", "multiple_keys", "multiple keys", "key", "keys", "proxy"}:
+                continue
+            if isinstance(v, dict) and "value" in v:
+                out[k] = v.get("value")
+            else:
+                out[k] = v
+        return out
+
+    def _build_translation_cache_key(self, sources: List[str]) -> dict:
+        return {
+            "translator": getattr(self, "name", self.__class__.__name__),
+            "src": getattr(self, "lang_source", ""),
+            "tgt": getattr(self, "lang_target", ""),
+            "params": self._cache_relevant_params(),
+            "context": getattr(self, "_cache_translation_context", None),
+            "sources": sources,
+        }
 
     def append_page_to_series_context(self, series_context_path: str, sources: list, translations: list) -> None:
         """Optional: append translated page to series store. Base implementation does nothing."""
