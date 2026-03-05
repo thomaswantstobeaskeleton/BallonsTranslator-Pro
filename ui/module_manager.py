@@ -30,7 +30,7 @@ from modules.textdetector.outside_text_processor import OSB_LABELS, filter_osb_o
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from utils.translator_test import test_translator
-from utils.series_context_store import DEFAULT_SERIES_ID
+from utils.series_context_store import DEFAULT_SERIES_ID, get_series_context_dir, ensure_series_dir
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
 from utils.proj_imgtrans import ProjImgTrans
@@ -231,6 +231,11 @@ class TranslateThread(ModuleThread):
             series_path = (self.translator.get_param_value("series_context_path") or "").strip()
         if not series_path:
             series_path = DEFAULT_SERIES_ID
+        # Ensure data/translation_context/default (or chosen series) exists so translators don't fail (Issue #6).
+        if series_path and hasattr(self.translator, "set_translation_context"):
+            dir_path = get_series_context_dir(series_path)
+            if dir_path:
+                ensure_series_dir(dir_path)
         if proj is not None and hasattr(self.translator, "set_translation_context"):
             ordered = list(proj.pages.keys())
             if page_key in ordered:
@@ -636,6 +641,9 @@ class ImgtransThread(QThread):
             series_path = (self.translator.get_param_value("series_context_path") or "").strip()
         if not series_path:
             series_path = DEFAULT_SERIES_ID
+        dir_path = get_series_context_dir(series_path)
+        if dir_path:
+            ensure_series_dir(dir_path)
         idx = pages_to_iterate.index(imgname)
         n = getattr(self.translator, "context_previous_pages_count", 0)
         prev_keys = pages_to_iterate[max(0, idx - n) : idx]

@@ -2165,8 +2165,11 @@ class MainWindow(mainwindow_cls):
                     if sw > 0 and pcfg.module.enable_ocr and pcfg.module.enable_detect and not override_fnt_size:
                         blk.font_size = blk.font_size / (1 + sw)
 
-            self.st_manager.auto_textlayout_flag = pcfg.let_autolayout_flag and \
-                (pcfg.module.enable_detect or pcfg.module.enable_translate)
+            self.st_manager.auto_textlayout_flag = (
+                pcfg.let_autolayout_flag
+                and (pcfg.let_fntsize_flag == 0)
+                and (pcfg.module.enable_detect or pcfg.module.enable_ocr or pcfg.module.enable_translate)
+            )
         
         if page_index != self.pageList.currentIndex().row():
             self.pageList.setCurrentRow(page_index)
