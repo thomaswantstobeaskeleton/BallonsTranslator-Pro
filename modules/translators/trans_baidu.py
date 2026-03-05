@@ -44,14 +44,12 @@ class BaiduTranslator(BaseTranslator):
             batch = query.split('\n')
             query_split_sizes.append(len(batch))
             n_queries.extend(batch)
-        token = self.params['token']
-        appId = self.params['appId']
-        if token == '' or token is None:
-            raise MissingTranslatorParams('token')
-        if appId == '' or appId is None:
-            raise MissingTranslatorParams('appId')
+        token = self.get_param_value('token') or ''
+        appId = self.get_param_value('appId') or ''
+        if token == '' or appId == '':
+            raise MissingTranslatorParams('token and appId')
         
-        payload = self.get_json(self.lang_map[self.lang_source], self.lang_map[self.lang_target], '\n'.join(n_queries),appId,token)
+        payload = self.get_json(self.lang_map[self.lang_source], self.lang_map[self.lang_target], '\n'.join(n_queries), appId, token)
         headers = {
             "Content-Type": "application/x-www-form-urlencoded"
         }

@@ -147,13 +147,15 @@ class EnsembleTranslator(BaseTranslator):
             except Exception as e:
                 LOGGER.warning('Ensemble: could not create judge %s: %s', judge_name, e)
 
-    def _translate_one_candidate(self, candidate, src_list: List[str]) -> List[str]:
-        if candidate is None:
+    def _translate_one_candidate(self, candidate, src_list: List[str], candidate_label: str = '') -> List[str]:
+        if candidate is None or not callable(getattr(candidate, 'translate', None)):
+            if candidate_label:
+                LOGGER.debug('Ensemble candidate %s skipped (not available or no translate method)', candidate_label)
             return ['[candidate failed]'] * len(src_list)
         try:
             return candidate.translate(src_list)
         except Exception as e:
-            LOGGER.warning('Ensemble candidate translate failed: %s', e)
+            LOGGER.warning('Ensemble candidate %s translate failed: %s', candidate_label or '?', e)
             return ['[candidate failed]'] * len(src_list)
 
     def _parse_judge_json(self, raw: str, expected_count: int) -> Optional[List[str]]:
@@ -203,9 +205,15 @@ class EnsembleTranslator(BaseTranslator):
         if not src_list:
             return []
         self._build_candidates_and_judge()
-        t1 = self._translate_one_candidate(self._candidates[0] if len(self._candidates) > 0 else None, src_list)
-        t2 = self._translate_one_candidate(self._candidates[1] if len(self._candidates) > 1 else None, src_list)
-        t3 = self._translate_one_candidate(self._candidates[2] if len(self._candidates) > 2 else None, src_list)
+        c1_name = (self.get_param_value('candidate_1') or '').strip() or '1'
+        c2_name = (self.get_param_value('candidate_2') or '').strip() or '2'
+        c3_name = (self.get_param_value('candidate_3') or '').strip() or '3'
+        t1 = self._translate_one_candidate(
+            self._candidates[0] if len(self._candidates) > 0 else None, src_list, c1_name)
+        t2 = self._translate_one_candidate(
+            self._candidates[1] if len(self._candidates) > 1 else None, src_list, c2_name)
+        t3 = self._translate_one_candidate(
+            self._candidates[2] if len(self._candidates) > 2 else None, src_list, c3_name)
         if self._judge is None:
             LOGGER.warning('Ensemble: no judge configured; using first candidate.')
             return t1

@@ -1231,6 +1231,22 @@ class LLM_API_Translator(BaseTranslator):
                     delay = self.rate_limit_delay if is_rate_limit else self.retry_timeout
                     time.sleep(delay)
 
+                except json.JSONDecodeError as e:
+                    api_retry_attempt += 1
+                    self.logger.warning(
+                        f"Malformed JSON from API (retrying). Attempt {api_retry_attempt}/{self.retry_attempts}."
+                    )
+                    if api_retry_attempt >= self.retry_attempts:
+                        self.logger.warning(
+                            "Malformed JSON after retries. Trying each snippet one-by-one (single-item fallback)."
+                        )
+                        fallback = self._translate_single_item_fallback(
+                            src_list, to_lang, "[ERROR: Invalid JSON]"
+                        )
+                        translations.extend(fallback)
+                        break
+                    time.sleep(self.retry_timeout)
+
                 except ValueError as e:
                     if "empty or invalid parsed response" in str(e):
                         api_retry_attempt += 1
@@ -1250,22 +1266,6 @@ class LLM_API_Translator(BaseTranslator):
                         self.logger.debug(traceback.format_exc())
                         translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)
                         break
-
-                except json.JSONDecodeError as e:
-                    api_retry_attempt += 1
-                    self.logger.warning(
-                        f"Malformed JSON from API (retrying). Attempt {api_retry_attempt}/{self.retry_attempts}."
-                    )
-                    if api_retry_attempt >= self.retry_attempts:
-                        self.logger.warning(
-                            "Malformed JSON after retries. Trying each snippet one-by-one (single-item fallback)."
-                        )
-                        fallback = self._translate_single_item_fallback(
-                            src_list, to_lang, "[ERROR: Invalid JSON]"
-                        )
-                        translations.extend(fallback)
-                        break
-                    time.sleep(self.retry_timeout)
 
                 except (
                     ValidationError,
