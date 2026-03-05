@@ -150,6 +150,16 @@ class DeleteBlkItemsCommand(QUndoCommand):
             else:
                 self.sw.setCurrentEditor(None)
 
+        # Sync project pages: remove deleted blocks so save/run/pipeline stay consistent (Issue 9).
+        self.pages_restore: List[Tuple[int, object]] = []
+        page_name = self.canvas.imgtrans_proj.current_img
+        if page_name and page_name in self.canvas.imgtrans_proj.pages:
+            for blkitem in reversed(self.blk_list):
+                idx = blkitem.idx
+                removed = self.canvas.imgtrans_proj.pages[page_name].pop(idx)
+                self.pages_restore.append((idx, removed))
+            self.pages_restore.sort(key=lambda x: x[0])
+
         self.ctrl.deleteTextblkItemList(self.blk_list, self.pwidget_list)
 
     def redo(self):
@@ -169,6 +179,13 @@ class DeleteBlkItemsCommand(QUndoCommand):
         if self.op_counter == 0:
             self.op_counter += 1
             return
+
+        # Sync project pages again when re-doing delete (blocks were restored on undo).
+        if getattr(self, 'pages_restore', None):
+            page_name = self.canvas.imgtrans_proj.current_img
+            if page_name and page_name in self.canvas.imgtrans_proj.pages:
+                for idx, _ in sorted(self.pages_restore, key=lambda x: -x[0]):
+                    self.canvas.imgtrans_proj.pages[page_name].pop(idx)
 
         self.ctrl.deleteTextblkItemList(self.blk_list, self.pwidget_list)
         if self.sw_changed:
@@ -201,6 +218,13 @@ class DeleteBlkItemsCommand(QUndoCommand):
                 img_array[y1: y2, x1: x2][mskpnt] = undo_img[mskpnt]
                 mask_array[y1: y2, x1: x2][mskpnt] = 255
             self.canvas.updateLayers()
+
+        # Restore blocks to project pages so delete/recover stays in sync (Issue 9).
+        if getattr(self, 'pages_restore', None):
+            page_name = self.canvas.imgtrans_proj.current_img
+            if page_name and page_name in self.canvas.imgtrans_proj.pages:
+                for idx, blk in self.pages_restore:
+                    self.canvas.imgtrans_proj.pages[page_name].insert(idx, blk)
 
         self.ctrl.recoverTextblkItemList(self.blk_list, self.pwidget_list)
         if self.sw_changed:
@@ -345,6 +369,7 @@ class SceneTextManager(QObject):
         self.canvas.paste_textblks.connect(self.onPasteBlkItems)
         self.canvas.format_textblks.connect(self.onFormatTextblks)
         self.canvas.layout_textblks.connect(self.onAutoLayoutTextblks)
+        self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -800,6 +825,32 @@ class SceneTextManager(QObject):
                 self.layout_textblk(blkitem)
 
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+
+    def onAutoFitFontToBox(self):
+        """Re-run auto fit font size for selected blocks (e.g. after changing font). Forces fit-to-box for selection."""
+        from utils.config import pcfg
+        selected_blks = self.canvas.selected_text_items()
+        selected_blks = [blk for blk in selected_blks if not blk.fontformat.vertical]
+        if not selected_blks:
+            return
+        old_fntsize = getattr(pcfg, 'let_fntsize_flag', 0)
+        old_autolayout = getattr(pcfg, 'let_autolayout_flag', True)
+        old_auto_flag = self.auto_textlayout_flag
+        try:
+            pcfg.let_fntsize_flag = 0
+            pcfg.let_autolayout_flag = True
+            self.auto_textlayout_flag = True
+            old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+            for blkitem in selected_blks:
+                old_html_lst.append(blkitem.toHtml())
+                old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+                trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+                self.layout_textblk(blkitem)
+            self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+        finally:
+            pcfg.let_fntsize_flag = old_fntsize
+            pcfg.let_autolayout_flag = old_autolayout
+            self.auto_textlayout_flag = old_auto_flag
 
     def onResetAngle(self):
         selected_blks = self.canvas.selected_text_items()
