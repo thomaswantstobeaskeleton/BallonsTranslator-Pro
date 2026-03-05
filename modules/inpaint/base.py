@@ -385,12 +385,16 @@ class InpainterBase(BaseModule):
         else:
             img_rgb = img
         if mask_ratio <= 0:
+            self.logger.warning(
+                'Inpainting skipped: mask is empty (no region to inpaint). '
+                'If you use initial upscale, ensure detection was run at least once so block coordinates match the image size.'
+            )
             return np.concatenate([img_rgb, original_alpha], axis=2) if original_alpha is not None else np.ascontiguousarray(img_rgb.copy())
         
         if not self.inpaint_by_block or textblock_list is None:
             if check_need_inpaint:
                 ballon_msk, non_text_msk = extract_ballon_mask(img_rgb, mask)
-                if ballon_msk is not None:
+                if ballon_msk is not None and non_text_msk is not None:
                     non_text_region = np.where(non_text_msk > 0)
                     non_text_px = img_rgb[non_text_region]
                     average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
@@ -497,27 +501,28 @@ class InpainterBase(BaseModule):
                         pass
                 if self.check_need_inpaint or check_need_inpaint:
                     ballon_msk, non_text_msk = extract_ballon_mask(im, msk)
-                    non_text_region = np.where(non_text_msk > 0)
-                    non_text_px = im[non_text_region]
-                    average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
-                    std_rgb = np.std(non_text_px - average_bg_color, axis=0)
-                    std_max = np.max(std_rgb)
-                    inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
-                    ballon_area = np.sum(ballon_msk > 0)
-                    # Skip median fill for small balloons so they get proper inpainting
-                    min_ballon_area_for_median = 40000  # ~200x200
-                    if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
-                        # Section 17: if colored/gradient bubble, inpaint text-only instead of median-fill
-                        if getattr(pcfg.module, 'colored_bubble_handling', True):
-                            is_colored_bubble = classify_bubble_colored(im, ballon_msk, msk, min_interior_pixels=64)
-                        else:
-                            is_colored_bubble = False
-                        if not is_colored_bubble:
-                            need_inpaint = False
-                            # Use pure white for speech bubbles when median is already near white
-                            if np.all(average_bg_color >= 220):
-                                average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
-                            im[np.where(ballon_msk > 0)] = average_bg_color
+                    if ballon_msk is not None and non_text_msk is not None:
+                        non_text_region = np.where(non_text_msk > 0)
+                        non_text_px = im[non_text_region]
+                        average_bg_color = np.median(non_text_px, axis=0).astype(np.uint8)
+                        std_rgb = np.std(non_text_px - average_bg_color, axis=0)
+                        std_max = np.max(std_rgb)
+                        inpaint_thresh = 7 if np.std(std_rgb) > 1 else 10
+                        ballon_area = np.sum(ballon_msk > 0)
+                        # Skip median fill for small balloons so they get proper inpainting
+                        min_ballon_area_for_median = 40000  # ~200x200
+                        if std_max < inpaint_thresh and ballon_area >= min_ballon_area_for_median:
+                            # Section 17: if colored/gradient bubble, inpaint text-only instead of median-fill
+                            if getattr(pcfg.module, 'colored_bubble_handling', True):
+                                is_colored_bubble = classify_bubble_colored(im, ballon_msk, msk, min_interior_pixels=64)
+                            else:
+                                is_colored_bubble = False
+                            if not is_colored_bubble:
+                                need_inpaint = False
+                                # Use pure white for speech bubbles when median is already near white
+                                if np.all(average_bg_color >= 220):
+                                    average_bg_color = np.array([255, 255, 255], dtype=np.uint8)
+                                im[np.where(ballon_msk > 0)] = average_bg_color
                     # cv2.imshow('im', im)
                     # cv2.imshow('ballon', ballon_msk)
                     # cv2.imshow('non_text', non_text_msk)

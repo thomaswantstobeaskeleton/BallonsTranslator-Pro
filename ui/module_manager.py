@@ -1009,8 +1009,17 @@ class ImgtransThread(QThread):
                     mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
                 
                 im_h, im_w = img.shape[:2]
-                # Always rebuild mask from blk_list so mask and blocks are from the same source (fixes HF and all detectors).
-                if mask is not None and blk_list:
+                # When image was upscaled but we didn't run detection, blk_list is from project (original resolution).
+                # Scale block coordinates to match current image size so mask and per-block crops are correct.
+                if scale > 1.0 and blk_list and not cfg_module.enable_detect:
+                    for blk in blk_list:
+                        if getattr(blk, 'xyxy', None):
+                            blk.xyxy = [x * scale for x in blk.xyxy]
+                        if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                            blk.lines = [[[p[0] * scale, p[1] * scale] for p in line] for line in blk.lines]
+                # Build or rebuild mask from blk_list so mask and blocks are from the same source.
+                # When mask was never saved (e.g. inpaint-only re-run), build from blocks so inpainting can run.
+                if blk_list:
                     if getattr(cfg_module, "resolve_mask_overlaps_bisector", True):
                         text_for_nudge = [b for b in blk_list if (getattr(b, "label", None) or "").strip().lower() in OSB_LABELS]
                         mask = build_mask_with_resolved_overlaps(

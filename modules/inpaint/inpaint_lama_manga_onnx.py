@@ -30,7 +30,10 @@ if _LAMA_ONNX_AVAILABLE:
         """
         inpaint_by_block = False
         check_need_inpaint = True
-
+        download_file_list = [{
+            "url": "https://huggingface.co/mayocream/lama-manga-onnx/resolve/main/lama-manga.onnx",
+            "files": "data/models/lama_manga.onnx",
+        }]
         params = {
             "model_path": {
                 "type": "line_editor",

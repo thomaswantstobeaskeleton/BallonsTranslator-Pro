@@ -4,6 +4,7 @@ Download inpainting_lama_2025jan.onnx from Hugging Face and set model_path.
 Requires: pip install onnxruntime
 """
 import os
+import os.path as osp
 import numpy as np
 import cv2
 from typing import List
@@ -34,7 +35,10 @@ if _LAMA_ONNX_AVAILABLE:
         """
         inpaint_by_block = True
         check_need_inpaint = True
-
+        download_file_list = [{
+            "url": "https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx",
+            "files": "data/models/inpainting_lama_2025jan.onnx",
+        }]
         params = {
             "model_path": {
                 "type": "line_editor",
