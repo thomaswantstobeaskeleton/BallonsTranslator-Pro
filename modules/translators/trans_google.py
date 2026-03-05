@@ -15,6 +15,9 @@ class TranslateError(ProviderError):
 
 # --- Constants for Google Translate ---
 # Do NOT put API keys in source. Set "api_key" in translator params (saved in config.json, which is gitignored).
+# When api_key is empty, use this default so Google Translate works without configuration (Issue #11; same as original BallonsTranslator).
+# Users can set their own key in Config → Translator → Google for higher limits.
+DEFAULT_GOOGLE_TRANSLATE_KEY = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520"
 USER_AGENT_BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
 GOOGLE_API_URL_BASE = "https://translate-pa.googleapis.com/v1"  # Base API URL
 
@@ -129,12 +132,17 @@ class TransGoogle(BaseTranslator):
 
     concate_text = False
     params: Dict = {
-        "api_key": "",
+        "api_key": {
+            "value": "",
+            "description": "Optional. Leave empty to use built-in default (works without config, like original BallonsTranslator). Set your own key for higher limits.",
+        },
         "delay": 0.0,
     }
 
     def _setup_translator(self):
         api_key = (self.get_param_value("api_key") or "").strip()
+        if not api_key:
+            api_key = DEFAULT_GOOGLE_TRANSLATE_KEY
         self.internal_google_translator = GoogleTranslateProviderPython(api_key=api_key)
 
         self.lang_map["Auto"] = "auto"
