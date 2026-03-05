@@ -194,6 +194,7 @@ class Canvas(QGraphicsScene):
 
     format_textblks = Signal()
     layout_textblks = Signal()
+    auto_fit_font_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1098,7 +1099,7 @@ class Canvas(QGraphicsScene):
             menu.addSeparator()
 
             # --- Format ---
-            format_act = layout_act = angle_act = squeeze_act = None
+            format_act = layout_act = auto_fit_act = angle_act = squeeze_act = None
             format_menu = None
             if context_menu_visible('format_apply'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
@@ -1106,6 +1107,11 @@ class Canvas(QGraphicsScene):
             if context_menu_visible('format_layout'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 layout_act = format_menu.addAction(self.tr("Auto layout"))
+            if context_menu_visible('format_auto_fit') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                auto_fit_act = format_menu.addAction(self.tr("Auto fit font size to box"))
+                if auto_fit_act is not None:
+                    auto_fit_act.setToolTip(self.tr("Scale font size so text fits the selected text box(es). Use after changing font."))
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
@@ -1289,6 +1295,8 @@ class Canvas(QGraphicsScene):
                 self.format_textblks.emit()
             elif rst == layout_act:
                 self.layout_textblks.emit()
+            elif rst == auto_fit_act:
+                self.auto_fit_font_signal.emit()
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

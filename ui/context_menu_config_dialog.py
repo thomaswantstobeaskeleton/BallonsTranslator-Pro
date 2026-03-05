@@ -68,6 +68,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
     ("Format", [
         ("format_apply", "Apply font formatting"),
         ("format_layout", "Auto layout"),
+        ("format_auto_fit", "Auto fit font size to box"),
         ("format_angle", "Reset Angle"),
         ("format_squeeze", "Squeeze"),
     ]),
@@ -95,7 +96,10 @@ class ContextMenuConfigDialog(QDialog):
         self._checkboxes: Dict[str, QCheckBox] = {}
         layout = QVBoxLayout(self)
 
-        hint = QLabel(self.tr("Check an item to show it in the canvas right-click menu. Uncheck to hide it."))
+        hint = QLabel(self.tr(
+            "Choose which actions appear in the canvas right-click menu. "
+            "Checked = visible, unchecked = hidden. Actions are grouped by category below."
+        ))
         hint.setWordWrap(True)
         hint.setStyleSheet("color: gray;")
         layout.addWidget(hint)

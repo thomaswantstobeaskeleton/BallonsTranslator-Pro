@@ -338,6 +338,7 @@ class MainWindow(mainwindow_cls):
         self.spellCheckPanel.set_get_blocks(self._spellcheck_get_blocks)
         self.spellCheckPanel.set_apply_replacement(self._spellcheck_apply_replacement)
         self.spellCheckPanel.close_requested.connect(self._on_spellcheck_panel_close)
+        self.spellCheckPanel.focus_block_requested.connect(self._on_spellcheck_focus_block)
         self.rightComicTransStackPanel.addWidget(self.spellCheckPanel)
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
@@ -1092,6 +1093,37 @@ class MainWindow(mainwindow_cls):
     def _on_spellcheck_panel_close(self):
         """Switch right panel from spell check back to text panel."""
         self.rightComicTransStackPanel.setCurrentIndex(1)
+
+    def _on_spellcheck_focus_block(self, block_idx: int, line_idx: int, is_translation: bool):
+        """After spell check replace: switch to text panel and select the block so the change is visible."""
+        self.rightComicTransStackPanel.setCurrentIndex(1)
+        if not self.st_manager.textblk_item_list or block_idx < 0 or block_idx >= len(self.st_manager.textblk_item_list):
+            return
+        self.canvas.block_selection_signal = True
+        self.canvas.clearSelection()
+        blk_item = self.st_manager.textblk_item_list[block_idx]
+        blk_item.setSelected(True)
+        self.canvas.block_selection_signal = False
+        self.st_manager.textEditList.set_selected_list([block_idx])
+        self.st_manager.formatpanel.set_textblk_item(blk_item)
+        self.canvas.gv.ensureVisible(blk_item)
+        if block_idx < len(self.st_manager.pairwidget_list):
+            edit = self.st_manager.pairwidget_list[block_idx].e_trans if is_translation else self.st_manager.pairwidget_list[block_idx].e_source
+            edit.setFocus()
+            edit.blockSignals(True)
+            lines = edit.toPlainText().split('\n')
+            if line_idx < len(lines):
+                from qtpy.QtGui import QTextCursor
+                cursor = edit.textCursor()
+                pos = 0
+                for i, line in enumerate(lines):
+                    if i == line_idx:
+                        cursor.setPosition(pos)
+                        cursor.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+                        edit.setTextCursor(cursor)
+                        break
+                    pos += len(line) + 1
+            edit.blockSignals(False)
 
     def shortcutCtrlD(self):
         if self.centralStackWidget.currentIndex() == 0:

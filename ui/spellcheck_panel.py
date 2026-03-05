@@ -21,6 +21,7 @@ class SpellCheckPanel(QWidget):
     """Panel that lists misspellings and allows applying suggestions."""
 
     replace_requested = Signal(int, int, str, bool)  # block_idx, line_idx, new_line, is_translation
+    focus_block_requested = Signal(int, int, bool)  # block_idx, line_idx, is_translation
     close_requested = Signal()
 
     def __init__(self, parent=None):
@@ -124,5 +125,6 @@ class SpellCheckPanel(QWidget):
         new_word = self.suggestion_combo.currentText() if self.suggestion_combo.count() else (suggs[0] if suggs else word)
         new_line = text[:start] + new_word + text[end:]
         self._apply_replacement(block_idx, line_idx, new_line, use_translation)
+        self.focus_block_requested.emit(block_idx, line_idx, use_translation)
         del self._issues[row]
         self._refresh_list()

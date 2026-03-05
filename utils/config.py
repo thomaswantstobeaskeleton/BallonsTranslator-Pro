@@ -343,7 +343,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_angle': True, 'format_squeeze': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
 }
