@@ -65,5 +65,24 @@ Pip may report a dependency conflict. With Pillow 10.x installed, **simple_lama*
 |-------------------|----------------------------|-----------------------------------|-----------------------------------------|
 | **craft_det**     | craft-text-detector        | opencv-python &lt;4.5.4.62 vs ≥4.8 | easyocr_det, mmocr_det, ctd             |
 | **simple_lama**   | simple-lama-inpainting     | pillow &lt;10 vs 10.x               | lama_large_512px, lama_onnx, lama_manga_onnx |
+| **rapidocr_det / rapidocr** | — | None | Install: `pip install rapidocr-onnxruntime` (optional). |
 
 The main application and all other detectors/inpainters work with the versions in `requirements.txt`. These notes only apply if you explicitly want **craft_det** or **simple_lama**.
+
+---
+
+## 3. RapidOCR detector and OCR (`rapidocr_det`, `rapidocr`)
+
+**No conflict.** Optional package:
+
+- **rapidocr-onnxruntime**
+
+**What it provides:** Text detector **rapidocr_det** and OCR **rapidocr** (ONNX, no GPU required). Good for EasyScanlate-like pipelines and Korean/Chinese/English.
+
+**Install when needed:**
+
+```bash
+pip install rapidocr-onnxruntime
+```
+
+**Optional:** Place PP-OCRv5 det/rec models in `data/models/rapidocr/` and set paths in Config → DL Module → Text detection (rapidocr_det) / OCR (rapidocr). For **recommended settings** (manhwa/comics, aligned with [EasyScanlate](https://github.com/Liiesl/EasyScanlate)), see **docs/EASYSCANLATE_INTEGRATION.md** § Configuration → Recommended settings.

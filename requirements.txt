@@ -62,5 +62,7 @@ pyobjc-framework-cocoa; sys_platform == 'darwin'
 pyobjc-framework-coreml; sys_platform == 'darwin'
 pyobjc-framework-quartz; sys_platform == 'darwin'
 pyobjc-framework-vision; sys_platform == 'darwin'
+# Optional: RapidOCR detector + OCR (lightweight, ONNX). Enables rapidocr_det and rapidocr in Config.
+rapidocr-onnxruntime
 betterproto
 protobuf>=3.20.0
