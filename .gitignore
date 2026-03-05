@@ -93,6 +93,7 @@ docs/*-local.md
 # Plans, integrations, and new-addition docs (maintainer-only)
 docs/UI_RECONSTRUCTION_PLAN_ISSUE_7.md
 docs/DANGO_STYLE_UI_PLAN.md
+docs/DANGO_REFERENCE.md
 docs/EASYSCANLATE_INTEGRATION.md
 docs/FUTURE_ADDITIONS.md
 docs/SETTINGS_UI_RECOMMENDATIONS.md
