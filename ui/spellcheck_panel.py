@@ -63,6 +63,11 @@ class SpellCheckPanel(QWidget):
         """Set callback apply_replacement(block_idx, line_idx, new_line, is_translation)."""
         self._apply_replacement = func
 
+    def run_check(self, source_not_translation: bool = True):
+        """Set target (Source text or Translation) and run check. Call after panel is shown."""
+        self.target_combo.setCurrentIndex(0 if source_not_translation else 1)
+        self._on_check()
+
     def _on_check(self):
         from utils.ocr_spellcheck import get_spell_issues, _init_enchant
         if not _init_enchant():

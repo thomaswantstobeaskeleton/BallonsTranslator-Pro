@@ -181,6 +181,8 @@ class TextBlkItem(QGraphicsTextItem):
                 fragment = it.fragment()
                 cfmt = fragment.charFormat()
                 sw = pt2px(cfmt.fontPointSize()) * self.fontformat.stroke_width
+                if getattr(self.fontformat, 'stroke_outline_outside_only', False):
+                    sw = sw * 2  # fill drawn on top covers inner half → stroke only outside (EasyScanlate-style)
                 stroke_pen.setWidthF(sw)
                 pos1 = fragment.position()
                 pos2 = pos1 + fragment.length()
@@ -225,6 +227,8 @@ class TextBlkItem(QGraphicsTextItem):
         fg = QColor(*ff.foreground_color())
         stroke_pen = QPen(QColor(*ff.stroke_color()), 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         stroke_px = pt2px(font.pointSizeF()) * ff.stroke_width if draw_stroke and ff.stroke_width > 0 else 0
+        if stroke_px > 0 and getattr(ff, 'stroke_outline_outside_only', False):
+            stroke_px = stroke_px * 2  # fill drawn on top → stroke only outside (EasyScanlate-style)
         if stroke_px > 0:
             stroke_pen.setWidthF(stroke_px)
 
@@ -395,6 +399,20 @@ class TextBlkItem(QGraphicsTextItem):
         p = -self.padding()
         P = p * 2
         return QRectF(rect.x() - p, rect.y() - p, rect.width() + P, rect.height() + P)
+
+    def _box_outline_rect_and_radius(self) -> Tuple[QRectF, float]:
+        """Return (unpadded outline rect, corner radius in item coords). Radius 0 = rectangle."""
+        br = self.boundingRect()
+        r = self.unpadRect(br)
+        radius_px = max(0.0, getattr(self.fontformat, 'text_box_corner_radius', 0.0) or 0.0)
+        if radius_px <= 0:
+            return r, 0.0
+        scale = self.get_scale()
+        if scale <= 0:
+            scale = 1.0
+        radius_item = radius_px / scale
+        radius_item = min(radius_item, r.width() / 2, r.height() / 2)
+        return r, max(0.0, radius_item)
 
     def setRect(self, rect: Union[List, QRectF], padding=True, repaint=True) -> None:
         
@@ -603,16 +621,23 @@ class TextBlkItem(QGraphicsTextItem):
                 painter.restore()
             br = self.boundingRect()
             draw_rect = self.draw_rect and not self.under_ctrl
+            outline_rect, radius = self._box_outline_rect_and_radius()
             if self.isSelected() and not self.is_editting():
                 pen = QPen(TEXTRECT_SELECTED_COLOR, 3.5 / self.get_scale(), Qt.PenStyle.DashLine)
                 painter.setPen(pen)
                 painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-                painter.drawRect(self.unpadRect(br))
+                if radius > 0:
+                    painter.drawRoundedRect(outline_rect, radius, radius)
+                else:
+                    painter.drawRect(outline_rect)
             elif draw_rect:
                 pen = QPen(TEXTRECT_SHOW_COLOR, 3 / self.get_scale(), Qt.PenStyle.SolidLine)
                 painter.setPen(pen)
                 painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-                painter.drawRect(self.unpadRect(br))
+                if radius > 0:
+                    painter.drawRoundedRect(outline_rect, radius, radius)
+                else:
+                    painter.drawRect(outline_rect)
             return
         option.state = QStyle.State_None
         # Prevent base class from filling with palette Base (e.g. brown/beige on some themes)
@@ -634,10 +659,19 @@ class TextBlkItem(QGraphicsTextItem):
                     pass
                 else:
                     mask_region = self._text_mask_region() if not self.is_editting() else None
+                    outline_rect, box_radius = self._box_outline_rect_and_radius()
+                    clip_region = None
+                    if box_radius > 0:
+                        path = QPainterPath()
+                        path.addRoundedRect(outline_rect, box_radius, box_radius)
+                        poly = path.toFillPolygon()
+                        clip_region = QRegion(poly.toPolygon())
                     if mask_region is not None:
-                        painter.setClipRegion(mask_region)
+                        clip_region = mask_region.intersected(clip_region) if clip_region is not None else mask_region
+                    if clip_region is not None:
+                        painter.setClipRegion(clip_region)
                     super().paint(painter, option, widget)
-                    if mask_region is not None:
+                    if clip_region is not None:
                         painter.setClipRegion(QRegion())
         painter.restore()
 
@@ -840,14 +874,23 @@ class TextBlkItem(QGraphicsTextItem):
             painter.restore()
 
         draw_rect = self.draw_rect and not self.under_ctrl
+        outline_rect, radius = self._box_outline_rect_and_radius()
         if self.isSelected() and not self.is_editting():
             pen = QPen(TEXTRECT_SELECTED_COLOR, 3.5 / self.get_scale(), Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawRect(self.unpadRect(br))
+            painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+            if radius > 0:
+                painter.drawRoundedRect(outline_rect, radius, radius)
+            else:
+                painter.drawRect(outline_rect)
         elif draw_rect:
             pen = QPen(TEXTRECT_SHOW_COLOR, 3 / self.get_scale(), Qt.PenStyle.SolidLine)
             painter.setPen(pen)
-            painter.drawRect(self.unpadRect(br))
+            painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+            if radius > 0:
+                painter.drawRoundedRect(outline_rect, radius, radius)
+            else:
+                painter.drawRect(outline_rect)
         painter.restore()
 
 

@@ -11,6 +11,7 @@ from .slider import PaintQSlider
 from .helper import isDarkTheme, themeColor
 from .push_button import NoBorderPushBtn
 from .checkbox import QFontChecker, AlignmentChecker
+from .dango_switch import DangoSwitch
 
 
 def combobox_with_label(param_name: str = None, size='small', options=None, parent=None, scrollWidget=None, label_alignment=None, vertical_layout=False, editable=False, label=False):

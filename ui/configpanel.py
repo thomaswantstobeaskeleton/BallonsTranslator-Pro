@@ -4,9 +4,9 @@ from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent, QColor
 from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit,
-    QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox)
+    QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox, QFileDialog)
 
-from .custom_widget import ConfigComboBox, Widget
+from .custom_widget import ConfigComboBox, Widget, DangoSwitch
 from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils import shared as C
@@ -197,6 +197,12 @@ class ConfigBlock(Widget):
         self.vlayout.addWidget(label)
         self.label_list.append(label)
 
+    def addSectionDescription(self, text: str):
+        """Short section-level description (Phase 2.3 UI plan)."""
+        desc = ConfigTextLabel(text, max(1, _config_font_size(CONFIG_FONTSIZE_CONTENT) - 2))
+        desc.setStyleSheet("color: gray;")
+        self.vlayout.addWidget(desc)
+
     def addSublock(self, sublock: ConfigSubBlock):
         self.vlayout.addWidget(sublock)
         sublock.setIdx(self.index, len(self.label_list)-1)
@@ -359,6 +365,8 @@ class ConfigPanel(Widget):
     reload_textstyle = Signal(bool)
     show_only_custom_font = Signal(bool)
     darkmode_changed = Signal(bool)
+    bubbly_ui_changed = Signal(bool)
+    custom_cursor_changed = Signal()
     display_lang_changed = Signal(str)
 
     def __init__(self, *args, **kwargs) -> None:
@@ -380,10 +388,13 @@ class ConfigPanel(Widget):
         label_inpaint = self.tr('Inpaint')
         label_translator = self.tr('Translator')
         label_startup = self.tr('Startup')
+        label_display = self.tr('Display')
         label_typesetting = self.tr('Typesetting')
+        label_ocr_result = self.tr('OCR result')
         label_save = self.tr('Save')
         label_saladict = self.tr('SalaDict')
         label_canvas = self.tr('Canvas')
+        label_integrations = self.tr('Integrations')
     
         dltableitem.appendRows([
             TableItem(self.tr('Image upscaling'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
@@ -394,10 +405,12 @@ class ConfigPanel(Widget):
         ])
         generalTableItem.appendRows([
             TableItem(label_startup, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_display, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_typesetting, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_ocr_result, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_save, _config_font_size(CONFIG_FONTSIZE_TABLE)),
-            TableItem(label_saladict, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_canvas, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_integrations, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
         
         self.load_model_checker, msublock = checkbox_with_label(self.tr('Load models on demand'), discription=self.tr('Load models on demand to save memory.'))
@@ -424,7 +437,7 @@ class ConfigPanel(Widget):
         self.skip_already_translated_checker.stateChanged.connect(self._on_skip_already_translated_changed)
         self.merge_nearby_blocks_checker, merge_sublock = checkbox_with_label(
             self.tr('Merge nearby blocks (collision)'),
-            discription=self.tr('Merge detection boxes that are close (Dango-style). Use when OCR returns many small boxes.')
+            discription=self.tr('Merge detection boxes that are close (collision-based). Use when OCR returns many small boxes.')
         )
         dlConfigPanel.vlayout.addWidget(merge_sublock)
         self.merge_nearby_blocks_checker.stateChanged.connect(self._on_merge_nearby_blocks_changed)
@@ -436,7 +449,7 @@ class ConfigPanel(Widget):
         merge_gap_sublock = ConfigSubBlock(
             self.merge_nearby_blocks_gap_spin,
             self.tr('Merge gap ratio'),
-            discription=self.tr('Vertical expansion ratio for horizontal merge (e.g. 1.5 = Dango-style).')
+            discription=self.tr('Vertical expansion ratio for horizontal merge (e.g. 1.5 for typical merge).')
         )
         dlConfigPanel.vlayout.addWidget(merge_gap_sublock)
         self.unload_model_btn = QPushButton(parent=self)
@@ -524,6 +537,7 @@ class ConfigPanel(Widget):
         self.trans_sub_block = dlConfigPanel.addBlockWidget(self.trans_config_panel)
 
         generalConfigPanel.addTextLabel(label_startup)
+        generalConfigPanel.addSectionDescription(self.tr("Reopen last project, confirm before run, recent list limit."))
         self.open_on_startup_checker, _ = generalConfigPanel.addCheckBox(self.tr('Reopen last project on startup'))
         self.open_on_startup_checker.stateChanged.connect(self.on_open_onstartup_changed)
 
@@ -540,14 +554,6 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(sublock)
         self.recent_proj_list_max_spin.valueChanged.connect(self.on_recent_proj_list_max_changed)
 
-        self.logical_dpi_spin = QSpinBox()
-        self.logical_dpi_spin.setRange(0, 300)
-        self.logical_dpi_spin.setValue(0)
-        self.logical_dpi_spin.setSpecialValueText(self.tr('System default'))
-        sublock = ConfigSubBlock(self.logical_dpi_spin, self.tr('Logical DPI (restart to apply)'), discription=self.tr('0 = use system. Use 96 or 72 if font scaling is wrong.'))
-        generalConfigPanel.addSublock(sublock)
-        self.logical_dpi_spin.valueChanged.connect(self.on_logical_dpi_changed)
-
         self.confirm_before_run_checker, _ = generalConfigPanel.addCheckBox(self.tr('Confirm before Run'), discription=self.tr('Show Run / Continue / Cancel dialog when clicking Run.'))
         self.confirm_before_run_checker.stateChanged.connect(self.on_confirm_before_run_changed)
 
@@ -563,8 +569,62 @@ class ConfigPanel(Widget):
         )
         generalConfigPanel.addSublock(sublock_arm)
 
-        self.darkmode_checker, _ = generalConfigPanel.addCheckBox(self.tr('Dark mode'), discription=self.tr('Use dark theme. Restart or toggle View → Dark Mode to apply fully.'))
-        self.darkmode_checker.stateChanged.connect(self.on_darkmode_checker_changed)
+        generalConfigPanel.addTextLabel(label_display)
+        self.darkmode_checker = DangoSwitch(self)
+        self.darkmode_checker.setChecked(bool(getattr(pcfg, 'darkmode', False)))
+        darkmode_sublock = ConfigSubBlock(
+            self.darkmode_checker,
+            self.tr('Dark mode'),
+            discription=self.tr('Use dark theme. Restart or toggle View → Dark Mode to apply fully.'),
+            vertical_layout=False,
+            insert_stretch=True
+        )
+        generalConfigPanel.addSublock(darkmode_sublock)
+        self.darkmode_checker.checkedChanged.connect(self.on_darkmode_checker_changed)
+
+        self.bubbly_ui_checker = DangoSwitch(self)
+        self.bubbly_ui_checker.setChecked(bool(getattr(pcfg, 'bubbly_ui', True)))
+        bubbly_ui_sublock = ConfigSubBlock(
+            self.bubbly_ui_checker,
+            self.tr('Bubbly UI'),
+            discription=self.tr('Rounder corners, gradients, softer look. Same as View → Bubbly UI.'),
+            vertical_layout=False,
+            insert_stretch=True
+        )
+        generalConfigPanel.addSublock(bubbly_ui_sublock)
+        self.bubbly_ui_checker.checkedChanged.connect(self.on_bubbly_ui_checker_changed)
+
+        self.use_custom_cursor_checker = DangoSwitch(self)
+        self.use_custom_cursor_checker.setChecked(bool(getattr(pcfg, 'use_custom_cursor', False)))
+        self.custom_cursor_path_edit = QLineEdit()
+        self.custom_cursor_path_edit.setPlaceholderText(self.tr('Path to cursor image (.png, .cur)'))
+        self.custom_cursor_path_edit.setText(getattr(pcfg, 'custom_cursor_path', '') or '')
+        self.custom_cursor_path_edit.setClearButtonEnabled(True)
+        self.custom_cursor_browse_btn = QPushButton(self.tr('Browse...'))
+        self.custom_cursor_browse_btn.clicked.connect(self._on_custom_cursor_browse)
+        cursor_path_layout = QHBoxLayout()
+        cursor_path_layout.addWidget(self.custom_cursor_path_edit)
+        cursor_path_layout.addWidget(self.custom_cursor_browse_btn)
+        cursor_path_widget = Widget()
+        cursor_path_widget.setLayout(cursor_path_layout)
+        use_cursor_sublock = ConfigSubBlock(
+            self.use_custom_cursor_checker,
+            self.tr('Use custom cursor'),
+            discription=self.tr('Use a custom mouse cursor from file. Set path below.'),
+            vertical_layout=False,
+            insert_stretch=True
+        )
+        generalConfigPanel.addSublock(use_cursor_sublock)
+        self.use_custom_cursor_checker.checkedChanged.connect(self.on_use_custom_cursor_changed)
+        cursor_path_sublock = ConfigSubBlock(
+            cursor_path_widget,
+            self.tr('Custom cursor path'),
+            discription=self.tr('PNG or CUR file. Applied when "Use custom cursor" is on.'),
+            vertical_layout=False
+        )
+        generalConfigPanel.addSublock(cursor_path_sublock)
+        self.custom_cursor_path_edit.textChanged.connect(self._on_custom_cursor_path_text_changed)
+        self.custom_cursor_path_edit.editingFinished.connect(self._on_custom_cursor_path_editing_finished)
 
         self.display_lang_combobox = QComboBox()
         self.display_lang_combobox.addItems(list(DISPLAY_LANGUAGE_MAP.keys()))
@@ -581,12 +641,13 @@ class ConfigPanel(Widget):
         sublock = ConfigSubBlock(self.config_font_scale_spin, self.tr('Config panel font scale (0.8–1.5)'), discription=self.tr('Scale font size in this Config panel. Reopen Config to apply.'))
         generalConfigPanel.addSublock(sublock)
 
-        generalConfigPanel.addTextLabel(self.tr('OCR result'))
-        self.ocr_spell_check_checker, _ = generalConfigPanel.addCheckBox(
-            self.tr('Spell check / Auto-correct OCR result'),
-            discription=self.tr('After OCR runs, correct misspelled words using a spell checker when there is a single suggestion (e.g. "teh" → "the"). Requires pyenchant and a system dictionary (e.g. en_US). Enable this in General to auto-correct OCR text.')
-        )
-        self.ocr_spell_check_checker.stateChanged.connect(self.on_ocr_spell_check_changed)
+        self.logical_dpi_spin = QSpinBox()
+        self.logical_dpi_spin.setRange(0, 300)
+        self.logical_dpi_spin.setValue(0)
+        self.logical_dpi_spin.setSpecialValueText(self.tr('System default'))
+        sublock = ConfigSubBlock(self.logical_dpi_spin, self.tr('Logical DPI (restart to apply)'), discription=self.tr('0 = use system. Use 96 or 72 if font scaling is wrong.'))
+        generalConfigPanel.addSublock(sublock)
+        self.logical_dpi_spin.valueChanged.connect(self.on_logical_dpi_changed)
 
         generalConfigPanel.addTextLabel(label_typesetting)
 
@@ -674,6 +735,13 @@ class ConfigPanel(Widget):
         self.let_show_only_custom_fonts, sublock = generalConfigPanel.addCheckBox(self.tr("Show only custom fonts"))
         self.let_show_only_custom_fonts.stateChanged.connect(self.on_show_only_custom_fonts)
 
+        generalConfigPanel.addTextLabel(label_ocr_result)
+        self.ocr_spell_check_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Spell check / Auto-correct OCR result'),
+            discription=self.tr('After OCR runs, correct misspelled words using a spell checker when there is a single suggestion (e.g. "teh" → "the"). Requires pyenchant and a system dictionary (e.g. en_US). Enable this in General to auto-correct OCR text.')
+        )
+        self.ocr_spell_check_checker.stateChanged.connect(self.on_ocr_spell_check_changed)
+
         generalConfigPanel.addTextLabel(label_save)
         self.rst_imgformat_combobox, imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JPG', 'WEBP', 'JXL'], self.tr('Result image format'))
         self.rst_imgformat_combobox.activated.connect(self.on_rst_imgformat_changed)
@@ -694,7 +762,14 @@ class ConfigPanel(Widget):
         self.intermediate_imgformat_combobox, intermediate_imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JXL'], self.tr('Intermediate image format'))
         self.intermediate_imgformat_combobox.activated.connect(self.on_intermediate_imgformat_changed)
 
-        generalConfigPanel.addTextLabel(label_saladict)
+        generalConfigPanel.addTextLabel(label_canvas)
+        self.context_menu_btn = QPushButton(self.tr("Context menu options..."))
+        self.context_menu_btn.setToolTip(self.tr("Choose which actions appear in the canvas right-click menu."))
+        self.context_menu_btn.clicked.connect(self._open_context_menu_config)
+        sublock_ctx = ConfigSubBlock(self.context_menu_btn, self.tr("Right-click menu"), discription=self.tr("Same as View → Context menu options. Show or hide actions in the canvas context menu by category."))
+        generalConfigPanel.addSublock(sublock_ctx)
+
+        generalConfigPanel.addTextLabel(label_integrations)
 
         sublock = ConfigSubBlock(ConfigTextLabel(self.tr("<a href=\"https://github.com/dmMaze/BallonsTranslator/tree/master/doc/saladict.md\">Installation guide</a>"), _config_font_size(CONFIG_FONTSIZE_CONTENT) - 2), vertical_layout=False)
         sublock.layout().insertStretch(-1)
@@ -713,13 +788,6 @@ class ConfigPanel(Widget):
         self.searchurl_combobox.setEditable(True)
         self.searchurl_combobox.setFixedWidth(CONFIG_COMBOBOX_LONG)
         self.searchurl_combobox.currentTextChanged.connect(self.on_searchurl_changed)
-
-        generalConfigPanel.addTextLabel(label_canvas)
-        self.context_menu_btn = QPushButton(self.tr("Context menu options..."))
-        self.context_menu_btn.setToolTip(self.tr("Choose which actions appear in the canvas right-click menu."))
-        self.context_menu_btn.clicked.connect(self._open_context_menu_config)
-        sublock_ctx = ConfigSubBlock(self.context_menu_btn, self.tr("Right-click menu"), discription=self.tr("Show or hide actions in the canvas context menu by category."))
-        generalConfigPanel.addSublock(sublock_ctx)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.configTable)
@@ -793,6 +861,35 @@ class ConfigPanel(Widget):
     def on_darkmode_checker_changed(self):
         pcfg.darkmode = self.darkmode_checker.isChecked()
         self.darkmode_changed.emit(pcfg.darkmode)
+
+    def on_bubbly_ui_checker_changed(self):
+        pcfg.bubbly_ui = self.bubbly_ui_checker.isChecked()
+        self.bubbly_ui_changed.emit(pcfg.bubbly_ui)
+
+    def on_use_custom_cursor_changed(self):
+        pcfg.use_custom_cursor = self.use_custom_cursor_checker.isChecked()
+        pcfg.custom_cursor_path = self.custom_cursor_path_edit.text().strip()
+        self.custom_cursor_changed.emit()
+
+    def _on_custom_cursor_browse(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr('Select cursor image'),
+            self.custom_cursor_path_edit.text() or '',
+            self.tr('Cursor images (*.png *.cur *.ico);;All files (*)')
+        )
+        if path:
+            self.custom_cursor_path_edit.setText(path)
+            pcfg.custom_cursor_path = path
+            if self.use_custom_cursor_checker.isChecked():
+                self.custom_cursor_changed.emit()
+
+    def _on_custom_cursor_path_text_changed(self, text: str):
+        pcfg.custom_cursor_path = text.strip()
+
+    def _on_custom_cursor_path_editing_finished(self):
+        if self.use_custom_cursor_checker.isChecked():
+            self.custom_cursor_changed.emit()
 
     def _display_lang_to_label(self, code: str) -> str:
         for label, c in DISPLAY_LANGUAGE_MAP.items():
@@ -1079,6 +1176,11 @@ class ConfigPanel(Widget):
             self.auto_region_merge_combobox.setCurrentIndex(arm_idx)
             self.auto_region_merge_combobox.blockSignals(False)
         self.darkmode_checker.setChecked(pcfg.darkmode)
+        self.bubbly_ui_checker.setChecked(getattr(pcfg, 'bubbly_ui', True))
+        self.use_custom_cursor_checker.setChecked(bool(getattr(pcfg, 'use_custom_cursor', False)))
+        self.custom_cursor_path_edit.blockSignals(True)
+        self.custom_cursor_path_edit.setText(getattr(pcfg, 'custom_cursor_path', '') or '')
+        self.custom_cursor_path_edit.blockSignals(False)
         self.display_lang_combobox.blockSignals(True)
         self.display_lang_combobox.setCurrentText(self._display_lang_to_label(getattr(pcfg, 'display_lang', C.DEFAULT_DISPLAY_LANG)))
         self.display_lang_combobox.blockSignals(False)

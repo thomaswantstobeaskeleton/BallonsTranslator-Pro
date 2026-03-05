@@ -72,7 +72,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_angle", "Reset Angle"),
         ("format_squeeze", "Squeeze"),
     ]),
-    ("Detect & Run", [
+    ("Run", [
         ("run_detect_region", "Detect text in region"),
         ("run_detect_page", "Detect text on page"),
         ("run_translate", "Translate"),

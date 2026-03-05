@@ -7,6 +7,7 @@ from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon
 
 from modules.translators import BaseTranslator
 from .custom_widget import Widget, PaintQSlider, SmallComboBox, ConfigClickableLabel
+from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 from utils.shared import TITLEBAR_HEIGHT, WINDOW_BORDER_WIDTH, BOTTOMBAR_HEIGHT, LEFTBAR_WIDTH, LEFTBTN_WIDTH
 from .framelesswindow import FramelessMoveResize
 from utils.config import pcfg
@@ -61,6 +62,7 @@ class LeftBar(Widget):
     recent_proj_list = []
     imgTransChecked = Signal()
     configChecked = Signal()
+    run_clicked = Signal()
     open_dir = Signal(str)
     open_json_proj = Signal(str)
     save_proj = Signal()
@@ -85,6 +87,15 @@ class LeftBar(Widget):
         self.configChecker.setObjectName('ConfigChecker')
         self.configChecker.checked.connect(self.stateCheckerChanged)
         self.configChecker.unchecked.connect(self.stateCheckerChanged)
+
+        self.runBtn = QPushButton()
+        self.runBtn.setObjectName('LeftBarRunBtn')
+        self.runBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
+        run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate.svg')
+        if osp.isfile(run_icon_path):
+            self.runBtn.setIcon(QIcon(run_icon_path))
+        self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
+        self.runBtn.clicked.connect(self.run_clicked.emit)
 
         actionOpenFolder = QAction(self.tr("Open Folder ..."), self)
         actionOpenFolder.triggered.connect(self.onOpenFolder)
@@ -127,22 +138,12 @@ class LeftBar(Widget):
         self.import_trans_txt = actionImportTranslationTxt.triggered
 
         self.recentMenu = QMenu(self.tr("Open Recent"), self)
-        
+
         openMenu = QMenu(self)
         openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenProj])
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
-        openMenu.addActions([
-            actionSaveProj,
-            actionExportAsDoc,
-            actionExportCurrentPageAs,
-            actionImportFromDoc,
-            actionExportSrcTxt,
-            actionExportTranslationTxt,
-            actionExportSrcMD,
-            actionExportTranslationMD,
-            actionImportTranslationTxt,
-        ])
+        openMenu.addAction(actionSaveProj)
         self.openBtn = OpenBtn()
         self.openBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
         self.openBtn.setMenu(openMenu)
@@ -152,16 +153,6 @@ class LeftBar(Widget):
         openBtnToolBar.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
         openBtnToolBar.addWidget(self.openBtn)
         
-        self.runImgtransBtn = QPushButton()
-        self.runImgtransBtn.setObjectName('RunButton')
-        self.runImgtransBtn.setText(self.tr('Run'))
-        font = self.runImgtransBtn.font()
-        font.setPixelSize(10)
-        self.runImgtransBtn.setFont(font)
-        self.runImgtransBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
-        self.run_imgtrans_clicked = self.runImgtransBtn.clicked
-        self.runImgtransBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
-        
         vlayout = QVBoxLayout(self)
         vlayout.addWidget(openBtnToolBar)
         vlayout.addWidget(self.showPageListLabel)
@@ -169,12 +160,20 @@ class LeftBar(Widget):
         vlayout.addWidget(self.imgTransChecker)
         vlayout.addItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
         vlayout.addWidget(self.configChecker)
-        vlayout.addWidget(self.runImgtransBtn)
+        vlayout.addWidget(self.runBtn)
         vlayout.setContentsMargins(padding, LEFTBTN_WIDTH // 2, padding, LEFTBTN_WIDTH // 2)
         vlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vlayout.setSpacing(LEFTBTN_WIDTH * 3 // 4)
         self.setGeometry(0, 0, 300, 500)
         self.setMouseTracking(True)
+
+        install_hover_opacity_animation(self.openBtn, duration_ms=100, normal_opacity=0.9)
+        if getattr(pcfg, 'bubbly_ui', True):
+            install_hover_scale_animation(self.openBtn, duration_ms=80, size_delta=(3, 2))
+        for w in (self.showPageListLabel, self.globalSearchChecker, self.imgTransChecker, self.configChecker, self.runBtn):
+            install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88)
+        if getattr(pcfg, 'bubbly_ui', True):
+            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
@@ -351,11 +350,17 @@ class TitleBar(Widget):
         translationContextAction = QAction(self.tr("Translation context (project)..."), self)
         self.translation_context_trigger = translationContextAction.triggered
 
+        keywordSubMenu = QMenu(self.tr("Keyword substitution"), self)
+        keywordSubMenu.addAction(replaceOCRkeyword)
+        keywordSubMenu.addAction(replacePreMTkeyword)
+        keywordSubMenu.addAction(replaceMTkeyword)
+
         editMenu = QMenu(self.editToolBtn)
         editMenu.addActions([undoAction, redoAction])
         editMenu.addSeparator()
-        editMenu.addActions([pageSearchAction, globalSearchAction, replaceOCRkeyword, replacePreMTkeyword, replaceMTkeyword])
+        editMenu.addActions([pageSearchAction, globalSearchAction])
         editMenu.addSeparator()
+        editMenu.addMenu(keywordSubMenu)
         editMenu.addAction(translationContextAction)
         self.editToolBtn.setMenu(editMenu)
         self.editToolBtn.setPopupMode(QToolButton.InstantPopup)
@@ -395,14 +400,26 @@ class TitleBar(Widget):
         self.context_menu_options_trigger = contextMenuOptionsAction.triggered
         self.darkModeAction = darkModeAction = QAction(self.tr('Dark Mode'), self)
         darkModeAction.setCheckable(True)
+        themeLightAction = QAction(self.tr('Light'), self)
+        themeLightAction.setToolTip(self.tr('Use light theme (Eva Light).'))
+        themeDarkAction = QAction(self.tr('Dark'), self)
+        themeDarkAction.setToolTip(self.tr('Use dark theme (Eva Dark).'))
+        themeGroup = QActionGroup(self)
+        themeGroup.setExclusive(True)
+        themeLightAction.setCheckable(True)
+        themeDarkAction.setCheckable(True)
+        themeGroup.addAction(themeLightAction)
+        themeGroup.addAction(themeDarkAction)
+        self.theme_light_trigger = themeLightAction.triggered
+        self.theme_dark_trigger = themeDarkAction.triggered
+        bubblyUIAction = QAction(self.tr('Bubbly UI'), self)
+        bubblyUIAction.setCheckable(True)
+        bubblyUIAction.setToolTip(self.tr('Rounder corners, gradients, and softer look.'))
+        self.bubbly_ui_trigger = bubblyUIAction.triggered
+        self.bubblyUIAction = bubblyUIAction
+        self.themeLightAction = themeLightAction
+        self.themeDarkAction = themeDarkAction
 
-        self.viewMenu = viewMenu = QMenu(self.viewToolBtn)
-        viewMenu.addMenu(self.displayLanguageMenu)
-        viewMenu.addActions([drawBoardAction, texteditAction, spellCheckPanelAction])
-        viewMenu.addSeparator()
-        viewMenu.addAction(keyboardShortcutsAction)
-        viewMenu.addAction(contextMenuOptionsAction)
-        viewMenu.addSeparator()
         helpMenu = QMenu(self.tr('Help'), self)
         docAction = QAction(self.tr('Documentation'), self)
         docAction.setToolTip(self.tr('Open project README (installation and usage).'))
@@ -414,12 +431,26 @@ class TitleBar(Widget):
         helpMenu.addAction(aboutAction)
         helpMenu.addSeparator()
         helpMenu.addAction(updateFromGitHubAction)
-        viewMenu.addMenu(helpMenu)
+
+        self.viewMenu = viewMenu = QMenu(self.viewToolBtn)
+        viewMenu.addMenu(self.displayLanguageMenu)
+        viewMenu.addSeparator()
+        viewMenu.addActions([drawBoardAction, texteditAction, spellCheckPanelAction])
+        viewMenu.addSeparator()
+        viewMenu.addAction(keyboardShortcutsAction)
+        viewMenu.addAction(contextMenuOptionsAction)
         viewMenu.addSeparator()
         viewMenu.addAction(importTextStyles)
         viewMenu.addAction(exportTextStyles)
         viewMenu.addSeparator()
+        themeMenu = QMenu(self.tr('Theme'), self)
+        themeMenu.addAction(themeLightAction)
+        themeMenu.addAction(themeDarkAction)
+        viewMenu.addMenu(themeMenu)
         viewMenu.addAction(darkModeAction)
+        viewMenu.addAction(bubblyUIAction)
+        viewMenu.addSeparator()
+        viewMenu.addMenu(helpMenu)
         self.viewToolBtn.setMenu(viewMenu)
         self.viewToolBtn.setPopupMode(QToolButton.InstantPopup)
         self.textedit_trigger = texteditAction.triggered
@@ -490,20 +521,35 @@ class TitleBar(Widget):
         self.manage_models_trigger = manageModelsAction.triggered
 
         toolsMenu = QMenu(self.toolsToolBtn)
-        toolsMenu.addAction(mergeToolAction)
-        toolsMenu.addAction(reRunDetectAction)
-        toolsMenu.addAction(reRunOCRAction)
-        toolsMenu.addAction(batchExportAction)
-        toolsMenu.addAction(batchExportAsAction)
-        toolsMenu.addAction(validateProjAction)
-        toolsMenu.addAction(mangaSourceAction)
-        toolsMenu.addAction(batchQueueAction)
-        toolsMenu.addAction(manageModelsAction)
+        projectMenu = QMenu(self.tr('Project'), self)
+        projectMenu.addAction(mergeToolAction)
+        projectMenu.addAction(reRunDetectAction)
+        projectMenu.addAction(reRunOCRAction)
+        projectMenu.addAction(validateProjAction)
+        exportMenuTools = QMenu(self.tr('Export'), self)
+        exportMenuTools.addAction(batchExportAction)
+        exportMenuTools.addAction(batchExportAsAction)
+        sourcesMenu = QMenu(self.tr('Sources'), self)
+        sourcesMenu.addAction(mangaSourceAction)
+        queueMenu = QMenu(self.tr('Queue'), self)
+        queueMenu.addAction(batchQueueAction)
+        modelsMenu = QMenu(self.tr('Models'), self)
+        modelsMenu.addAction(manageModelsAction)
+        toolsMenu.addMenu(projectMenu)
+        toolsMenu.addMenu(exportMenuTools)
+        toolsMenu.addMenu(sourcesMenu)
+        toolsMenu.addMenu(queueMenu)
+        toolsMenu.addMenu(modelsMenu)
         self.toolsToolBtn.setMenu(toolsMenu)
         self.toolsToolBtn.setPopupMode(QToolButton.InstantPopup)
 
         self.runToolBtn = TitleBarToolBtn(self)
-        self.runToolBtn.setText(self.tr('Run'))
+        self.runToolBtn.setObjectName('PipelineRunBtn')
+        self.runToolBtn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate.svg')
+        if osp.isfile(run_icon_path):
+            self.runToolBtn.setIcon(QIcon(run_icon_path))
+        self.runToolBtn.setText(self.tr('Pipeline'))
 
         self.stageActions = stageActions = [
             QAction(self.tr('Enable Text Dection'), self),
@@ -547,6 +593,14 @@ class TitleBar(Widget):
         else:
             self.iconLabel.setFixedWidth(LEFTBAR_WIDTH + 8)
 
+        self.fileToolBtn = TitleBarToolBtn(self)
+        self.fileToolBtn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        file_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')
+        if osp.isfile(file_icon_path):
+            self.fileToolBtn.setIcon(QIcon(file_icon_path))
+        self.fileToolBtn.setText(self.tr('File'))
+        self.fileToolBtn.setPopupMode(QToolButton.InstantPopup)
+
         self.titleLabel = QLabel('BallonsTranslatorPro')
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -554,6 +608,7 @@ class TitleBar(Widget):
         hlayout = QHBoxLayout(self)
         hlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hlayout.addWidget(self.iconLabel)
+        hlayout.addWidget(self.fileToolBtn)
         hlayout.addWidget(self.editToolBtn)
         hlayout.addWidget(self.viewToolBtn)
         hlayout.addWidget(self.goToolBtn)
@@ -580,6 +635,53 @@ class TitleBar(Widget):
             hlayout.addWidget(self.closeBtn)
             hlayout.setContentsMargins(0, 0, 0, 0)
             hlayout.setSpacing(0)
+
+        for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn):
+            install_hover_opacity_animation(btn, duration_ms=100, normal_opacity=0.9)
+            if getattr(pcfg, 'bubbly_ui', True):
+                install_hover_scale_animation(btn, duration_ms=80, size_delta=(3, 2))
+
+    def setLeftBar(self, leftBar):
+        """Build File menu and connect to left bar (open/save/export/import). Call from mainwindow after both are created."""
+        fileMenu = QMenu(self.fileToolBtn)
+        actionOpenFolder = QAction(self.tr("Open Folder ..."), self)
+        actionOpenFolder.triggered.connect(leftBar.onOpenFolder)
+        actionOpenImages = QAction(self.tr("Open Images ..."), self)
+        actionOpenImages.triggered.connect(leftBar.onOpenImages)
+        actionOpenProj = QAction(self.tr("Open Project ... *.json"), self)
+        actionOpenProj.triggered.connect(leftBar.onOpenProj)
+        fileMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenProj])
+        fileMenu.addMenu(leftBar.recentMenu)
+        fileMenu.addSeparator()
+        actionSave = QAction(self.tr("Save Project"), self)
+        actionSave.triggered.connect(leftBar.save_proj.emit)
+        fileMenu.addAction(actionSave)
+        fileMenu.addSeparator()
+        exportMenu = QMenu(self.tr("Export"), self)
+        actionExportDoc = QAction(self.tr("Export as Doc"), self)
+        actionExportDoc.triggered.connect(leftBar.export_doc.emit)
+        actionExportCurrentPage = QAction(self.tr("Export current page as..."), self)
+        actionExportCurrentPage.triggered.connect(leftBar.export_current_page_as.emit)
+        actionExportSrcTxt = QAction(self.tr("Export source text as TXT"), self)
+        actionExportSrcTxt.triggered.connect(leftBar.export_src_txt.emit)
+        actionExportTransTxt = QAction(self.tr("Export translation as TXT"), self)
+        actionExportTransTxt.triggered.connect(leftBar.export_trans_txt.emit)
+        actionExportSrcMD = QAction(self.tr("Export source text as markdown"), self)
+        actionExportSrcMD.triggered.connect(leftBar.export_src_md.emit)
+        actionExportTransMD = QAction(self.tr("Export translation as markdown"), self)
+        actionExportTransMD.triggered.connect(leftBar.export_trans_md.emit)
+        exportMenu.addActions([actionExportDoc, actionExportCurrentPage])
+        exportMenu.addSeparator()
+        exportMenu.addActions([actionExportSrcTxt, actionExportTransTxt, actionExportSrcMD, actionExportTransMD])
+        fileMenu.addMenu(exportMenu)
+        importMenu = QMenu(self.tr("Import"), self)
+        actionImportDoc = QAction(self.tr("Import from Doc"), self)
+        actionImportDoc.triggered.connect(leftBar.import_doc.emit)
+        actionImportTransTxt = QAction(self.tr("Import translation from TXT/markdown"), self)
+        actionImportTransTxt.triggered.connect(leftBar.import_trans_txt.emit)
+        importMenu.addActions([actionImportDoc, actionImportTransTxt])
+        fileMenu.addMenu(importMenu)
+        self.fileToolBtn.setMenu(fileMenu)
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
@@ -673,7 +775,8 @@ class SmallConfigPutton(QPushButton):
     pass
 
 
-CFG_ICON  = QIcon('icons/leftbar_config_activate.svg')
+CFG_ICON = QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg'))
+CFG_ICON_NORMAL = QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg'))
 
 
 class SelectionWithConfigWidget(Widget):
@@ -690,6 +793,11 @@ class SelectionWithConfigWidget(Widget):
         self.cfg_btn = None
         if add_cfg_btn:
             self.cfg_btn = SmallConfigPutton()
+            self.cfg_btn.setObjectName('BottomBarCfgBtn')
+            self.cfg_btn.setToolTip(self.tr('Open module settings'))
+            self.cfg_btn.setIconSize(QSize(18, 18))
+            if osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')):
+                self.cfg_btn.setIcon(CFG_ICON_NORMAL)
             self.cfg_btn.clicked.connect(self.cfg_clicked)
 
         layout = QHBoxLayout(self)
@@ -704,13 +812,13 @@ class SelectionWithConfigWidget(Widget):
         layout.addLayout(layout2)
 
     def enterEvent(self, event: QEvent) -> None:
-        if self.cfg_btn is not None:
+        if self.cfg_btn is not None and osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')):
             self.cfg_btn.setIcon(CFG_ICON)
         return super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
-        if self.cfg_btn is not None:
-            self.cfg_btn.setIcon(QIcon())
+        if self.cfg_btn is not None and osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')):
+            self.cfg_btn.setIcon(CFG_ICON_NORMAL)
         return super().leaveEvent(event)
     
     def blockSignals(self, block: bool):
@@ -742,6 +850,11 @@ class TranslatorSelectionWidget(Widget):
         self.src_selector = SmallComboBox()
         self.tgt_selector = SmallComboBox()
         self.cfg_btn = SmallConfigPutton()
+        self.cfg_btn.setObjectName('BottomBarCfgBtn')
+        self.cfg_btn.setToolTip(self.tr('Open module settings'))
+        self.cfg_btn.setIconSize(QSize(18, 18))
+        if osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')):
+            self.cfg_btn.setIcon(CFG_ICON_NORMAL)
         self.cfg_btn.clicked.connect(self.cfg_clicked)
 
         layout = QHBoxLayout(self)
@@ -756,13 +869,13 @@ class TranslatorSelectionWidget(Widget):
         layout.setSpacing(1)
 
     def enterEvent(self, event: QEvent) -> None:
-        if self.cfg_btn is not None:
+        if self.cfg_btn is not None and osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')):
             self.cfg_btn.setIcon(CFG_ICON)
         return super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
-        if self.cfg_btn is not None:
-            self.cfg_btn.setIcon(QIcon())
+        if self.cfg_btn is not None and osp.isfile(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')):
+            self.cfg_btn.setIcon(CFG_ICON_NORMAL)
         return super().leaveEvent(event)
     
     def blockSignals(self, block: bool):
@@ -789,6 +902,8 @@ class BottomBar(Widget):
     textedit_checkchanged = Signal()
     paintmode_checkchanged = Signal()
     textblock_checkchanged = Signal()
+    run_clicked = Signal()
+    spellcheck_checkchanged = Signal()
 
     def __init__(self, mainwindow: QMainWindow, *args, **kwargs) -> None:
         super().__init__(mainwindow, *args, **kwargs)
@@ -801,15 +916,24 @@ class BottomBar(Widget):
         self.inpaint_selector = SelectionWithConfigWidget(self.tr('Inpaint'))
         self.trans_selector = TranslatorSelectionWidget()
 
+        self.runBtn = QPushButton(self.tr('Run'))
+        self.runBtn.setObjectName('BottomBarRunBtn')
+        self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
+        self.runBtn.clicked.connect(self.run_clicked.emit)
+
         self.hlayout = QHBoxLayout(self)
         self.paintChecker = QCheckBox()
         self.paintChecker.setObjectName('PaintChecker')
-        self.paintChecker.setToolTip(self.tr('Enable/disable paint mode'))
+        self.paintChecker.setToolTip(self.tr('Drawing board'))
         self.paintChecker.clicked.connect(self.onPaintCheckerPressed)
         self.texteditChecker = QCheckBox()
         self.texteditChecker.setObjectName('TexteditChecker')
-        self.texteditChecker.setToolTip(self.tr('Enable/disable text edit mode'))
+        self.texteditChecker.setToolTip(self.tr('Text editor'))
         self.texteditChecker.clicked.connect(self.onTextEditCheckerPressed)
+        self.spellCheckChecker = QCheckBox()
+        self.spellCheckChecker.setObjectName('SpellCheckChecker')
+        self.spellCheckChecker.setToolTip(self.tr('Spell check panel'))
+        self.spellCheckChecker.clicked.connect(self.onSpellCheckCheckerPressed)
         self.textblockChecker = QCheckBox()
         self.textblockChecker.setObjectName('TextblockChecker')
         self.textblockChecker.clicked.connect(self.onTextblockCheckerClicked)
@@ -823,18 +947,18 @@ class BottomBar(Widget):
         self.textlayerSlider.setValue(100)
         self.textlayerSlider.setRange(0, 100)
         
+        # Layout: Pipeline (det, ocr, inpaint, trans) | Run | spacer | sliders | Right panel (Drawing, Text, Spell check, text block mode)
         self.hlayout.addWidget(self.textdet_selector)
         self.hlayout.addWidget(self.ocr_selector)
         self.hlayout.addWidget(self.inpaint_selector)
         self.hlayout.addWidget(self.trans_selector)
-        # self.hlayout.addWidget(self.translatorStatusbtn)
-        # self.hlayout.addWidget(self.transTranspageBtn)
-        # self.hlayout.addWidget(self.inpainterStatBtn)
+        self.hlayout.addWidget(self.runBtn)
         self.hlayout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Minimum))
         self.hlayout.addWidget(self.textlayerSlider)
         self.hlayout.addWidget(self.originalSlider)
         self.hlayout.addWidget(self.paintChecker)
         self.hlayout.addWidget(self.texteditChecker)
+        self.hlayout.addWidget(self.spellCheckChecker)
         self.hlayout.addWidget(self.textblockChecker)
         self.hlayout.setContentsMargins(60, 0, 10, WINDOW_BORDER_WIDTH)
 
@@ -843,6 +967,7 @@ class BottomBar(Widget):
         checked = self.paintChecker.isChecked()
         if checked:
             self.texteditChecker.setChecked(False)
+            self.spellCheckChecker.setChecked(False)
         pcfg.imgtrans_paintmode = checked
         self.paintmode_checkchanged.emit()
 
@@ -850,8 +975,24 @@ class BottomBar(Widget):
         checked = self.texteditChecker.isChecked()
         if checked:
             self.paintChecker.setChecked(False)
+            self.spellCheckChecker.setChecked(False)
         pcfg.imgtrans_textedit = checked
         self.textedit_checkchanged.emit()
+
+    def onSpellCheckCheckerPressed(self):
+        checked = self.spellCheckChecker.isChecked()
+        if checked:
+            self.paintChecker.setChecked(False)
+            self.texteditChecker.setChecked(False)
+        self.spellcheck_checkchanged.emit()
+
+    def setPipelineVisible(self, visible: bool):
+        """Show or hide pipeline strip (detectors, OCR, inpaint, translate, Run). Hide when view is Config."""
+        self.textdet_selector.setVisible(visible)
+        self.ocr_selector.setVisible(visible)
+        self.inpaint_selector.setVisible(visible)
+        self.trans_selector.setVisible(visible)
+        self.runBtn.setVisible(visible)
 
     def onTextblockCheckerClicked(self):
         self.textblock_checkchanged.emit()

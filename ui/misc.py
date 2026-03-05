@@ -159,6 +159,16 @@ def parse_stylesheet(theme: str = '', reverse_icon: bool = False) -> str:
         reverse_icon_color(dark2light)
     with open(C.STYLESHEET_PATH, "r", encoding='utf-8') as f:
         stylesheet = f.read()
+    # Append Bubbly UI when enabled (rounder corners, gradients, etc.)
+    try:
+        from utils.config import pcfg
+        if getattr(pcfg, 'bubbly_ui', True):
+            bubbly_path = osp.join(osp.dirname(C.STYLESHEET_PATH), 'stylesheet_bubbly.css')
+            if osp.isfile(bubbly_path):
+                with open(bubbly_path, 'r', encoding='utf-8') as f:
+                    stylesheet += '\n' + f.read()
+    except Exception:
+        pass
     with open(C.THEME_PATH, 'r', encoding='utf8') as f:
         theme_dict: Dict = json.loads(f.read())
     if not theme or theme not in theme_dict:

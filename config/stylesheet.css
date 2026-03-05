@@ -373,10 +373,6 @@ QPushButton {
     border-radius: 4px;
 }
 
-QPushButton#RunButton {
-    font-size: 12px;
-}
-
 NoBorderPushBtn {
     background-color: @noboderPushBtnBackgroundColor;
     border: none;
@@ -1052,11 +1048,18 @@ SmallComboBox {
 }
 
 SmallConfigPutton {
-    height: 20px;
-    width: 20px;
+    height: 22px;
+    width: 22px;
+    min-width: 22px;
+    min-height: 22px;
     border: none;
     border-width: 0px;
     background-color: rgba(0, 0, 0, 0);
+}
+
+SmallConfigPutton:hover {
+    background-color: rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
 }
 
 SmallSizeComboBox {
@@ -1089,4 +1092,13 @@ DeleteStyleButton {
 
 DeleteStyleButton::hover {
     background-color: #FF605C;
+}
+
+QLabel#TitleLabel {
+    padding: 2px 8px;
+}
+
+.FadeLabel,
+QLabel#angleLabel {
+    border-radius: 12px;
 }

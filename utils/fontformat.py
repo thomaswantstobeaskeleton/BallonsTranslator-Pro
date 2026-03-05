@@ -95,10 +95,14 @@ class FontFormat(Config):
     blend_mode: int = 0
     # Outline only: draw stroke, no fill (stroke-only text)
     outline_only: bool = False
+    # Stroke outline outside only (EasyScanlate-style): draw stroke at 2x width so fill covers inner half; visible stroke is only outside glyphs
+    stroke_outline_outside_only: bool = False
     # Overlay image opacity (0..1) and block skew (shear) - synced to TextBlock
     overlay_opacity: float = 1.0
     skew_x: float = 0.0
     skew_y: float = 0.0
+    # Text box shape: 0 = rectangle, >0 = corner radius in px (rounded rect)
+    text_box_corner_radius: float = 0.0
     # #35: per-character stroke color (list of [r,g,b], one per character; used for text-on-path)
     stroke_rgb_per_char: List = field(default=None)  # optional
 

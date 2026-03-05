@@ -1,0 +1,194 @@
+/* ========== Bubbly UI: rounder corners, softer look ========== */
+/* Loaded only when Config → Display → Bubbly UI (or View → Bubbly UI) is on. */
+QPushButton {
+    border-radius: 10px;
+    padding: 4px 12px;
+    border: 1px solid @borderColor;
+}
+
+QPushButton:hover {
+    background-color: #cad7ed;
+}
+
+QPushButton:pressed {
+    background-color: rgba(30, 147, 229, 0.35);
+}
+
+QPushButton:focus {
+    border: 1px solid rgb(30, 147, 229);
+    outline: none;
+}
+
+/* Primary action buttons (Run) — left bar and bottom bar */
+QPushButton#LeftBarRunBtn,
+QPushButton#BottomBarRunBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @progressChunkStart, stop:1 @progressChunkEnd);
+    color: white;
+    border: 1px solid @borderColor;
+    font-weight: bold;
+}
+
+QPushButton#LeftBarRunBtn:hover,
+QPushButton#BottomBarRunBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @progressChunkStart, stop:1 @progressChunkEnd);
+    color: white;
+}
+
+TitleBarToolBtn {
+    border-radius: 8px;
+}
+
+TitleBarToolBtn:hover {
+    border-radius: 8px;
+    background-color: rgb(30, 147, 229);
+    color: whitesmoke;
+}
+
+/* Primary action (Pipeline) — accent on hover only so title bar matches other buttons at start */
+TitleBarToolBtn#PipelineRunBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @progressChunkStart, stop:1 @progressChunkEnd);
+    color: white;
+    border: 1px solid @borderColor;
+}
+
+QComboBox {
+    border-radius: 8px;
+}
+
+QComboBox:focus {
+    border: 1px solid rgb(30, 147, 229);
+}
+
+QLineEdit {
+    border-radius: 8px;
+}
+
+QLineEdit:focus {
+    border: 1px solid rgb(30, 147, 229);
+}
+
+QPlainTextEdit {
+    border-radius: 8px;
+}
+
+QPlainTextEdit:focus {
+    border: 1px solid rgb(30, 147, 229);
+}
+
+QMenu {
+    border-radius: 10px;
+    padding: 6px 0px;
+}
+
+QMenu::item {
+    border-radius: 6px;
+    margin: 2px 8px;
+    min-height: 28px;
+    padding: 2px 4px;
+}
+
+QMenu::separator {
+    height: 6px;
+    margin: 4px 8px;
+}
+
+QMenu::item:selected {
+    background-color: rgba(30, 147, 229, 0.2);
+    border-radius: 6px;
+}
+
+QGroupBox {
+    border-radius: 10px;
+}
+
+PanelAreaContent,
+PanelArea {
+    border-radius: 12px;
+}
+
+PanelGroupBox {
+    border-radius: 10px;
+}
+
+ConfigBlock,
+ConfigSubBlock {
+    border-radius: 10px;
+}
+
+ConfigSubBlock:hover {
+    border-radius: 8px;
+}
+
+QScrollBar::handle:vertical {
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal {
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    border-radius: 6px;
+}
+
+SourceTextEdit,
+TransTextEdit {
+    border-radius: 10px;
+}
+
+QListWidget {
+    border-radius: 8px;
+}
+
+ConfigTable {
+    border-radius: 8px;
+}
+
+OpenBtn {
+    border-radius: 10px;
+}
+
+DrawToolCheckBox::indicator {
+    border-radius: 10px;
+}
+
+ColorPickerLabel {
+    border-radius: 8px;
+}
+
+ColorPickerLabel:hover {
+    border-radius: 8px;
+}
+
+AlignmentChecker::indicator {
+    border-radius: 6px;
+}
+
+QFontChecker::indicator {
+    border-radius: 6px;
+}
+
+QProgressBar {
+    border-radius: 8px;
+    border: 1px solid @borderColor;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    border-radius: 6px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @progressChunkStart, stop:1 @progressChunkEnd);
+}
+
+QLabel#TitleLabel {
+    padding: 2px 8px;
+}
+
+.FadeLabel,
+QLabel#angleLabel {
+    border-radius: 12px;
+}

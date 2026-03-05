@@ -1006,6 +1006,8 @@ class Canvas(QGraphicsScene):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 paste_src_act = edit_menu.addAction(self.tr("Paste source text"))
                 paste_src_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
+            if edit_menu is not None and (copy_act or paste_act or copy_trans_act or paste_trans_act or copy_src_act or paste_src_act):
+                edit_menu.addSeparator()
             if context_menu_visible('edit_delete'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 delete_act = edit_menu.addAction(self.tr("Delete"))
@@ -1014,12 +1016,16 @@ class Canvas(QGraphicsScene):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 delete_recover_act = edit_menu.addAction(self.tr("Delete and Recover removed text"))
                 delete_recover_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
+            if edit_menu is not None and (delete_act or delete_recover_act):
+                edit_menu.addSeparator()
             if context_menu_visible('edit_clear_src'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 clear_src_act = edit_menu.addAction(self.tr("Clear source text"))
             if context_menu_visible('edit_clear_trans'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 clear_trans_act = edit_menu.addAction(self.tr("Clear translation"))
+            if edit_menu is not None and (clear_src_act or clear_trans_act):
+                edit_menu.addSeparator()
             if context_menu_visible('edit_select_all'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 select_all_act = edit_menu.addAction(self.tr("Select all"))
@@ -1158,30 +1164,30 @@ class Canvas(QGraphicsScene):
 
             menu.addSeparator()
 
-            # --- Detect & Run ---
+            # --- Run (pipeline) ---
             detect_region_act = detect_page_act = translate_act = ocr_act = None
             ocr_translate_act = ocr_translate_inpaint_act = inpaint_act = None
             run_menu = None
             if context_menu_visible('run_detect_region') and saved_rect is not None:
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 detect_region_act = run_menu.addAction(self.tr("Detect text in region"))
             if context_menu_visible('run_detect_page'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 detect_page_act = run_menu.addAction(self.tr("Detect text on page"))
             if context_menu_visible('run_translate'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 translate_act = run_menu.addAction(self.tr("Translate"))
             if context_menu_visible('run_ocr'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_act = run_menu.addAction(self.tr("OCR"))
             if context_menu_visible('run_ocr_translate'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_act = run_menu.addAction(self.tr("OCR and translate"))
             if context_menu_visible('run_ocr_translate_inpaint'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_inpaint_act = run_menu.addAction(self.tr("OCR, translate and inpaint"))
             if context_menu_visible('run_inpaint'):
-                if run_menu is None: run_menu = menu.addMenu(self.tr("Detect & Run"))
+                if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 inpaint_act = run_menu.addAction(self.tr("Inpaint"))
 
             menu.addSeparator()

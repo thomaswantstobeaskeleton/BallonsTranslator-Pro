@@ -13,7 +13,7 @@ import cv2
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
-from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent
+from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
@@ -24,6 +24,7 @@ from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
+from .custom_widget.animated_stack import AnimatedStackWidget
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
@@ -204,6 +205,20 @@ class MainWindow(mainwindow_cls):
     def resetStyleSheet(self, reverse_icon: bool = False):
         theme = 'eva-dark' if pcfg.darkmode else 'eva-light'
         self.setStyleSheet(parse_stylesheet(theme, reverse_icon))
+        self._apply_custom_cursor()
+
+    def _apply_custom_cursor(self):
+        if getattr(pcfg, 'use_custom_cursor', False) and getattr(pcfg, 'custom_cursor_path', ''):
+            path = pcfg.custom_cursor_path
+            if osp.isfile(path):
+                try:
+                    pix = QPixmap(path)
+                    if not pix.isNull():
+                        self.setCursor(QCursor(pix))
+                        return
+                except Exception:
+                    pass
+        self.unsetCursor()
 
     def setupUi(self):
         screen_size = QGuiApplication.primaryScreen().geometry().size()
@@ -222,6 +237,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.open_dir.connect(self.OpenProj)
         self.leftBar.open_json_proj.connect(self.openJsonProj)
         self.leftBar.save_proj.connect(self.manual_save)
+        self.leftBar.run_clicked.connect(self.run_imgtrans)
         self.leftBar.export_doc.connect(self.on_export_doc)
         self.leftBar.export_current_page_as.connect(self.on_export_current_page_as)
         self.leftBar.import_doc.connect(self.on_import_doc)
@@ -248,21 +264,23 @@ class MainWindow(mainwindow_cls):
         self.global_search_widget.search_tree.result_item_clicked.connect(self.on_search_result_item_clicked)
         self.leftStackWidget.addWidget(self.global_search_widget)
         
-        self.centralStackWidget = QStackedWidget(self)
+        self.centralStackWidget = AnimatedStackWidget(self, duration_ms=220)
         
         self.titleBar = TitleBar(self)
         self.titleBar.closebtn_clicked.connect(self.on_closebtn_clicked)
         self.titleBar.display_lang_changed.connect(self.on_display_lang_changed)
+        self.titleBar.setLeftBar(self.leftBar)
         self.bottomBar = BottomBar(self)
         self.bottomBar.textedit_checkchanged.connect(self.setTextEditMode)
         self.bottomBar.paintmode_checkchanged.connect(self.setPaintMode)
         self.bottomBar.textblock_checkchanged.connect(self.setTextBlockMode)
+        self.bottomBar.spellcheck_checkchanged.connect(self.on_spellcheck_panel_toggled)
 
         mainHLayout = QHBoxLayout()
         mainHLayout.addWidget(self.leftBar)
+        mainHLayout.setSpacing(1)
         mainHLayout.addWidget(self.centralStackWidget)
         mainHLayout.setContentsMargins(0, 0, 0, 0)
-        mainHLayout.setSpacing(0)
 
         # set up canvas
         SW.canvas = self.canvas = Canvas()
@@ -331,7 +349,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.search_widget.replace_all.connect(self.st_manager.on_page_replace_all)
 
         # comic trans pannel
-        self.rightComicTransStackPanel = QStackedWidget(self)
+        self.rightComicTransStackPanel = AnimatedStackWidget(self, duration_ms=180)
         self.rightComicTransStackPanel.addWidget(self.drawingPanel)
         self.rightComicTransStackPanel.addWidget(self.textPanel)
         self.spellCheckPanel = SpellCheckPanel(self)
@@ -489,9 +507,10 @@ class MainWindow(mainwindow_cls):
         module_manager.setTranslator()
         module_manager.setInpainter()
 
-        self.leftBar.run_imgtrans_clicked.connect(self.run_imgtrans)
-
         self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
+        self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
+        self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
+        self.titleBar.bubblyUIAction.setChecked(getattr(pcfg, 'bubbly_ui', True))
 
         self.drawingPanel.set_config(pcfg.drawpanel)
         self.drawingPanel.initDLModule(module_manager)
@@ -505,6 +524,8 @@ class MainWindow(mainwindow_cls):
         self.configPanel.reload_textstyle.connect(self.load_textstyle_from_proj_dir)
         self.configPanel.show_only_custom_font.connect(self.on_show_only_custom_font)
         self.configPanel.darkmode_changed.connect(self.on_config_darkmode_changed)
+        self.configPanel.bubbly_ui_changed.connect(self.on_config_bubbly_ui_changed)
+        self.configPanel.custom_cursor_changed.connect(self._on_config_custom_cursor_changed)
         self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
         if pcfg.let_show_only_custom_fonts_flag:
             self.on_show_only_custom_font(True)
@@ -554,6 +575,7 @@ class MainWindow(mainwindow_cls):
 
     def setupImgTransUI(self):
         self.centralStackWidget.setCurrentIndex(0)
+        self.bottomBar.setPipelineVisible(True)
         if self.leftBar.needleftStackWidget():
             self.leftStackWidget.show()
             if self.leftBar.showPageListLabel.isChecked():
@@ -566,6 +588,7 @@ class MainWindow(mainwindow_cls):
 
     def setupConfigUI(self):
         self.centralStackWidget.setCurrentIndex(1)
+        self.bottomBar.setPipelineVisible(False)
 
     def set_display_lang(self, lang: str):
         self.retranslateUI()
@@ -839,13 +862,17 @@ class MainWindow(mainwindow_cls):
         self.titleBar.replaceMTkeyword_trigger.connect(self.show_MT_keyword_window)
         self.titleBar.replaceOCRkeyword_trigger.connect(self.show_OCR_keyword_window)
         self.titleBar.translation_context_trigger.connect(self.show_translation_context_dialog)
-        self.titleBar.run_trigger.connect(self.leftBar.runImgtransBtn.click)
+        self.titleBar.run_trigger.connect(self.run_imgtrans)
+        self.bottomBar.run_clicked.connect(self.run_imgtrans)
         self.titleBar.run_woupdate_textstyle_trigger.connect(self.run_imgtrans_wo_textstyle_update)
         self.titleBar.translate_page_trigger.connect(self.on_transpagebtn_pressed)
         self.titleBar.enable_module.connect(self.on_enable_module)
         self.titleBar.importtstyle_trigger.connect(self.import_tstyles)
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
         self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
+        self.titleBar.theme_light_trigger.connect(self._on_theme_light_triggered)
+        self.titleBar.theme_dark_trigger.connect(self._on_theme_dark_triggered)
+        self.titleBar.bubbly_ui_trigger.connect(self._on_bubbly_ui_triggered)
         self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
         self.titleBar.re_run_detection_only_trigger.connect(self.on_re_run_detection_only)
         self.titleBar.re_run_ocr_only_trigger.connect(self.on_re_run_ocr_only)
@@ -1087,12 +1114,24 @@ class MainWindow(mainwindow_cls):
             return
         if self.rightComicTransStackPanel.isHidden():
             self.rightComicTransStackPanel.show()
-            self.bottomBar.paintChecker.setChecked(True)
         self.rightComicTransStackPanel.setCurrentIndex(2)
+        self.bottomBar.spellCheckChecker.setChecked(True)
 
     def _on_spellcheck_panel_close(self):
         """Switch right panel from spell check back to text panel."""
         self.rightComicTransStackPanel.setCurrentIndex(1)
+        self.bottomBar.spellCheckChecker.blockSignals(True)
+        self.bottomBar.spellCheckChecker.setChecked(False)
+        self.bottomBar.spellCheckChecker.blockSignals(False)
+
+    def on_spellcheck_panel_toggled(self):
+        """Show or hide Spell check panel from bottom bar toggle."""
+        if self.bottomBar.spellCheckChecker.isChecked():
+            if self.rightComicTransStackPanel.isHidden():
+                self.rightComicTransStackPanel.show()
+            self.rightComicTransStackPanel.setCurrentIndex(2)
+        else:
+            self.rightComicTransStackPanel.setCurrentIndex(1)
 
     def _on_spellcheck_focus_block(self, block_idx: int, line_idx: int, is_translation: bool):
         """After spell check replace: switch to text panel and select the block so the change is visible."""
@@ -2170,7 +2209,9 @@ class MainWindow(mainwindow_cls):
                 and (pcfg.let_fntsize_flag == 0)
                 and (pcfg.module.enable_detect or pcfg.module.enable_ocr or pcfg.module.enable_translate)
             )
-        
+        else:
+            self.st_manager.auto_textlayout_flag = False
+
         if page_index != self.pageList.currentIndex().row():
             self.pageList.setCurrentRow(page_index)
         else:
@@ -2584,11 +2625,43 @@ class MainWindow(mainwindow_cls):
 
     def on_darkmode_triggered(self):
         pcfg.darkmode = self.titleBar.darkModeAction.isChecked()
+        self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
+        self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
         self.resetStyleSheet()
+
+    def _on_theme_light_triggered(self):
+        pcfg.darkmode = False
+        self.titleBar.darkModeAction.setChecked(False)
+        self.titleBar.themeLightAction.setChecked(True)
+        self.titleBar.themeDarkAction.setChecked(False)
+        self.resetStyleSheet()
+
+    def _on_theme_dark_triggered(self):
+        pcfg.darkmode = True
+        self.titleBar.darkModeAction.setChecked(True)
+        self.titleBar.themeLightAction.setChecked(False)
+        self.titleBar.themeDarkAction.setChecked(True)
+        self.resetStyleSheet()
+
+    def _on_bubbly_ui_triggered(self):
+        pcfg.bubbly_ui = self.titleBar.bubblyUIAction.isChecked()
+        self.resetStyleSheet()
+        self.save_config()
 
     def on_config_darkmode_changed(self, checked: bool):
         self.titleBar.darkModeAction.setChecked(checked)
+        self.titleBar.themeLightAction.setChecked(not checked)
+        self.titleBar.themeDarkAction.setChecked(checked)
         self.resetStyleSheet()
+        self.save_config()
+
+    def on_config_bubbly_ui_changed(self, checked: bool):
+        self.titleBar.bubblyUIAction.setChecked(checked)
+        self.resetStyleSheet()
+        self.save_config()
+
+    def _on_config_custom_cursor_changed(self):
+        self._apply_custom_cursor()
         self.save_config()
 
     def ocr_postprocess(self, textblocks: List[TextBlock], img, ocr_module=None, **kwargs):
@@ -2703,12 +2776,11 @@ class MainWindow(mainwindow_cls):
         self.st_manager.on_incanvas_selection_changed()
 
     def on_spell_check_src(self):
-        """Run spell check on source text of selected blocks."""
-        blks = self.canvas.selected_text_items()
-        if not blks:
-            return
+        """Open spell check panel and run check on source text so misspelled words are listed."""
         try:
-            from utils.ocr_spellcheck import spell_check_line
+            from utils.ocr_spellcheck import _init_enchant
+            if not _init_enchant():
+                raise RuntimeError("enchant not available")
         except Exception:
             QMessageBox.warning(
                 self,
@@ -2716,21 +2788,20 @@ class MainWindow(mainwindow_cls):
                 self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
             )
             return
-        for blkitem in blks:
-            blk = blkitem.blk
-            if getattr(blk, "text", None) and isinstance(blk.text, list):
-                blk.text = [spell_check_line(line) for line in blk.text]
-                self.st_manager.pairwidget_list[blkitem.idx].e_source.setPlainText("\n".join(blk.text))
-        if blks:
-            self.canvas.setProjSaveState(False)
+        if self.centralStackWidget.currentIndex() != 0:
+            return
+        if self.rightComicTransStackPanel.isHidden():
+            self.rightComicTransStackPanel.show()
+            self.bottomBar.paintChecker.setChecked(True)
+        self.rightComicTransStackPanel.setCurrentIndex(2)
+        self.spellCheckPanel.run_check(source_not_translation=True)
 
     def on_spell_check_trans(self):
-        """Run spell check on translation text of selected blocks."""
-        blks = self.canvas.selected_text_items()
-        if not blks:
-            return
+        """Open spell check panel and run check on translation so misspelled words are listed."""
         try:
-            from utils.ocr_spellcheck import spell_check_line
+            from utils.ocr_spellcheck import _init_enchant
+            if not _init_enchant():
+                raise RuntimeError("enchant not available")
         except Exception:
             QMessageBox.warning(
                 self,
@@ -2738,16 +2809,13 @@ class MainWindow(mainwindow_cls):
                 self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
             )
             return
-        for blkitem in blks:
-            blk = blkitem.blk
-            trans = (getattr(blk, "translation", None) or "") or self.st_manager.pairwidget_list[blkitem.idx].e_trans.toPlainText()
-            lines = trans.split("\n")
-            corrected = [spell_check_line(line) for line in lines]
-            new_trans = "\n".join(corrected)
-            blk.translation = new_trans
-            self.st_manager.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_trans)
-        if blks:
-            self.canvas.setProjSaveState(False)
+        if self.centralStackWidget.currentIndex() != 0:
+            return
+        if self.rightComicTransStackPanel.isHidden():
+            self.rightComicTransStackPanel.show()
+            self.bottomBar.paintChecker.setChecked(True)
+        self.rightComicTransStackPanel.setCurrentIndex(2)
+        self.spellCheckPanel.run_check(source_not_translation=False)
 
     def on_trim_whitespace(self):
         """Trim leading/trailing whitespace from each line in selected blocks (source and translation)."""

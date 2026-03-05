@@ -240,6 +240,9 @@ class ProgramConfig(Config):
     gsearch_regex: bool = False
     gsearch_range: int = 0
     darkmode: bool = False
+    bubbly_ui: bool = True
+    use_custom_cursor: bool = False
+    custom_cursor_path: str = ''
     textselect_mini_menu: bool = True
     fold_textarea: bool = False
     show_source_text: bool = True
@@ -358,7 +361,7 @@ CONFIG_KEY_ORDER = (
     "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path",
     "fsearch_case", "fsearch_whole_word", "fsearch_regex", "fsearch_range",
     "gsearch_case", "gsearch_whole_word", "gsearch_regex", "gsearch_range",
-    "darkmode", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
+    "darkmode", "bubbly_ui", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
     "saladict_shortcut", "search_url", "ocr_sublist", "restore_ocr_empty", "pre_mt_sublist", "mt_sublist",
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
     "supersampling_factor", "show_text_style_preset", "expand_tstyle_panel", "show_text_effect_panel",

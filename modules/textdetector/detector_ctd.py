@@ -135,6 +135,10 @@ class ComicTextDetector(TextDetectorBase):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 cpu_model = load_ctd_model(CTD_TORCH_PATH, "cpu", self.detect_size)
+                cpu_model.merge_fntsize_tol_hor = getattr(self.model, 'merge_fntsize_tol_hor', 2.0)
+                cpu_model.merge_fntsize_tol_ver = getattr(self.model, 'merge_fntsize_tol_ver', 1.7)
+                cpu_model.box_thresh = getattr(self.model, 'box_thresh', 0.45)
+                cpu_model.min_box_area = getattr(self.model, 'min_box_area', 0)
                 _, mask, blk_list = cpu_model(img)
                 del cpu_model
                 if torch.cuda.is_available():

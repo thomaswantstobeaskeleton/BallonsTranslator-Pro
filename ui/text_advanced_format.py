@@ -239,6 +239,10 @@ class TextAdvancedFormatPanel(PanelArea):
         self.outline_only_checker.setToolTip(self.tr("Draw stroke only, no fill (set stroke width > 0)"))
         self.outline_only_checker.checkStateChanged.connect(lambda s: self.on_format_changed('outline_only', self.outline_only_checker.isChecked()))
 
+        self.stroke_outside_only_checker = TextCheckerLabel(self.tr('Stroke outline outside only'))
+        self.stroke_outside_only_checker.setToolTip(self.tr("Draw stroke only outside the glyphs (EasyScanlate-style; needs stroke width > 0)"))
+        self.stroke_outside_only_checker.checkStateChanged.connect(lambda s: self.on_format_changed('stroke_outline_outside_only', self.stroke_outside_only_checker.isChecked()))
+
         self.overlay_opacity_box = SmallSizeComboBox([0, 1], 'overlay_opacity', self, init_value=1.)
         self.overlay_opacity_box.setToolTip(self.tr("Foreground overlay image opacity"))
         self.overlay_opacity_box.param_changed.connect(self.on_format_changed)
@@ -265,6 +269,7 @@ class TextAdvancedFormatPanel(PanelArea):
         vlayout.addLayout(overlay_opacity_layout)
         vlayout.addLayout(skew_layout)
         vlayout.addWidget(self.outline_only_checker)
+        vlayout.addWidget(self.stroke_outside_only_checker)
         vlayout.addWidget(self.shadow_group)
         vlayout.addWidget(self.gradient_group)
 
@@ -311,6 +316,7 @@ class TextAdvancedFormatPanel(PanelArea):
         self.gradient_group.end_picker.setPickerColor(font_format.gradient_end_color)
         self.blend_mode_combobox.setCurrentIndex(max(0, min(getattr(font_format, 'blend_mode', 0), 5)))
         self.outline_only_checker.setCheckState(getattr(font_format, 'outline_only', False))
+        self.stroke_outside_only_checker.setCheckState(getattr(font_format, 'stroke_outline_outside_only', False))
         self.overlay_opacity_box.setValue(getattr(font_format, 'overlay_opacity', 1.0))
         self.skew_x_box.setValue(getattr(font_format, 'skew_x', 0.0))
         self.skew_y_box.setValue(getattr(font_format, 'skew_y', 0.0))

@@ -339,6 +339,17 @@ class FontFormatPanel(Widget):
         self.warpStrengthSpinBox.setMinimumWidth(55)
         self.warpStrengthSpinBox.valueChanged.connect(self._on_warp_strength_changed)
 
+        self.boxCornerRadiusSpinBox = QDoubleSpinBox(self)
+        self.boxCornerRadiusSpinBox.setObjectName("BoxCornerRadius")
+        self.boxCornerRadiusSpinBox.setRange(0, 50)
+        self.boxCornerRadiusSpinBox.setSingleStep(2)
+        self.boxCornerRadiusSpinBox.setDecimals(1)
+        self.boxCornerRadiusSpinBox.setValue(0)
+        self.boxCornerRadiusSpinBox.setSuffix(" px")
+        self.boxCornerRadiusSpinBox.setToolTip(self.tr("Rounded text box corners. 0 = sharp (rectangle)."))
+        self.boxCornerRadiusSpinBox.setMinimumWidth(60)
+        self.boxCornerRadiusSpinBox.valueChanged.connect(self._on_box_corner_radius_changed)
+
         self.strokeWidthBox = SizeComboBox([0, 10], 'stroke_width', self)
         self.strokeWidthBox.addItems(["0.1"])
         self.strokeWidthBox.setToolTip(self.tr("Change stroke width"))
@@ -465,6 +476,7 @@ class FontFormatPanel(Widget):
         hl2b.addWidget(self.textOnPathArcDegreesSpinBox)
         hl2b.addWidget(self.warpStyleCombo)
         hl2b.addWidget(self.warpStrengthSpinBox)
+        hl2b.addWidget(self.boxCornerRadiusSpinBox)
         hl2b.setSpacing(FONTFORMAT_SPACING)
         hl2b.setContentsMargins(4, 4, 4, 0)
         hl3 = QHBoxLayout()
@@ -535,6 +547,9 @@ class FontFormatPanel(Widget):
     def _on_warp_strength_changed(self, value: float):
         self.on_param_changed('warp_strength', value)
 
+    def _on_box_corner_radius_changed(self, value: float):
+        self.on_param_changed('text_box_corner_radius', value)
+
     def update_text_style_label(self):
         if self.global_mode():
             active_text_style_label = self.active_text_style_label()
@@ -596,6 +611,9 @@ class FontFormatPanel(Widget):
         self.warpStrengthSpinBox.setValue(float(getattr(font_format, 'warp_strength', 0.5)))
         self.warpStrengthSpinBox.blockSignals(False)
         self.warpStrengthSpinBox.setVisible(warp_style > 0)
+        self.boxCornerRadiusSpinBox.blockSignals(True)
+        self.boxCornerRadiusSpinBox.setValue(float(getattr(font_format, 'text_box_corner_radius', 0.0)))
+        self.boxCornerRadiusSpinBox.blockSignals(False)
         self.formatBtnGroup.boldBtn.setChecked(font_format.bold)
         self.formatBtnGroup.underlineBtn.setChecked(font_format.underline)
         self.formatBtnGroup.strikethroughBtn.setChecked(font_format.strikethrough)

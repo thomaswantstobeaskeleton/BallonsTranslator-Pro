@@ -234,6 +234,13 @@ def ffmt_change_warp_strength(param_name: str, values, act_ffmt: FontFormat, is_
 
 
 @font_formating(push_undostack=True)
+def ffmt_change_text_box_corner_radius(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.text_box_corner_radius = max(0.0, float(value))
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
 def ffmt_change_blend_mode(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     for blkitem, value in zip(blkitems, values):
         blkitem.fontformat.blend_mode = int(value) if value is not None else 0
@@ -244,6 +251,14 @@ def ffmt_change_blend_mode(param_name: str, values, act_ffmt: FontFormat, is_glo
 def ffmt_change_outline_only(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     for blkitem, value in zip(blkitems, values):
         blkitem.fontformat.outline_only = bool(value)
+        blkitem.repaint_background()
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_stroke_outline_outside_only(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.stroke_outline_outside_only = bool(value)
         blkitem.repaint_background()
         blkitem.update()
 
