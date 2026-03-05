@@ -1,5 +1,7 @@
-# To install pytorch cuda (gpu) version, please look https://pytorch.org/
+# Core deps for first run. launch.py installs PyTorch (CUDA/CPU/ROCm) automatically; use TORCH_COMMAND to override.
+# See https://pytorch.org/ for manual PyTorch install.
 
+packaging
 PyQt6-Qt6>=6.6.2 ; python_version > "3.8"
 PyQt6>=6.6.1 ; python_version > "3.8"
 PyQt5-Qt5>=5.15.2 ; python_version <= "3.8"
@@ -47,6 +49,7 @@ httpx[socks,brotli]
 langdetect
 translators==5.9.5
 json5
+Pillow>=10.0.0
 pillow-jxl-plugin>=1.3.4
 # Optional: OCR spell check (General → Spell check OCR result). Requires system Hunspell/dicts (e.g. libenchant-dev + enchant-2 on Linux).
 pyenchant
