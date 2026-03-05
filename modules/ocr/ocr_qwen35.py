@@ -7,6 +7,7 @@ Use with any detector (e.g. hf_object_det).
 """
 from typing import List
 import os
+import re
 import tempfile
 import numpy as np
 import cv2
@@ -33,6 +34,82 @@ def _cv2_to_pil_rgb(img: np.ndarray) -> "Image.Image":
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return Image.fromarray(img)
+
+
+def _is_no_text_placeholder(text: str) -> bool:
+    """Treat model 'no text' / placeholder / role leak / HTML-only responses as empty."""
+    if not text or not isinstance(text, str):
+        return True
+    raw = text.strip()
+    if not raw:
+        return True
+    # Normalize for phrase matching: single line, collapsed spaces, upper
+    t = raw.upper().replace("\n", " ").replace("\r", " ")
+    t = " ".join(t.split())
+    if not t:
+        return True
+    # Punctuation/whitespace only (e.g. "." or " . ")
+    if re.sub(r"[\s\.\,\-\;\:\!\?\'\"\-\–\—\u3000\u00a0]+", "", t) == "":
+        return True
+    # "THERE IS NO TEXT YOU CAN EXTRACT..." and variants
+    no_text_phrases = (
+        "THERE IS NO TEXT",
+        "NO TEXT YOU CAN EXTRACT",
+        "NO TEXT TO EXTRACT",
+        "CANNOT EXTRACT",
+        "UNABLE TO EXTRACT",
+        "NO EXTRACTABLE TEXT",
+        "NO VISIBLE TEXT",
+        "IMAGE CONTAINS NO TEXT",
+        "NO READABLE TEXT",
+    )
+    for phrase in no_text_phrases:
+        if phrase in t:
+            return True
+    # Role/chat leak: "assistant", "<think>...</think>", "<tool_call>", etc.
+    tag_removed = re.sub(r"<[^>]*>", " ", t, flags=re.IGNORECASE)
+    tag_removed = " ".join(tag_removed.split()).strip()
+    if tag_removed in ("", "ASSISTANT", "USER", "SYSTEM"):
+        return True
+    # Only role labels (e.g. "user user assistant" with optional think tags)
+    role_only = {"USER", "ASSISTANT", "SYSTEM"}
+    words = tag_removed.split()
+    if words and all(w in role_only for w in words):
+        return True
+    if tag_removed.startswith("ASSISTANT") and len(tag_removed) < 50:
+        rest = tag_removed[9:].strip()
+        if not rest or re.sub(r"[\s\.\,\-\;\:\!\?]+", "", rest) == "":
+            return True
+    # HTML/XML-only (e.g. <html><body><p></p></html> or <P><DIV></DIV></P>)
+    stripped = t.replace(" ", "")
+    if stripped.startswith("<") and ">" in stripped:
+        remainder = re.sub(r"<[^>]+>", "", stripped)
+        if not remainder or remainder in ("", "/"):
+            return True
+        # Allow only punctuation/whitespace after stripping tags
+        if re.sub(r"[\s\.\,\-\;\:\!\?\/]+", "", remainder) == "":
+            return True
+    # LaTeX/math placeholder only (e.g. $$\TEXT{ }$$ or $$ $$ or $${}$$
+    if "$$" in raw or ("$" in raw and raw.strip().startswith("$")):
+        # Explicit empty \TEXT{ } pattern (e.g. $$\TEXT\n{ }$$)
+        if "\\TEXT" in raw.upper() and re.search(r"\\TEXT\s*\{\s*\}", raw, re.IGNORECASE | re.DOTALL):
+            return True
+        # Single block $$...$$ or $...$ with empty or placeholder content
+        math_block = re.sub(r"\s+", " ", raw).strip()
+        if re.match(r"^\$\$.*\$\$$", math_block) or (
+            re.match(r"^\$[^$].*\$$", math_block) and "$$" not in math_block
+        ):
+            inner = math_block
+            if inner.startswith("$$"):
+                inner = inner[2:].lstrip()
+            if inner.endswith("$$"):
+                inner = inner[:-2].rstrip()
+            if inner.startswith("$") and inner.endswith("$"):
+                inner = inner[1:-1].strip()
+            # Empty or only backslash-commands and braces/whitespace
+            if not inner or re.sub(r"[\\\s{}]+", "", inner) == "":
+                return True
+    return False
 
 
 # Qwen3.5 collection: all models under 9B + 9B (Instruct and Base)
@@ -198,6 +275,8 @@ if _QWEN35_AVAILABLE:
                 input_len = inputs["input_ids"].shape[1]
                 gen = out[0, input_len:]
                 text = self.processor.decode(gen, skip_special_tokens=True, clean_up_tokenization_spaces=False).strip()
+                if _is_no_text_placeholder(text):
+                    text = ""
                 return text
             except Exception as e:
                 self.logger.warning(f"Qwen3.5 OCR failed: {e}")
@@ -231,6 +310,8 @@ if _QWEN35_AVAILABLE:
                     continue
                 pil_img = _cv2_to_pil_rgb(crop)
                 text = self._run_one(pil_img)
+                if _is_no_text_placeholder(text):
+                    text = ""
                 blk.text = [text if text else ""]
 
         def ocr_img(self, img: np.ndarray) -> str:

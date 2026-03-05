@@ -24,6 +24,21 @@ def download_and_check_module_files(module_class_list: List[BaseModule] = None):
                 continue
             LOGGER.error(f'Please save these files manually to specified path and restart the application, otherwise {module_class} will be unavailable.')
 
+    # Optional ONNX inpainter models (modules only registered when onnxruntime is installed)
+    optional_onnx_models = [
+        {
+            "url": "https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx",
+            "files": osp.join(shared.PROGRAM_PATH, "data/models/inpainting_lama_2025jan.onnx"),
+        },
+        {
+            "url": "https://huggingface.co/mayocream/lama-manga-onnx/resolve/main/lama-manga.onnx",
+            "files": osp.join(shared.PROGRAM_PATH, "data/models/lama_manga.onnx"),
+        },
+    ]
+    for kw in optional_onnx_models:
+        download_and_check_files(**kw)
+
+
 def prepare_pkuseg():
     try:
         import pkuseg

@@ -54,9 +54,10 @@ def get_bounding_box(shape):
             return [float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])]
     
     # 备用：从 lines 计算
-    if 'lines' in shape and len(shape['lines']) > 0:
+    lines = shape.get('lines')
+    if lines is not None and isinstance(lines, (list, tuple)) and len(lines) > 0:
         # lines 是双层嵌套: [[[x1,y1], [x2,y2], ...]]
-        points = shape['lines'][0] if isinstance(shape['lines'][0], list) else shape['lines']
+        points = lines[0] if isinstance(lines[0], list) else lines
         if points:
             x_coords = [float(p[0]) for p in points]
             y_coords = [float(p[1]) for p in points]
@@ -167,6 +168,8 @@ def can_labels_merge(label1, label2, config):
 
 
 def merge_labels(label1, label2, strategy):
+    label1 = label1 if label1 is not None else ''
+    label2 = label2 if label2 is not None else ''
     if strategy == "FIRST":
         return label1
     elif strategy == "COMBINE":
@@ -350,8 +353,9 @@ def perform_merge(shapes, mode, config):
             # 获取所有点 - 从 lines 或 xyxy
             all_points = []
             for shape in group_shapes:
-                if 'lines' in shape and len(shape['lines']) > 0:
-                    points = shape['lines'][0] if isinstance(shape['lines'][0], list) else shape['lines']
+                lines = shape.get('lines')
+                if lines is not None and isinstance(lines, (list, tuple)) and len(lines) > 0:
+                    points = lines[0] if isinstance(lines[0], list) else lines
                     all_points.extend(points)
                 elif 'xyxy' in shape:
                     xyxy = shape['xyxy']

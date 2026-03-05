@@ -240,13 +240,13 @@ def check_local_file(local_file: str, sha256_precal: str = None, cache_hash: boo
 
     if file_exists and sha256_precal is not None and shared.check_local_file_hash:
         sha256_precal = sha256_precal.lower()
-        if cache_hash and local_file in shared.cache_data and shared.cache_data[local_file].lower() == sha256_precal:
+        if cache_hash and (shared.cache_data is not None and local_file in shared.cache_data and shared.cache_data[local_file].lower() == sha256_precal):
             pass
         else:
             sha256_calculated = calculate_sha256(local_file).lower()
             if sha256_calculated != sha256_precal:
                 valid_hash = False
-            if cache_hash:
+            if cache_hash and shared.cache_data is not None:
                 shared.cache_data[local_file] = sha256_calculated
                 shared.CACHE_UPDATED = True
     
