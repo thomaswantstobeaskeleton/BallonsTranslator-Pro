@@ -247,6 +247,7 @@ class OCROneAPI(OCRBase):
         "newline_handling": {"type": "selector", "options": ["preserve", "remove"], "value": "preserve", "description": "Newline char handling (preserve/remove)"},
         "reverse_line_order": {"type": "checkbox", "value": False, "description": "Reverse line order (for vertical CJK)"},
         "no_uppercase": {"type": "checkbox", "value": False, "description": "Convert text to lowercase (except sentence start)"},
+        "collapse_single_letter_spaces": {"type": "checkbox", "value": True, "description": "Fix 'H e l l o' style output (merge spaces between single letters into one word). Disable if it breaks normal text."},
         "description": "Local OCR using OneOCR library (Windows Only)",
     }
 
@@ -264,6 +265,10 @@ class OCROneAPI(OCRBase):
     @property
     def reverse_line_order(self): return bool(
         self.get_param_value("reverse_line_order"))
+
+    @property
+    def collapse_single_letter_spaces(self):
+        return bool(self.get_param_value("collapse_single_letter_spaces") if self.get_param_value("collapse_single_letter_spaces") is not None else True)
 
     def __init__(self, **params) -> None:
         super().__init__(**params)
@@ -399,10 +404,41 @@ class OCROneAPI(OCRBase):
             text = text.replace("\n", " ").replace("\r", "")
         elif self.newline_handling == "preserve":
             text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if self.collapse_single_letter_spaces:
+            text = self._collapse_single_letter_spaces(text)
         text = self._apply_punctuation_and_spacing(text)
         if self.no_uppercase:
             text = self._apply_no_uppercase(text)
         return text
+
+    def _collapse_single_letter_spaces(self, text: str) -> str:
+        """Merge 'H e l l o' style (each letter + space) into 'Hello'. Leaves 'I am' unchanged."""
+        if not text or ' ' not in text:
+            return text
+        lines = text.split('\n')
+        out = []
+        for line in lines:
+            tokens = line.split()
+            if not tokens:
+                out.append(line)
+                continue
+            new_tokens = []
+            i = 0
+            while i < len(tokens):
+                t = tokens[i]
+                if len(t) == 1 and t.isalpha():
+                    run = [t]
+                    j = i + 1
+                    while j < len(tokens) and len(tokens[j]) == 1 and tokens[j].isalpha():
+                        run.append(tokens[j])
+                        j += 1
+                    new_tokens.append(''.join(run))
+                    i = j
+                else:
+                    new_tokens.append(t)
+                    i += 1
+            out.append(' '.join(new_tokens))
+        return '\n'.join(out)
 
     def _apply_no_uppercase(self, text: str) -> str:
         if not text:

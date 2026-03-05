@@ -107,6 +107,7 @@ class ComicTextDetector(TextDetectorBase):
                 merge_tol = float(merge_tol)
             except (TypeError, ValueError):
                 merge_tol = 3.0
+        # Passed to model and used in group_output() when merging lines by font size (see ctd/inference.py).
         self.model.merge_fntsize_tol_hor = merge_tol
         self.model.merge_fntsize_tol_ver = merge_tol
         box_thresh = self.get_param_value('box score threshold')
