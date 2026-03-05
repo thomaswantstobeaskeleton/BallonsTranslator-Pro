@@ -11,7 +11,7 @@ try:
 except:
     from qtpy.QtGui import QUndoStack, QUndoCommand
 
-from .misc import ndarray2pixmap, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION
+from .misc import ndarray2pixmap, pixmap2ndarray, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION
 from .textitem import TextBlkItem, TextBlock
 from .texteditshapecontrol import TextBlkShapeControl
 from .textedit_commands import WarpItemCommand
@@ -907,6 +907,43 @@ class Canvas(QGraphicsScene):
         else:
             drawing_map = img
         self.drawingLayer.setPixmap(drawing_map)
+
+    def merge_drawing_layer_into_inpainted(self) -> bool:
+        """Merge current drawing layer strokes into imgtrans_proj.inpainted_array so manual edits
+        are used by Inpaint and display stays in sync. Clears the drawing layer after merge.
+        Returns True if a merge was performed."""
+        if not self.imgtrans_proj.img_valid or not self.imgtrans_proj.inpainted_valid:
+            return False
+        if not self.drawingLayer.drawed():
+            return False
+        draw_pix = self.drawingLayer.get_drawed_pixmap()
+        if draw_pix.isNull():
+            return False
+        arr = self.imgtrans_proj.inpainted_array
+        if arr is None:
+            return False
+        draw_arr = pixmap2ndarray(draw_pix, keep_alpha=True)
+        if draw_arr is None:
+            return False
+        h, w = arr.shape[:2]
+        if draw_arr.shape[0] != h or draw_arr.shape[1] != w:
+            return False
+        alpha = draw_arr[:, :, 3]
+        if np.max(alpha) < 1:
+            self.drawingLayer.clearAllDrawings()
+            self.updateLayers()
+            return True
+        mask = (alpha > 127).astype(np.uint8)
+        if arr.ndim == 3:
+            for c in range(min(3, arr.shape[2])):
+                arr[:, :, c] = np.where(mask, draw_arr[:, :, c], arr[:, :, c])
+            if arr.shape[2] == 4:
+                arr[:, :, 3] = np.where(mask, alpha, arr[:, :, 3])
+        else:
+            arr[:] = np.where(mask[:, :, np.newaxis], draw_arr[:, :, :arr.shape[2]], arr)
+        self.drawingLayer.clearAllDrawings()
+        self.updateLayers()
+        return True
 
     def setPaintMode(self, painting: bool):
         if painting:

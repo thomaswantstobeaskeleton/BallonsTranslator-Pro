@@ -161,6 +161,7 @@ class DeleteBlkItemsCommand(QUndoCommand):
             self.pages_restore.sort(key=lambda x: x[0])
 
         self.ctrl.deleteTextblkItemList(self.blk_list, self.pwidget_list)
+        self.canvas.updateLayers()
 
     def redo(self):
 
@@ -188,6 +189,7 @@ class DeleteBlkItemsCommand(QUndoCommand):
                     self.canvas.imgtrans_proj.pages[page_name].pop(idx)
 
         self.ctrl.deleteTextblkItemList(self.blk_list, self.pwidget_list)
+        self.canvas.updateLayers()
         if self.sw_changed:
             self.sw.counter_sum = self.new_counter_sum
             cursor_removed = False
@@ -227,6 +229,7 @@ class DeleteBlkItemsCommand(QUndoCommand):
                     self.canvas.imgtrans_proj.pages[page_name].insert(idx, blk)
 
         self.ctrl.recoverTextblkItemList(self.blk_list, self.pwidget_list)
+        self.canvas.updateLayers()
         if self.sw_changed:
             self.sw.counter_sum = self.old_counter_sum
             self.sw.search_rstedit_list += self.search_rstedit_list

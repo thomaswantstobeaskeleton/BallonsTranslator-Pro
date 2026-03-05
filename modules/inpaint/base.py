@@ -94,6 +94,24 @@ def _clip_xyxy_to_image(xyxy, im_w: int, im_h: int):
     return [x1, y1, x2, y2]
 
 
+def _apply_block_text_mask_to_mask(mask: np.ndarray, blk, im_w: int, im_h: int) -> None:
+    """Punch holes in mask where blk.text_mask is 0 (e.g. text eraser). Modifies mask in place."""
+    text_mask = getattr(blk, "text_mask", None)
+    if text_mask is None or text_mask.size == 0:
+        return
+    xyxy = _clip_xyxy_to_image(getattr(blk, "xyxy", None), im_w, im_h)
+    if xyxy is None:
+        return
+    x1, y1, x2, y2 = xyxy
+    th, tw = text_mask.shape[:2]
+    bh, bw = y2 - y1, x2 - x1
+    if bh <= 0 or bw <= 0:
+        return
+    if (th, tw) != (bh, bw):
+        text_mask = cv2.resize(text_mask, (bw, bh), interpolation=cv2.INTER_NEAREST)
+    mask[y1:y2, x1:x2] = np.where(text_mask > 127, mask[y1:y2, x1:x2], 0).astype(np.uint8)
+
+
 def _block_mask_polygon(blk, im_w: int, im_h: int):
     """Return polygon for block as (n, 2) int32 for fillPoly; None if degenerate.
     Block coordinates must be in page space (same as image size im_w x im_h).
@@ -238,6 +256,22 @@ def build_mask_with_resolved_overlaps(
         for pts in polys:
             if pts is not None and len(pts) >= 3:
                 cv2.fillPoly(tmp, [np.asarray(pts, dtype=np.int32)], 255)
+        # Apply per-block text_mask (e.g. from text eraser) so holes are preserved (Issue 9 incomplete masking).
+        text_mask = getattr(blk, "text_mask", None)
+        if text_mask is not None and text_mask.size > 0:
+            xyxy = _clip_xyxy_to_image(getattr(blk, "xyxy", None), im_w, im_h)
+            if xyxy is not None:
+                x1, y1, x2, y2 = xyxy
+                th, tw = text_mask.shape[:2]
+                bh, bw = y2 - y1, x2 - x1
+                if bh > 0 and bw > 0:
+                    if (th, tw) != (bh, bw):
+                        text_mask = cv2.resize(
+                            text_mask, (bw, bh), interpolation=cv2.INTER_NEAREST
+                        )
+                    tmp[y1:y2, x1:x2] = np.where(
+                        text_mask > 127, tmp[y1:y2, x1:x2], 0
+                    ).astype(np.uint8)
         ys, xs = np.where(tmp > 0)
         ci = centers[idx]
         for y, x in zip(ys, xs):

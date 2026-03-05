@@ -821,6 +821,8 @@ class DrawingPanel(Widget):
             inpaint_dict = {'img': img, 'mask': mask, 'inpaint_rect': inpaint_rect}
 
         self.canvas.image_edit_mode = ImageEditMode.NONE
+        # Merge any drawing-layer strokes into inpainted_array so manual edits are used and display is correct (Issue 9).
+        self.canvas.merge_drawing_layer_into_inpainted()
         if pcfg.drawpanel.inpaint_hardness < 100:
             mask = inpaint_dict['mask']
             sigma = (100 - pcfg.drawpanel.inpaint_hardness) / 100.0 * 12

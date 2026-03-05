@@ -15,7 +15,7 @@ from .funcmaps import get_maskseg_method
 from utils.logger import logger as LOGGER
 from utils.imgproc_utils import enlarge_window, union_area
 from utils.registry import Registry
-from modules.inpaint.base import _clip_xyxy_to_image, _block_mask_polygon, _block_mask_polygons, build_mask_with_resolved_overlaps
+from modules.inpaint.base import _clip_xyxy_to_image, _block_mask_polygon, _block_mask_polygons, build_mask_with_resolved_overlaps, _apply_block_text_mask_to_mask
 from utils.io_utils import imread, text_is_empty
 from modules.translators import MissingTranslatorParams
 from modules.translators.exceptions import CriticalTranslationError
@@ -1032,6 +1032,7 @@ class ImgtransThread(QThread):
                             for pts in _block_mask_polygons(blk, im_w, im_h):
                                 if pts is not None and len(pts) >= 3:
                                     cv2.fillPoly(mask, [pts], 255)
+                            _apply_block_text_mask_to_mask(mask, blk, im_w, im_h)
                 elif mask is not None:
                     if mask.shape[0] != im_h or mask.shape[1] != im_w:
                         mask = cv2.resize(mask, (im_w, im_h), interpolation=cv2.INTER_NEAREST)
