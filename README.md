@@ -15,7 +15,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
 
 
-**Recent additions:** **Secondary detector — outside bubbles only** (Config → Detector: use primary for bubbles e.g. YSGYolo, secondary e.g. EasyOCR for signs/captions only). **Ensemble (3+1) translator** now shows all translators in candidate/judge dropdowns with improved Zh→En defaults (Google, nllb200, LLM_API_Translator; judge LLM_API_Translator; use OpenRouter in LLM_API params). **Merge settings:** detector merge_gap_px (e.g. EasyOCR) and **Merge nearby blocks (collision)** in Config → DL Module to fix small text boxes. **Delete and Recover:** Deleting text blocks (canvas right-click → Delete and Recover) now syncs with the project so saved files and pipeline runs stay consistent; undo/redo restores or re-removes blocks in project pages. Manual mask/drawing edits are merged into the inpainted image before running Inpaint; per-block text eraser masks are applied when building the inpainting mask so holes are preserved; canvas refreshes after delete/recover to avoid display artifacts. **Google Translate** works without an API key by default (same as original BallonsTranslator); set an API key in Config → Translator → Google only if you need higher limits. **Translation context:** `data/translation_context/default` is created automatically when using series context so translation no longer fails with a missing directory. **Auto fit to box:** When Config → Typesetting is set to “Auto fit to box”, Detect/OCR/Translate runs now trigger auto font scaling for new blocks; you can also re-run via right-click → Format → **Auto fit font size to box** after changing font. **Context menu options** (right-click menu customization) dialog text clarified and grouped by category. **Inpainting with upscale:** When running with initial upscale but without re-running detection, block coordinates are scaled to the upscaled image so inpainting runs correctly. New docs: [TROUBLESHOOTING](docs/TROUBLESHOOTING.md), [STARRIVER](docs/STARRIVER.md), [CONJOINED_MODELS](docs/CONJOINED_MODELS.md), [DANGO_REFERENCE](docs/DANGO_REFERENCE.md). **Config:** Fresh installs use `config/config.example.json` as the template; your `config/config.json` is never overwritten by updates.
+**Recent additions:** **UI (Issue #7):** Title bar has **File** (open/save/export/import), **Edit** (with Keyword substitution submenu), **View** (grouped: panels, shortcuts, styles, Help), **Pipeline** (renamed from Run; stage toggles and presets), **Tools** (grouped: project, export, sources, queue, models). Left bar Open menu trimmed to open/save only; export/import are in File. Config → General split into Startup, Display, Typesetting, OCR result, Save, Canvas, Integrations. Canvas context menu: Edit has separators; **Run** (renamed from Detect & Run). **Secondary detector — outside bubbles only** (Config → Detector: use primary for bubbles e.g. YSGYolo, secondary e.g. EasyOCR for signs/captions only). **Ensemble (3+1) translator** now shows all translators in candidate/judge dropdowns with improved Zh→En defaults (Google, nllb200, LLM_API_Translator; judge LLM_API_Translator; use OpenRouter in LLM_API params). **Merge settings:** detector merge_gap_px (e.g. EasyOCR) and **Merge nearby blocks (collision)** in Config → DL Module to fix small text boxes. **Delete and Recover:** Deleting text blocks (canvas right-click → Delete and Recover) now syncs with the project so saved files and pipeline runs stay consistent; undo/redo restores or re-removes blocks in project pages. Manual mask/drawing edits are merged into the inpainted image before running Inpaint; per-block text eraser masks are applied when building the inpainting mask so holes are preserved; canvas refreshes after delete/recover to avoid display artifacts. **Google Translate** works without an API key by default (same as original BallonsTranslator); set an API key in Config → Translator → Google only if you need higher limits. **Translation context:** `data/translation_context/default` is created automatically when using series context so translation no longer fails with a missing directory. **Auto fit to box:** When Config → Typesetting is set to “Auto fit to box”, Detect/OCR/Translate runs now trigger auto font scaling for new blocks; you can also re-run via right-click → Format → **Auto fit font size to box** after changing font. **Context menu options** (right-click menu customization) dialog text clarified and grouped by category. **Inpainting with upscale:** When running with initial upscale but without re-running detection, block coordinates are scaled to the upscaled image so inpainting runs correctly. New docs: [TROUBLESHOOTING](docs/TROUBLESHOOTING.md), [STARRIVER](docs/STARRIVER.md), [CONJOINED_MODELS](docs/CONJOINED_MODELS.md), [DANGO_REFERENCE](docs/DANGO_REFERENCE.md). **Config:** Fresh installs use `config/config.example.json` as the template; your `config/config.json` is never overwritten by updates.
 
 ---
 
@@ -566,7 +566,6 @@ This fork adds **many new optional modules** and applies **fixes and setting imp
 - **Quality rankings:** [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md), [docs/BEST_MODELS_RESEARCH.md](docs/BEST_MODELS_RESEARCH.md), [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
 - **Optional deps:** [docs/OPTIONAL_DEPENDENCIES.md](docs/OPTIONAL_DEPENDENCIES.md), [docs/INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md)
 - **Translation context:** [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
-- **UI/settings:** [docs/SETTINGS_UI_RECOMMENDATIONS.md](docs/SETTINGS_UI_RECOMMENDATIONS.md)
 
 ### Upstream issues and PRs (dmMaze/BallonsTranslator)
 
@@ -675,6 +674,7 @@ Select the detector from the **Text detection** dropdown in the settings panel. 
 | **surya_det** | `pip install surya-ocr` | Select **surya_det**; pair with surya_ocr. |
 | **magi_det** | `pip install transformers torch einops` | Select **magi_det**; model downloads from HF (ragavsachdeva/magi) on first use; pair with any OCR. |
 | **craft_det** | `pip install craft-text-detector torch` | Select **craft_det**; outputs 4-point quads for merge; pair with any OCR. **Conflict:** needs opencv<4.5.4.62; see [Optional dependencies](#8-optional-dependency-conflicts-and-workarounds). |
+| **rapidocr_det** | `pip install rapidocr-onnxruntime` | Select **rapidocr_det**; lightweight ONNX detection; pair with **rapidocr** OCR for EasyScanlate-like pipeline. Optional models in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
 | **dptext_detr** | Clone [DPText-DETR](https://github.com/ymy-k/DPText-DETR), install its deps. | Select **dptext_detr**; set **repo_path** to your clone; pair with any OCR. |
 | **swintextspotter_v2** | Clone [SwinTextSpotterv2](https://github.com/mxin262/SwinTextSpotterv2), install its deps. | Select **swintextspotter_v2**; set **repo_path**; use **none_ocr** if demo outputs text. |
 | **hunyuan_ocr_det** | Same as hunyuan_ocr (transformers, etc.). | Select **hunyuan_ocr_det**; set OCR to **none_ocr** to keep spotter text. |
@@ -703,6 +703,7 @@ Select the OCR from the **OCR** dropdown. Install only the dependencies for the 
 | Module | Dependencies | How to run |
 |--------|--------------|------------|
 | **paddle_rec_v5** | `pip install paddlepaddle paddleocr` (3.x). | PP-OCRv5 recognition; pair with paddle_det_v5. Select and set language, device. |
+| **rapidocr** | `pip install rapidocr-onnxruntime` | Select **rapidocr**; lightweight ONNX recognition; pair with **rapidocr_det** for EasyScanlate-like pipeline. Optional rec/dict in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
 | **PaddleOCRVLManga**, **paddle_vl** | PaddleOCR-VL (manga or local server). | VLM manga or server; select and configure. |
 | **paddleocr_vl_hf** | `transformers` 5.x | Select **paddleocr_vl_hf**; use prompt "OCR:"; 109 languages, SOTA document. |
 | **surya_ocr** | `pip install surya-ocr` | Select **surya_ocr**; set language (e.g. Chinese (Simplified)), **Fix Latin misread** True for CJK; crop_padding 6–8. |
@@ -835,7 +836,7 @@ Most behavior and display options are set in the **Config panel** (left bar → 
 - **General → Saladict / search:** Show mini menu when selecting text; Saladict shortcut; Search engine URL for lookups.
 - **DL Module:** **Default device** (used when a module’s device is "Default"); **Load model on demand**; **Empty run cache**; **Unload models after idle** (minutes, 0 = off). Detector/OCR/Inpainter/Translator dropdowns and their params (device, detect_size, crop_padding, etc.) are in the same panel. The **Translator** section includes **Translation context (project)...** and **Test translator**. *Note: Test translator may fail when Load model on demand or Unload models after idle is enabled — the translator is only loaded when you run a pipeline; run a page first or temporarily disable those options when testing.* See [§12.7](#127-translation-context-glossary-series-previous-pages-summarization) for translation context.
 
-Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See **docs/SETTINGS_UI_RECOMMENDATIONS.md** for a concise list of implemented UI settings and possible future additions.
+Module-specific params (CTD box score, mask dilation, inpaint_size, translator API keys, etc.) are in the corresponding Config sub-sections. See Config panel (§7) and §11–12 for implemented UI and workflow.
 
 ### 7.8 Full config reference (ProgramConfig & ModuleConfig)
 
@@ -1011,7 +1012,6 @@ The main application and all other modules work with the versions in `requiremen
   `utils/io_utils.py` — `imwrite(..., webp_lossless=False)`; when WebP and `webp_lossless` True, uses quality 101 for lossless.
 
 - **Documentation:**  
-  `docs/SETTINGS_UI_RECOMMENDATIONS.md` — Lists implemented UI/settings (canvas menu, Lossless WebP, Manga source, Tools menu, etc.) and possible future additions.  
   `docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md` — Design and implementation of translation context, glossary, series storage, and LLM integration.
 
 ---
@@ -1065,10 +1065,9 @@ The main application and all other modules work with the versions in `requiremen
 | **docs/QUALITY_RANKINGS.md** | Tier-based quality/accuracy rankings for all detection, OCR, and translation modules; task-based SOTA (document vs manga vs multilingual); sanity-check notes. |
 | **docs/MODELS_REFERENCE.md** | Map of recommended models to BallonsTranslator modules; quick reference and “not integrated” list. |
 | **docs/BEST_MODELS_RESEARCH.md** | Detailed research on OCR, detection, inpainting; benchmarks and recommendations. |
-| **docs/OPTIONAL_DEPENDENCIES.md** | craft_det and simple_lama dependency conflicts and workarounds. |
+| **docs/OPTIONAL_DEPENDENCIES.md** | craft_det and simple_lama dependency conflicts and workarounds; RapidOCR (rapidocr_det, rapidocr) install and optional models. |
 | **docs/INSTALL_EXTRA_DETECTORS.md** | Optional detectors (SwinTextSpotter, DPText-DETR, CRAFT, hf_object_det); none_ocr usage; detection vs OCR coverage table. |
 | **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
-| **docs/SETTINGS_UI_RECOMMENDATIONS.md** | Implemented UI/settings (canvas menu, Lossless WebP, batch export to PDF, Check project overlap, Manga/Comic sources: MangaDex, GOMANGA, Manhwa Reader, Comick, Local folder), Tools menu, and possible future additions. |
 | **docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md** | In-depth prompt for ChatGPT/LLMs to find manga APIs with direct image URLs for implementing more download sources. |
 | **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md** | Design and implementation of translation context: glossary, previous-page context, series-level storage, and integration with LLM translator. |
 | **doc/FORMATTING_COMPARISON_AI_VS_MAIN.md** | Comparison of formatting and layout behavior (webcomics/manhua) between this fork and BallonsTranslator-ai; useful when migrating or choosing settings. |
@@ -1167,7 +1166,7 @@ These are saved when you change them in the dialog or when you close the dialog.
 - **Dialog** (`ui/manga_source_dialog.py`): Source combo (MangaDex, MangaDex raw/original language, MangaDex URL, Comick, GOMANGA, Manhwa Reader when available, Local folder); search/URL/local rows; results list; chapter list with checkboxes; language/quality/delay/folder; progress bar. Worker in QThread selects client by source_id; Manhwa Reader is shown only after availability check; Local folder: Open folder in BallonsTranslator triggers open_folder_requested(path).
 - **Main window:** Tools menu **Manga / Comic source...**; connects open_folder_requested(path) to OpenProj(path) for chapter or local folder.
 
-**Files:** `utils/manga_sources/__init__.py`, `mangadex.py`, `comick_source.py`, `gomanga_api.py`, `manhwa_reader.py`, `ui/manga_source_dialog.py`, `ui/mainwindowbars.py`, `ui/mainwindow.py`, `utils/config.py`, `config/config.example.json`. See **docs/SETTINGS_UI_RECOMMENDATIONS.md**. Export/Check: `ui/export_dialog.py` (Also create PDF), `ui/mainwindow.py` (`_do_batch_export` + img2pdf; `on_validate_project` + overlapping-block check).
+**Files:** `utils/manga_sources/__init__.py`, `mangadex.py`, `comick_source.py`, `gomanga_api.py`, `manhwa_reader.py`, `ui/manga_source_dialog.py`, `ui/mainwindowbars.py`, `ui/mainwindow.py`, `utils/config.py`, `config/config.example.json`. See §11–12 and Config panel. Export/Check: `ui/export_dialog.py` (Also create PDF), `ui/mainwindow.py` (`_do_batch_export` + img2pdf; `on_validate_project` + overlapping-block check).
 
 ---
 
