@@ -65,10 +65,41 @@ class ModuleThread(QThread):
 
     def _set_module(self, module_name: str):
         old_module = self.module
+        register = self.module_register
+        if module_name not in register.module_dict:
+            fallback = None
+            if self.module_key == 'textdetector':
+                valid = GET_VALID_TEXTDETECTORS()
+                fallback = "ctd" if "ctd" in valid else (valid[0] if valid else None)
+                if fallback:
+                    cfg_module.textdetector = fallback
+            elif self.module_key == 'ocr':
+                valid = GET_VALID_OCR()
+                fallback = valid[0] if valid else None
+                if fallback:
+                    cfg_module.ocr = fallback
+            elif self.module_key == 'inpainter':
+                valid = GET_VALID_INPAINTERS()
+                fallback = valid[0] if valid else None
+                if fallback:
+                    cfg_module.inpainter = fallback
+            if fallback:
+                LOGGER.warning(
+                    "Module '%s' (%s) is not available (e.g. failed to load). Using '%s'.",
+                    module_name, self.module_key, fallback,
+                )
+                module_name = fallback
+            else:
+                create_error_dialog(
+                    KeyError(module_name),
+                    self._failed_set_module_msg + " " + self.tr("No fallback available."),
+                )
+                self.finish_set_module.emit()
+                return
         try:
             module: Union[TextDetectorBase, BaseTranslator, InpainterBase, OCRBase] \
-                = self.module_register.module_dict[module_name]
-            params = cfg_module.get_params(self.module_key)[module_name]
+                = register.module_dict[module_name]
+            params = cfg_module.get_params(self.module_key).get(module_name)
             if params is not None:
                 self.module = module(**params)
             else:
@@ -194,8 +225,22 @@ class TranslateThread(ModuleThread):
             if self.translator.name == translator:
                 return
         
+        if translator not in TRANSLATORS.module_dict:
+            valid = GET_VALID_TRANSLATORS()
+            fallback = 'google' if 'google' in valid else (valid[0] if valid else None)
+            if fallback:
+                LOGGER.warning(
+                    "Translator '%s' is not available (e.g. failed to load). Using '%s'.",
+                    translator, fallback,
+                )
+                translator = fallback
+                cfg_module.translator = fallback
+            else:
+                create_error_dialog(KeyError(translator), self.tr('Failed to set translator. No fallback available.'))
+                self.finish_set_module.emit()
+                return
         try:
-            params = cfg_module.translator_params[translator]
+            params = cfg_module.translator_params.get(translator)
             translator_module: BaseTranslator = TRANSLATORS.module_dict[translator]
             if params is not None:
                 self.translator = translator_module(source, target, raise_unsupported_lang=False, **params)
@@ -206,7 +251,12 @@ class TranslateThread(ModuleThread):
             cfg_module.translator = self.translator.name
         except Exception as e:
             if old_translator is None:
-                old_translator = TRANSLATORS.module_dict['google']('简体中文', 'English', raise_unsupported_lang=False)
+                valid = GET_VALID_TRANSLATORS()
+                fallback_name = 'google' if 'google' in valid else (valid[0] if valid else None)
+                if fallback_name:
+                    old_translator = TRANSLATORS.module_dict[fallback_name](
+                        '简体中文', 'English', raise_unsupported_lang=False
+                    )
             self.translator = old_translator
             msg = self.tr('Failed to set translator ') + translator
             create_error_dialog(e, msg, 'FailedSetTranslator')
@@ -277,16 +327,17 @@ class TranslateThread(ModuleThread):
                 self.translator.append_page_to_series_context(series_path, sources, translations)
         else:
             try:
+                setattr(self.translator, '_current_page_key', page_key)
                 self.translator.translate_textblk_lst(page)
             except CriticalTranslationError as e:
-                create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {page_key})', 'TranslationFailed')
                 self.stop_requested = True
             except Exception as e:
                 if not getattr(cfg_module, "translation_soft_failure_continue", True):
-                    create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                    create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {page_key})', 'TranslationFailed')
                     self.stop_requested = True
                 else:
-                    LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                    LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", page_key, e)
                     placeholder = "[Translation failed]"
                     for blk in page:
                         if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
@@ -329,6 +380,7 @@ class TranslateThread(ModuleThread):
             self.blockSignals(True)
             trans_success = True
             try:
+                setattr(self.translator, '_current_page_key', page_key)
                 self._translate_page(self.imgtrans_proj.pages, page_key, emit_finished=False)
             except Exception as e:
                 trans_success = False
@@ -338,8 +390,8 @@ class TranslateThread(ModuleThread):
                 self.blockSignals(False)
                 manager = getattr(self, 'manager', None)
                 if manager is not None:
-                    create_error_dialog(e, msg, 'TranslationFailed')
-                    manager.translation_failure_request.emit(msg, page_key)
+                    create_error_dialog(e, msg + f' (page: {page_key})', 'TranslationFailed')
+                    manager.translation_failure_request.emit(msg + f' (page: {page_key})', page_key)
                     manager._trans_failure_mutex.lock()
                     manager._trans_failure_condition.wait(manager._trans_failure_mutex)
                     choice = getattr(manager, '_trans_failure_choice', 'skip')
@@ -358,7 +410,7 @@ class TranslateThread(ModuleThread):
                             time.sleep(delay)
                         continue
                 else:
-                    create_error_dialog(e, msg, 'TranslationFailed')
+                    create_error_dialog(e, msg + f' (page: {page_key})', 'TranslationFailed')
             self.blockSignals(False)
             self.finished_counter += 1
             if trans_success:
@@ -747,6 +799,14 @@ class ImgtransThread(QThread):
             need_save_mask = False
             blk_removed: List[TextBlock] = []
             if cfg_module.enable_detect:
+                if self.textdetector is None:
+                    create_error_dialog(
+                        RuntimeError("Text detector module is not set or failed to load."),
+                        self.tr("Text detector is not available. Switch to a working detector in Config or install the required model."),
+                        "DetectorNotSet",
+                    )
+                    self.stop_requested = True
+                    break
                 try:
                     mask, blk_list = self.textdetector.detect(img, self.imgtrans_proj)
                     need_save_mask = True
@@ -783,7 +843,8 @@ class ImgtransThread(QThread):
                         except Exception as e:
                             LOGGER.warning('Dual text detection failed: %s', e)
                 except Exception as e:
-                    create_error_dialog(e, self.tr('Text Detection Failed.'), 'TextDetectFailed')
+                    LOGGER.error("Text detection failed for page: %s", imgname, exc_info=True)
+                    create_error_dialog(e, self.tr('Text Detection Failed.') + f' (page: {imgname})', 'TextDetectFailed')
                     blk_list = []
                 self.detect_counter += 1
                 if pcfg.module.keep_exist_textlines:
@@ -891,7 +952,8 @@ class ImgtransThread(QThread):
                     else:
                         self.ocr.run_ocr(img, blk_list)
                 except Exception as e:
-                    create_error_dialog(e, self.tr('OCR Failed.'), 'OCRFailed')
+                    LOGGER.error("OCR failed for page: %s", imgname, exc_info=True)
+                    create_error_dialog(e, self.tr('OCR Failed.') + f' (page: {imgname})', 'OCRFailed')
                 self.ocr_counter += 1
 
                 if pcfg.restore_ocr_empty:
@@ -993,17 +1055,18 @@ class ImgtransThread(QThread):
                 elif not low_vram_trans:
                     self._set_translation_context_for_page(imgname, pages_to_iterate)
                     try:
+                        setattr(self.translator, '_current_page_key', imgname)
                         self.translator.translate_textblk_lst(blk_list)
                     except CriticalTranslationError as e:
-                        create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                        create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
                         self.stop_requested = True
                         break
                     except Exception as e:
                         if not getattr(cfg_module, "translation_soft_failure_continue", True):
-                            create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                            create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
                             self.stop_requested = True
                             break
-                        LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                        LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", imgname, e)
                         for blk in blk_list:
                             if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
                                 blk.translation = "[Translation failed]"
@@ -1056,7 +1119,8 @@ class ImgtransThread(QThread):
                         inpainted_to_save = downscale_to_size(inpainted, orig_w, orig_h) if scale > 1 else inpainted
                         self.imgtrans_proj.save_inpainted(imgname, inpainted_to_save)
                     except Exception as e:
-                        create_error_dialog(e, self.tr('Inpainting Failed.'), 'InpaintFailed')
+                        LOGGER.error("Inpainting failed for page: %s", imgname, exc_info=True)
+                        create_error_dialog(e, self.tr('Inpainting Failed.') + f' (page: {imgname})', 'InpaintFailed')
                     
                 self.inpaint_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
@@ -1094,17 +1158,18 @@ class ImgtransThread(QThread):
                 )
                 if not skip:
                     try:
+                        setattr(self.translator, '_current_page_key', imgname)
                         self.translator.translate_textblk_lst(blk_list)
                     except CriticalTranslationError as e:
-                        create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                        create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
                         self.stop_requested = True
                         break
                     except Exception as e:
                         if not getattr(cfg_module, "translation_soft_failure_continue", True):
-                            create_error_dialog(e, self.tr('Translation Failed.'), 'TranslationFailed')
+                            create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
                             self.stop_requested = True
                             break
-                        LOGGER.warning("Translation failed (soft): %s. Using placeholders and continuing.", e)
+                        LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", imgname, e)
                         for blk in blk_list:
                             if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
                                 blk.translation = "[Translation failed]"
@@ -1221,6 +1286,7 @@ class ModuleManager(QObject):
 
         self.progress_msgbox = imgtrans_progress_msgbox
         self.progress_msgbox.stop_clicked.connect(self.stopImgtransPipeline)
+        self.progress_msgbox.force_stop_clicked.connect(self.forceStopImgtransPipeline)
 
         self.imgtrans_thread = ImgtransThread(self.textdetect_thread, self.ocr_thread, self.translate_thread, self.inpaint_thread)
         self.imgtrans_thread.update_detect_progress.connect(self.on_update_detect_progress)
@@ -1383,6 +1449,22 @@ class ModuleManager(QObject):
         if self.imgtrans_thread.isRunning():
             self.imgtrans_thread.requestStop()
 
+    def forceStopImgtransPipeline(self):
+        """Force-stop the image translation pipeline when the progress window is closed."""
+        LOGGER.warning('Force-stopping image translation pipeline due to progress window close...')
+        if self.imgtrans_thread.isRunning():
+            try:
+                self.imgtrans_thread.requestStop()
+            except Exception:
+                pass
+            # Hard terminate the pipeline thread if it is still running.
+            self.imgtrans_thread.terminate()
+        # Also terminate any stage threads that might still be active.
+        self.terminateRunningThread()
+        # Hide the progress box and notify the rest of the UI that the pipeline ended.
+        self.progress_msgbox.hide()
+        self.imgtrans_pipeline_finished.emit()
+
     def requestPausePipeline(self):
         """Pause the running pipeline (for batch queue). No-op if not running."""
         if self.imgtrans_thread.isRunning():
@@ -1502,6 +1584,19 @@ class ModuleManager(QObject):
     def setTranslator(self, translator: str = None):
         if translator is None:
             translator = cfg_module.translator
+        valid = GET_VALID_TRANSLATORS()
+        if translator not in valid:
+            fallback = 'google' if 'google' in valid else (valid[0] if valid else None)
+            if fallback:
+                LOGGER.warning(
+                    "Translator '%s' is not available (e.g. not yet integrated). Using '%s'.",
+                    translator, fallback,
+                )
+                translator = fallback
+                cfg_module.translator = fallback
+            else:
+                create_error_dialog(ValueError(self.tr("No translator module available.")), self.tr("Failed to set Translator."))
+                return
         if self.translate_thread.isRunning():
             LOGGER.warning('Terminating a running translation thread.')
             self.translate_thread.terminate()
@@ -1513,7 +1608,20 @@ class ModuleManager(QObject):
             return
         
         if inpainter is None:
-            inpainter =cfg_module.inpainter
+            inpainter = cfg_module.inpainter
+        valid = GET_VALID_INPAINTERS()
+        if inpainter not in valid:
+            fallback = valid[0] if valid else None
+            if fallback:
+                LOGGER.warning(
+                    "Inpainter '%s' is not available (e.g. not yet integrated). Using '%s'.",
+                    inpainter, fallback,
+                )
+                inpainter = fallback
+                cfg_module.inpainter = fallback
+            else:
+                create_error_dialog(ValueError(self.tr("No inpainter module available.")), self.tr("Failed to set Inpainter."))
+                return
         
         if self.inpaint_thread.isRunning():
             self.block_set_inpainter = True
@@ -1580,6 +1688,19 @@ class ModuleManager(QObject):
     def setOCR(self, ocr: str = None):
         if ocr is None:
             ocr = cfg_module.ocr
+        valid = GET_VALID_OCR()
+        if ocr not in valid:
+            fallback = valid[0] if valid else None
+            if fallback:
+                LOGGER.warning(
+                    "OCR '%s' is not available (e.g. not yet integrated). Using '%s'.",
+                    ocr, fallback,
+                )
+                ocr = fallback
+                cfg_module.ocr = fallback
+            else:
+                create_error_dialog(ValueError(self.tr("No OCR module available.")), self.tr("Failed to set OCR."))
+                return
         if self.ocr_thread.isRunning():
             LOGGER.warning('Terminating a running OCR thread.')
             self.ocr_thread.terminate()

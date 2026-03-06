@@ -849,6 +849,10 @@ class LLM_API_Translator(BaseTranslator):
         except Exception as e:
             self.logger.warning(f"Context summary request failed: {e}")
             return None
+        if completion is None:
+            return None
+        if isinstance(completion, str):
+            return completion.strip() or None
         if (
             completion.choices
             and completion.choices[0].message
@@ -1000,29 +1004,46 @@ class LLM_API_Translator(BaseTranslator):
                 self.logger.error(f"API request failed: {e}")
                 raise
 
-        if (
-            completion.choices
-            and completion.choices[0].message
-            and completion.choices[0].message.content
-        ):
-            raw_content = completion.choices[0].message.content
-            json_to_parse = raw_content.strip()
+        if completion is None:
+            self.logger.warning("API returned None.")
+            return None
+        # Some providers return a raw string instead of an object with .choices (#1098)
+        raw_content = None
+        if isinstance(completion, str):
+            raw_content = completion.strip()
+        elif getattr(completion, "choices", None) and completion.choices:
+            msg = getattr(completion.choices[0], "message", None)
+            if msg and getattr(msg, "content", None):
+                raw_content = msg.content.strip()
+        if not raw_content:
+            self.logger.warning("API returned no content or unexpected response shape.")
+            return None
+        json_to_parse = raw_content
 
-            match = re.search(
-                r"```(?:json)?\s*(\{.*?\})\s*```", json_to_parse, re.DOTALL
+        match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```", json_to_parse, re.DOTALL
+        )
+        if match:
+            self.logger.debug(
+                "Markdown code block detected. Extracting JSON content."
             )
-            if match:
-                self.logger.debug(
-                    "Markdown code block detected. Extracting JSON content."
-                )
-                json_to_parse = match.group(1)
-            else:
-                start = json_to_parse.find("{")
-                end = json_to_parse.rfind("}")
-                if start != -1 and end != -1 and end > start:
-                    json_to_parse = json_to_parse[start : end + 1]
-            try:
+            json_to_parse = match.group(1)
+        else:
+            start = json_to_parse.find("{")
+            end = json_to_parse.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                json_to_parse = json_to_parse[start : end + 1]
+        try:
                 data_to_validate = json.loads(json_to_parse)
+                # Normalize Grok-style {"1": "text", "2": "..."} to {"translations": [...]} before validate (#1031)
+                if isinstance(data_to_validate, dict) and "translations" not in data_to_validate:
+                    if all(str(k).strip().isdigit() for k in data_to_validate.keys()):
+                        data_to_validate = {
+                            "translations": [
+                                {"id": int(k), "translation": v if isinstance(v, str) else (str(v) if v is not None else "")}
+                                for k, v in sorted(data_to_validate.items(), key=lambda x: int(str(x[0]).strip()) if str(x[0]).strip().isdigit() else 0)
+                            ]
+                        }
                 validated_response = TranslationResponse.model_validate(
                     data_to_validate
                 )
@@ -1067,8 +1088,8 @@ class LLM_API_Translator(BaseTranslator):
                             k.isdigit() for k in simple_data.keys()
                         ):
                             fixed_translations = [
-                                {"id": int(k), "translation": v}
-                                for k, v in simple_data.items()
+                                {"id": int(k), "translation": v if isinstance(v, str) else (str(v) if v is not None else "")}
+                                for k, v in sorted(simple_data.items(), key=lambda x: int(x[0]) if str(x[0]).strip().isdigit() else 0)
                             ]
                         elif isinstance(simple_data, list):
                             fixed_translations = simple_data
@@ -1260,8 +1281,10 @@ class LLM_API_Translator(BaseTranslator):
                             )
                         time.sleep(self.retry_timeout)
                     else:
+                        page = getattr(self, '_current_page_key', None)
                         self.logger.error(
                             f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"
+                            + (f" (page: {page})" if page else "")
                         )
                         self.logger.debug(traceback.format_exc())
                         translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)
@@ -1280,8 +1303,10 @@ class LLM_API_Translator(BaseTranslator):
                             "Authentication or quota error; cannot continue.",
                             cause=e,
                         )
+                    page = getattr(self, '_current_page_key', None)
                     self.logger.error(
                         f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"
+                        + (f" (page: {page})" if page else "")
                     )
                     self.logger.debug(traceback.format_exc())
                     translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)

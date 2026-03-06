@@ -204,7 +204,35 @@ def main():
 
     from qtpy.QtCore import QTranslator, QLocale, Qt
     shared.args = args
-    shared.DEFAULT_DISPLAY_LANG = QLocale.system().name().replace('en_CN', 'zh_CN')
+    # Use system language for default display language; fallback by language when exact locale .qm missing (#1145)
+    sys_locale = QLocale.system().name().replace('en_CN', 'zh_CN')
+    trans_dir = shared.TRANSLATE_DIR
+    # Prefer system script over region: e.g. Simplified Chinese in Macau should get zh_CN, not zh_TW
+    try:
+        sys_script = QLocale.system().script()
+        traditional_codes = ('zh_TW', 'zh_HK', 'zh_MO')
+        simplified_script = getattr(QLocale.Script, 'SimplifiedChineseScript', None)
+        if simplified_script is not None and sys_script == simplified_script and sys_locale in traditional_codes:
+            if osp.exists(osp.join(trans_dir, 'zh_CN.qm')):
+                sys_locale = 'zh_CN'
+    except Exception:
+        pass
+    if osp.exists(osp.join(trans_dir, sys_locale + '.qm')):
+        shared.DEFAULT_DISPLAY_LANG = sys_locale
+    else:
+        try:
+            lang = QLocale.system().language()
+            if lang == QLocale.Language.Chinese:
+                for code in ('zh_CN', 'zh_TW'):
+                    if osp.exists(osp.join(trans_dir, code + '.qm')):
+                        shared.DEFAULT_DISPLAY_LANG = code
+                        break
+                else:
+                    shared.DEFAULT_DISPLAY_LANG = sys_locale
+            else:
+                shared.DEFAULT_DISPLAY_LANG = sys_locale
+        except Exception:
+            shared.DEFAULT_DISPLAY_LANG = sys_locale
     shared.HEADLESS = args.headless
     shared.HEADLESS_CONTINUOUS = getattr(args, 'headless_continuous', False)
     shared.load_cache()
@@ -263,6 +291,12 @@ def main():
 
     lang = config.display_lang
     langp = osp.join(shared.TRANSLATE_DIR, lang + '.qm')
+    if not osp.exists(langp) and lang.startswith('zh_'):
+        for code in ('zh_CN', 'zh_TW'):
+            if code != lang and osp.exists(osp.join(shared.TRANSLATE_DIR, code + '.qm')):
+                lang = code
+                langp = osp.join(shared.TRANSLATE_DIR, lang + '.qm')
+                break
     if osp.exists(langp):
         translator = QTranslator()
         translator.load(lang, osp.dirname(osp.abspath(__file__)) + "/translate")
