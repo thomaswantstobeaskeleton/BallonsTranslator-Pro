@@ -1,3 +1,4 @@
+# PyInstaller spec for BallonsTranslator (launch.py)
 # 导入模块
 import os
 import sys
@@ -24,6 +25,7 @@ a = Analysis([
         ('config', './config'),
         ('data', './data'),
         ('doc', './doc'),
+        ('docs', './docs'),
         ('fonts', './fonts'),
         ('icons', './icons'),
         ('modules', './modules'),
