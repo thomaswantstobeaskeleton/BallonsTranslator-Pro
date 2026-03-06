@@ -2,12 +2,13 @@ from typing import Callable, List, Dict
 import time
 import datetime
 
-from qtpy.QtWidgets import QDialog, QLabel, QHBoxLayout, QVBoxLayout, QMessageBox, QSizePolicy, QProgressBar, QPushButton
+from qtpy.QtWidgets import QDialog, QLabel, QHBoxLayout, QVBoxLayout, QMessageBox, QSizePolicy, QProgressBar, QPushButton, QGraphicsOpacityEffect
 from qtpy.QtGui import  QCloseEvent, QShowEvent
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
 
 from utils.shared import remove_from_runtime_widget_set, add_to_runtime_widget_set
 from .widget import Widget
+from .hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 
 
 class MessageBox(QMessageBox):
@@ -63,11 +64,17 @@ class MessageBox(QMessageBox):
     
 
 class TaskProgressBar(Widget):
+    """Progress bar with bubbly smooth fill animation (OutCubic)."""
     def __init__(self, description: str = '', verbose=False, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.progressbar = QProgressBar(self)
         self.progressbar.setTextVisible(False)
+        self.progressbar.setMinimum(0)
+        self.progressbar.setMaximum(100)
+        self._value_anim = QPropertyAnimation(self.progressbar, b"value", self)
+        self._value_anim.setDuration(280)
+        self._value_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.textlabel = QLabel(self)
         self.description = description
         self.text_len = 89
@@ -91,7 +98,11 @@ class TaskProgressBar(Widget):
         self.updateProgress(0)
 
     def updateProgress(self, progress: int, msg: str = ''):
-        self.progressbar.setValue(progress)
+        progress = max(0, min(100, progress))
+        self._value_anim.stop()
+        self._value_anim.setStartValue(self.progressbar.value())
+        self._value_anim.setEndValue(progress)
+        self._value_anim.start()
         if self.description:
             msg = self.description + msg
         if len(msg) > self.text_len - 3:
@@ -100,7 +111,6 @@ class TaskProgressBar(Widget):
             pads = self.text_len - len(msg)
             msg = msg + ' ' * pads
         self.textlabel.setText(msg)
-        self.progressbar.setValue(progress)
 
         if self.verbose:
             if progress == 0:
@@ -181,22 +191,54 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
         layout.addWidget(self.inpaint_bar)
         layout.addWidget(self.translate_bar)
         
-        # 添加停止按钮
+        # Stop / Force stop with bubbly hover feedback
         self.stop_button = QPushButton(self.tr('Stop'), self)
         self.stop_button.clicked.connect(self.on_stop_clicked)
+        install_hover_opacity_animation(self.stop_button, duration_ms=100, normal_opacity=0.9)
+        install_hover_scale_animation(self.stop_button, duration_ms=80, size_delta=(3, 2))
+        self.force_stop_button = QPushButton(self.tr('Force stop'), self)
+        self.force_stop_button.clicked.connect(self.on_force_stop_clicked)
+        install_hover_opacity_animation(self.force_stop_button, duration_ms=100, normal_opacity=0.9)
+        install_hover_scale_animation(self.force_stop_button, duration_ms=80, size_delta=(3, 2))
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.force_stop_button)
         button_layout.addStretch()
         layout.addLayout(button_layout)
 
         self.setFixedWidth(self.sizeHint().width())
+        self._show_anim_ref = []
+    
+    def showEvent(self, e: QShowEvent) -> None:
+        super().showEvent(e)
+        # Bubbly fade-in when dialog appears
+        effect = QGraphicsOpacityEffect(self)
+        effect.setOpacity(0.0)
+        self.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(200)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        self._show_anim_ref[:] = [anim]
+
+        def on_finished():
+            if self.graphicsEffect() == effect:
+                self.setGraphicsEffect(None)
+            self._show_anim_ref.clear()
+        anim.finished.connect(on_finished)
+        anim.start()
     
     def on_stop_clicked(self):
         self.stop_clicked.emit()
         # 重置按钮状态（为下次使用准备）
         self.stop_button.setEnabled(False)
         self.stop_button.setText(self.tr('trying to stop...'))
+
+    def on_force_stop_clicked(self):
+        """Same as closing the window: force-stop the pipeline immediately."""
+        self.force_stop_clicked.emit()
 
 
     def updateDetectProgress(self, value: int, msg: str = ''):
@@ -219,6 +261,7 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
         # 重置停止按钮状态
         self.stop_button.setEnabled(True)
         self.stop_button.setText(self.tr('Stop'))
+        self.force_stop_button.setEnabled(True)
 
     def show_all_bars(self):
         self.detect_bar.show()

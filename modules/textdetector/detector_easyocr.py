@@ -75,7 +75,7 @@ if _EASYOCR_AVAILABLE:
                 "type": "selector",
                 "options": ["craft", "dbnet18"],
                 "value": "craft",
-                "description": "Backbone: craft or dbnet18. If Chinese in bubbles is missed, try switching to dbnet18.",
+                "description": "Backbone: craft (works everywhere) or dbnet18 (needs deform_conv; may auto-fallback to craft on CPU).",
             },
             "text_threshold": {
                 "value": 0.35,
@@ -110,17 +110,28 @@ if _EASYOCR_AVAILABLE:
         def __init__(self, **params) -> None:
             super().__init__(**params)
             self.reader = None
+            self._force_craft_network = False  # set when dbnet18 fails (deform_conv missing), so reload uses craft
 
         def _load_model(self):
             if self.reader is not None:
                 return
-            lang_val = self.params["language"]["value"]
+            lang_val = self.get_param_value("language")
             if lang_val == "ch_sim+en":
                 lang_list = ["ch_sim", "en"]
-            else:
+            elif isinstance(lang_val, str):
                 lang_list = [lang_val]
-            gpu = self.params["gpu"]["value"]
-            detect_network = self.params["detect_network"]["value"]
+            else:
+                lang_list = ["en"]
+            gpu = self.get_param_value("gpu")
+            if not isinstance(gpu, bool):
+                gpu = bool(gpu)
+            detect_network = self.get_param_value("detect_network")
+            if getattr(self, "_force_craft_network", False):
+                detect_network = "craft"
+                self._force_craft_network = False
+                self.logger.warning(
+                    "EasyOCR: dbnet18 not available on this system (deform_conv missing). Using craft backbone."
+                )
             self.reader = easyocr.Reader(
                 lang_list,
                 gpu=gpu,
@@ -137,9 +148,9 @@ if _EASYOCR_AVAILABLE:
             mask = np.zeros((h, w), dtype=np.uint8)
             blk_list: List[TextBlock] = []
 
-            text_threshold = float(self.params["text_threshold"]["value"])
-            link_threshold = float(self.params["link_threshold"]["value"])
-            min_size = int(self.params["min_size"]["value"])
+            text_threshold = float(self.get_param_value("text_threshold"))
+            link_threshold = float(self.get_param_value("link_threshold"))
+            min_size = int(self.get_param_value("min_size"))
             detect_kw = dict(
                 min_size=min_size,
                 text_threshold=text_threshold,
@@ -154,15 +165,32 @@ if _EASYOCR_AVAILABLE:
             except Exception as e:
                 err_msg = str(e)
                 err_lower = err_msg.lower()
-                # CUDA OOM or deform_conv failure: fall back to CPU for this and future runs
-                if ("out of memory" in err_lower or "deform_conv" in err_msg or "not imported successfully" in err_msg) and (
-                    "cuda" in err_lower or "cuda" in str(type(e).__name__).lower()
+                # dbnet18 requires deform_conv; on CPU it is often not built. Fall back to craft once.
+                if ("deform_conv" in err_msg or "not imported successfully" in err_msg) and not getattr(
+                    self, "_force_craft_network", False
                 ):
+                    self.logger.warning(
+                        "EasyOCR dbnet18 failed (deform_conv not available). Falling back to craft backbone."
+                    )
+                    self.reader = None
+                    self._force_craft_network = True
+                    if self.get_param_value("gpu"):
+                        self.set_param_value("gpu", False)
+                    self._load_model()
+                    try:
+                        horizontal_list_agg, free_list_agg = self.reader.detect(img, **detect_kw)
+                    except Exception as e2:
+                        self.logger.error("EasyOCR det failed after craft fallback: %s", e2)
+                        return mask, blk_list
+                # CUDA OOM or other GPU error: fall back to CPU; use craft if current was dbnet18
+                elif ("out of memory" in err_lower or "cuda" in err_lower) and self.get_param_value("gpu"):
                     self.logger.warning(
                         "EasyOCR detector hit GPU OOM or CUDA error. Falling back to CPU for detection."
                     )
                     self.reader = None
-                    self.params["gpu"]["value"] = False
+                    self.set_param_value("gpu", False)
+                    if (self.get_param_value("detect_network") or "").lower() == "dbnet18":
+                        self._force_craft_network = True
                     self._load_model()
                     try:
                         horizontal_list_agg, free_list_agg = self.reader.detect(img, **detect_kw)
@@ -205,7 +233,7 @@ if _EASYOCR_AVAILABLE:
                 else:
                     pts_list.append([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
 
-            if self.params.get("merge_text_lines", {}).get("value", True) and len(pts_list) > 0:
+            if self.get_param_value("merge_text_lines") and len(pts_list) > 0:
                 blk_list = mit_merge_textlines(pts_list, width=w, height=h)
                 for blk in blk_list:
                     for line_pts in blk.lines:
@@ -226,18 +254,21 @@ if _EASYOCR_AVAILABLE:
                     blk_list.append(blk)
                     cv2.fillPoly(mask, [pts_np], 255)
 
-            merge_gap = int(self.params.get("merge_gap_px", {}).get("value", 50))
+            merge_gap = 50
+            try:
+                merge_gap = max(0, int(float(self.get_param_value("merge_gap_px"))))
+            except (TypeError, ValueError):
+                pass
             blk_list = _merge_nearby_blocks(blk_list, merge_gap)
             blk_list = sort_regions(blk_list)
 
-            pad_val = 0
-            bp = self.params.get("box_padding", {})
-            if isinstance(bp, dict):
-                v = bp.get("value", 5)
-                try:
-                    pad_val = max(0, min(24, int(v) if v not in (None, "") else 5))
-                except (TypeError, ValueError):
-                    pad_val = 5
+            pad_val = 5
+            try:
+                bp = self.get_param_value("box_padding")
+                v = bp if bp not in (None, "") else 5
+                pad_val = max(0, min(24, int(v)))
+            except (TypeError, ValueError):
+                pass
             if pad_val > 0:
                 blk_list = expand_blocks(blk_list, pad_val, w, h)
 

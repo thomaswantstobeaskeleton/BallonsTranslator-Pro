@@ -5,6 +5,7 @@ from modules import GET_VALID_INPAINTERS, GET_VALID_TEXTDETECTORS, GET_VALID_TRA
 from modules.translators.base import lang_display_label, lang_display_to_key
 from utils.logger import logger as LOGGER
 from .custom_widget import ConfigComboBox, ParamComboBox, NoBorderPushBtn, ParamNameLabel
+from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 from utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from utils.config import pcfg
 
@@ -226,6 +227,10 @@ class ParamWidget(QWidget):
                     param_widget = ParamLineEditor(param_key, force_digital=is_digital)
                     param_widget.setText(str(value))
 
+                elif param_type == 'text':
+                    param_widget = ParamLineEditor(param_key, force_digital=False, size=param_dict.get('size', 'long'))
+                    param_widget.setText(str(value))
+
                 elif param_type == 'check_group':
                     param_widget = ParamCheckGroup(param_key, check_group=value)
 
@@ -395,6 +400,8 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.testTranslatorBtn = QPushButton(self.tr("Test translator"), self)
         self.testTranslatorBtn.setToolTip(self.tr("Test if the current translator is available (e.g. API key, network)."))
         self.testTranslatorBtn.clicked.connect(self.test_translator_clicked.emit)
+        install_hover_opacity_animation(self.testTranslatorBtn, duration_ms=100, normal_opacity=0.9)
+        install_hover_scale_animation(self.testTranslatorBtn, duration_ms=80, size_delta=(3, 2))
         self.replacePreMTkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for machine translation source text"), self)
         self.replacePreMTkeywordBtn.clicked.connect(self.show_pre_MT_keyword_window)
         self.replacePreMTkeywordBtn.setFixedWidth(500)
@@ -425,9 +432,13 @@ class TranslatorConfigPanel(ModuleConfigParseWidget):
         self.copyPromptBtn = QPushButton(self.tr("Copy prompt"), self.manual_helper_widget)
         self.copyPromptBtn.setToolTip(self.tr("Copy the translation prompt (JSON with source texts) to clipboard. Paste into your tool, then paste the response back and click Paste response."))
         self.copyPromptBtn.clicked.connect(self.copy_manual_prompt_requested.emit)
+        install_hover_opacity_animation(self.copyPromptBtn, duration_ms=100, normal_opacity=0.9)
+        install_hover_scale_animation(self.copyPromptBtn, duration_ms=80, size_delta=(3, 2))
         self.pasteResponseBtn = QPushButton(self.tr("Paste response"), self.manual_helper_widget)
         self.pasteResponseBtn.setToolTip(self.tr("Paste JSON from clipboard into the response box and apply to blocks. Run Translate to use it."))
         self.pasteResponseBtn.clicked.connect(self.paste_manual_response_requested.emit)
+        install_hover_opacity_animation(self.pasteResponseBtn, duration_ms=100, normal_opacity=0.9)
+        install_hover_scale_animation(self.pasteResponseBtn, duration_ms=80, size_delta=(3, 2))
         manual_hl.addWidget(self.copyPromptBtn)
         manual_hl.addWidget(self.pasteResponseBtn)
         manual_hl.addStretch()

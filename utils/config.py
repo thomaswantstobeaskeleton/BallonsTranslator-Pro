@@ -86,6 +86,10 @@ class ModuleConfig(Config):
     # - two_step: OCR -> text translator (default)
     # - one_step_vlm: OCR module performs translate-from-image and writes blk.translation directly (requires supported OCR, e.g. llm_ocr)
     translation_mode: str = "two_step"
+    # Replace translation mode (manga-translator-ui style): input = raw image + pre-rendered translated image (same name in a folder).
+    # Pipeline: detect+OCR on translated image -> text; detect on raw -> blocks; match by position; inpaint raw; render matched text.
+    replace_translation_mode: bool = False
+    replace_translation_translated_dir: str = ""  # Folder containing translated images (same filenames as project). Empty = off.
     # When True (default), on soft translation failure (e.g. timeout, parse error) use placeholder and continue batch. When False, show dialog and stop like critical errors.
     translation_soft_failure_continue: bool = True
     # Skip translation for pages that already have all blocks translated (non-empty translation). Speeds up re-runs.
@@ -93,6 +97,8 @@ class ModuleConfig(Config):
     # Optional: merge nearby text blocks using collision-based grouping (Dango-style). Off by default; enable for word-level OCR or many small blocks.
     merge_nearby_blocks_collision: bool = False
     merge_nearby_blocks_gap_ratio: float = 1.5  # vertical expansion ratio for horizontal merge; 1.5 = Dango-style
+    # Only run collision merge when page has at least this many blocks (avoids merging normal bubble layouts; default 18).
+    merge_nearby_blocks_min_blocks: int = 18
     # Translation caching (saves API costs for deterministic settings/reruns)
     translation_cache_enabled: bool = False
     translation_cache_deterministic_only: bool = True
@@ -102,6 +108,10 @@ class ModuleConfig(Config):
     layout_collision_check: bool = True
     layout_collision_min_mask_ratio: float = 0.85
     layout_collision_max_retries: int = 3
+    # Center text vertically (and horizontally as needed) inside each bubble/block (manga-translator-ui style).
+    center_text_in_bubble: bool = False
+    # Try larger font / fewer lines so text fits with fewer line breaks (test combinations; manga-translator-ui style).
+    optimize_line_breaks: bool = False
     finish_code: int = 15
     run_preset_name: str = 'Full'
     # --- Section 6 / 6.1: Image upscaling & per-stage resizing ---
@@ -214,6 +224,8 @@ class ProgramConfig(Config):
     original_transparency: float = 0.
     open_recent_on_startup: bool = True
     recent_proj_list_max: int = 14
+    # When True, show the welcome screen on startup when no project is opened (manhua-translator / Komakun style).
+    show_welcome_screen: bool = True
     # When True, check for and pull GitHub updates on startup. Can cause issues or bad results; use with caution.
     auto_update_from_github: bool = False
     logical_dpi: int = 0
@@ -355,7 +367,7 @@ CONTEXT_MENU_DEFAULT = {
 CONFIG_KEY_ORDER = (
     "module", "drawpanel", "global_fontformat", "recent_proj_list", "show_page_list",
     "imgtrans_paintmode", "imgtrans_textedit", "imgtrans_textblock", "mask_transparency", "original_transparency",
-    "open_recent_on_startup", "recent_proj_list_max", "auto_update_from_github", "logical_dpi", "confirm_before_run",
+    "open_recent_on_startup", "recent_proj_list_max", "show_welcome_screen", "auto_update_from_github", "logical_dpi", "confirm_before_run",
     "let_fntsize_flag", "let_fntstroke_flag", "let_fntcolor_flag", "let_fnt_scolor_flag", "let_fnteffect_flag",
     "let_alignment_flag", "let_writing_mode_flag", "let_family_flag", "let_autolayout_flag", "let_uppercase_flag",
     "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path",
@@ -434,7 +446,15 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     
     global pcfg
     pcfg.merge(config)
-    # Section 9: clamp numeric settings to valid ranges to avoid silent broken pipeline
+    # Migrate removed rtdetr_comic / legacy rtdetr_v2 -> ctd (rtdetr_comic detector removed)
+    for key in ('textdetector', 'textdetector_secondary', 'textdetector_tertiary'):
+        if getattr(pcfg.module, key, None) in ('rtdetr_comic', 'rtdetr_v2'):
+            setattr(pcfg.module, key, 'ctd')
+    tp = getattr(pcfg.module, 'textdetector_params', None)
+    if isinstance(tp, dict):
+        for old in ('rtdetr_v2', 'rtdetr_comic'):
+            tp.pop(old, None)
+    # Section 9: clamp numeric settings
     try:
         from utils.validation import clamp_settings
         clamp_settings(pcfg)

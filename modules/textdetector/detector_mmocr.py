@@ -113,13 +113,22 @@ if _MMOCR_AVAILABLE:
                 self.inferencer = TextDetInferencer(model=det_model, device=device)
             except (ImportError, OSError) as e:
                 err_msg = str(e)
+                # On Windows / mismatched mmcv, this can throw low-level DLL errors that would crash the app.
+                # Log a clear message and disable MMOCR instead of raising.
                 if "DLL load failed" in err_msg or "_ext" in err_msg or "procedure could not be found" in err_msg:
-                    raise RuntimeError(
-                        "MMOCR failed: mmcv was built for a different PyTorch version (e.g. 2.0). "
-                        "Your PyTorch is newer, so mmcv's native code is incompatible. "
-                        "Use CTD, Surya, or Paddle detection instead. See doc/INSTALL_MMOCR.md."
-                    ) from e
-                raise
+                    self.logger.error(
+                        "MMOCR detector failed to initialize due to incompatible mmcv/PyTorch build. "
+                        "Use CTD, Surya, RapidOCR, or Paddle detection instead. See docs/OPTIONAL_DEPENDENCIES.md. "
+                        "Raw error: %s",
+                        err_msg,
+                    )
+                else:
+                    self.logger.error("MMOCR detector initialization failed: %s", err_msg)
+                self.inferencer = None
+            except Exception as e:
+                # Any other unexpected init error: log and disable MMOCR, but don't crash the app.
+                self.logger.error("MMOCR detector unexpected initialization error: %s", e)
+                self.inferencer = None
 
         def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
             if img.ndim == 3 and img.shape[2] == 4:

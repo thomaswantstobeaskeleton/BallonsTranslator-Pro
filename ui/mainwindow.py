@@ -143,6 +143,13 @@ class MainWindow(mainwindow_cls):
                 if osp.exists(proj_dir):
                     self.OpenProj(proj_dir)
 
+        if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
+            if self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
+                if getattr(pcfg, 'show_welcome_screen', True):
+                    self._show_welcome_screen()
+                else:
+                    self.centralStackWidget.setCurrentIndex(1)
+
         if shared.HEADLESS or shared.HEADLESS_CONTINUOUS:
             self.run_batch(**exec_args)
         elif exec_args.get('exec_dirs') and str(exec_args.get('exec_dirs')).strip():
@@ -239,6 +246,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.open_json_proj.connect(self.openJsonProj)
         self.leftBar.save_proj.connect(self.manual_save)
         self.leftBar.run_clicked.connect(self.run_imgtrans)
+        self.leftBar.close_project_requested.connect(self.close_project_and_show_welcome)
         self.leftBar.export_doc.connect(self.on_export_doc)
         self.leftBar.export_current_page_as.connect(self.on_export_current_page_as)
         self.leftBar.import_doc.connect(self.on_import_doc)
@@ -266,7 +274,15 @@ class MainWindow(mainwindow_cls):
         self.leftStackWidget.addWidget(self.global_search_widget)
         
         self.centralStackWidget = AnimatedStackWidget(self, duration_ms=220)
-        
+
+        from .welcome_widget import WelcomeWidget
+        self.welcomeWidget = WelcomeWidget(self)
+        self.welcomeWidget.open_folder_requested.connect(self._welcome_open_folder)
+        self.welcomeWidget.open_project_requested.connect(self.OpenProj)
+        self.welcomeWidget.open_images_requested.connect(self.leftBar.onOpenImages)
+        self.welcomeWidget.open_acbf_requested.connect(self.leftBar.onOpenACBFCBZ)
+        self.welcomeWidget.recent_project_clicked.connect(self._welcome_recent_clicked)
+
         self.titleBar = TitleBar(self)
         self.titleBar.closebtn_clicked.connect(self.on_closebtn_clicked)
         self.titleBar.display_lang_changed.connect(self.on_display_lang_changed)
@@ -366,6 +382,7 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.addWidget(self.canvas.gv)
         self.comicTransSplitter.addWidget(self.rightComicTransStackPanel)
 
+        self.centralStackWidget.addWidget(self.welcomeWidget)
         self.centralStackWidget.addWidget(self.comicTransSplitter)
         self.centralStackWidget.addWidget(self.configPanel)
 
@@ -575,7 +592,7 @@ class MainWindow(mainwindow_cls):
             self.mtSubWidget.loadCfgSublist(pcfg.mt_sublist)
 
     def setupImgTransUI(self):
-        self.centralStackWidget.setCurrentIndex(0)
+        self.centralStackWidget.setCurrentIndex(1)
         self.bottomBar.setPipelineVisible(True)
         if self.leftBar.needleftStackWidget():
             self.leftStackWidget.show()
@@ -588,7 +605,7 @@ class MainWindow(mainwindow_cls):
             self.leftStackWidget.hide()
 
     def setupConfigUI(self):
-        self.centralStackWidget.setCurrentIndex(1)
+        self.centralStackWidget.setCurrentIndex(2)
         self.bottomBar.setPipelineVisible(False)
 
     def set_display_lang(self, lang: str):
@@ -602,6 +619,23 @@ class MainWindow(mainwindow_cls):
         
         if pcfg.let_textstyle_indep_flag and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             self.load_textstyle_from_proj_dir(from_proj=True)
+
+    def _welcome_open_folder(self):
+        self.leftBar.onOpenFolder()
+
+    def _welcome_recent_clicked(self, path: str):
+        if path and osp.exists(path):
+            self.OpenProj(path)
+
+    def _show_welcome_screen(self):
+        """Switch to welcome screen and refresh recent list."""
+        if hasattr(self, 'welcomeWidget'):
+            self.welcomeWidget.set_recent_projects(getattr(self.leftBar, 'recent_proj_list', []) or [])
+        self.centralStackWidget.setCurrentIndex(0)
+
+    def _show_main_content(self):
+        """Switch from welcome to main translation view."""
+        self.centralStackWidget.setCurrentIndex(1)
 
     def load_textstyle_from_proj_dir(self, from_proj=False):
         if from_proj:
@@ -633,6 +667,7 @@ class MainWindow(mainwindow_cls):
             self.titleBar.setTitleContent(osp.basename(directory))
             self.updatePageList()
             self.opening_dir = False
+            self._show_main_content()
         except Exception as e:
             self.opening_dir = False
             create_error_dialog(e, self.tr('Failed to load project ') + directory)
@@ -724,6 +759,7 @@ class MainWindow(mainwindow_cls):
             self.updatePageList()
             self.titleBar.setTitleContent(osp.basename(self.imgtrans_proj.proj_path))
             self.opening_dir = False
+            self._show_main_content()
         except Exception as e:
             self.opening_dir = False
             create_error_dialog(e, self.tr('Failed to load project from') + json_path)
@@ -1864,6 +1900,40 @@ class MainWindow(mainwindow_cls):
             and self.imgtrans_proj.directory is not None:
             LOGGER.debug('Manually saving...')
             self.saveCurrentPage(update_scene_text=True, save_proj=True, restore_interface=True, save_rst_only=False)
+
+    def close_project_and_show_welcome(self):
+        """Close current project and switch to welcome screen. Prompts to save if unsaved."""
+        if self.imgtrans_proj.is_empty:
+            self._show_welcome_screen()
+            return
+        if self.canvas.projstate_unsaved:
+            ret = QMessageBox.question(
+                self,
+                self.tr("Unsaved changes"),
+                self.tr("Save project before closing?"),
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if ret == QMessageBox.StandardButton.Cancel:
+                return
+            if ret == QMessageBox.StandardButton.Save:
+                self.saveCurrentPage(update_scene_text=True, save_proj=True, restore_interface=True, save_rst_only=False)
+        self.imgtrans_proj.pages = {}
+        self.imgtrans_proj._pagename2idx = {}
+        self.imgtrans_proj._idx2pagename = {}
+        self.imgtrans_proj.current_img = None
+        self.imgtrans_proj.directory = None
+        self.imgtrans_proj.proj_path = None
+        self.imgtrans_proj.img_array = None
+        self.imgtrans_proj.mask_array = None
+        self.imgtrans_proj.inpainted_array = None
+        self.st_manager.clearSceneTextitems()
+        self.pageList.clear()
+        self.titleBar.setTitleContent(proj_name="", page_name="")
+        self.canvas.clear_undostack(update_saved_step=True)
+        if hasattr(self.welcomeWidget, "set_recent_projects"):
+            self.welcomeWidget.set_recent_projects(getattr(self.leftBar, "recent_proj_list", []) or [])
+        self.centralStackWidget.setCurrentIndex(0)
 
     def saveCurrentPage(self, update_scene_text=True, save_proj=True, restore_interface=False, save_rst_only=False, keep_exist_as_backup=False):
         
@@ -3228,6 +3298,11 @@ class MainWindow(mainwindow_cls):
             widget.view_hide_btn_clicked.connect(self.on_hide_view_widget)
             widget.setVisible(visible)
 
+        if hasattr(self, 'textPanel') and hasattr(self.textPanel, 'formatpanel'):
+            self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(
+                not getattr(pcfg, 'show_text_style_preset', True)
+            )
+
         # Section 10: Canvas view mode (original / debug / translated / normal) + Fit to width
         self.titleBar.viewMenu.addSeparator()
         from qtpy.QtGui import QActionGroup
@@ -3273,6 +3348,8 @@ class MainWindow(mainwindow_cls):
         widget: ViewWidget = shared.config_name_to_view_widget[cfg_name]['widget']
         widget.setVisible(show)
         setattr(pcfg, cfg_name, show)
+        if cfg_name == 'show_text_style_preset' and hasattr(self, 'textPanel'):
+            self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(not show)
 
     def on_hide_view_widget(self, cfg_name: str):
         d = shared.config_name_to_view_widget[cfg_name]
@@ -3281,3 +3358,5 @@ class MainWindow(mainwindow_cls):
         action: QAction = d['action']
         action.setChecked(False)
         setattr(pcfg, cfg_name, False)
+        if cfg_name == 'show_text_style_preset' and hasattr(self, 'textPanel'):
+            self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(True)

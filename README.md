@@ -137,7 +137,7 @@ For quality rankings (tier-based), see [docs/QUALITY_RANKINGS.md](docs/QUALITY_R
 **Goal:** Use the Hugging Face object detector with the default comic model and choose which text regions to detect (bubbles only, or bubbles + SFX/captions).
 
 1. **Install:** `pip install transformers torch`.
-2. **Config → Text detection** → select **hf_object_det** or **rtdetr_comic**. **rtdetr_comic** defaults to the comic model with **no model id** (leave **model_id** empty). **hf_object_det** default **model_id** is `ogkalu/comic-text-and-bubble-detector` (RT-DETR fine-tuned for comic text and bubbles).
+2. **Config → Text detection** → select **hf_object_det**. Default **model_id** is `ogkalu/comic-text-and-bubble-detector` (RT-DETR fine-tuned for comic text and bubbles).
 3. **labels_include** — Comma-separated list of which classes to keep. The ogkalu model outputs three classes:
    - **bubble** — Speech/thought bubble shape (the drawn balloon).
    - **text_bubble** — Text inside a bubble.
@@ -528,7 +528,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 This fork adds **many new optional modules** and applies **fixes and setting improvements**. Original behavior and defaults are unchanged unless noted. New modules are discovered automatically via the existing registry (no changes to core launch or config flow). You only install extra dependencies for the modules you use. **Not all added models have been tested in every environment**—see [Disclaimer: models and testing](#disclaimer-models-and-testing).
 
 ### Text detection
-- MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), CRAFT (standalone), **rtdetr_comic** (RT-DETRv2 comic text & bubble, no model id required), HF object-detection (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2
+- MMOCR, PP-OCRv5, Surya, Magi (Manga Whisperer), TextMamba (stub), CRAFT (standalone), HF object-detection (default: ogkalu comic-text-and-bubble-detector), DPText-DETR, SwinTextSpotter v2
 - **Box padding** (4–6 px recommended) on CTD, Paddle, EasyOCR, YSGYolo, HF object-det, MMOCR, Surya — reduces clipped punctuation (?, !) and character edges
 
 ### OCR
@@ -671,7 +671,6 @@ Select the detector from the **Text detection** dropdown in the settings panel. 
 | Module | Dependencies | How to run |
 |--------|--------------|------------|
 | **hf_object_det** | `pip install transformers torch` | Select **hf_object_det**. Default **model_id** is `ogkalu/comic-text-and-bubble-detector` (bubble, text_bubble, text_free). Change **model_id** for other HF object-detection models; use **score_threshold** and **labels_include** (comma-separated) to filter. |
-| **rtdetr_comic** | `pip install transformers torch` | Select **rtdetr_comic**. Uses **RT-DETRv2** comic text & bubble detector; **no model id required** — leave **model_id** empty for default `ogkalu/comic-text-and-bubble-detector` (bubble, text_bubble, text_free). Set **score_threshold**, **box_padding**, optional **class_ids** (0,1,2) to filter. |
 | **mmocr_det** | `pip install openmim` then `mim install mmengine mmcv mmdet mmocr` (see `doc/INSTALL_MMOCR.md` for Windows). | Select **mmocr_det**; pair with mmocr_ocr. |
 | **paddle_det_v5** | `pip install paddlepaddle paddleocr` (3.x). | Select **paddle_det_v5**; pair with paddle_rec_v5. |
 | **surya_det** | `pip install surya-ocr` | Select **surya_det**; pair with surya_ocr. |
@@ -967,7 +966,7 @@ The main application and all other modules work with the versions in `requiremen
 ### New files (no removals of original files)
 
 - **Text detection:**  
-  `modules/textdetector/detector_mmocr.py`, `detector_paddle_v5.py`, `detector_surya.py`, `detector_magi.py`, `detector_textmamba.py`, `detector_craft.py`, `detector_hf_object_detection.py`, `detector_rtdetr_v2.py`, `detector_dptext_detr.py`, `detector_swintextspotter_v2.py` (existing in original may differ; this fork adds or modifies as listed).
+  `modules/textdetector/detector_mmocr.py`, `detector_paddle_v5.py`, `detector_surya.py`, `detector_magi.py`, `detector_textmamba.py`, `detector_craft.py`, `detector_hf_object_detection.py`, `detector_dptext_detr.py`, `detector_swintextspotter_v2.py` (existing in original may differ; this fork adds or modifies as listed).
 
 - **OCR:**  
   `modules/ocr/ocr_trocr.py`, `ocr_paddle_rec_v5.py`, `ocr_paddle_VL.py`, `ocr_paddleVL_manga.py`, `ocr_got_ocr2.py`, `ocr_glm_ocr.py`, `ocr_donut.py`, `ocr_paddleocr_vl_hf.py`, `ocr_qwen2vl.py`, `ocr_deepseek.py`, `ocr_lighton.py`, `ocr_chandra.py`, `ocr_docowl2.py`, `ocr_nanonets.py`, `ocr_ocean.py`, `ocr_internvl2.py`, `ocr_internvl3.py`, `ocr_florence2.py`, `ocr_minicpm.py`, `ocr_ocrflux.py`, `ocr_hunyuan.py`, `ocr_manga_mobile.py`, `ocr_nemotron.py`.

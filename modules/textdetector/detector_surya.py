@@ -187,20 +187,30 @@ if _SURYA_DET_AVAILABLE:
         def _load_model(self):
             if self.det_model is not None:
                 return
-            dev = (self.params.get("device") or {}).get("value", "cpu")
-            if dev in ("cuda", "gpu"):
-                dev = "cuda"
-            if _SURYA_LEGACY_API:
-                self.det_model = load_model()
-                self.det_processor = load_processor()
-                if dev == "cuda" and hasattr(self.det_model, "to"):
-                    self.det_model = self.det_model.to(dev)
-            elif _SURYA_USE_PREDICTOR_ONLY:
-                self.det_model = DetectionPredictor(device=dev)
-                self.det_processor = None
-            else:
-                preds = load_predictors(device=dev)
-                self.det_model = preds["detection"]
+            try:
+                dev = self.get_param_value("device")
+                if not isinstance(dev, str):
+                    dev = "cpu"
+                if dev in ("cuda", "gpu"):
+                    dev = "cuda"
+                if _SURYA_LEGACY_API:
+                    self.det_model = load_model()
+                    self.det_processor = load_processor()
+                    if dev == "cuda" and hasattr(self.det_model, "to"):
+                        self.det_model = self.det_model.to(dev)
+                elif _SURYA_USE_PREDICTOR_ONLY:
+                    self.det_model = DetectionPredictor(device=dev)
+                    self.det_processor = None
+                else:
+                    preds = load_predictors(device=dev)
+                    self.det_model = preds["detection"]
+                    self.det_processor = None
+            except Exception as e:
+                self.logger.error(
+                    "Surya detector failed to load. Use another detector (e.g. rapidocr_det, paddle_det, ctd). Error: %s",
+                    e,
+                )
+                self.det_model = None
                 self.det_processor = None
 
         def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
@@ -209,6 +219,8 @@ if _SURYA_DET_AVAILABLE:
             h, w = img.shape[:2]
             mask = np.zeros((h, w), dtype=np.uint8)
             blk_list: List[TextBlock] = []
+            if self.det_model is None:
+                return mask, blk_list
             try:
                 pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
                 if _SURYA_LEGACY_API:
@@ -218,59 +230,74 @@ if _SURYA_DET_AVAILABLE:
                     if not isinstance(predictions, list):
                         predictions = [predictions]
             except Exception as e:
-                self.logger.error(f"Surya detection failed: {e}")
+                self.logger.error("Surya detection failed: %s", e)
                 return mask, blk_list
             min_score = 0.3
-            ps = self.params.get("det_score_thresh", {})
-            if isinstance(ps, dict):
-                try:
-                    min_score = max(0.0, min(1.0, float(ps.get("value", 0.3))))
-                except (TypeError, ValueError):
-                    pass
-            mask, blk_list = _predictions_to_mask_blocks(h, w, predictions, min_score)
+            try:
+                ps = self.get_param_value("det_score_thresh")
+                min_score = max(0.0, min(1.0, float(ps)))
+            except (TypeError, ValueError):
+                pass
+            try:
+                mask, blk_list = _predictions_to_mask_blocks(h, w, predictions, min_score)
+            except Exception as e:
+                self.logger.error("Surya postprocess failed: %s", e)
+                return np.zeros((h, w), dtype=np.uint8), []
             if not blk_list:
                 return mask, blk_list
             merge_gap = 12
-            mg = self.params.get("merge_gap_px", {})
-            if isinstance(mg, dict):
-                try:
-                    merge_gap = max(0, int(float(mg.get("value", 12))))
-                except (TypeError, ValueError):
-                    pass
-            merge_lines = self.params.get("merge_text_lines", {}).get("value", True)
+            try:
+                mg = self.get_param_value("merge_gap_px")
+                merge_gap = max(0, int(float(mg)))
+            except (TypeError, ValueError):
+                pass
+            merge_lines = self.get_param_value("merge_text_lines")
+            if not isinstance(merge_lines, bool):
+                merge_lines = bool(merge_lines)
             # When merge_gap_px is 0, skip line grouping so each detection line stays one box
             # (avoids two close bubbles being merged by mit_merge_textlines).
             if merge_lines and merge_gap > 0 and len(blk_list) > 0:
-                pts_list = [line_pts for blk in blk_list for line_pts in blk.lines]
-                if pts_list:
-                    blk_list = mit_merge_textlines(pts_list, width=w, height=h)
-                    mask = np.zeros((h, w), dtype=np.uint8)
-                    for blk in blk_list:
-                        for line_pts in blk.lines:
-                            pts = np.array(line_pts, dtype=np.int32)
-                            if pts.ndim == 1:
-                                pts = pts.reshape(-1, 2)
-                            cv2.fillPoly(mask, [pts], 255)
-            blk_list = _merge_nearby_blocks(blk_list, merge_gap)
-            blk_list = sort_regions(blk_list)
-            pad_val = 0
-            bp = self.params.get("box_padding", {})
-            if isinstance(bp, dict):
                 try:
-                    v = bp.get("value", 0)
-                    pad_val = max(0, min(24, int(v) if v not in (None, '') else 0))
-                except (TypeError, ValueError):
-                    pass
+                    pts_list = [line_pts for blk in blk_list for line_pts in blk.lines]
+                    if pts_list:
+                        blk_list = mit_merge_textlines(pts_list, width=w, height=h)
+                        mask = np.zeros((h, w), dtype=np.uint8)
+                        for blk in blk_list:
+                            for line_pts in blk.lines:
+                                pts = np.array(line_pts, dtype=np.int32)
+                                if pts.ndim == 1:
+                                    pts = pts.reshape(-1, 2)
+                                cv2.fillPoly(mask, [pts], 255)
+                except Exception as e:
+                    self.logger.warning("Surya merge textlines failed, using raw boxes: %s", e)
+            try:
+                blk_list = _merge_nearby_blocks(blk_list, merge_gap)
+                blk_list = sort_regions(blk_list)
+            except Exception as e:
+                self.logger.warning("Surya merge/sort failed: %s", e)
+            pad_val = 0
+            try:
+                bp = self.get_param_value("box_padding")
+                v = bp if bp not in (None, "") else 0
+                pad_val = max(0, min(24, int(v)))
+            except (TypeError, ValueError):
+                pass
             if pad_val > 0:
-                blk_list = expand_blocks(blk_list, pad_val, w, h)
+                try:
+                    blk_list = expand_blocks(blk_list, pad_val, w, h)
+                except Exception as e:
+                    self.logger.warning("Surya expand_blocks failed: %s", e)
                 mask = np.zeros((h, w), dtype=np.uint8)
                 for blk in blk_list:
-                    if blk.lines:
-                        pts = np.array(blk.lines[0], dtype=np.int32)
-                    else:
-                        x1, y1, x2, y2 = blk.xyxy
-                        pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
-                    cv2.fillPoly(mask, [pts], 255)
+                    try:
+                        if blk.lines:
+                            pts = np.array(blk.lines[0], dtype=np.int32)
+                        else:
+                            x1, y1, x2, y2 = blk.xyxy
+                            pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+                        cv2.fillPoly(mask, [pts], 255)
+                    except Exception:
+                        pass
             return mask, blk_list
 
         def updateParam(self, param_key: str, param_content):

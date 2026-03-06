@@ -1019,8 +1019,9 @@ class SceneTextManager(QObject):
                     region_area = region_rect[2] * region_rect[3]
                     if region_area > 2.5 * text_area:
                         scale_up = np.sqrt(LAYOUT_SCALE_UP_FILL * region_area / text_area)
-                        scale_up = min(scale_up, LAYOUT_SCALE_UP_MAX)
-                        resize_ratio = max(resize_ratio, min(scale_up, LAYOUT_SCALE_UP_MAX))
+                        scale_up_max = LAYOUT_SCALE_UP_MAX * (1.15 if getattr(pcfg.module, "optimize_line_breaks", False) else 1.0)
+                        scale_up = min(scale_up, scale_up_max)
+                        resize_ratio = max(resize_ratio, min(scale_up, scale_up_max))
 
         if resize_ratio != 1:
             new_font_size = max(1.0, blk_font.pointSizeF() * resize_ratio)
@@ -1147,6 +1148,16 @@ class SceneTextManager(QObject):
                 blkitem.setFontSize(new_font_size)
                 blk_font.setPointSizeF(new_font_size)
 
+            # Center text block inside bubble/region (manga-translator-ui style)
+            if getattr(pcfg.module, "center_text_in_bubble", False) and region_rect is not None and len(region_rect) >= 4:
+                rx, ry, rw, rh = region_rect[0], region_rect[1], region_rect[2], region_rect[3]
+                tw, th = xywh[2], xywh[3]
+                cx = rx + rw / 2
+                cy = ry + rh / 2
+                # xywh in layout_text is mask-local; center position in image coords for setRect below
+                xywh[0] = int(cx - tw / 2)
+                xywh[1] = int(cy - th / 2)
+
             if restore_charfmts:
                 char_fmts = blkitem.get_char_fmts()        
         
@@ -1158,6 +1169,14 @@ class SceneTextManager(QObject):
             blkitem.set_size(maxw * LAYOUT_WIDTH_STROKE_FACTOR, layout_h, set_layout_maxsize=True)
             blkitem.setPlainText(new_text)
             blkitem._ensure_transparent_document_background()
+            if getattr(pcfg.module, "center_text_in_bubble", False) and region_rect is not None and len(region_rect) >= 4:
+                br = blkitem.absBoundingRect(qrect=True)
+                blkitem.setRect([
+                    xywh[0],
+                    xywh[1],
+                    br.width(),
+                    br.height(),
+                ], repaint=True)
             if len(self.pairwidget_list) > blkitem.idx:
                 self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
             if restore_charfmts:

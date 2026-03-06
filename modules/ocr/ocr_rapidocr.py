@@ -72,8 +72,23 @@ def _get_rotate_crop_image(img: np.ndarray, points) -> np.ndarray:
     return warped
 
 
+def _looks_like_points(obj) -> bool:
+    """True if obj looks like polygon points [[x,y], [x,y], ...] rather than text."""
+    if not isinstance(obj, (list, tuple)) or len(obj) < 4:
+        return False
+    for p in obj[:4]:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            return False
+        try:
+            float(p[0])
+            float(p[1])
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 def _parse_rec_output(rec_out) -> tuple:
-    """Return (text, score) from RapidOCR recognition output. Handles (text, score), (score, text), or (text, score, word_boxes)."""
+    """Return (text, score) from RapidOCR recognition output. Handles (text, score), (score, text), or (points, text, score)."""
     text, score = "", 0.0
     try:
         if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
@@ -94,19 +109,42 @@ def _parse_rec_output(rec_out) -> tuple:
             else:
                 text = str(item) if item else ""
     except (ValueError, TypeError, IndexError):
-        # Fallback: first element as text, 0.0 as score (e.g. unexpected API format)
+        # Fallback: avoid treating (points, text, score) as text=points
         if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
             item = rec_out[0][0]
-            text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
+            if isinstance(item, (list, tuple)) and len(item) >= 3 and _looks_like_points(item[0]):
+                text = str(item[1]).strip() if item[1] else ""
+                try:
+                    score = float(item[2])
+                except (TypeError, ValueError):
+                    score = 0.0
+            else:
+                text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
+                score = 0.0
         elif isinstance(rec_out, list) and len(rec_out) > 0:
             item = rec_out[0]
-            text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
-        score = 0.0
+            if isinstance(item, (list, tuple)) and len(item) >= 3 and _looks_like_points(item[0]):
+                text = str(item[1]).strip() if item[1] else ""
+                try:
+                    score = float(item[2])
+                except (TypeError, ValueError):
+                    score = 0.0
+            else:
+                text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
+                score = 0.0
+        else:
+            score = 0.0
     return (str(text).strip() if text else "", float(score))
 
 
 def _item_to_text_score(item) -> tuple:
-    """From [a, b] or [a, b, ...], return (text, score). Handles (text, score) or (score, text) order."""
+    """From [a, b] or [points, text, score], return (text, score). Handles (text, score) or (score, text) order."""
+    if len(item) >= 3 and _looks_like_points(item[0]):
+        # (points, text, score) format: use text and score, not points as text
+        try:
+            return (str(item[1]).strip() if item[1] else "", float(item[2]))
+        except (TypeError, ValueError):
+            return (str(item[1]).strip() if item[1] else "", 0.0)
     if len(item) < 2:
         return (item[0] if len(item) > 0 else "", 0.0)
     a, b = item[0], item[1]
@@ -212,19 +250,38 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                     pass
 
             for blk in blk_list:
+                # Build a crop that covers all lines in the block, not just the first one.
                 if blk.lines:
-                    pts = blk.lines[0]
+                    xs, ys = [], []
+                    for line in blk.lines:
+                        for p in line:
+                            if not isinstance(p, (list, tuple)) or len(p) < 2:
+                                continue
+                            xs.append(p[0])
+                            ys.append(p[1])
+                    if xs and ys:
+                        x1 = max(0, int(min(xs)) - pad)
+                        y1 = max(0, int(min(ys)) - pad)
+                        x2 = min(im_w, int(max(xs)) + pad)
+                        y2 = min(im_h, int(max(ys)) + pad)
+                    else:
+                        x1, y1, x2, y2 = blk.xyxy
+                        x1 = max(0, x1 - pad)
+                        y1 = max(0, y1 - pad)
+                        x2 = min(im_w, x2 + pad)
+                        y2 = min(im_h, y2 + pad)
                 else:
                     x1, y1, x2, y2 = blk.xyxy
-                    pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-                x1 = max(0, min(p[0] for p in pts) - pad)
-                y1 = max(0, min(p[1] for p in pts) - pad)
-                x2 = min(im_w, max(p[0] for p in pts) + pad)
-                y2 = min(im_h, max(p[1] for p in pts) + pad)
+                    x1 = max(0, x1 - pad)
+                    y1 = max(0, y1 - pad)
+                    x2 = min(im_w, x2 + pad)
+                    y2 = min(im_h, y2 + pad)
                 if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
                     blk.text = [""]
                     continue
-                if blk.lines and len(blk.lines[0]) >= 4:
+                # If there is exactly one quad for this block, allow perspective warp.
+                # For multi-line bubbles, use an axis-aligned crop so all lines are included.
+                if blk.lines and len(blk.lines) == 1 and len(blk.lines[0]) >= 4:
                     quad_rel = [[float(p[0]) - x1, float(p[1]) - y1] for p in blk.lines[0]]
                     crop = _get_rotate_crop_image(img[y1:y2, x1:x2], quad_rel)
                 else:

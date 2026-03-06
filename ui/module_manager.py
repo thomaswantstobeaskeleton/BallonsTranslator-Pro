@@ -13,7 +13,7 @@ from qtpy.QtGui import QClipboard
 
 from .funcmaps import get_maskseg_method
 from utils.logger import logger as LOGGER
-from utils.imgproc_utils import enlarge_window, union_area
+from utils.imgproc_utils import enlarge_window, union_area, get_block_mask
 from utils.registry import Registry
 from modules.inpaint.base import _clip_xyxy_to_image, _block_mask_polygon, _block_mask_polygons, build_mask_with_resolved_overlaps, _apply_block_text_mask_to_mask
 from utils.io_utils import imread, text_is_empty
@@ -814,19 +814,23 @@ class ImgtransThread(QThread):
                     for blk in blk_list:
                         if getattr(blk, 'lines', None) and len(blk.lines) > 0:
                             examine_textblk(blk, im_w, im_h, sort=True)
-                    # Optional: collision-based merge (Dango-style) for word-level or many small blocks
+                    # Optional: collision-based merge (Dango-style) for word-level or many small blocks.
+                    # Skip when block count is low (typical bubble layout) to avoid merging separate bubbles and losing boxes.
                     if getattr(cfg_module, 'merge_nearby_blocks_collision', False) and blk_list:
                         try:
                             from utils.ocr_result_merge import merge_blocks_horizontal, merge_blocks_vertical
-                            gap = float(getattr(cfg_module, 'merge_nearby_blocks_gap_ratio', 1.5) or 1.5)
-                            vertical_count = sum(1 for b in blk_list if getattr(b, 'vertical', False) or getattr(getattr(b, 'fontformat', None), 'vertical', False))
-                            if vertical_count > len(blk_list) / 2:
-                                blk_list = merge_blocks_vertical(blk_list, gap_ratio=gap)
-                            else:
-                                blk_list = merge_blocks_horizontal(blk_list, gap_ratio=gap, add_space_between=False)
-                            if mask is not None and blk_list:
-                                mask = build_mask_with_resolved_overlaps(blk_list, im_w, im_h)
-                                need_save_mask = True
+                            # Only merge when we have many blocks (likely word-level or scattered); typical manga has ~5–15 bubbles per page.
+                            merge_min_blocks = int(getattr(cfg_module, 'merge_nearby_blocks_min_blocks', 18) or 18)
+                            if len(blk_list) >= merge_min_blocks:
+                                gap = float(getattr(cfg_module, 'merge_nearby_blocks_gap_ratio', 1.5) or 1.5)
+                                vertical_count = sum(1 for b in blk_list if getattr(b, 'vertical', False) or getattr(getattr(b, 'fontformat', None), 'vertical', False))
+                                if vertical_count > len(blk_list) / 2:
+                                    blk_list = merge_blocks_vertical(blk_list, gap_ratio=gap)
+                                else:
+                                    blk_list = merge_blocks_horizontal(blk_list, gap_ratio=gap, add_space_between=False)
+                                if mask is not None and blk_list:
+                                    mask = build_mask_with_resolved_overlaps(blk_list, im_w, im_h)
+                                    need_save_mask = True
                         except Exception as e:
                             LOGGER.warning('Collision merge failed: %s', e)
                     # Section 14: primary detection deduplication and nested-box removal
@@ -928,6 +932,58 @@ class ImgtransThread(QThread):
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
                 self.update_detect_progress.emit(self.detect_counter)
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: detection done')
+
+            # Replace translation mode: load translated image, detect+OCR on it, match blocks, set raw blk.translation (manga-translator-ui style)
+            if (getattr(cfg_module, "replace_translation_mode", False) and
+                getattr(cfg_module, "replace_translation_translated_dir", "").strip() and
+                blk_list and mask is not None and self.textdetector is not None and self.ocr is not None):
+                try:
+                    trans_dir = (cfg_module.replace_translation_translated_dir or "").strip()
+                    if osp.isabs(trans_dir):
+                        trans_img_path = osp.join(trans_dir, imgname)
+                    else:
+                        trans_img_path = osp.join(self.imgtrans_proj.directory, trans_dir, imgname)
+                    if not osp.isfile(trans_img_path):
+                        LOGGER.warning("Replace translation: translated image not found: %s", trans_img_path)
+                    else:
+                        img_trans = imread(trans_img_path)
+                        if img_trans is not None:
+                            if img_trans.shape[:2] != img.shape[:2]:
+                                img_trans = cv2.resize(img_trans, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+                            mask_trans, blk_list_trans = self.textdetector.detect(img_trans, self.imgtrans_proj)
+                            self.ocr.run_ocr(img_trans, blk_list_trans)
+                            def _box_area(xyxy):
+                                if not xyxy or len(xyxy) != 4:
+                                    return 0.0
+                                return max(0.0, (xyxy[2] - xyxy[0]) * (xyxy[3] - xyxy[1]))
+                            def _iou(a_xyxy, b_xyxy):
+                                inter = union_area(a_xyxy, b_xyxy)
+                                if inter <= 0:
+                                    return 0.0
+                                sa = _box_area(a_xyxy)
+                                sb = _box_area(b_xyxy)
+                                return inter / (sa + sb - inter) if (sa + sb - inter) > 0 else 0.0
+                            for raw_blk in blk_list:
+                                ra = getattr(raw_blk, "xyxy", None)
+                                if not ra or len(ra) != 4:
+                                    continue
+                                best_iou, best_text = 0.0, ""
+                                for trans_blk in blk_list_trans:
+                                    tb = getattr(trans_blk, "xyxy", None)
+                                    if not tb or len(tb) != 4:
+                                        continue
+                                    iou = _iou(ra, tb)
+                                    if iou > best_iou:
+                                        best_iou = iou
+                                        best_text = (trans_blk.get_text() or "").strip() or getattr(trans_blk, "translation", "") or ""
+                                if best_iou > 0.2 and best_text:
+                                    raw_blk.translation = best_text
+                            self.imgtrans_proj.pages[imgname] = blk_list
+                            LOGGER.info("Replace translation: applied translations from %s", trans_img_path)
+                        else:
+                            LOGGER.warning("Replace translation: failed to load %s", trans_img_path)
+                except Exception as e:
+                    LOGGER.warning("Replace translation failed for page %s: %s", imgname, e)
 
             if blk_list is None:
                 blk_list = self.imgtrans_proj.pages[imgname] if imgname in self.imgtrans_proj.pages else []
@@ -1299,6 +1355,14 @@ class ModuleManager(QObject):
 
         self.translator_panel = translator_panel = config_panel.trans_config_panel        
         translator_params = merge_config_module_params(cfg_module.translator_params, GET_VALID_TRANSLATORS(), TRANSLATORS.get)
+        # Chain translator: show dropdown of available translators for chain_translators param
+        if 'Chain' in translator_params and isinstance(translator_params.get('Chain'), dict):
+            chain_params = translator_params['Chain']
+            if isinstance(chain_params.get('chain_translators'), dict):
+                chain_params['chain_translators'] = dict(chain_params['chain_translators'])
+                chain_params['chain_translators']['type'] = 'selector'
+                chain_params['chain_translators']['options'] = list(GET_VALID_TRANSLATORS())
+                chain_params['chain_translators']['editable'] = True
         translator_panel.addModulesParamWidgets(translator_params)
         translator_panel.translator_changed.connect(self.setTranslator)
         translator_panel.paramwidget_edited.connect(self.on_translatorparam_edited)
@@ -1453,16 +1517,22 @@ class ModuleManager(QObject):
         """Force-stop the image translation pipeline when the progress window is closed."""
         LOGGER.warning('Force-stopping image translation pipeline due to progress window close...')
         if self.imgtrans_thread.isRunning():
-            try:
-                self.imgtrans_thread.requestStop()
-            except Exception:
-                pass
-            # Hard terminate the pipeline thread if it is still running.
-            self.imgtrans_thread.terminate()
-        # Also terminate any stage threads that might still be active.
-        self.terminateRunningThread()
-        # Hide the progress box and notify the rest of the UI that the pipeline ended.
-        self.progress_msgbox.hide()
+            self.imgtrans_thread.requestStop()
+            # Give the pipeline a short time to exit cleanly (avoids crash from terminate() mid-run).
+            if not self.imgtrans_thread.wait(3000):
+                try:
+                    self.imgtrans_thread.terminate()
+                    self.imgtrans_thread.wait(1000)
+                except Exception as e:
+                    LOGGER.debug("Force stop terminate/wait: %s", e)
+        try:
+            self.terminateRunningThread()
+        except Exception as e:
+            LOGGER.debug("Force stop terminateRunningThread: %s", e)
+        try:
+            self.progress_msgbox.hide()
+        except Exception:
+            pass
         self.imgtrans_pipeline_finished.emit()
 
     def requestPausePipeline(self):

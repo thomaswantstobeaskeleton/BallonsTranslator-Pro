@@ -65,6 +65,7 @@ class LeftBar(Widget):
     imgTransChecked = Signal()
     configChecked = Signal()
     run_clicked = Signal()
+    close_project_requested = Signal()
     open_dir = Signal(str)
     open_json_proj = Signal(str)
     save_proj = Signal()
@@ -93,7 +94,11 @@ class LeftBar(Widget):
         self.runBtn = QPushButton()
         self.runBtn.setObjectName('LeftBarRunBtn')
         self.runBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
-        run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate.svg')
+        run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_run.svg')
+        if not osp.isfile(run_icon_path):
+            run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate_activate.svg')
+        if not osp.isfile(run_icon_path):
+            run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate.svg')
         if osp.isfile(run_icon_path):
             self.runBtn.setIcon(QIcon(run_icon_path))
         self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
@@ -149,6 +154,10 @@ class LeftBar(Widget):
         openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenACBFCBZ, actionOpenProj])
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
+        actionCloseProject = QAction(self.tr("Close project and go to welcome screen"), self)
+        actionCloseProject.triggered.connect(self.close_project_requested.emit)
+        openMenu.addAction(actionCloseProject)
+        openMenu.addSeparator()
         openMenu.addAction(actionSaveProj)
         self.openBtn = OpenBtn()
         self.openBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
@@ -176,8 +185,9 @@ class LeftBar(Widget):
         install_hover_opacity_animation(self.openBtn, duration_ms=100, normal_opacity=0.9)
         if getattr(pcfg, 'bubbly_ui', True):
             install_hover_scale_animation(self.openBtn, duration_ms=80, size_delta=(3, 2))
-        for w in (self.showPageListLabel, self.globalSearchChecker, self.imgTransChecker, self.configChecker, self.runBtn):
+        for w in (self.showPageListLabel, self.globalSearchChecker, self.imgTransChecker, self.configChecker):
             install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88)
+        install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=1.0)
         if getattr(pcfg, 'bubbly_ui', True):
             install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
 
@@ -692,6 +702,10 @@ class TitleBar(Widget):
         actionOpenProj.triggered.connect(leftBar.onOpenProj)
         fileMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenProj])
         fileMenu.addMenu(leftBar.recentMenu)
+        fileMenu.addSeparator()
+        actionCloseProject = QAction(self.tr("Close project and go to welcome screen"), self)
+        actionCloseProject.triggered.connect(leftBar.close_project_requested.emit)
+        fileMenu.addAction(actionCloseProject)
         fileMenu.addSeparator()
         actionSave = QAction(self.tr("Save Project"), self)
         actionSave.triggered.connect(leftBar.save_proj.emit)

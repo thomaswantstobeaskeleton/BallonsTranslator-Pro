@@ -8,6 +8,7 @@ from qtpy.QtGui import QFocusEvent, QMouseEvent, QTextCursor, QKeyEvent
 
 from utils import shared
 from utils import config as C
+from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .textitem import TextBlkItem
@@ -426,6 +427,11 @@ class FontFormatPanel(Widget):
         self.saveAsDefaultBtn.setToolTip(self.tr("Save current global font format as the default for new projects and sessions."))
         self.saveAsDefaultBtn.clicked.connect(self.set_default_format_requested.emit)
 
+        self.showGlobalFontFormatBtn = QPushButton(self.tr("Show Global Font Format"))
+        self.showGlobalFontFormatBtn.setToolTip(self.tr("Show the Global Font Format section (style presets) again."))
+        self.showGlobalFontFormatBtn.clicked.connect(self._on_show_global_font_format_clicked)
+        self.showGlobalFontFormatBtn.setVisible(not getattr(pcfg, "show_text_style_preset", True))
+
         self.textadvancedfmt_panel = TextAdvancedFormatPanel(
             self.tr('Advanced Text Format'),
             config_name='text_advanced_format_panel',
@@ -454,6 +460,7 @@ class FontFormatPanel(Widget):
         FONTFORMAT_SPACING = 10
 
         vl0 = QVBoxLayout()
+        vl0.addWidget(self.showGlobalFontFormatBtn)
         vl0.addWidget(self.textstyle_panel.view_widget)
         vl0.addWidget(self.applyToAllBlocksBtn)
         vl0.addWidget(self.saveAsDefaultBtn)
@@ -518,6 +525,16 @@ class FontFormatPanel(Widget):
 
         self.focusOnColorDialog = False
         C.active_format = self.global_format
+
+    def _on_show_global_font_format_clicked(self):
+        """Restore the Global Font Format (style presets) section when it was hidden."""
+        pcfg.show_text_style_preset = True
+        self.textstyle_panel.view_widget.setVisible(True)
+        self.showGlobalFontFormatBtn.setVisible(False)
+        if hasattr(shared, "config_name_to_view_widget") and "show_text_style_preset" in shared.config_name_to_view_widget:
+            d = shared.config_name_to_view_widget["show_text_style_preset"]
+            if "action" in d and d["action"] is not None:
+                d["action"].setChecked(True)
 
     def global_mode(self):
         return id(C.active_format) == id(self.global_format)

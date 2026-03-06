@@ -452,6 +452,16 @@ class ConfigPanel(Widget):
             discription=self.tr('Vertical expansion ratio for horizontal merge (e.g. 1.5 for typical merge).')
         )
         dlConfigPanel.vlayout.addWidget(merge_gap_sublock)
+        self.merge_nearby_blocks_min_blocks_spin = QSpinBox()
+        self.merge_nearby_blocks_min_blocks_spin.setRange(5, 60)
+        self.merge_nearby_blocks_min_blocks_spin.setValue(int(getattr(pcfg.module, 'merge_nearby_blocks_min_blocks', 18)))
+        self.merge_nearby_blocks_min_blocks_spin.valueChanged.connect(self._on_merge_nearby_blocks_min_blocks_changed)
+        merge_min_sublock = ConfigSubBlock(
+            self.merge_nearby_blocks_min_blocks_spin,
+            self.tr('Min blocks to merge'),
+            discription=self.tr('Only run merge when page has at least this many blocks (avoids merging normal bubble layouts; default 18).')
+        )
+        dlConfigPanel.vlayout.addWidget(merge_min_sublock)
         self.unload_model_btn = QPushButton(parent=self)
         self.unload_model_btn.setFixedWidth(500)
         self.unload_model_btn.setText(self.tr('Unload All Models'))
@@ -540,6 +550,12 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSectionDescription(self.tr("Reopen last project, confirm before run, recent list limit."))
         self.open_on_startup_checker, _ = generalConfigPanel.addCheckBox(self.tr('Reopen last project on startup'))
         self.open_on_startup_checker.stateChanged.connect(self.on_open_onstartup_changed)
+
+        self.show_welcome_screen_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Show welcome screen when no project is open'),
+            discription=self.tr('On startup, when no project is opened, show the welcome screen to open or create a project (manhua-translator / Komakun style).')
+        )
+        self.show_welcome_screen_checker.stateChanged.connect(self.on_show_welcome_screen_changed)
 
         self.auto_update_from_github_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Auto update from GitHub on startup'),
@@ -817,6 +833,9 @@ class ConfigPanel(Widget):
     def _on_merge_nearby_blocks_gap_changed(self, value):
         pcfg.module.merge_nearby_blocks_gap_ratio = float(value)
 
+    def _on_merge_nearby_blocks_min_blocks_changed(self, value):
+        pcfg.module.merge_nearby_blocks_min_blocks = int(value)
+
     def on_keepline_clicked(self):
         pcfg.module.keep_exist_textlines = self.detect_config_panel.keep_existing_checker.isChecked()
 
@@ -837,6 +856,9 @@ class ConfigPanel(Widget):
 
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
+
+    def on_show_welcome_screen_changed(self):
+        pcfg.show_welcome_screen = self.show_welcome_screen_checker.isChecked()
 
     def on_auto_update_from_github_changed(self):
         pcfg.auto_update_from_github = self.auto_update_from_github_checker.isChecked()
@@ -1151,6 +1173,8 @@ class ConfigPanel(Widget):
             self.merge_nearby_blocks_checker.setChecked(getattr(pcfg.module, 'merge_nearby_blocks_collision', False))
         if hasattr(self, 'merge_nearby_blocks_gap_spin'):
             self.merge_nearby_blocks_gap_spin.setValue(float(getattr(pcfg.module, 'merge_nearby_blocks_gap_ratio', 1.5)))
+        if hasattr(self, 'merge_nearby_blocks_min_blocks_spin'):
+            self.merge_nearby_blocks_min_blocks_spin.setValue(int(getattr(pcfg.module, 'merge_nearby_blocks_min_blocks', 18)))
         if hasattr(self, 'image_upscale_initial_checker'):
             self.image_upscale_initial_checker.setChecked(getattr(pcfg.module, 'image_upscale_initial', False))
         if hasattr(self, 'image_upscale_initial_factor_spin'):
@@ -1167,6 +1191,7 @@ class ConfigPanel(Widget):
             self.inpaint_spill_after_spin.setValue(int(getattr(pcfg.module, 'inpaint_spill_to_disk_after_blocks', 0)))
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
+        self.show_welcome_screen_checker.setChecked(getattr(pcfg, 'show_welcome_screen', True))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
         arm = getattr(pcfg, 'auto_region_merge_after_run', 'never')

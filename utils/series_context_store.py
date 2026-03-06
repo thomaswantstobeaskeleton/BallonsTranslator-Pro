@@ -165,3 +165,25 @@ def merge_glossary_no_dupes(
                 seen.add(s)
                 out.append((s, t))
     return out
+
+
+def append_to_series_glossary(
+    series_context_path: str,
+    entries: List[Tuple[str, str]],
+) -> None:
+    """
+    Append (source, target) pairs to {series_context_path}/glossary.txt.
+    One line per entry: source -> target. Skips duplicates (by source) already in file.
+    """
+    if not series_context_path or not entries:
+        return
+    if not ensure_series_dir(series_context_path):
+        return
+    path = osp.join(series_context_path, GLOSSARY_FILENAME)
+    existing_sources = {s for s, _ in load_series_glossary(series_context_path)}
+    with open(path, "a", encoding="utf-8") as f:
+        for s, t in entries:
+            if not s or not t or s in existing_sources:
+                continue
+            existing_sources.add(s)
+            f.write(f"{s} -> {t}\n")

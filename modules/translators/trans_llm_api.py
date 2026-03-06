@@ -15,6 +15,7 @@ from utils.series_context_store import (
     load_recent_context,
     append_page_to_series_context as store_append_page,
     merge_glossary_no_dupes,
+    append_to_series_glossary,
 )
 from .base import BaseTranslator, register_translator
 from .exceptions import CriticalTranslationError
@@ -134,6 +135,11 @@ class LLM_API_Translator(BaseTranslator):
             "value": False,
             "description": "Include the next page's source text as context (helps with continuity; upstream #1142). Off by default.",
         },
+        "hint_original_regions": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Prepend [Original regions: N] to the prompt (manga-translator-ui AI line-break style). Tells the model to output exactly N translations for better 1:1 region matching. No extra API call.",
+        },
         "series_context_prompt": {
             "type": "editor",
             "value": "",
@@ -167,7 +173,32 @@ class LLM_API_Translator(BaseTranslator):
         },
         "invalid repeat count": {
             "value": 2,
-            "description": "Number of retries if the count of translations mismatches the source count.",
+            "description": "Number of retries if the count of translations mismatches the source count (check_br_and_retry style).",
+        },
+        "post_translation_check": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Validate output: repetition (e.g. 20+ same chars) and target-language ratio. Retry up to post_check_max_retries on failure.",
+        },
+        "post_check_repetition_chars": {
+            "type": "line_editor",
+            "value": 20,
+            "description": "Treat as hallucination when this many consecutive identical characters appear in a translation (post_translation_check).",
+        },
+        "post_check_target_ratio": {
+            "type": "line_editor",
+            "value": 0.5,
+            "description": "Minimum fraction of output that must be in target language (post_translation_check). 0 = disabled.",
+        },
+        "post_check_max_retries": {
+            "type": "line_editor",
+            "value": 2,
+            "description": "Max retries when post-translation check fails (repetition or low target-language ratio).",
+        },
+        "extract_glossary": {
+            "type": "checkbox",
+            "value": False,
+            "description": "After each translated batch, call the model once to extract terms (names, places, etc.) and append to series glossary (series_context_path). Uses one extra API call per batch.",
         },
         "max requests per minute": {
             "value": 20,
@@ -493,6 +524,123 @@ class LLM_API_Translator(BaseTranslator):
     def invalid_repeat_count(self) -> int:
         return int(self.get_param_value("invalid repeat count"))
 
+    def _has_repetition_hallucination(self, texts: List[str], threshold: int) -> bool:
+        """True if any translation has threshold+ consecutive identical characters (e.g. 啊啊啊...)."""
+        if threshold <= 0:
+            return False
+        for t in texts:
+            if not t or len(t) < threshold:
+                continue
+            run = 1
+            for i in range(1, len(t)):
+                if t[i] == t[i - 1]:
+                    run += 1
+                    if run >= threshold:
+                        return True
+                else:
+                    run = 1
+        return False
+
+    def _target_lang_ratio(self, texts: List[str]) -> float:
+        """Return fraction of characters that look like target language. Heuristic only."""
+        target = (self.lang_target or "").strip()
+        if not target or not texts:
+            return 1.0
+        full = "".join(texts)
+        if not full:
+            return 1.0
+        total = len(full)
+        if total == 0:
+            return 1.0
+        # CJK ranges (simplified)
+        def is_cjk(c):
+            o = ord(c)
+            return (
+                0x4E00 <= o <= 0x9FFF
+                or 0x3040 <= o <= 0x309F
+                or 0x30A0 <= o <= 0x30FF
+                or 0xAC00 <= o <= 0xD7AF
+            )
+        def is_letter(c):
+            return c.isalpha()
+        if target in ("简体中文", "繁體中文", "日本語", "한국어"):
+            in_lang = sum(1 for c in full if is_cjk(c) or (c.isalnum() and not c.isascii()))
+        else:
+            in_lang = sum(1 for c in full if is_letter(c) or c.isspace() or c in ".,?!;:'\"-")
+        return in_lang / total if total else 1.0
+
+    def _post_check_fail(self, ordered_translations: List[str]) -> bool:
+        """True if we should retry due to repetition or low target-language ratio."""
+        if not self.get_param_value("post_translation_check"):
+            return False
+        try:
+            rep_chars = int(self.get_param_value("post_check_repetition_chars") or 20)
+        except (TypeError, ValueError):
+            rep_chars = 20
+        if self._has_repetition_hallucination(ordered_translations, rep_chars):
+            self.logger.warning("Post-check failed: repetition (hallucination) detected.")
+            return True
+        try:
+            ratio = float(self.get_param_value("post_check_target_ratio") or 0)
+        except (TypeError, ValueError):
+            ratio = 0
+        if ratio <= 0:
+            return False
+        r = self._target_lang_ratio(ordered_translations)
+        if r < ratio:
+            self.logger.warning("Post-check failed: target-language ratio %.2f < %.2f.", r, ratio)
+            return True
+        return False
+
+    def _extract_and_append_glossary(
+        self, sources: List[str], translations: List[str]
+    ) -> None:
+        """Optional: one extra API call to extract terms from source->translation pairs and append to series glossary."""
+        if not sources or not translations or len(sources) != len(translations):
+            return
+        series_path = self._get_series_context_path()
+        if not series_path:
+            return
+        pairs = [
+            f"  {i+1}. [{s.strip()}] -> [{t.strip()}]"
+            for i, (s, t) in enumerate(zip(sources, translations))
+            if (s or "").strip() and (t or "").strip()
+        ]
+        if not pairs:
+            return
+        to_lang = self.lang_map.get(self.lang_target, self.lang_target)
+        user = (
+            "From the following source text and translation pairs, extract important terms "
+            "that should stay consistent (names, places, skills, items, etc.). "
+            "Output valid JSON only, no other text: {\"terms\": [{\"source\": \"original\", \"target\": \"translation\"}]}.\n\n"
+            f"Target language: {to_lang}.\n\nPairs:\n" + "\n".join(pairs[:30])
+        )
+        messages = [
+            {"role": "system", "content": "You extract terminology for a glossary. Output JSON only."},
+            {"role": "user", "content": user},
+        ]
+        try:
+            raw = self._request_raw_completion(messages, max_tokens=1024)
+            if not raw or not raw.strip():
+                return
+            start, end = raw.find("{"), raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(raw[start : end + 1])
+                terms = data.get("terms") or data.get("translations") or []
+            else:
+                return
+            entries = []
+            for t in terms:
+                if isinstance(t, dict):
+                    s, tg = t.get("source"), t.get("target")
+                    if s and tg and isinstance(s, str) and isinstance(tg, str):
+                        entries.append((s.strip(), tg.strip()))
+            if entries:
+                append_to_series_glossary(series_path, entries)
+                self.logger.info("Extracted %d terms and appended to series glossary.", len(entries))
+        except Exception as e:
+            self.logger.debug("Glossary extraction failed (non-fatal): %s", e)
+
     @property
     def frequency_penalty(self) -> float:
         return float(self.get_param_value("frequency penalty"))
@@ -580,6 +728,8 @@ class LLM_API_Translator(BaseTranslator):
                 next_preview = " ".join((s or "").strip() for s in srcs[:5])[:500]
                 if next_preview:
                     prompt_parts.append("Next page (for context): " + next_preview.strip())
+        if self.get_param_value("hint_original_regions"):
+            prompt_parts.append(f"[Original regions: {len(queries)}]")
         prompt_parts.append(
             f"Please translate the following text snippets from {from_lang} to {to_lang}. "
             f"The input is provided as a JSON array. Respond with a JSON object in the specified format.\n\n"
@@ -1034,20 +1184,20 @@ class LLM_API_Translator(BaseTranslator):
             if start != -1 and end != -1 and end > start:
                 json_to_parse = json_to_parse[start : end + 1]
         try:
-                data_to_validate = json.loads(json_to_parse)
-                # Normalize Grok-style {"1": "text", "2": "..."} to {"translations": [...]} before validate (#1031)
-                if isinstance(data_to_validate, dict) and "translations" not in data_to_validate:
-                    if all(str(k).strip().isdigit() for k in data_to_validate.keys()):
-                        data_to_validate = {
-                            "translations": [
-                                {"id": int(k), "translation": v if isinstance(v, str) else (str(v) if v is not None else "")}
-                                for k, v in sorted(data_to_validate.items(), key=lambda x: int(str(x[0]).strip()) if str(x[0]).strip().isdigit() else 0)
-                            ]
-                        }
-                validated_response = TranslationResponse.model_validate(
-                    data_to_validate
-                )
-            except (ValidationError, json.JSONDecodeError) as e:
+            data_to_validate = json.loads(json_to_parse)
+            # Normalize Grok-style {"1": "text", "2": "..."} to {"translations": [...]} before validate (#1031)
+            if isinstance(data_to_validate, dict) and "translations" not in data_to_validate:
+                if all(str(k).strip().isdigit() for k in data_to_validate.keys()):
+                    data_to_validate = {
+                        "translations": [
+                            {"id": int(k), "translation": v if isinstance(v, str) else (str(v) if v is not None else "")}
+                            for k, v in sorted(data_to_validate.items(), key=lambda x: int(str(x[0]).strip()) if str(x[0]).strip().isdigit() else 0)
+                        ]
+                    }
+            validated_response = TranslationResponse.model_validate(
+                data_to_validate
+            )
+        except (ValidationError, json.JSONDecodeError) as e:
                 validated_response = None
                 self.logger.warning(
                     f"Initial Pydantic validation failed: {e}. Attempting repair and fallbacks."
@@ -1198,6 +1348,14 @@ class LLM_API_Translator(BaseTranslator):
                         self.logger.warning(
                             f"Translation count mismatch: expected {num_src}, got {got}. Using available entries (missing filled with empty)."
                         )
+                        # check_br_and_retry: retry request when count mismatch
+                        if mismatch_retry_attempt < self.invalid_repeat_count:
+                            mismatch_retry_attempt += 1
+                            self.logger.info(
+                                f"Retrying due to count mismatch (attempt {mismatch_retry_attempt}/{self.invalid_repeat_count})."
+                            )
+                            time.sleep(self.retry_timeout)
+                            continue
                         # If we got 1 and expected N, try newline split as improvement over empty slots
                         if got == 1 and num_src > 1:
                             one = parsed_response.translations[0].translation
@@ -1213,11 +1371,35 @@ class LLM_API_Translator(BaseTranslator):
                                     num_src - len(lines)
                                 )
 
+                    # Post-translation check: repetition / target-language ratio; retry up to N times
+                    post_check_retry = 0
+                    try:
+                        max_post = int(self.get_param_value("post_check_max_retries") or 0)
+                    except (TypeError, ValueError):
+                        max_post = 0
+                    while self._post_check_fail(ordered_translations) and post_check_retry < max_post:
+                        post_check_retry += 1
+                        self.logger.info(
+                            f"Post-check retry {post_check_retry}/{max_post}. Re-requesting translation."
+                        )
+                        time.sleep(self.retry_timeout)
+                        parsed_response = self._request_translation(prompt, expected_count=num_src)
+                        if not parsed_response or not parsed_response.translations:
+                            break
+                        translations_dict = {
+                            item.id: item.translation for item in parsed_response.translations
+                        }
+                        ordered_translations = [
+                            translations_dict.get(i, "") for i in range(1, num_src + 1)
+                        ]
+
                     # Apply keyword substitutions (e.g. powers -> abilities)
                     ordered_translations = [
                         self._apply_keyword_substitutions(t) for t in ordered_translations
                     ]
                     translations.extend(ordered_translations)
+                    if self.get_param_value("extract_glossary"):
+                        self._extract_and_append_glossary(src_list[:num_src], ordered_translations)
                     self.logger.info(
                         f"Successfully translated batch of {num_src}. Tokens used: {self.token_count_last}"
                     )

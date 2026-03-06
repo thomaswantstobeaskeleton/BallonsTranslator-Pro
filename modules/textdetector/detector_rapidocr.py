@@ -180,7 +180,7 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
             },
             "min_text_height": {
                 "value": 8,
-                "description": "Minimum text region height (px). Smaller regions are dropped.",
+                "description": "Minimum text region height (px). Smaller regions dropped. 0 = no minimum (use if missing small bubbles).",
             },
             "max_text_height": {
                 "value": 0,
@@ -188,11 +188,19 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
             },
             "adjust_contrast": {
                 "value": 0.0,
-                "description": "Contrast adjustment before detection (e.g. 0.5 = +50%). 0 = off. Helps faint text.",
+                "description": "Contrast before detection (e.g. 0.5 = +50%). Helps faint text; very high (e.g. 2) can over-brighten and reduce detection.",
             },
             "resize_threshold": {
                 "value": 0,
-                "description": "If image width > this (px), resize to this before detection. 0 = no resize. Speeds up large pages.",
+                "description": "If image width > this (px), resize before detection. 0 = no resize (recommended when missing bubbles).",
+            },
+            "det_box_thresh": {
+                "value": 0.5,
+                "description": "Detection box confidence threshold (0.0–1.0). Lower = more boxes (try 0.2–0.3 if missing bubbles).",
+            },
+            "det_thresh": {
+                "value": 0.3,
+                "description": "Pixel-level detection threshold (0.1–0.5). Lower = detect fainter text (try 0.2 or 0.15 if still missing).",
             },
             "description": "RapidOCR detection only (ONNX). Install: pip install rapidocr-onnxruntime",
         }
@@ -245,6 +253,17 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
             blk_list: List[TextBlock] = []
 
             try:
+                det_box_thresh = float((self.params.get("det_box_thresh") or {}).get("value", 0.5) or 0.5)
+                det_box_thresh = max(0.0, min(1.0, det_box_thresh))
+                det_thresh = float((self.params.get("det_thresh") or {}).get("value", 0.3) or 0.3)
+                det_thresh = max(0.1, min(0.5, det_thresh))
+                if hasattr(self.det_engine, "text_det") and getattr(
+                    self.det_engine.text_det, "postprocess_op", None
+                ) is not None:
+                    self.det_engine.text_det.postprocess_op.thresh = det_thresh
+                det_out = self.det_engine(img, box_thresh=det_box_thresh)
+            except TypeError:
+                # Older RapidOCR may not accept box_thresh in __call__
                 det_out = self.det_engine(img)
             except Exception as e:
                 self.logger.error("RapidOCR det failed: %s", e)
@@ -318,5 +337,16 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                     pad_val = 5
             if pad_val > 0:
                 blk_list = expand_blocks(blk_list, pad_val, orig_w, orig_h)
+
+            # Rebuild mask from final blocks (including padding) so inpainting covers full region
+            mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
+            for blk in blk_list:
+                for line_pts in blk.lines:
+                    pts_np = np.array(line_pts, dtype=np.int32)
+                    if pts_np.ndim == 1:
+                        pts_np = pts_np.reshape(-1, 2)
+                    pts_np = np.clip(pts_np, 0, [orig_w - 1, orig_h - 1])
+                    if pts_np.shape[0] >= 3:
+                        cv2.fillPoly(mask, [pts_np], 255)
 
             return mask, blk_list

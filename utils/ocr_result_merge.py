@@ -8,6 +8,7 @@ from typing import List, Tuple
 import numpy as np
 
 from .textblock import TextBlock
+from .imgproc_utils import xywh2xyxypoly
 
 
 def _box_xyxy(blk: TextBlock) -> Tuple[float, float, float, float]:
@@ -93,12 +94,14 @@ def merge_blocks_horizontal(
             tr = getattr(b, 'translation', None) or ''
             if tr:
                 trans.append(tr)
-        # Single union bbox
+        # Single union bbox and polygon so mask/layout use full merged region (fixes "sized down" / missing area)
         all_xyxy = [_box_xyxy(b) for b in group]
         x1 = min(a[0] for a in all_xyxy)
         y1 = min(a[1] for a in all_xyxy)
         x2 = max(a[2] for a in all_xyxy)
         y2 = max(a[3] for a in all_xyxy)
+        xywh = np.array([[x1, y1, x2 - x1, y2 - y1]])
+        union_lines = xywh2xyxypoly(xywh).reshape(-1, 4, 2).tolist()
 
         delimiter = ' ' if add_space_between else ''
         new_text = delimiter.join(str(t).strip() for t in texts if str(t).strip())
@@ -106,7 +109,7 @@ def merge_blocks_horizontal(
 
         new_blk = TextBlock(
             xyxy=[x1, y1, x2, y2],
-            lines=first.lines,
+            lines=union_lines,
             text=[new_text] if new_text else first.text,
             translation=new_translation or first.translation,
         )
@@ -182,6 +185,9 @@ def merge_blocks_vertical(
         y1 = min(a[1] for a in all_xyxy)
         x2 = max(a[2] for a in all_xyxy)
         y2 = max(a[3] for a in all_xyxy)
+        # Use union bbox polygon so mask/layout cover full merged region (fixes "sized down" / missing boxes)
+        xywh = np.array([[x1, y1, x2 - x1, y2 - y1]])
+        union_lines = xywh2xyxypoly(xywh).reshape(-1, 4, 2).tolist()
         texts = []
         trans = []
         for b in group:
@@ -198,7 +204,7 @@ def merge_blocks_vertical(
 
         new_blk = TextBlock(
             xyxy=[x1, y1, x2, y2],
-            lines=first.lines,
+            lines=union_lines,
             text=[new_text] if new_text else first.text,
             translation=new_translation or first.translation,
         )

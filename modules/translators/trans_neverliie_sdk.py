@@ -160,20 +160,22 @@ class _NeverliieBaseTranslator(BaseTranslator):
                 self.client = None
 
 
-@register_translator("Gemini_neverliie")
-class GeminiNeverliieTranslator(_NeverliieBaseTranslator):
-    """Google Gemini translation via neverliie-ai-sdk (EasyScanlate-style)."""
+if _NEVERLIIE_AVAILABLE:
 
-    _provider_name = "Gemini (neverliie-ai-sdk)"
-    _default_model = "gemini-1.5-flash"
-    _client_cls = NeverliieGoogle
+    @register_translator("Gemini_neverliie")
+    class GeminiNeverliieTranslator(_NeverliieBaseTranslator):
+        """Google Gemini translation via neverliie-ai-sdk (EasyScanlate-style)."""
+
+        _provider_name = "Gemini (neverliie-ai-sdk)"
+        _default_model = "gemini-1.5-flash"
+        _client_cls = NeverliieGoogle
 
 
-@register_translator("Mistral_neverliie")
-class MistralNeverliieTranslator(_NeverliieBaseTranslator):
-    """Mistral translation via neverliie-ai-sdk."""
+    @register_translator("Mistral_neverliie")
+    class MistralNeverliieTranslator(_NeverliieBaseTranslator):
+        """Mistral translation via neverliie-ai-sdk."""
 
-    _provider_name = "Mistral (neverliie-ai-sdk)"
-    _default_model = "mistral-small-latest"
-    _client_cls = NeverliieMistral
+        _provider_name = "Mistral (neverliie-ai-sdk)"
+        _default_model = "mistral-small-latest"
+        _client_cls = NeverliieMistral
 

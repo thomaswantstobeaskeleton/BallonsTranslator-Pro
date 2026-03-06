@@ -325,7 +325,7 @@ class SceneTextLayout(QAbstractTextDocumentLayout):
         self.reLayout()
 
     def max_font_size(self, to_px=False) -> float:
-        fs = self._max_font_size if self._max_font_size > 0 else self.document().defaultFont().pointSizeF()
+        fs = self._max_font_size if self._max_font_size > 0 else max(1.0, self.document().defaultFont().pointSizeF())
         fs = max(1.0, fs) if fs <= 0 else fs
         if to_px:
             fs = pt2px(fs)

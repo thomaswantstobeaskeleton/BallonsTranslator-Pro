@@ -41,6 +41,8 @@ class ExpandLabel(Widget):
         self.arrowlabel = QLabel(self)
         self.arrowlabel.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         font = self.textlabel.font()
+        if font.pointSize() <= 0 and font.pointSizeF() <= 0:
+            font.setPointSizeF(1.0)
         if size_type == 'normal':
             if shared.ON_MACOS:
                 font.setPointSize(13)

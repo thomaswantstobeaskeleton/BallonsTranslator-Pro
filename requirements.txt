@@ -11,7 +11,7 @@ urllib3
 jaconv
 torch
 torchvision
-# >=4.56 for core; >=5.0 needed for GLM-OCR and some HF modules. RT-DETRv2 (rtdetr_comic) uses RTDetrV2ForObjectDetection. Do not pin to 4.57.1 or install will downgrade and break them.
+# >=4.56 for core; >=5.0 needed for GLM-OCR and some HF modules. Do not pin to 4.57.1 or install will downgrade and break them.
 transformers>=4.56
 mecab-python3; sys_platform == 'darwin'
 fugashi

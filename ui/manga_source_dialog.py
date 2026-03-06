@@ -31,7 +31,13 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
 )
 
-from utils.manga_sources import MangaDexClient, ComickSourceClient, GomangaApiClient, ManhwaReaderClient
+from utils.manga_sources import (
+    MangaDexClient,
+    ComickSourceClient,
+    GomangaApiClient,
+    ManhwaReaderClient,
+    GenericChapterUrlClient,
+)
 from utils.config import pcfg, save_config, ProgramConfig
 from utils.logger import logger as LOGGER
 
@@ -62,6 +68,7 @@ SOURCE_OPTIONS: List[tuple] = [
     ("Comick", "comick"),
     ("GOMANGA", "gomanga"),
     ("Manhwa Reader", "manhwa_reader"),
+    ("Generic (chapter URL)", "generic_chapter_url"),
     ("Local folder", "local_folder"),
 ]
 
@@ -89,6 +96,7 @@ class MangaSourceWorker(QObject):
     run_feed = Signal(str, str, str)  # manga_id, lang, source_id
     run_download = Signal(object)  # (chapter_infos, base_dir, manga_title, data_saver, source_id)
     run_load_chapter_url = Signal(str)
+    run_load_generic_chapter_url = Signal(str)
     run_check_manhwa_reader = Signal()
 
     def __init__(self):
@@ -98,11 +106,13 @@ class MangaSourceWorker(QObject):
         self._comick = ComickSourceClient(timeout=30, request_delay=delay)
         self._gomanga = GomangaApiClient(timeout=30, request_delay=delay)
         self._manhwa_reader = ManhwaReaderClient(timeout=30, request_delay=delay)
+        self._generic_chapter = GenericChapterUrlClient(timeout=25, request_delay=delay)
         self._abort = False
         self.run_search.connect(self.do_search)
         self.run_feed.connect(self.do_feed)
         self.run_download.connect(self._do_download)
         self.run_load_chapter_url.connect(self.do_load_chapter_by_url)
+        self.run_load_generic_chapter_url.connect(self.do_load_generic_chapter_url)
         self.run_check_manhwa_reader.connect(self._do_check_manhwa_reader)
 
     def abort(self):
@@ -215,6 +225,11 @@ class MangaSourceWorker(QObject):
                 "Use MangaDex for download, or open the chapter link in your browser."
             )
             return
+        if source_id == "generic_chapter_url":
+            self._do_download_generic_chapter_url(
+                chapter_infos, base_dir, manga_title, data_saver
+            )
+            return
         self._abort = False
         delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
         if source_id == "gomanga":
@@ -277,6 +292,71 @@ class MangaSourceWorker(QObject):
         except Exception as e:
             self.error.emit(str(e))
 
+    def do_load_generic_chapter_url(self, chapter_url: str):
+        """Load a single chapter by generic chapter page URL. Fetches HTML, extracts image count; emits feed_finished([ch]) or error."""
+        self._abort = False
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        self._generic_chapter.request_delay = delay
+        if not (chapter_url or chapter_url.strip()):
+            self.error.emit("Enter a chapter page URL.")
+            return
+        try:
+            urls = self._generic_chapter.get_chapter_images(chapter_url.strip())
+            if not urls:
+                self.error.emit(
+                    "No images found at this URL. The site may require JavaScript (e.g. Cloudflare); try another source or use a browser extension."
+                )
+                return
+            ch = {
+                "id": chapter_url.strip(),
+                "display": "Chapter (%d images)" % len(urls),
+                "image_count": len(urls),
+            }
+            self.feed_finished.emit([ch])
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def _do_download_generic_chapter_url(
+        self,
+        chapter_infos: List[dict],
+        base_dir: str,
+        manga_title: str,
+        data_saver: bool,
+    ):
+        """Download chapters using GenericChapterUrlClient (chapter_infos[].id = chapter URL)."""
+        self._abort = False
+        delay = getattr(pcfg, 'manga_source_request_delay', 0.3)
+        self._generic_chapter.request_delay = delay
+        manga_safe = _sanitize_filename(manga_title)
+        parent_dir = osp.join(base_dir, manga_safe)
+        os.makedirs(parent_dir, exist_ok=True)
+        total_ch = len(chapter_infos)
+        for i, ch in enumerate(chapter_infos):
+            if self._abort:
+                self.error.emit("Download aborted.")
+                return
+            ch_url = ch.get("id")
+            display = ch.get("display", "Chapter")
+            ch_safe = _sanitize_filename(display)
+            save_dir = osp.join(parent_dir, ch_safe)
+            try:
+                result = self._generic_chapter.download_chapter(
+                    ch_url,
+                    save_dir,
+                    manga_id=manga_safe,
+                    chapter_id=ch_safe,
+                    on_progress=None,
+                )
+                if result:
+                    self.download_progress.emit(i + 1, total_ch, display)
+                else:
+                    self.error.emit("Failed to download " + display)
+                    return
+            except Exception as e:
+                self.error.emit(f"{display}: {e}")
+                return
+        self.download_finished.emit(parent_dir)
+
 
 class MangaSourceDialog(QDialog):
     """Search manga, load chapters, download selected. Emits open_folder_requested(path)."""
@@ -311,6 +391,7 @@ class MangaSourceDialog(QDialog):
         self._is_url_source = False
         self._is_local_folder = False
         self._is_comick = False
+        self._is_generic_chapter_url = False
         # Manhwa Reader is hidden until we confirm the API is up
         self._unavailable_sources: set = {"manhwa_reader"}
 
@@ -514,6 +595,7 @@ class MangaSourceDialog(QDialog):
         self._is_url_source = source == "mangadex_url"
         self._is_local_folder = source == "local_folder"
         self._is_comick = source == "comick"
+        self._is_generic_chapter_url = source == "generic_chapter_url"
         is_raw = source == "mangadex_raw"
         if is_raw:
             self._lang_label.setText(self.tr("Raw language (chapters to load):"))
@@ -524,9 +606,13 @@ class MangaSourceDialog(QDialog):
         else:
             self._lang_label.setText(self.tr("Language:"))
         for w in self._search_row_widgets:
-            w.setVisible(not self._is_url_source and not self._is_local_folder)
+            w.setVisible(not self._is_url_source and not self._is_local_folder and not self._is_generic_chapter_url)
         for w in self._url_row_widgets:
-            w.setVisible(self._is_url_source)
+            w.setVisible(self._is_url_source or self._is_generic_chapter_url)
+        if self._is_generic_chapter_url:
+            self._url_edit.setPlaceholderText(self.tr("Paste chapter page URL (HTML with images)..."))
+        else:
+            self._url_edit.setPlaceholderText(self.tr("Paste MangaDex chapter URL or chapter UUID..."))
         for w in self._local_folder_widgets:
             w.setVisible(self._is_local_folder)
         self._results_group.setVisible(not self._is_local_folder)
@@ -536,6 +622,11 @@ class MangaSourceDialog(QDialog):
             self._results_list.clear()
             self._manga_results = []
             self._load_ch_btn.setEnabled(False)
+        if self._is_generic_chapter_url:
+            self._results_list.clear()
+            self._manga_results = []
+            self._selected_manga = {"id": None, "title": self.tr("Chapter from URL")}
+            self._load_ch_btn.setEnabled(False)
         if self._is_comick:
             self._download_btn.setToolTip(self.tr("Download is not supported for Comick. Use MangaDex to download, or open chapter links in your browser."))
         else:
@@ -544,9 +635,19 @@ class MangaSourceDialog(QDialog):
             self._status_label.setText(self.tr("Click the button to open a folder of images as a project."))
         elif self._is_url_source:
             self._status_label.setText("" if self._is_url_source else self._status_label.text())
+        elif self._is_generic_chapter_url:
+            self._status_label.setText(self.tr("Paste a chapter page URL and click Load chapter. Works for sites that serve images in HTML; JS-heavy sites may need another tool."))
 
     def _on_load_chapter_url(self):
         url = self._url_edit.text().strip()
+        if self._is_generic_chapter_url:
+            if not url:
+                self._status_label.setText(self.tr("Enter a chapter page URL."))
+                return
+            self._status_label.setText(self.tr("Loading chapter..."))
+            self._load_chapter_url_btn.setEnabled(False)
+            self._worker.run_load_generic_chapter_url.emit(url)
+            return
         if not url:
             self._status_label.setText(self.tr("Enter a MangaDex chapter URL or UUID."))
             return
@@ -607,10 +708,12 @@ class MangaSourceDialog(QDialog):
 
     def _on_feed_finished(self, chapters: list):
         self._load_ch_btn.setEnabled(True)
-        if self._is_url_source:
+        if self._is_url_source or self._is_generic_chapter_url:
             self._load_chapter_url_btn.setEnabled(True)
         self._chapters = chapters
         if self._is_url_source and len(chapters) == 1:
+            self._selected_manga = {"id": None, "title": self.tr("Chapter from URL")}
+        if self._is_generic_chapter_url and len(chapters) == 1:
             self._selected_manga = {"id": None, "title": self.tr("Chapter from URL")}
         self._chapters_list.clear()
         for ch in chapters:
