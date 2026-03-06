@@ -1,4 +1,4 @@
-@REM dependencies\libraries\py310\python.exe F:\repos\BallonsTranslator\ballontranslator
+@REM Launch BallonsTranslator on Windows with auto-update
 @REM @echo %PATH%
 
 cd %~dp0

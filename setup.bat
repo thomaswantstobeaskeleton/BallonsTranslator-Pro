@@ -5,7 +5,7 @@ REM Installs dependencies. PyTorch is auto-installed on first "python launch.py"
 setlocal
 cd /d "%~dp0"
 
-echo BallonsTranslator-Pro setup (Windows)
+echo BallonsTranslator setup (Windows)
 echo.
 
 if not defined PYTHON set PYTHON=python

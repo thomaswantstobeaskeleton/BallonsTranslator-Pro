@@ -1,4 +1,4 @@
-@REM dependencies\libraries\py310\python.exe F:\repos\BallonsTranslator\ballontranslator
+@REM Launch BallonsTranslator on Windows (AMD/nightly)
 @REM @echo %PATH%
 
 cd %~dp0
@@ -33,7 +33,7 @@ goto :show_stdout_stderr
 
 
 :launch
-%PYTHON% launch.py --nightly%*
+%PYTHON% launch.py --nightly %*
 pause
 exit /b
 
