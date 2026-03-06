@@ -38,6 +38,16 @@ class CaiyunTranslator(BaseTranslator):
         }
 
         response = requests.request("POST", url, data=json.dumps(payload), headers=headers)
-        translations = json.loads(response.text)["target"]
+        data = json.loads(response.text)
+
+        if response.status_code != 200:
+            err_msg = data.get("message") or data.get("error") or response.text or str(response.status_code)
+            raise MissingTranslatorParams(f'Caiyun API error (HTTP {response.status_code}): {err_msg}')
+
+        if "target" not in data:
+            err_msg = data.get("message") or data.get("error") or str(data)
+            raise MissingTranslatorParams(f'Caiyun API returned no translations: {err_msg}')
+
+        translations = data["target"]
 
         return translations

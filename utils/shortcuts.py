@@ -10,6 +10,7 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     # File
     ("file.open_folder", "Ctrl+O", "File", "Open Folder"),
     ("file.save_proj", "Ctrl+S", "File", "Save Project"),
+    ("file.export_all_pages", "Ctrl+Shift+S", "File", "Export all pages"),
     # Edit
     ("edit.undo", "Ctrl+Z", "Edit", "Undo"),
     ("edit.redo", "Ctrl+Shift+Z", "Edit", "Redo"),
@@ -40,6 +41,8 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("format.bold", "Ctrl+B", "Format", "Bold"),
     ("format.italic", "Ctrl+I", "Format", "Italic"),
     ("format.underline", "Ctrl+U", "Format", "Underline"),
+    ("format.font_size_up", "Ctrl+Alt+Up", "Format", "Increase font size of selected text"),
+    ("format.font_size_down", "Ctrl+Alt+Down", "Format", "Decrease font size of selected text"),
     # Drawing panel tools
     ("draw.hand", "H", "Drawing", "Hand tool (pan)"),
     ("draw.inpaint", "J", "Drawing", "Inpaint brush"),

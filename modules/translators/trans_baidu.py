@@ -58,7 +58,12 @@ class BaiduTranslator(BaseTranslator):
         result = json.loads(response.text)
         result_list = []
         if "trans_result" not in result:
-            raise MissingTranslatorParams(f'Baidu returned invalid response: {result}\nAre the API keys set correctly?')
+            err_code = result.get("error_code", "")
+            err_msg = result.get("error_msg", "")
+            detail = f"{err_code} - {err_msg}".strip(" - ") if (err_code or err_msg) else str(result)
+            raise MissingTranslatorParams(
+                f'Baidu API error: {detail}. Check API keys, permissions, and IP whitelist.'
+            )
         for ret in result["trans_result"]:
             for v in ret["dst"].split('\n'):
                 result_list.append(v)

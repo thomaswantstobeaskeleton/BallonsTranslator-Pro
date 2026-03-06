@@ -165,6 +165,7 @@ class ProgressMessageBox(QDialog):
 
 class ImgtransProgressMessageBox(ProgressMessageBox):
     stop_clicked = Signal()
+    force_stop_clicked = Signal()
     
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(None, *args, **kwargs)
@@ -230,3 +231,9 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
         self.ocr_bar.hide()
         self.translate_bar.hide()
         self.inpaint_bar.hide()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # When the user closes the run-status window (X), emit a force-stop signal
+        # so the pipeline can be hard-stopped instead of just hiding the UI.
+        self.force_stop_clicked.emit()
+        return super().closeEvent(event)
