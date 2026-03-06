@@ -172,4 +172,4 @@ def _translate(self, src_list: List[str]) -> List[str]:
 
 ### Testes
 
-Após implementar o tradutor, teste-o seguindo o exemplo em `tests/test_translators.py`.
+Após implementar o tradutor, teste-o selecionando-o na aplicação (Config → Translator) e executando uma tradução.

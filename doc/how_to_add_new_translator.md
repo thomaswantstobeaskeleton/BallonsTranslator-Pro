@@ -139,4 +139,4 @@ def _translate(self, src_list: List[str]) -> List[str]:
 
 Re-implement ```updateParam```, ```supported_tgt_list```, ```supported_src_list``` if necessary, please refer to their comments for further details.
 
-Once the translator is implemented, it is recommended to test it following the example in tests/test_translators.py.
+Once the translator is implemented, test it by selecting it in the app (Config → Translator) and running a translation.
