@@ -22,6 +22,7 @@ from utils.split_text_region import split_textblock
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
 from modules.translators.trans_chatgpt import GPTTranslator
+from modules.translators.base import lang_display_to_key
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
@@ -916,6 +917,8 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.bold", "Ctrl+B", self.shortcutBold)
         _mk_shortcut("format.italic", "Ctrl+I", self.shortcutItalic)
         _mk_shortcut("format.underline", "Ctrl+U", self.shortcutUnderline)
+        _mk_shortcut("format.font_size_up", "Ctrl+Alt+Up", self.shortcutFontSizeUp)
+        _mk_shortcut("format.font_size_down", "Ctrl+Alt+Down", self.shortcutFontSizeDown)
         _mk_shortcut("canvas.delete_line", "Delete", self.shortcutDelete)
         _mk_shortcut("canvas.create_textbox", "Ctrl+Shift+N", self.shortcutCreateTextbox)
         _mk_shortcut("view.context_menu_options", "Ctrl+Shift+O", self.shortcutContextMenuOptions)
@@ -1198,6 +1201,32 @@ class MainWindow(mainwindow_cls):
     def shortcutUnderline(self):
         if self.textPanel.formatpanel.isVisible():
             self.textPanel.formatpanel.formatBtnGroup.underlineBtn.click()
+
+    def shortcutFontSizeUp(self):
+        """Increase font size for selected text blocks."""
+        if not self.textPanel.formatpanel.isVisible():
+            return
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        gf = self.textPanel.formatpanel.global_format
+        from ui import fontformat_commands as FC
+        FC.ffmt_change_rel_font_size('rel_font_size', 1.25, gf, True, blks, clip_size=True)
+        self.st_manager.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
+
+    def shortcutFontSizeDown(self):
+        """Decrease font size for selected text blocks."""
+        if not self.textPanel.formatpanel.isVisible():
+            return
+        blks = self.canvas.selected_text_items()
+        if not blks:
+            return
+        gf = self.textPanel.formatpanel.global_format
+        from ui import fontformat_commands as FC
+        FC.ffmt_change_rel_font_size('rel_font_size', 0.75, gf, True, blks, clip_size=True)
+        self.st_manager.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
 
     def shortcutCreateTextbox(self):
         """Create a default-size text box at cursor (Canvas)."""
@@ -1968,37 +1997,47 @@ class MainWindow(mainwindow_cls):
     def on_trans_src_changed(self):
         sender = self.sender()
         text = sender.currentText()
+        key = lang_display_to_key(text)
         translator = self.module_manager.translator
         if translator is not None:
-            translator.set_source(text)
-        pcfg.module.translate_source = text
+            translator.set_source(key)
+        pcfg.module.translate_source = key
+        try:
+            idx = translator.supported_src_list.index(key) if translator else 0
+        except (ValueError, AttributeError):
+            idx = 0
         combobox = self.configPanel.trans_config_panel.source_combobox
         if sender != combobox:
             combobox.blockSignals(True)
-            combobox.setCurrentText(text)
+            combobox.setCurrentIndex(idx)
             combobox.blockSignals(False)
         combobox = self.bottomBar.trans_selector.src_selector
         if sender != combobox:
             combobox.blockSignals(True)
-            combobox.setCurrentText(text)
+            combobox.setCurrentIndex(idx)
             combobox.blockSignals(False)
 
     def on_trans_tgt_changed(self):
         sender = self.sender()
         text = sender.currentText()
+        key = lang_display_to_key(text)
         translator = self.module_manager.translator
         if translator is not None:
-            translator.set_target(text)
-        pcfg.module.translate_target = text
+            translator.set_target(key)
+        pcfg.module.translate_target = key
+        try:
+            idx = translator.supported_tgt_list.index(key) if translator else 0
+        except (ValueError, AttributeError):
+            idx = 0
         combobox = self.configPanel.trans_config_panel.target_combobox
         if sender != combobox:
             combobox.blockSignals(True)
-            combobox.setCurrentText(text)
+            combobox.setCurrentIndex(idx)
             combobox.blockSignals(False)
         combobox = self.bottomBar.trans_selector.tgt_selector
         if sender != combobox:
             combobox.blockSignals(True)
-            combobox.setCurrentText(text)
+            combobox.setCurrentIndex(idx)
             combobox.blockSignals(False)
 
     def on_inpaint_changed(self):

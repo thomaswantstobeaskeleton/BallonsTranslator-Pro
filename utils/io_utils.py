@@ -166,6 +166,12 @@ def imread(imgpath, read_type=cv2.IMREAD_COLOR, max_retry_limit=5, retry_interva
             if read_type == cv2.IMREAD_GRAYSCALE:
                 img = img.convert('L')
             img = np.array(img)
+            # Normalize 16-bit (and similar) to 8-bit for display/OCR compatibility (#923)
+            if img.ndim >= 2 and img.dtype in (np.uint16, np.int32):
+                if img.dtype == np.uint16:
+                    img = (img >> 8).astype(np.uint8)
+                else:
+                    img = (np.clip(img, 0, 65535) >> 8).astype(np.uint8)
             if read_type != cv2.IMREAD_GRAYSCALE:
                 if img.ndim == 3 and img.shape[-1] == 1:
                     img = img[..., :2]

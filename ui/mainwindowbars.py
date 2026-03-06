@@ -1,11 +1,13 @@
 import os.path as osp
+from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton
+from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon
 
 from modules.translators import BaseTranslator
+from modules.translators.base import lang_display_label
 from .custom_widget import Widget, PaintQSlider, SmallComboBox, ConfigClickableLabel
 from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 from utils.shared import TITLEBAR_HEIGHT, WINDOW_BORDER_WIDTH, BOTTOMBAR_HEIGHT, LEFTBAR_WIDTH, LEFTBTN_WIDTH
@@ -107,6 +109,10 @@ class LeftBar(Widget):
         actionOpenImages = QAction(self.tr("Open Images ..."), self)
         actionOpenImages.triggered.connect(self.onOpenImages)
 
+        actionOpenACBFCBZ = QAction(self.tr("Open ACBF/CBZ ..."), self)
+        actionOpenACBFCBZ.setToolTip(self.tr("Open a comic book archive (.cbz/.zip); extracts to a folder and opens as project."))
+        actionOpenACBFCBZ.triggered.connect(self.onOpenACBFCBZ)
+
         actionSaveProj = QAction(self.tr("Save Project"), self)
         self.save_proj = actionSaveProj.triggered
         actionSaveProj.setShortcut(QKeySequence.fromString(get_shortcut("file.save_proj", getattr(pcfg, "shortcuts", None))))
@@ -140,7 +146,7 @@ class LeftBar(Widget):
         self.recentMenu = QMenu(self.tr("Open Recent"), self)
 
         openMenu = QMenu(self)
-        openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenProj])
+        openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenACBFCBZ, actionOpenProj])
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
         openMenu.addAction(actionSaveProj)
@@ -258,9 +264,42 @@ class LeftBar(Widget):
         
         dialog = QFileDialog()
         folder_path = str(dialog.getExistingDirectory(self, self.tr("Select Directory"), d))
-        if osp.exists(folder_path):
+        if folder_path and osp.exists(folder_path):
             self.updateRecentProjList(folder_path)
             self.open_dir.emit(folder_path)
+
+    def onOpenACBFCBZ(self) -> None:
+        d = None
+        if len(self.recent_proj_list) > 0:
+            for projp in self.recent_proj_list:
+                if not osp.isdir(projp):
+                    projp = osp.dirname(projp)
+                if osp.exists(projp):
+                    d = projp
+                    break
+        dialog = QFileDialog(self)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        dialog.setNameFilter(self.tr("Comic archives (*.cbz *.zip)"))
+        if d:
+            dialog.setDirectory(d)
+        if not dialog.exec():
+            return
+        selected = dialog.selectedFiles()
+        if not selected or not osp.isfile(selected[0]):
+            return
+        cbz_path = str(selected[0])
+        try:
+            from utils.cbz_acbf_utils import extract_cbz_to_folder
+            out_dir = osp.join(osp.dirname(cbz_path), Path(cbz_path).stem)
+            extract_cbz_to_folder(cbz_path, out_dir=out_dir)
+            self.updateRecentProjList(out_dir)
+            self.open_dir.emit(out_dir)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                self.tr("Open ACBF/CBZ"),
+                self.tr("Failed to extract archive: {}").format(str(e)),
+            )
 
     def onOpenProj(self):
         dialog = QFileDialog()
@@ -502,6 +541,7 @@ class TitleBar(Widget):
         reRunOCRAction = QAction(self.tr('Re-run OCR only'), self)
         self.re_run_ocr_only_trigger = reRunOCRAction.triggered
         batchExportAction = QAction(self.tr('Export all pages'), self)
+        batchExportAction.setShortcut(QKeySequence.fromString(get_shortcut("file.export_all_pages", getattr(pcfg, "shortcuts", None))))
         self.batch_export_trigger = batchExportAction.triggered
         batchExportAsAction = QAction(self.tr('Export all pages as...'), self)
         batchExportAsAction.setToolTip(self.tr('Choose output folder and format (PNG, JPEG, WebP, JXL).'))
@@ -888,12 +928,21 @@ class TranslatorSelectionWidget(Widget):
         self.blockSignals(True)
         self.src_selector.clear()
         self.tgt_selector.clear()
-        self.src_selector.addItems(translator.supported_src_list)
-        self.tgt_selector.addItems(translator.supported_tgt_list)
+        for key in translator.supported_src_list:
+            self.src_selector.addItem(lang_display_label(key))
+        for key in translator.supported_tgt_list:
+            self.tgt_selector.addItem(lang_display_label(key))
         self.selector.setCurrentText(translator.name)
-        self.src_selector.setCurrentText(translator.lang_source)
-        self.tgt_selector.setCurrentText(translator.lang_target)
+        self._set_lang_selector_by_key(self.src_selector, translator.supported_src_list, translator.lang_source)
+        self._set_lang_selector_by_key(self.tgt_selector, translator.supported_tgt_list, translator.lang_target)
         self.blockSignals(False)
+
+    def _set_lang_selector_by_key(self, combobox, key_list: list, key: str):
+        try:
+            idx = key_list.index(key)
+            combobox.setCurrentIndex(idx)
+        except (ValueError, IndexError):
+            combobox.setCurrentIndex(0)
 
 
 
