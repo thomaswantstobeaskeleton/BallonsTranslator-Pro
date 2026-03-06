@@ -503,14 +503,18 @@ class FontFormatPanel(Widget):
         hl4.setContentsMargins(0, 12, 0, 0)
         hl4.setSpacing(0)
 
-        self.vlayout.addLayout(vl0)
+        # Main format controls first so they stay visible when sections above are collapsed/hidden
         self.vlayout.addLayout(hl1)
         self.vlayout.addLayout(hl2)
         self.vlayout.addLayout(hl2b)
         self.vlayout.addLayout(hl3)
         self.vlayout.addLayout(hl4)
+        self.vlayout.addLayout(vl0)
         self.vlayout.setContentsMargins(0, 0, 7, 0)
         self.vlayout.setSpacing(0)
+
+        # Ensure format controls remain visible when panel is narrow or sections are collapsed
+        self.setMinimumHeight(320)
 
         self.focusOnColorDialog = False
         C.active_format = self.global_format
