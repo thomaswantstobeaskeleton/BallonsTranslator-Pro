@@ -764,7 +764,23 @@ Select the inpainter from the **Inpainting** dropdown. Key settings: **inpaint_s
 
 ## 6. Translation modules
 
-No new translator backends were added in this fork. Use the existing **LLM_API_Translator** (GPT-4o/Claude/Gemini), **ChatGPT**, **Sakura** (JP↔EN), **DeepL**, **google**, **nllb200**, **m2m100**, **Sugoi**, **t5_mt**, **opus_mt**, **Baidu**, **Youdao**, **Caiyun**, **Papago**, **Yandex**, **text-generation-webui**, **None**, **Copy Source**. Configure API keys and endpoints in the settings panel. **LLM_API_Translator** with provider **OpenRouter** includes free text models in the model dropdown (e.g. `openrouter/free`, Llama, Gemma, StepFun, Qwen); see [OpenRouter free models](https://openrouter.ai/models?fmt=cards&max_price=0&order=most-popular&output_modalities=text&input_modalities=text). See original README and `doc/加别的翻译器.md` for adding new translators.
+This fork extends the original translator list with both **classic MT** and **LLM-based** backends.
+
+- **LLM / API-based translators**
+  - **LLM_API_Translator** – unified OpenAI / Google / Grok / OpenRouter / local (LLM Studio) client with JSON-mode parsing, context + glossary support, and keyword substitutions. Recommended for GPT‑4o / Claude / Gemini / OpenRouter free models.
+  - **Gemini\_neverliie** – Google **Gemini** via [`neverliie-ai-sdk`](https://pypi.org/project/neverliie-ai-sdk/). EasyScanlate-style usage: set an API key in **Config → Translator → Gemini\_neverliie → api_key**, optionally override **model** (default `gemini-1.5-flash`). Prompts are tuned for manga/manhwa dialogue; no special project format is required.
+  - **Mistral\_neverliie** – **Mistral** via `neverliie-ai-sdk` (default model `mistral-small-latest`). Configure in the same place as Gemini\_neverliie with your Mistral key and (optionally) a custom model name.
+  - **ChatGPT**, **trans\_chatgpt\_exp** – legacy OpenAI chat translators (kept for compatibility; new work should prefer **LLM_API_Translator** or neverliie-based modules).
+
+- **Classic MT and specialized translators**
+  - **google** – unofficial Google Translate HTML API (works out of the box without an API key; set your own key for higher limits).
+  - **DeepL / DeepLx / DeepLx\_API** – DeepL official and community endpoints.
+  - **nllb200**, **m2m100**, **t5\_mt**, **opus\_mt** – local Hugging Face models (Transformer-based MT).
+  - **Sakura**, **Sugoi**, **EZTrans**, **Caiyun**, **Papago**, **Baidu**, **Youdao**, **Yandex** – JP↔EN and CN↔EN engines.
+  - **trans\_ensemble** – ensemble (3+1) judge-style translator which can mix several engines (e.g. Google, nllb200, LLM\_API\_Translator, Gemini\_neverliie) and pick the best candidate per line.
+  - **None**, **Copy Source** – utility translators for skipping MT or copying source text into the translation field.
+
+Configure API keys and endpoints for each module in the settings panel (Config → DL Module → Translator). **LLM_API_Translator** with provider **OpenRouter** includes free text models in the model dropdown (e.g. `openrouter/free`, Llama, Gemma, StepFun, Qwen); see [OpenRouter free models](https://openrouter.ai/models?fmt=cards&max_price=0&order=most-popular&output_modalities=text&input_modalities=text). See original README and `doc/加别的翻译器.md` for adding additional custom translators.
 
 ### 6.1 Translation context and glossary
 
