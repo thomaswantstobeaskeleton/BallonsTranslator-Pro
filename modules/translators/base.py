@@ -73,6 +73,52 @@ LANGMAP_GLOBAL = {
     'Tamil': '',
 }
 
+# Latin (English) labels for UI display next to non-Latin names (#1132)
+LANG_LATIN_DISPLAY = {
+    'Auto': 'Auto',
+    '简体中文': 'Chinese Simplified',
+    '繁體中文': 'Chinese Traditional',
+    '日本語': 'Japanese',
+    'English': 'English',
+    '한국어': 'Korean',
+    'Tiếng Việt': 'Vietnamese',
+    'čeština': 'Czech',
+    'Nederlands': 'Dutch',
+    'Français': 'French',
+    'Deutsch': 'German',
+    'magyar nyelv': 'Hungarian',
+    'Italiano': 'Italian',
+    'Polski': 'Polish',
+    'Português': 'Portuguese',
+    'Brazilian Portuguese': 'Brazilian Portuguese',
+    'limba română': 'Romanian',
+    'русский язык': 'Russian',
+    'Español': 'Spanish',
+    'Türk dili': 'Turkish',
+    'украї́нська мо́ва': 'Ukrainian',
+    'Thai': 'Thai',
+    'Arabic': 'Arabic',
+    'Hindi': 'Hindi',
+    'Malayalam': 'Malayalam',
+    'Tamil': 'Tamil',
+}
+
+
+def lang_display_label(key: str) -> str:
+    """Return display string for language selector: 'key (Latin)' when Latin differs, else key. (#1132)"""
+    latin = LANG_LATIN_DISPLAY.get(key)
+    if latin and latin != key:
+        return f"{key} ({latin})"
+    return key
+
+
+def lang_display_to_key(display: str) -> str:
+    """Extract internal language key from combobox display string. (#1132)"""
+    if " (" in display:
+        return display.split(" (", 1)[0].strip()
+    return display.strip()
+
+
 SYSTEM_LANG = ''
 SYSTEM_LANGMAP = {
     'zh-CN': '简体中文'        
