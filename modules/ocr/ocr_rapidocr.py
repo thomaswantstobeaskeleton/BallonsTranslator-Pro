@@ -73,27 +73,54 @@ def _get_rotate_crop_image(img: np.ndarray, points) -> np.ndarray:
 
 
 def _parse_rec_output(rec_out) -> tuple:
-    """Return (text, score) from RapidOCR recognition output. Handles (text, score) or (text, score, word_boxes)."""
+    """Return (text, score) from RapidOCR recognition output. Handles (text, score), (score, text), or (text, score, word_boxes)."""
     text, score = "", 0.0
-    if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
-        item = rec_out[0][0]
-        if isinstance(item, (list, tuple)):
-            text = item[0] if len(item) > 0 else ""
-            score = float(item[1]) if len(item) > 1 else 0.0
-        else:
-            text = str(item)
-    elif hasattr(rec_out, "txts") and rec_out.txts and len(rec_out.txts) > 0:
-        text = rec_out.txts[0]
-        score = getattr(rec_out, "scores", [0.0])[0]
-    elif isinstance(rec_out, list) and len(rec_out) > 0:
-        item = rec_out[0]
-        if isinstance(item, (list, tuple)) and len(item) >= 2:
-            text, score = item[0], float(item[1])
-        elif isinstance(item, (list, tuple)) and len(item) > 0:
-            text = item[0]
-        else:
-            text = str(item) if item else ""
+    try:
+        if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
+            item = rec_out[0][0]
+            if isinstance(item, (list, tuple)):
+                text, score = _item_to_text_score(item)
+            else:
+                text = str(item)
+        elif hasattr(rec_out, "txts") and rec_out.txts and len(rec_out.txts) > 0:
+            text = rec_out.txts[0]
+            score = getattr(rec_out, "scores", [0.0])[0]
+        elif isinstance(rec_out, list) and len(rec_out) > 0:
+            item = rec_out[0]
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                text, score = _item_to_text_score(item)
+            elif isinstance(item, (list, tuple)) and len(item) > 0:
+                text = item[0]
+            else:
+                text = str(item) if item else ""
+    except (ValueError, TypeError, IndexError):
+        # Fallback: first element as text, 0.0 as score (e.g. unexpected API format)
+        if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
+            item = rec_out[0][0]
+            text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
+        elif isinstance(rec_out, list) and len(rec_out) > 0:
+            item = rec_out[0]
+            text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
+        score = 0.0
     return (str(text).strip() if text else "", float(score))
+
+
+def _item_to_text_score(item) -> tuple:
+    """From [a, b] or [a, b, ...], return (text, score). Handles (text, score) or (score, text) order."""
+    if len(item) < 2:
+        return (item[0] if len(item) > 0 else "", 0.0)
+    a, b = item[0], item[1]
+    try:
+        s = float(b)
+        return (str(a).strip(), s)
+    except (TypeError, ValueError):
+        pass
+    try:
+        s = float(a)
+        return (str(b).strip(), s)
+    except (TypeError, ValueError):
+        pass
+    return (str(a).strip(), 0.0)
 
 
 if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:

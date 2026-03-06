@@ -1418,8 +1418,14 @@ class MainWindow(mainwindow_cls):
                 final_count = len(final_shapes)
                 QMessageBox.information(self, "Success", f"Merge done: {initial_count} -> {final_count} blocks (reduced by {initial_count - final_count})")
             else:
-                labels = set(s.get('label', '') for s in initial_shapes)
-                detail_msg = f"No blocks were merged.\nTotal: {initial_count} text blocks.\nLabel types: {', '.join(labels) or 'none'}\n\n"
+                raw_labels = set(s.get('label') for s in initial_shapes)
+                label_list = sorted({str(lbl) for lbl in raw_labels if lbl})
+                label_str = ", ".join(label_list) if label_list else "none"
+                detail_msg = (
+                    f"No blocks were merged.\n"
+                    f"Total: {initial_count} text blocks.\n"
+                    f"Label types: {label_str}\n\n"
+                )
                 detail_msg += "Suggestions:\n"
                 detail_msg += "1. Try increasing max gap (e.g. 100–200)\n"
                 detail_msg += "2. Lower min overlap ratio (e.g. 50–70%)\n"
