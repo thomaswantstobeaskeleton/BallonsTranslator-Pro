@@ -93,6 +93,8 @@ class FontFormat(Config):
     warp_strength: float = 0.5  # 0..1
     # Blend mode for compositing block with scene (0=Normal, 1=Multiply, 2=Screen, 3=Overlay, 4=Darken, 5=Lighten)
     blend_mode: int = 0
+    # Auto fit font size to block: when True, layout scales font so text fits the block's bounding box (#1077)
+    auto_fit_font_size: bool = False
     # Outline only: draw stroke, no fill (stroke-only text)
     outline_only: bool = False
     # Stroke outline outside only (EasyScanlate-style): draw stroke at 2x width so fill covers inner half; visible stroke is only outside glyphs

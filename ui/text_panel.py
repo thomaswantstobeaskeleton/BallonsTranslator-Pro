@@ -153,9 +153,9 @@ class FontSizeBox(QFrame):
         self.downBtn.clicked.connect(self.onDownBtnClicked)
         self.fcombobox = SizeComboBox([1, 1000], 'font_size', self)
         self.fcombobox.addItems([
-            "5", "5.5", "6.5", "7.5", "8", "9", "10", "10.5",
-            "11", "12", "14", "16", "18", "20", "22", "26", "28",
-            "30", "32", "34", "36", "40", "44", "48", "56", "72", "93", "123", "163"
+            "5", "5.5", "6", "6.5", "7", "7.5", "8", "9", "10", "10.5",
+            "11", "12", "14", "16", "18", "20", "22", "24", "26", "28",
+            "30", "32", "34", "36", "40", "44", "48", "52", "56", "64", "72", "80", "93", "123", "163", "200"
         ])
         self.fcombobox.param_changed.connect(self.param_changed)
 
@@ -306,6 +306,11 @@ class FontFormatPanel(Widget):
         self.verticalChecker = QFontChecker(self)
         self.verticalChecker.setObjectName("FontVerticalChecker")
         self.verticalChecker.clicked.connect(lambda : self.on_param_changed('vertical', self.verticalChecker.isChecked()))
+
+        self.autoFitFontSizeChecker = QFontChecker(self)
+        self.autoFitFontSizeChecker.setObjectName("AutoFitFontSizeChecker")
+        self.autoFitFontSizeChecker.setToolTip(self.tr("Auto fit font size to block: scale font so text fits the bounding box when layout runs."))
+        self.autoFitFontSizeChecker.clicked.connect(lambda : self.on_param_changed('auto_fit_font_size', self.autoFitFontSizeChecker.isChecked()))
 
         self.textOnPathCombo = QComboBox(self)
         self.textOnPathCombo.setObjectName("TextOnPathCombo")
@@ -468,6 +473,7 @@ class FontFormatPanel(Widget):
         hl2.addWidget(self.alignBtnGroup)
         hl2.addWidget(self.formatBtnGroup)
         hl2.addWidget(self.verticalChecker)
+        hl2.addWidget(self.autoFitFontSizeChecker)
         hl2.setSpacing(FONTFORMAT_SPACING)
         hl2.setContentsMargins(4, 0, 4, 0)
         hl2b = QHBoxLayout()
@@ -594,6 +600,7 @@ class FontFormatPanel(Widget):
         self.lineSpacingBox.setValue(font_format.line_spacing)
         self.letterSpacingBox.setValue(font_format.letter_spacing)
         self.verticalChecker.setChecked(font_format.vertical)
+        self.autoFitFontSizeChecker.setChecked(bool(getattr(font_format, 'auto_fit_font_size', False)))
         self.opacityMainBox.setValue(font_format.opacity)
         text_on_path = getattr(font_format, 'text_on_path', 0)
         self.textOnPathCombo.blockSignals(True)

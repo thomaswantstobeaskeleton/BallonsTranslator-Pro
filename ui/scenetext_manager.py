@@ -494,6 +494,10 @@ class SceneTextManager(QObject):
             blk_item = blk
             blk_item.idx = len(self.textblk_item_list)
         else:
+            # Apply global stroke default to new blocks when they have no stroke (#1143)
+            if blk.fontformat.stroke_width == 0 and getattr(pcfg.global_fontformat, 'stroke_width', 0) > 0:
+                blk.fontformat.stroke_width = pcfg.global_fontformat.stroke_width
+                blk.fontformat.srgb = list(getattr(pcfg.global_fontformat, 'srgb', [0, 0, 0]))
             translation = ''
             if self.auto_textlayout_flag and not blk.vertical:
                 translation = blk.translation
@@ -982,7 +986,8 @@ class SceneTextManager(QObject):
 
         adaptive_fntsize = False
         resize_ratio = 1
-        if self.auto_textlayout_flag and pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:
+        force_fit = getattr(fmt, 'auto_fit_font_size', False)
+        if (self.auto_textlayout_flag and pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag) or force_fit:
             if blkitem.blk.src_is_vertical and blkitem.blk.vertical != blkitem.blk.src_is_vertical:
                 adaptive_fntsize = True
                 area_ratio = ballon_area / text_area

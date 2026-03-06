@@ -264,6 +264,15 @@ def ffmt_change_stroke_outline_outside_only(param_name: str, values, act_ffmt: F
 
 
 @font_formating(push_undostack=True)
+def ffmt_change_auto_fit_font_size(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.auto_fit_font_size = bool(value)
+        if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+            blkitem.blk.fontformat.auto_fit_font_size = bool(value)
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
 def ffmt_change_overlay_opacity(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     for blkitem, value in zip(blkitems, values):
         v = max(0.0, min(1.0, float(value)))

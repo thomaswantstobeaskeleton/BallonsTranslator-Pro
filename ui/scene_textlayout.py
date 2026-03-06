@@ -742,6 +742,12 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 line_char_ids.append(char_idx)
                 space_w = cfmt.space_width
                 let_sp_offset = cfmt.tbr.height() * (ls - 1)
+                # Vertical Latin/English often has excessive letter spacing (#1035); reduce for mostly-ASCII lines
+                content = text.strip().replace(' ', '')
+                if content:
+                    latin_count = sum(1 for c in content if ord(c) < 128 and (c.isalpha() or c in ".,!?'\"-"))
+                    if latin_count >= 0.5 * len(content):
+                        let_sp_offset *= 0.4
 
                 tbr_h = cfmt.tbr.height() + let_sp_offset
                 char = blk_text[char_idx]
