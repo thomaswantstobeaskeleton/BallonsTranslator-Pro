@@ -77,6 +77,10 @@ Rebirth_of_the_Urban_Immortal_Cultivator/
 # Cursor IDE
 .cursor
 
+# Drive sync / temp folders (e.g. Google Drive, backup tools)
+.tmp.drivedownload
+.tmp.driveupload
+
 # Git lock (safety; normally not tracked)
 .git/index.lock
 
@@ -101,6 +105,15 @@ docs/FUTURE_ADDITIONS.md
 docs/SETTINGS_UI_RECOMMENDATIONS.md
 docs/COMIC_TRANSLATE_RESEARCH.md
 docs/COMIC_TRANSLATE_IMPLEMENTATION_PLAN.md
+docs/ANIMATIONS_AND_VISUAL_FEATURES_RESEARCH.md
+docs/ANIMATIONS_IMPLEMENTATION_PLAN.md
+docs/RELATED_PROJECTS_RESEARCH.md
+docs/BEST_MODELS_RESEARCH.md
+# Catch-all: root-level and docs research/plan (do not commit)
+research.md
+plan.md
+/docs/*RESEARCH*.md
+/docs/**PLAN*.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db
