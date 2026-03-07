@@ -10,7 +10,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 | Topic | Summary |
 |-------|---------|
-| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, **Manga/Comic source** (MangaDex incl. raw/original language, GOMANGA, Manhwa Reader, Comick, Local folder), **batch export to PDF**, **duplicate/overlapping block check**, 370 fonts. Full docs and recommended settings. |
+| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, **Manga/Comic source** (MangaDex incl. raw/original language, GOMANGA, Manhwa Reader, Comick, MangaForFree, ToonGod, MangaNato, MangaFire, NaruRaw, ManhwaRaw, 1kkk, generic chapter URL, Local folder), **batch export to PDF**, **duplicate/overlapping block check**, 370 fonts. Full docs and recommended settings. |
 | **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
 | **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
 
@@ -66,7 +66,7 @@ For a **portable-style** install (e.g. copy folder and run elsewhere):
 - **OCR:** 20+ engines (Paddle, manga_ocr, Surya, TrOCR, GOT-OCR2, Ocean, InternVL2/3, HunyuanOCR, etc.). **Crop padding** on many OCRs to avoid clipped text.
 - **Inpainting:** lama_large_512px with **configurable mask dilation** (0–5); Simple LaMa, Diffusers (SD/SDXL/FLUX), LaMa ONNX, MAT, Fluently v4, etc.
 - **Translation context:** Glossary, previous-page context, series-level storage, optional **context summarization** when near model limit (LLM_API_Translator).
-- **UI:** Canvas right-click menu (30+ actions: copy/paste, merge, move up/down, spell check, trim, case change, gradient, text on path, detect in region, pipeline stages); **OCR auto-correct** (pyenchant, single-suggestion replacement after OCR); **text eraser** tool; **batch queue**; **Manga / Comic source** (MangaDex incl. raw/original language, GOMANGA, Manhwa Reader, Comick, Local folder — search and download where supported); **batch export to PDF** (Export all pages); **Check project** (missing files, invalid JSON, overlapping blocks); **keyboard shortcuts** (customizable); **keyword substitution** (OCR, pre-MT, post-MT).
+- **UI:** Canvas right-click menu (30+ actions: copy/paste, merge, move up/down, spell check, trim, case change, gradient, text on path, detect in region, pipeline stages); **OCR auto-correct** (pyenchant, single-suggestion replacement after OCR); **text eraser** tool; **batch queue**; **Manga / Comic source** (MangaDex incl. raw/original language, GOMANGA, Manhwa Reader, Comick, MangaForFree, ToonGod, MangaNato, MangaFire, NaruRaw, ManhwaRaw, 1kkk, generic chapter URL, Local folder — search and download where supported); **batch export to PDF** (Export all pages); **Check project** (missing files, invalid JSON, overlapping blocks); **keyboard shortcuts** (customizable); **keyword substitution** (OCR, pre-MT, post-MT).
 - **Config panel:** Logical DPI, dark mode, display language, WebP lossless, typesetting defaults, dual text detection (primary + secondary detector).
 
 **Models and fonts added in this fork:** The fork ships with **many more** detection, OCR, and inpainting modules than the original (15+ text detectors, 30+ OCR engines, 15+ inpainters), plus **370+ fonts** in the `fonts/` folder (included in the repo for accessibility and built-in options; supported extensions: `.ttf`, `.otf`, `.ttc`, `.pfb`). Custom fonts in `fonts/` are loaded at startup. Config → Typesetting: **Show only custom fonts** limits the font list to those. Not every module is tested in every environment—see [Disclaimer: models and testing](#disclaimer-models-and-testing) above.
@@ -165,27 +165,37 @@ See [Dual text detection](#dual-text-detection-primary--secondary) for using HF 
 | **Comick** | By title (Comick Source API) | Yes | No | Many aggregator sites; search merges all sources (NDJSON); chapter links only |
 | **GOMANGA** | By title | Yes | Yes | Unofficial API; direct image URLs; shows clear error if upstream returns 403 |
 | **Manhwa Reader** | Filter /api/all by title | Yes | Yes | Manhwa/webtoon; shown in list only when API is up |
+| **MangaForFree** | By title | Yes | Yes | Manhua/aggregator; optional browser (Playwright) if blocked |
+| **ToonGod** | By title | Yes | Yes | Webtoon/manhwa; toongod.org; optional browser (Playwright) if blocked |
+| **MangaNato** | By title | Yes | Yes | Aggregator; optional browser (Playwright) if blocked |
+| **MangaFire** | By title | Yes | Yes | Aggregator; optional browser (Playwright) if blocked |
+| **NaruRaw (Japanese raw)** | By title | Yes | Yes | Japanese raw manga (naruraw.net); optional browser if blocked |
+| **ManhwaRaw (Korean raw)** | By title | Yes | Yes | Korean raw manhwa (manhwaraw.club); optional browser if blocked |
+| **1kkk (Chinese manhua)** | By title | Yes | Yes | Chinese manhua (www.1kkk.com); optional browser if blocked |
+| **Generic (chapter URL)** | — | Paste chapter URL | Yes | Any site: paste a chapter URL to load and download (optional Playwright) |
+| **MangaFire / MangaNato / Raws (chapter URL)** | — | Paste chapter URL | Yes | Same as Generic for specific sites |
 | **Local folder** | — | — | — | Open folder of images as project |
 
-#### Search and load chapters (MangaDex, Comick, GOMANGA, Manhwa Reader)
+#### Search and load chapters (MangaDex, Comick, GOMANGA, Manhwa Reader, MangaForFree, ToonGod, MangaNato, MangaFire, NaruRaw, ManhwaRaw, 1kkk)
 
 1. **Search by title:** Enter manga name → **Search** → results show title. Select a result → **Load chapters**.
 2. **MangaDex only — by URL:** Paste a MangaDex chapter URL (e.g. `https://mangadex.org/chapter/abc123...`) → **Load chapter** — fetches that chapter directly.
 3. **Language:** Dropdown for chapter feed (e.g. English, Japanese, Chinese Simplified). For **MangaDex (raw / original language)** this becomes **Raw language (chapters to load)** — use it to search and load chapters in the original language (e.g. Japanese, Korean, Chinese) for translating. Stored in `manga_source_lang`. (MangaDex only; other sources ignore.)
 4. **Quality:** **Use data-saver** — smaller images, faster download (MangaDex only). Stored in `manga_source_data_saver`.
+5. **Run browser in background (hidden):** For MangaForFree, ToonGod, MangaNato, MangaFire, NaruRaw, ManhwaRaw, and 1kkk, enable **Use browser (Playwright)** when the site blocks plain HTTP; check **Run browser in background (hidden)** to keep the browser headless. Config: `manga_source_playwright_headless`. Use **Install Chromium** if needed.
 
 #### Download
 
-5. **Download folder:** Choose base folder. Default: `~/BallonsTranslator/Downloaded Chapters` (created automatically). Stored in `manga_source_download_dir`.
-6. **Request delay:** 0–2 s between API requests (rate limiting). Stored in `manga_source_request_delay`.
-7. Select chapters (checkboxes) → **Download selected chapters**.
-8. **Page naming:** Pages are saved as **001.png**, **002.png**, … (or original ext) so BallonsTranslator loads them in reading order. Original MangaDex filenames are not used.
-9. **Folder structure:** `{download_folder}/{manga_title}/{chapter_display}/` (e.g. `Ch.1 – Vol.1`).
+6. **Download folder:** Choose base folder. Default: `~/BallonsTranslator/Downloaded Chapters` (created automatically). Stored in `manga_source_download_dir`.
+7. **Request delay:** 0–2 s between API requests (rate limiting). Stored in `manga_source_request_delay`.
+8. Select chapters (checkboxes) → **Download selected chapters**.
+9. **Page naming:** Pages are saved as **001.png**, **002.png**, … (or original ext) so BallonsTranslator loads them in reading order. Original MangaDex filenames are not used.
+10. **Folder structure:** `{download_folder}/{manga_title}/{chapter_display}/` (e.g. `Ch.1 – Vol.1`).
 
 #### After download
 
-10. **Open in BallonsTranslator after download** — when checked, first chapter folder opens automatically. Stored in `manga_source_open_after_download`.
-11. **Open folder in BallonsTranslator** — button to manually open the first downloaded chapter folder as a project.
+11. **Open in BallonsTranslator after download** — when checked, first chapter folder opens automatically. Stored in `manga_source_open_after_download`.
+12. **Open folder in BallonsTranslator** — button to manually open the first downloaded chapter folder as a project.
 
 ---
 
