@@ -446,41 +446,50 @@ class MainWindow(mainwindow_cls):
         self.resetStyleSheet()
 
     def on_finish_setdetector(self):
+        """Defer UI update to avoid QPainter conflict when signal fires during paint (e.g. model load)."""
         module_manager = self.module_manager
         if module_manager.textdetector is not None:
             name = module_manager.textdetector.name
-            pcfg.module.textdetector = name
-            self.configPanel.detect_config_panel.setDetector(name)
-            self.bottomBar.textdet_selector.setSelectedValue(name)
-            LOGGER.info('Text detector set to {}'.format(name))
+            def _update():
+                pcfg.module.textdetector = name
+                self.configPanel.detect_config_panel.setDetector(name)
+                self.bottomBar.textdet_selector.setSelectedValue(name)
+                LOGGER.info('Text detector set to {}'.format(name))
+            QTimer.singleShot(0, _update)
 
     def on_finish_setocr(self):
         module_manager = self.module_manager
         if module_manager.ocr is not None:
             name = module_manager.ocr.name
-            pcfg.module.ocr = name
-            self.configPanel.ocr_config_panel.setOCR(name)
-            self.bottomBar.ocr_selector.setSelectedValue(name)
-            LOGGER.info('OCR set to {}'.format(name))
+            def _update():
+                pcfg.module.ocr = name
+                self.configPanel.ocr_config_panel.setOCR(name)
+                self.bottomBar.ocr_selector.setSelectedValue(name)
+                LOGGER.info('OCR set to {}'.format(name))
+            QTimer.singleShot(0, _update)
 
     def on_finish_setinpainter(self):
         module_manager = self.module_manager
         if module_manager.inpainter is not None:
             name = module_manager.inpainter.name
-            pcfg.module.inpainter = name
-            self.configPanel.inpaint_config_panel.setInpainter(name)
-            self.bottomBar.inpaint_selector.setSelectedValue(name)
-            LOGGER.info('Inpainter set to {}'.format(name))
+            def _update():
+                pcfg.module.inpainter = name
+                self.configPanel.inpaint_config_panel.setInpainter(name)
+                self.bottomBar.inpaint_selector.setSelectedValue(name)
+                LOGGER.info('Inpainter set to {}'.format(name))
+            QTimer.singleShot(0, _update)
 
     def on_finish_settranslator(self):
         module_manager = self.module_manager
         translator = module_manager.translator
         if translator is not None:
             name = translator.name
-            pcfg.module.translator = name
-            self.bottomBar.trans_selector.finishSetTranslator(translator)
-            self.configPanel.trans_config_panel.finishSetTranslator(translator)
-            LOGGER.info('Translator set to {}'.format(name))
+            def _update():
+                pcfg.module.translator = name
+                self.bottomBar.trans_selector.finishSetTranslator(translator)
+                self.configPanel.trans_config_panel.finishSetTranslator(translator)
+                LOGGER.info('Translator set to {}'.format(name))
+            QTimer.singleShot(0, _update)
         else:
             LOGGER.error('invalid translator')
         
