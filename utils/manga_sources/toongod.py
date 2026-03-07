@@ -13,7 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .generic_chapter_url import fetch_html_playwright
-from .url_utils import infer_id, normalize_base_url, slugify_keyword
+from .url_utils import infer_id, normalize_base_url
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
