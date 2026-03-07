@@ -67,10 +67,22 @@ class PageListView(QListWidget):
         self.setIconSize(QSize(shared.PAGELIST_THUMBNAIL_SIZE, shared.PAGELIST_THUMBNAIL_SIZE))
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key.Key_A and event.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
+            self.selectAll()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def contextMenuEvent(self, e: QContextMenuEvent):
         menu = QMenu()
         reveal_act = menu.addAction(self.tr('Reveal in File Explorer'))
         selected_items = self.selectedItems()
+        n_total = self.count()
+        select_all_pages_act = None
+        if n_total > 0:
+            menu.addSeparator()
+            select_all_pages_act = menu.addAction(self.tr('Select all pages'))
         if selected_items:
             menu.addSeparator()
             translate_act = menu.addAction(self.tr('Translate Selected Images'))
@@ -80,6 +92,8 @@ class PageListView(QListWidget):
 
         if rst == reveal_act:
             self.reveal_file.emit()
+        elif rst == select_all_pages_act:
+            self.selectAll()
         elif selected_items and rst == translate_act:
             self.translate_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == remove_act:
@@ -214,6 +228,7 @@ class MainWindow(mainwindow_cls):
         theme = 'eva-dark' if pcfg.darkmode else 'eva-light'
         self.setStyleSheet(parse_stylesheet(theme, reverse_icon))
         self._apply_custom_cursor()
+        self._apply_app_font()
 
     def _apply_custom_cursor(self):
         if getattr(pcfg, 'use_custom_cursor', False) and getattr(pcfg, 'custom_cursor_path', ''):
@@ -227,6 +242,22 @@ class MainWindow(mainwindow_cls):
                 except Exception:
                     pass
         self.unsetCursor()
+
+    def _apply_app_font(self):
+        """Apply app-wide font from theme customizer (View → Theme & UI). Never set point size <= 0."""
+        family = getattr(pcfg, 'app_font_family', None) or ''
+        size = max(0, getattr(pcfg, 'app_font_size', 0) or 0)
+        app = QApplication.instance()
+        if not app:
+            return
+        f = app.font()
+        if family:
+            f.setFamily(family)
+        if size > 0 and size <= 72:
+            f.setPointSize(size)
+        if f.pointSizeF() <= 0:
+            f.setPointSizeF(10.0)
+        app.setFont(f)
 
     def setupUi(self):
         screen_size = QGuiApplication.primaryScreen().geometry().size()
@@ -332,6 +363,8 @@ class MainWindow(mainwindow_cls):
         self.canvas.move_blocks_down_signal.connect(self.on_move_blocks_down)
         self.canvas.import_image_to_blk.connect(self.on_import_image_to_blk)
         self.canvas.clear_overlay_signal.connect(self.on_clear_overlay)
+
+        self.app.installEventFilter(self)
 
         self.bottomBar.originalSlider.valueChanged.connect(self.canvas.setOriginalTransparencyBySlider)
         self.bottomBar.textlayerSlider.valueChanged.connect(self.canvas.setTextLayerTransparencyBySlider)
@@ -926,6 +959,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
         self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
         self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
+        self.titleBar.theme_customizer_trigger.connect(self.open_theme_customizer)
         self.titleBar.context_menu_options_trigger.connect(self.shortcutContextMenuOptions)
         self.titleBar.help_doc_trigger.connect(self.on_help_documentation)
         self.titleBar.help_about_trigger.connect(self.on_help_about)
@@ -991,6 +1025,20 @@ class MainWindow(mainwindow_cls):
         dlg = ShortcutsDialog(self)
         dlg.shortcuts_changed.connect(self.apply_shortcuts)
         dlg.show()
+
+    def open_theme_customizer(self):
+        from .theme_customizer_dialog import ThemeCustomizerDialog
+        dlg = ThemeCustomizerDialog(self)
+        dlg.theme_applied.connect(self._on_theme_customizer_applied)
+        dlg.show()
+
+    def _on_theme_customizer_applied(self, font_family: str, font_size: int):
+        self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
+        self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
+        self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
+        self.titleBar.bubblyUIAction.setChecked(getattr(pcfg, 'bubbly_ui', True))
+        self.resetStyleSheet()
+        # Font is applied in resetStyleSheet() -> _apply_app_font() (pcfg already saved by dialog)
 
     def on_help_documentation(self):
         """Open project README (#126 Help menu)."""
@@ -1214,8 +1262,25 @@ class MainWindow(mainwindow_cls):
                 self.canvas.delete_textblks.emit(0)
 
     def shortcutSelectAll(self):
+        """Ctrl+A: select all pages when page list has focus, else select all text blocks on canvas."""
+        focus = QApplication.focusWidget()
+        if focus is self.pageList or (focus and self.pageList.isAncestorOf(focus)):
+            self.pageList.selectAll()
+            return
         if self.centralStackWidget.currentIndex() == 0:
             self.st_manager.set_blkitems_selection(True)
+
+    def eventFilter(self, obj, event):
+        """Intercept Ctrl+A when canvas (or its viewport) has focus so select-all-blocks works."""
+        if event.type() == QEvent.Type.KeyPress:
+            e = event
+            if e.key() == Qt.Key.Key_A and e.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
+                # Target is canvas view or its viewport/child
+                if obj is self.canvas.gv or (obj and self.canvas.gv.isAncestorOf(obj)):
+                    if self.centralStackWidget.currentIndex() == 0:
+                        self.st_manager.set_blkitems_selection(True)
+                        return True
+        return super().eventFilter(obj, event)
 
     def shortcutSpace(self):
         if self.centralStackWidget.currentIndex() == 0:
