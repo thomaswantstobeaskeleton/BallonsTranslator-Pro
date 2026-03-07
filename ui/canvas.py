@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Union
+from typing import List, Union, Optional
 import os
 
 from qtpy.QtWidgets import QApplication, QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
@@ -238,6 +238,7 @@ class Canvas(QGraphicsScene):
         self.textblock_mode = False
         self.creating_textblock = False
         self.create_block_origin: QPointF = None
+        self._right_click_create_origin: Optional[QPointF] = None  # right-click in textblock_mode: show menu unless user drags
         self.editing_textblkitem: TextBlkItem = None
         self.warp_edit_mode = False  # PR #1105: Free Transform (quad warp) editing
 
@@ -748,6 +749,14 @@ class Canvas(QGraphicsScene):
             self.pan_initial_pos = new_pos
             self.hscroll_bar.setValue(int(self.hscroll_bar.value() - delta_pos.x()))
             self.vscroll_bar.setValue(int(self.vscroll_bar.value() - delta_pos.y()))
+        
+        elif getattr(self, '_right_click_create_origin', None) is not None and (event.buttons() & Qt.MouseButton.RightButton):
+            # Right-click drag in textblock_mode: start create-textblock only after movement past threshold
+            delta = event.scenePos() - self._right_click_create_origin
+            if delta.manhattanLength() > 10:
+                self.startCreateTextblock(self._right_click_create_origin)
+                self._right_click_create_origin = None
+                self.txtblkShapeControl.setRect(QRectF(self.create_block_origin, event.scenePos() / self.scale_factor).normalized())
             
         elif self.creating_textblock:
             self.txtblkShapeControl.setRect(QRectF(self.create_block_origin, event.scenePos() / self.scale_factor).normalized())
@@ -840,10 +849,14 @@ class Canvas(QGraphicsScene):
             self.pan_initial_pos = event.screenPos()
             return
 
+        if btn != Qt.MouseButton.RightButton:
+            self._right_click_create_origin = None
+
         if self.imgtrans_proj.img_valid:
             if self.textblock_mode and len(self.selectedItems()) == 0 and self.textEditMode():
                 if btn == Qt.MouseButton.RightButton:
-                    self.startCreateTextblock(event.scenePos())
+                    # Defer startCreateTextblock until user drags; otherwise right-click shows context menu
+                    self._right_click_create_origin = event.scenePos()
                     event.accept()
                     return
             elif self.creating_normal_rect:
@@ -887,7 +900,13 @@ class Canvas(QGraphicsScene):
                 self._last_rubber_band_rect = QRectF(r)
         self.hide_rubber_band()
 
-        Qt.MouseButton.LeftButton
+        # Right-click without drag in textblock_mode: show context menu instead of creating a box
+        if btn == Qt.MouseButton.RightButton and getattr(self, '_right_click_create_origin', None) is not None:
+            self._context_menu_scene_pos = event.scenePos()
+            self.context_menu_requested.emit(event.screenPos(), False)
+            self._right_click_create_origin = None
+            return super().mouseReleaseEvent(event)
+
         if btn == Qt.MouseButton.MiddleButton:
             self.mid_btn_pressed = False
         textblk_created = False
@@ -918,6 +937,7 @@ class Canvas(QGraphicsScene):
         self.editing_textblkitem = None
         self.stroke_img_item = None
         self.erase_img_key = None
+        self._right_click_create_origin = None
         self.txtblkShapeControl.setBlkItem(None)
         self.mid_btn_pressed = False
         self.search_widget.reInitialize()
