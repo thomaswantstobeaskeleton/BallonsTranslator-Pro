@@ -791,6 +791,9 @@ class OCRConfigPanel(ModuleConfigParseWidget):
         self.ocr_changed = self.module_changed
         self.setOCR = self.setModule
         self.restoreEmptyOCRChecker = QCheckBox(self.tr("Delete and restore region where OCR return empty string."), self)
+        self.restoreEmptyOCRChecker.setToolTip(
+            self.tr("When enabled, text boxes whose OCR result is empty are removed from the page and the mask is restored. "
+                    "Disable this to keep all boxes even when OCR returns nothing or fails (e.g. to avoid boxes disappearing)."))
         self.restoreEmptyOCRChecker.clicked.connect(self.on_restore_empty_ocr)
         self.vlayout.addWidget(self.restoreEmptyOCRChecker)
         # 字体检测选项

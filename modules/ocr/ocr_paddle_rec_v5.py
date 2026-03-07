@@ -11,6 +11,7 @@ import cv2
 from typing import List
 
 from .base import OCRBase, register_OCR, DEVICE_SELECTOR, TextBlock
+from utils.ocr_preprocess import preprocess_for_ocr
 
 os.environ.setdefault("PPOCR_HOME", os.path.join("data", "models", "paddle-ocr"))
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -47,6 +48,11 @@ if _PADDLE_REC_V5_AVAILABLE:
                 "value": 0.5,
                 "description": "Min confidence for recognized text (0–1).",
             },
+            "crop_padding": {
+                "type": "line_editor",
+                "value": 4,
+                "description": "Pixels to add around each crop (0–24). Like Ocean OCR; helps recognizer see full text.",
+            },
             "description": "PaddleOCR PP-OCRv5 recognition only (paddleocr 3.x). Pair with paddle_det_v5.",
         }
         _load_model_keys = {"model"}
@@ -56,6 +62,7 @@ if _PADDLE_REC_V5_AVAILABLE:
             self.model = None
             self._model_name = None
             self._device = None
+            self.crop_padding = max(0, min(24, int(self.params.get("crop_padding", {}).get("value", 4) or 4)))
 
         def _load_model(self):
             model_name = (
@@ -105,8 +112,54 @@ if _PADDLE_REC_V5_AVAILABLE:
 
         def _ocr_blk_list(self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs) -> None:
             im_h, im_w = img.shape[:2]
+            upscale_min_side = 0
+            try:
+                from utils.config import pcfg
+                upscale_min_side = int(getattr(pcfg.module, "ocr_upscale_min_side", 0) or 0)
+            except Exception:
+                pass
+            if upscale_min_side <= 0:
+                upscale_min_side = 32
+            pad = max(0, min(24, int(getattr(self, "crop_padding", 4) or 4)))
             for blk in blk_list:
+                if getattr(blk, "lines", None) and len(blk.lines) > 1:
+                    text_parts = []
+                    for line_pts in blk.lines:
+                        if not isinstance(line_pts, (list, tuple)) or len(line_pts) < 4:
+                            continue
+                        xs = [p[0] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        ys = [p[1] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        if not xs or not ys:
+                            continue
+                        x1 = max(0, int(min(xs)) - pad)
+                        y1 = max(0, int(min(ys)) - pad)
+                        x2 = min(im_w, int(max(xs)) + pad)
+                        y2 = min(im_h, int(max(ys)) + pad)
+                        if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
+                            text_parts.append("")
+                            continue
+                        crop = img[y1:y2, x1:x2]
+                        if crop.size == 0:
+                            text_parts.append("")
+                            continue
+                        if crop.ndim == 3 and crop.shape[2] == 4:
+                            crop = cv2.cvtColor(crop, cv2.COLOR_RGBA2RGB)
+                        crop = np.ascontiguousarray(crop)
+                        crop = preprocess_for_ocr(crop, recipe="none", upscale_min_side=upscale_min_side)
+                        t = self._run_one(crop)
+                        text_parts.append(t if t else "")
+                    blk.text = text_parts if text_parts else [""]
+                    continue
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
+                if pad > 0:
+                    x1 = max(0, x1 - pad)
+                    y1 = max(0, y1 - pad)
+                    x2 = min(im_w, x2 + pad)
+                    y2 = min(im_h, y2 + pad)
                 if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
                     blk.text = [""]
                     continue
@@ -116,6 +169,8 @@ if _PADDLE_REC_V5_AVAILABLE:
                     continue
                 if crop.ndim == 3 and crop.shape[2] == 4:
                     crop = cv2.cvtColor(crop, cv2.COLOR_RGBA2RGB)
+                crop = np.ascontiguousarray(crop)
+                crop = preprocess_for_ocr(crop, recipe="none", upscale_min_side=upscale_min_side)
                 text = self._run_one(crop)
                 blk.text = [text if text else ""]
 
@@ -126,6 +181,8 @@ if _PADDLE_REC_V5_AVAILABLE:
 
         def updateParam(self, param_key: str, param_content):
             super().updateParam(param_key, param_content)
+            if param_key == "crop_padding":
+                self.crop_padding = max(0, min(24, int(self.params.get("crop_padding", {}).get("value", 4) or 4)))
             if param_key in ("model_name", "device"):
                 self.model = None
                 self._model_name = None

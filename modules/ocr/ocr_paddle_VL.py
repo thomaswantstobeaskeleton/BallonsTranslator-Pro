@@ -52,10 +52,15 @@ class OCRPaddleVL(OCRBase):
         im_h, im_w = img.shape[:2]
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
-            if y2 < im_h and x2 < im_w and x1 >= 0 and y1 >= 0 and x1 < x2 and y1 < y2:
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
+            if x1 < x2 and y1 < y2:
                 try:
                     crop = img[y1:y2, x1:x2]
-                    blk.text = self.ocr(crop)
+                    result = self.ocr(crop)
+                    blk.text = [result] if result else ['']
                 except Exception as e:
                     self.logger.exception('Paddle-VL 块级识别失败')
                     blk.text = ['']

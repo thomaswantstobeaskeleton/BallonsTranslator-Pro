@@ -298,27 +298,31 @@ class OCROneAPI(OCRBase):
             self.engine = None
             self.available = False
 
-    def _ocr_blk_list(self, img: np.ndarray, blk_list: list[TextBlock], *args, **kwargs):
+    def _ocr_blk_list(self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs):
         if not self.available:
             return
         im_h, im_w = img.shape[:2]
         for i, blk in enumerate(blk_list):
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if 0 <= y1 < y2 <= im_h and 0 <= x1 < x2 <= im_w:
                 crop = img[y1:y2, x1:x2]
                 if crop.size == 0:
-                    blk.text = ""
+                    blk.text = [""]
                     continue
                 is_vertical = blk.vertical
                 try:
-                    blk.text = self.ocr(crop, apply_postprocessing=True, reverse_lines=is_vertical)
+                    blk.text = [self.ocr(crop, apply_postprocessing=True, reverse_lines=is_vertical)]
                 except Exception as e:  # Log error from main ocr call
                     if self.logger:
                         self.logger.error(
                             f"OCR err block {i+1} {blk.xyxy}: {e}", exc_info=self.debug_mode)
-                        blk.text = ""
+                    blk.text = [""]
             else:
-                blk.text = ""  # Invalid coords
+                blk.text = [""]  # Invalid coords
 
     def ocr_img(self, img: np.ndarray) -> str: return self.ocr(img,
                                                                apply_postprocessing=True, reverse_lines=self.reverse_line_order) if self.available else ""

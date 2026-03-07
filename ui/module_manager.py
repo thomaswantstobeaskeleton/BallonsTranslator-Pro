@@ -23,6 +23,7 @@ from modules.base import BaseModule, soft_empty_cache, GPUINTENSIVE_SET
 from modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, \
     GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, \
     BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
+from modules.ocr.base import normalize_block_text, ensure_blocks_have_lines
 import modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
 from utils.textblock import TextBlock, sort_regions, examine_textblk, remove_contained_boxes, deduplicate_primary_boxes
@@ -603,6 +604,49 @@ class ImgtransThread(QThread):
                 mask = mask2
         return mask, blk_list
 
+    @staticmethod
+    def _clip_detection_blocks_to_image(blk_list: List[TextBlock], im_w: int, im_h: int) -> List[TextBlock]:
+        """Clip all block xyxy and lines to image bounds; drop blocks that are fully outside or degenerate.
+        Prevents off-page or invalid boxes from detectors (e.g. rare bad page)."""
+        if not blk_list:
+            return blk_list
+        out = []
+        for blk in blk_list:
+            safe_xyxy = _clip_xyxy_to_image(getattr(blk, "xyxy", None), im_w, im_h)
+            if safe_xyxy is None:
+                continue
+            blk.xyxy = safe_xyxy
+            lines = getattr(blk, "lines", None)
+            if lines and len(lines) > 0:
+                clipped_lines = []
+                for line in lines:
+                    if not line or len(line) < 3:
+                        continue
+                    pts = []
+                    for p in line:
+                        try:
+                            x, y = float(p[0]), float(p[1])
+                            x = max(0.0, min(x, im_w))
+                            y = max(0.0, min(y, im_h))
+                            pts.append([x, y])
+                        except (TypeError, ValueError, IndexError):
+                            continue
+                    if len(pts) >= 3:
+                        clipped_lines.append(pts)
+                if clipped_lines:
+                    blk.lines = clipped_lines
+                else:
+                    # Fallback: one line from bbox so block remains valid
+                    x1, y1, x2, y2 = safe_xyxy
+                    blk.lines = [[[x1, y1], [x2, y1], [x2, y2], [x1, y2]]]
+            out.append(blk)
+        if len(out) < len(blk_list):
+            LOGGER.debug(
+                "Clipped detection blocks to image: kept %d of %d (dropped %d out-of-bounds or degenerate)",
+                len(out), len(blk_list), len(blk_list) - len(out),
+            )
+        return out
+
     def _run_dual_detect(self, img: np.ndarray, mask: np.ndarray, blk_list: List[TextBlock], im_w: int, im_h: int):
         """Section 14: Secondary (and optionally tertiary) detector merge. Builds extra list and calls _run_extra_detectors."""
         primary = (getattr(cfg_module, 'textdetector', '') or '').strip()
@@ -901,6 +945,7 @@ class ImgtransThread(QThread):
                     mask, blk_list = self.textdetector.detect(img, self.imgtrans_proj)
                     need_save_mask = True
                     im_h, im_w = img.shape[:2]
+                    blk_list = self._clip_detection_blocks_to_image(blk_list, im_w, im_h)
                     for blk in blk_list:
                         if getattr(blk, 'lines', None) and len(blk.lines) > 0:
                             examine_textblk(blk, im_w, im_h, sort=True)
@@ -1017,7 +1062,16 @@ class ImgtransThread(QThread):
                         )
                     except Exception as e:
                         LOGGER.warning("Panel reorder failed: %s", e)
-                self.imgtrans_proj.pages[imgname] = blk_list
+                # Final clip so no block is saved off-page (safety for any detector/merge path)
+                im_h, im_w = img.shape[:2]
+                blk_list = self._clip_detection_blocks_to_image(blk_list, im_w, im_h)
+                # Don't overwrite existing blocks with empty detection result (preserves boxes when detector fails or returns nothing)
+                existing = self.imgtrans_proj.pages.get(imgname) or []
+                if blk_list or len(existing) == 0:
+                    self.imgtrans_proj.pages[imgname] = blk_list
+                else:
+                    LOGGER.warning("Detection returned no blocks for page %s; keeping %d existing block(s)", imgname, len(existing))
+                    blk_list = existing  # run OCR/translate/inpaint on existing blocks
 
                 if mask is not None and not cfg_module.enable_ocr:
                     mask_to_save = downscale_to_size(mask, orig_w, orig_h) if scale > 1 else mask
@@ -1083,6 +1137,16 @@ class ImgtransThread(QThread):
             if blk_list is None:
                 blk_list = self.imgtrans_proj.pages[imgname] if imgname in self.imgtrans_proj.pages else []
 
+            # When image is upscaled but detection was skipped, blocks from project are in original resolution.
+            # Ensure every block has lines (from xyxy if missing), then scale block coordinates to upscaled image.
+            if scale > 1.0 and blk_list and not cfg_module.enable_detect:
+                ensure_blocks_have_lines(blk_list)
+                for blk in blk_list:
+                    if getattr(blk, 'xyxy', None):
+                        blk.xyxy = [x * scale for x in blk.xyxy]
+                    if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                        blk.lines = [[[p[0] * scale, p[1] * scale] for p in line] for line in blk.lines]
+
             if cfg_module.enable_ocr:
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR running')
                 ocr_runner = getattr(self, '_auto_ocr_instance', None) if getattr(cfg_module, 'ocr_auto_by_language', False) else None
@@ -1104,6 +1168,8 @@ class ImgtransThread(QThread):
                             ocr_cache_key = cm.get_ocr_cache_key(image_hash, ocr_name_for_cache, source_lang, device)
                             if cm.can_serve_all_blocks_from_ocr_cache(ocr_cache_key, blk_list):
                                 cm.apply_cached_ocr_to_blocks(ocr_cache_key, blk_list)
+                                for blk in blk_list:
+                                    normalize_block_text(blk)
                                 ocr_ran = True
                         except Exception as _e:
                             LOGGER.debug("OCR cache check failed: %s", _e)
@@ -1158,6 +1224,11 @@ class ImgtransThread(QThread):
                             blk_list_updated.append(blk)
 
                     if len(blk_removed) > 0:
+                        LOGGER.info(
+                            "Restore empty OCR: removed %d block(s) with empty OCR result (page %s). Turn off 'Restore empty OCR' in Config to keep all boxes.",
+                            len(blk_removed),
+                            imgname,
+                        )
                         blk_list.clear()
                         blk_list += blk_list_updated
                         
@@ -1317,8 +1388,8 @@ class ImgtransThread(QThread):
                 
                 im_h, im_w = img.shape[:2]
                 # When image was upscaled but we didn't run detection, blk_list is from project (original resolution).
-                # Scale block coordinates to match current image size so mask and per-block crops are correct.
-                if scale > 1.0 and blk_list and not cfg_module.enable_detect:
+                # Scale block coordinates only if we didn't already scale them before OCR (when OCR is enabled).
+                if scale > 1.0 and blk_list and not cfg_module.enable_detect and not getattr(cfg_module, 'enable_ocr', True):
                     for blk in blk_list:
                         if getattr(blk, 'xyxy', None):
                             blk.xyxy = [x * scale for x in blk.xyxy]

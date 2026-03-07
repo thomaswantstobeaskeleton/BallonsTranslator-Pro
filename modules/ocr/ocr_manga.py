@@ -1,7 +1,7 @@
 # modified from https://github.com/kha-white/manga-ocr/blob/master/manga_ocr/ocr.py
 import re
 import jaconv
-from transformers import AutoFeatureExtractor, AutoTokenizer, VisionEncoderDecoderModel
+from transformers import AutoTokenizer, VisionEncoderDecoderModel
 import numpy as np
 import torch
 from typing import List
@@ -9,11 +9,50 @@ from typing import List
 from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBlock
 
 MANGA_OCR_PATH = r'data/models/manga-ocr-base'
+
+
+def _load_image_processor(pretrained_model_name_or_path, encoder_config=None):
+    """Load image processor for manga-ocr. Prefer AutoImageProcessor (transformers 4.x+), fallback to AutoFeatureExtractor or encoder-based."""
+    try:
+        from transformers import AutoImageProcessor
+        return AutoImageProcessor.from_pretrained(pretrained_model_name_or_path)
+    except Exception:
+        pass
+    try:
+        from transformers import AutoFeatureExtractor
+        return AutoFeatureExtractor.from_pretrained(pretrained_model_name_or_path)
+    except Exception:
+        pass
+    try:
+        from transformers import ViTImageProcessor
+        return ViTImageProcessor.from_pretrained(pretrained_model_name_or_path)
+    except Exception:
+        pass
+    if encoder_config is not None:
+        try:
+            from transformers import ViTImageProcessor
+            size = getattr(encoder_config, "image_size", 224)
+            if isinstance(size, (list, tuple)):
+                size = size[0] if size else 224
+            return ViTImageProcessor(size=size)
+        except Exception:
+            pass
+    raise ValueError(
+        "Could not load manga-ocr image processor. Ensure data/models/manga-ocr-base contains "
+        "preprocessor_config.json or config.json. Try re-downloading the model."
+    )
+
+
 class MangaOcr:
     def __init__(self, pretrained_model_name_or_path=MANGA_OCR_PATH, device='cpu'):
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(pretrained_model_name_or_path)
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
         self.model = VisionEncoderDecoderModel.from_pretrained(pretrained_model_name_or_path)
+        try:
+            self.feature_extractor = _load_image_processor(pretrained_model_name_or_path)
+        except ValueError:
+            self.feature_extractor = _load_image_processor(
+                pretrained_model_name_or_path, encoder_config=self.model.encoder.config
+            )
         self.to(device)
         
     def to(self, device):
@@ -88,6 +127,10 @@ class MangaOCR(OCRBase):
             pass
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if pad > 0:
                 x1a = max(0, x1 - pad)
                 y1a = max(0, y1 - pad)

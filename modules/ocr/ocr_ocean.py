@@ -374,6 +374,10 @@ if _OCEAN_AVAILABLE:
                     blk.text = text_parts if text_parts else [""]
                     continue
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 if pad > 0:
                     x1 = max(0, x1 - pad)
                     y1 = max(0, y1 - pad)
@@ -395,6 +399,23 @@ if _OCEAN_AVAILABLE:
                     )
                     blk.text = [""]
                     continue
+                h, w = crop.shape[:2]
+                # Tall single-line crop: run OCR on horizontal strips so multi-line bubbles get full text
+                strip_min_height = 40
+                if h > 1.3 * w and h >= strip_min_height:
+                    strip_height = max(min_side, int(h / max(1, int(h / (w * 0.8)))))
+                    text_parts = []
+                    for sy in range(0, h, max(1, strip_height // 2)):
+                        strip = crop[sy : sy + strip_height]
+                        if strip.shape[0] < min_side:
+                            continue
+                        pil_strip = _cv2_to_pil_rgb(strip)
+                        line_text = self._run_one(pil_strip)
+                        if line_text and line_text.strip():
+                            text_parts.append(line_text.strip())
+                    if text_parts:
+                        blk.text = text_parts
+                        continue
                 pil_img = _cv2_to_pil_rgb(crop)
                 text = self._run_one(pil_img)
                 blk.text = [text if text else ""]

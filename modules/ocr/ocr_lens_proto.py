@@ -525,6 +525,10 @@ class OCRLensAPI_exp(OCRBase):
             )
         for i, blk in enumerate(blk_list):
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if self.debug_mode > 1:
                 self.logger.debug(
                     f"Processing block {i+1}/{len(blk_list)}: ({x1, y1, x2, y2})"
@@ -537,23 +541,23 @@ class OCRLensAPI_exp(OCRBase):
                 try:
                     cropped_img = img[y1c:y2c, x1c:x2c]
                     if cropped_img.size > 0:
-                        blk.text = self.ocr(cropped_img)
+                        blk.text = [self.ocr(cropped_img)]
                     else:
                         if self.debug_mode:
                             self.logger.warning(f"Empty cropped image for block {i+1}.")
-                        blk.text = ""
+                        blk.text = [""]
                 except Exception as crop_err:
                     self.logger.error(
                         f"Error cropping/processing block {i+1}: {crop_err}",
                         exc_info=self.debug_mode,
                     )
-                    blk.text = ""
+                    blk.text = [""]
             else:
                 if self.debug_mode:
                     self.logger.warning(
                         f"Invalid/zero-area bbox {blk.xyxy} (clamped: {x1c,y1c,x2c,y2c})"
                     )
-                blk.text = ""
+                blk.text = [""]
 
     def _apply_no_uppercase(self, text: str) -> str:
         """Applies lowercase except for first letter of sentences."""

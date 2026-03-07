@@ -553,6 +553,10 @@ class LLM_OCR(OCRBase):
         prompt = prompt_tmpl.format(target_language=str(target_lang))
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if 0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h:
                 cropped_img = img[y1:y2, x1:x2]
                 cropped_img = preprocess_for_ocr(cropped_img, recipe="none", upscale_min_side=upscale_min)
@@ -587,6 +591,10 @@ class LLM_OCR(OCRBase):
                 pass
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if 0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h:
                 cropped_img = img[y1:y2, x1:x2]
                 cropped_img = preprocess_for_ocr(cropped_img, recipe="none", upscale_min_side=upscale_min)

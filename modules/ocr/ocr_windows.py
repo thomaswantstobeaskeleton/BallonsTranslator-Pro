@@ -67,9 +67,12 @@ if platform.system() == 'Windows' and platform.version() >= '10.0.10240.0':
                     im_h, im_w = img.shape[:2]
                     for blk in blk_list:
                         x1, y1, x2, y2 = blk.xyxy
-                        if y2 < im_h and x2 < im_w and \
-                            x1 > 0 and y1 > 0 and x1 < x2 and y1 < y2: 
-                            blk.text = self.engine(img[y1:y2, x1:x2])
+                        x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                        y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                        x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                        y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
+                        if y2 <= im_h and x2 <= im_w and x1 < x2 and y1 < y2:
+                            blk.text = [self.engine(img[y1:y2, x1:x2])]
                         else:
                             self.logger.warning('invalid textbbox to target img')
                             blk.text = ['']

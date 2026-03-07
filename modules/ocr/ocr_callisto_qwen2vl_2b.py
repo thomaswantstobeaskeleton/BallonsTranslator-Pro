@@ -175,6 +175,10 @@ def _make_vlm_2b_ocr(module_key: str, model_id: str, description_short: str):
                     pass
             for blk in blk_list:
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
                 x2, y2 = min(im_w, x2 + pad), min(im_h, y2 + pad)
                 if not (x1 < x2 and y1 < y2):

@@ -76,7 +76,12 @@ def _split_block_by_image_gap(
     """If the block appears to span two regions (e.g. two bubbles), split by vertical gap in the crop. Returns [blk] if no split."""
     if split_textblock is None:
         return [blk]
+    im_h, im_w = img.shape[:2]
     x1, y1, x2, y2 = blk.xyxy
+    x1 = max(0, min(int(round(float(x1))), im_w - 1))
+    y1 = max(0, min(int(round(float(y1))), im_h - 1))
+    x2 = max(x1, min(int(round(float(x2))), im_w - 1))
+    y2 = max(y1, min(int(round(float(y2))), im_h - 1))
     bw, bh = x2 - x1, y2 - y1
     if bh < min_block_height or bw < 30:
         return [blk]

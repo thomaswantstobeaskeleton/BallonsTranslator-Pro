@@ -123,6 +123,10 @@ if _MINICPM_AVAILABLE:
                 pass
             for blk in blk_list:
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 x1 = max(0, x1 - padding)
                 y1 = max(0, y1 - padding)
                 x2 = min(im_w, x2 + padding)
@@ -132,6 +136,10 @@ if _MINICPM_AVAILABLE:
                     continue
                 crop = img[y1:y2, x1:x2]
                 if crop.size == 0:
+                    blk.text = [""]
+                    continue
+                min_side = 24
+                if crop.shape[0] < min_side or crop.shape[1] < min_side:
                     blk.text = [""]
                     continue
                 pil_crop = _cv2_to_pil_rgb(crop)

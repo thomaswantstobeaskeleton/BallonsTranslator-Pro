@@ -269,6 +269,8 @@ class ProgramConfig(Config):
     saladict_shortcut: str = "Alt+S"
     search_url: str = "https://www.google.com/search?q="
     ocr_sublist: List = field(default_factory=lambda: list())
+    # When True, after OCR any block whose recognized text is empty is REMOVED from the page (mask/inpaint restored).
+    # Turn OFF to keep all text boxes even when OCR returns nothing (avoids "deleting" boxes when OCR fails or returns 1 char).
     restore_ocr_empty: bool = False
     pre_mt_sublist: List = field(default_factory=lambda: list())
     mt_sublist: List = field(default_factory=lambda: list())

@@ -101,13 +101,31 @@ def _parse_rec_output_all(rec_out) -> List[tuple]:
     results = []
     try:
         items = []
-        if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
-            items = list(rec_out[0])
+        if isinstance(rec_out, tuple) and rec_out[0] is not None:
+            first = rec_out[0]
+            if isinstance(first, (list, tuple)) and len(first) > 0:
+                items = list(first)
+            elif isinstance(first, str):
+                # Single string (e.g. full text or one line): split by newlines so multi-line crop becomes multiple lines
+                for line in first.strip().splitlines():
+                    line = line.strip()
+                    if line or not results:
+                        results.append((line, 0.0))
+                if results:
+                    return results
+                items = []
         elif hasattr(rec_out, "txts") and rec_out.txts:
             scores = getattr(rec_out, "scores", None) or [0.0] * len(rec_out.txts)
             for i, txt in enumerate(rec_out.txts):
-                results.append((str(txt).strip() if txt else "", float(scores[i]) if i < len(scores) else 0.0))
-            return results
+                txt_str = str(txt).strip() if txt else ""
+                if "\n" in txt_str:
+                    for line in txt_str.splitlines():
+                        line = line.strip()
+                        if line or not results:
+                            results.append((line, float(scores[i]) if i < len(scores) else 0.0))
+                else:
+                    results.append((txt_str, float(scores[i]) if i < len(scores) else 0.0))
+            return results if results else [("", 0.0)]
         elif isinstance(rec_out, list) and len(rec_out) > 0:
             items = rec_out if isinstance(rec_out[0], (list, tuple)) else [rec_out]
         if not items:
@@ -117,8 +135,13 @@ def _parse_rec_output_all(rec_out) -> List[tuple]:
                 text, score = _item_to_text_score(item)
             else:
                 text, score = str(item).strip(), 0.0
-            if text or score > 0:
-                results.append((str(text).strip() if text else "", float(score)))
+            if "\n" in text:
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line or not results:
+                        results.append((line, score))
+            elif text or score > 0:
+                results.append((str(text).strip(), float(score)))
     except (ValueError, TypeError, IndexError):
         if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
             item = rec_out[0][0]
@@ -304,12 +327,20 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                         y2 = min(im_h, int(max(ys)) + pad)
                     else:
                         x1, y1, x2, y2 = blk.xyxy
+                        x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                        y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                        x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                        y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                         x1 = max(0, x1 - pad)
                         y1 = max(0, y1 - pad)
                         x2 = min(im_w, x2 + pad)
                         y2 = min(im_h, y2 + pad)
                 else:
                     x1, y1, x2, y2 = blk.xyxy
+                    x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                    y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                    x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                    y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                     x1 = max(0, x1 - pad)
                     y1 = max(0, y1 - pad)
                     x2 = min(im_w, x2 + pad)
@@ -330,6 +361,34 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                 crop = preprocess_for_ocr(crop, recipe=recipe, upscale_min_side=upscale_min_side)
                 if crop.ndim == 2:
                     crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2RGB)
+                # For tall single-line crops, run OCR on horizontal strips to get multiple lines (rec often returns one line per crop).
+                crop_h, crop_w = crop.shape[:2]
+                min_strip_height = 20
+                if crop_h >= min_strip_height and crop_h > 1.3 * crop_w and crop_h > 40:
+                    strip_height = max(min_strip_height, crop_h // 3)
+                    overlap = max(0, strip_height // 4)
+                    text_parts = []
+                    y0 = 0
+                    while y0 < crop_h:
+                        y1_strip = min(y0 + strip_height, crop_h)
+                        strip = crop[y0:y1_strip, :]
+                        if strip.size == 0:
+                            y0 = y1_strip
+                            continue
+                        try:
+                            rec_out = self.rec_engine(strip)
+                        except Exception as e:
+                            self.logger.debug("RapidOCR rec failed on strip: %s", e)
+                            y0 = y1_strip
+                            continue
+                        line_text, line_score = _parse_rec_output(rec_out)
+                        if min_conf > 0 and line_score < min_conf:
+                            line_text = ""
+                        if line_text or not text_parts:
+                            text_parts.append(line_text if line_text else "")
+                        y0 = y1_strip - overlap if y1_strip < crop_h else crop_h
+                    blk.text = text_parts if text_parts else [""]
+                    continue
                 try:
                     rec_out = self.rec_engine(crop)
                 except Exception as e:

@@ -1043,6 +1043,15 @@ def collect_textblock_regions(img: np.ndarray, textblk_lst: List[TextBlock], tex
     regions = []
     textblk_lst_indices = []
     for blk_idx, textblk in enumerate(textblk_lst):
+        # If detector left blocks with xyxy but no lines, derive one line so OCR runs at least once per block
+        if len(textblk) == 0:
+            try:
+                bx1, by1, bx2, by2 = textblk.xyxy
+                if bx2 > bx1 and by2 > by1:
+                    xywh = np.array([[bx1, by1, bx2 - bx1, by2 - by1]])
+                    textblk.lines = xywh2xyxypoly(xywh).reshape(-1, 4, 2).tolist()
+            except Exception:
+                continue
         for ii in range(len(textblk)):
             if split_textblk and len(textblk) == 1:
                 seg_func = canny_flood

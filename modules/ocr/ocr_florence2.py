@@ -161,6 +161,10 @@ if _FLORENCE2_AVAILABLE:
                 pass
             for blk in blk_list:
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 x1 = max(0, x1 - padding)
                 y1 = max(0, y1 - padding)
                 x2 = min(im_w, x2 + padding)

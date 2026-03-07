@@ -20,6 +20,7 @@ import cv2
 import re
 
 from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBlock
+from utils.ocr_preprocess import preprocess_for_ocr
 
 # Specify the path for storing PaddleOCR models
 PADDLE_OCR_PATH = os.path.join("data", "models", "paddle-ocr")
@@ -114,8 +115,8 @@ if PADDLE_OCR_AVAILABLE:
             "language": {
                 "type": "selector",
                 "options": list(lang_map.keys()),
-                "value": "English",  # Default language
-                "description": "Select the language for OCR",
+                "value": "Chinese & English",  # Better default for manga/manhua; use English only for pure Latin text
+                "description": "Select the language for OCR. Use \"Chinese & English\" or \"Japanese\" for manga in those languages; \"English\" alone often yields single-character or wrong results.",
             },
             "device": DEVICE_SELECTOR(),
             "use_angle_cls": {
@@ -158,6 +159,11 @@ if PADDLE_OCR_AVAILABLE:
                 "value": "As Recognized",
                 "description": "Text output format",
             },
+            "crop_padding": {
+                "type": "line_editor",
+                "value": 4,
+                "description": "Pixels to add around each crop (0–24). Like Ocean OCR; helps recognizer see full text.",
+            },
         }
 
         device = DEFAULT_DEVICE
@@ -174,6 +180,7 @@ if PADDLE_OCR_AVAILABLE:
             self.drop_score = self.params["drop_score"]["value"]
             self.text_case = self.params["text_case"]["value"]
             self.output_format = self.params["output_format"]["value"]
+            self.crop_padding = max(0, min(24, int(self.params.get("crop_padding", {}).get("value", 4) or 4)))
             self.model = None
             self._setup_logging()
             self._load_model()
@@ -244,57 +251,95 @@ if PADDLE_OCR_AVAILABLE:
             self, img: np.ndarray, blk_list: List[TextBlock], *args, **kwargs
         ):
             im_h, im_w = img.shape[:2]
+            upscale_min_side = 0
+            try:
+                from utils.config import pcfg
+                upscale_min_side = int(getattr(pcfg.module, "ocr_upscale_min_side", 0) or 0)
+            except Exception:
+                pass
+            # Ensure very small crops are upscaled so recognizer can work (Ocean uses min 24px; Paddle benefits from 32+)
+            if upscale_min_side <= 0:
+                upscale_min_side = 32
+            pad = getattr(self, "crop_padding", 4) or 0
+            pad = max(0, min(24, int(pad)))
             for blk in blk_list:
+                # Per-line cropping when block has multiple lines (like Ocean) – better results than one big crop
+                if getattr(blk, "lines", None) and len(blk.lines) > 1:
+                    text_parts = []
+                    for line_pts in blk.lines:
+                        if not isinstance(line_pts, (list, tuple)) or len(line_pts) < 4:
+                            continue
+                        xs = [p[0] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        ys = [p[1] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        if not xs or not ys:
+                            continue
+                        x1 = max(0, int(min(xs)) - pad)
+                        y1 = max(0, int(min(ys)) - pad)
+                        x2 = min(im_w, int(max(xs)) + pad)
+                        y2 = min(im_h, int(max(ys)) + pad)
+                        if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
+                            text_parts.append("")
+                            continue
+                        cropped_img = img[y1:y2, x1:x2]
+                        if cropped_img.size == 0:
+                            text_parts.append("")
+                            continue
+                        cropped_img = np.ascontiguousarray(cropped_img)
+                        cropped_img = preprocess_for_ocr(cropped_img, recipe="none", upscale_min_side=upscale_min_side)
+                        t = self._run_one_crop(cropped_img)
+                        text_parts.append(t if t else "")
+                    blk.text = text_parts if text_parts else [""]
+                    continue
+                # Single box (or single line)
                 x1, y1, x2, y2 = blk.xyxy
-                if 0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h:
-                    cropped_img = img[y1:y2, x1:x2]
-                    try:
-                        result = self.model.ocr(
-                            cropped_img, det=True, rec=True, cls=self.use_angle_cls
-                        )
-
-                        # Extract raw text from OCR result
-                        raw_texts = []
-                        if (
-                            isinstance(result, list)
-                            and len(result) > 0
-                            and isinstance(result[0], list)
-                        ):
-                            for line in result[0]:
-                                if (
-                                    isinstance(line, list)
-                                    and len(line) > 1
-                                    and isinstance(line[1], (list, tuple))
-                                    and len(line[1]) > 0
-                                ):
-                                    raw_texts.append(line[1][0])
-                        raw_text = " ".join(raw_texts)
-
-                        if self.debug_mode:
-                            self.logger.debug(
-                                f"Raw OCR text from block ({x1}, {y1}, {x2}, {y2}): {raw_text}"
-                            )
-
-                        # Process the OCR result
-                        text = self._process_result(result)
-
-                        if self.debug_mode:
-                            self.logger.debug(
-                                f"Processed text from block ({x1}, {y1}, {x2}, {y2}): {text}"
-                            )
-
-                        blk.text = [text] if text else [""]
-
-                    except Exception as e:
-                        if self.debug_mode:
-                            self.logger.error(f"Error recognizing block: {str(e)}")
-                        blk.text = [""]
-                else:
-                    if self.debug_mode:
-                        self.logger.warning(
-                            "Invalid text block coordinates for target image"
-                        )
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
+                if pad > 0:
+                    x1 = max(0, x1 - pad)
+                    y1 = max(0, y1 - pad)
+                    x2 = min(im_w, x2 + pad)
+                    y2 = min(im_h, y2 + pad)
+                if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
                     blk.text = [""]
+                    continue
+                cropped_img = img[y1:y2, x1:x2]
+                if cropped_img.size == 0:
+                    blk.text = [""]
+                    continue
+                cropped_img = np.ascontiguousarray(cropped_img)
+                cropped_img = preprocess_for_ocr(
+                    cropped_img, recipe="none", upscale_min_side=upscale_min_side
+                )
+                try:
+                    text = self._run_one_crop(cropped_img)
+                    blk.text = [text] if text else [""]
+                except Exception as e:
+                    if self.debug_mode:
+                        self.logger.error(f"Error recognizing block: {str(e)}")
+                    blk.text = [""]
+
+        def _run_one_crop(self, cropped_img: np.ndarray) -> str:
+            """Run Paddle OCR on one crop (det+rec then rec-only fallback). Returns recognized text or empty string."""
+            try:
+                result = self.model.ocr(
+                    cropped_img, det=True, rec=True, cls=self.use_angle_cls
+                )
+                text = self._process_result(result)
+                if not (text and text.strip()):
+                    try:
+                        result_rec = self.model.ocr(
+                            cropped_img, det=False, rec=True, cls=self.use_angle_cls
+                        )
+                        text = self._process_result(result_rec) or self._process_result_rec_only(result_rec)
+                    except Exception:
+                        pass
+                return text.strip() if text else ""
+            except Exception as e:
+                if self.debug_mode:
+                    self.logger.error(f"Paddle OCR crop failed: {str(e)}")
+                return ""
 
         def _process_result(self, result):
             try:
@@ -319,36 +364,53 @@ if PADDLE_OCR_AVAILABLE:
                         text = line[1][0]
                         raw_texts.append(text)
 
-                # Depending on the output_format, we concatenate the lines
-                if self.output_format == "Single Line":
-                    joined_text = " ".join(raw_texts)
-                    # Text cleaning
-                    joined_text = re.sub(r"-(?!\w)", "", joined_text)
-                    joined_text = re.sub(r"\s+", " ", joined_text)
-                elif self.output_format == "As Recognized":
-                    joined_text = " ".join(
-                        raw_texts
-                    )  # Combine with spaces to create a single text
-                    # Clean up text, preserve line breaks
-                    joined_text = re.sub(r"-(?!\w)", "", joined_text)
-                    joined_text = re.sub(r"\s+", " ", joined_text)
-                else:
-                    joined_text = " ".join(raw_texts)
-                    joined_text = re.sub(r"-(?!\w)", "", joined_text)
-                    joined_text = re.sub(r"\s+", " ", joined_text)
-
-                # Apply case conversion to all text
-                processed_text = self._apply_text_case(joined_text)
-                processed_text = self._apply_punctuation_and_spacing(processed_text)
-
-                if self.debug_mode:
-                    self.logger.debug(f"Final processed text: {processed_text}")
-
-                return processed_text
+                return self._join_and_clean(raw_texts)
             except Exception as e:
                 if self.debug_mode:
                     self.logger.error(f"Error processing OCR result: {str(e)}")
                 return ""
+
+        def _process_result_rec_only(self, result):
+            """Parse result from ocr(..., det=False) which can be (text, conf) or [[(box, (text, conf))]] etc."""
+            if not result:
+                return ""
+            try:
+                # Single tuple (text, conf) from some Paddle versions
+                if isinstance(result, (list, tuple)) and len(result) >= 2:
+                    if isinstance(result[0], (int, float)) and isinstance(result[1], str):
+                        return self._join_and_clean([result[1]])
+                    if isinstance(result[0], str):
+                        return self._join_and_clean([result[0]])
+                # Nested list: [[(box, (text, conf))]] or [(text, conf)]
+                flat = result[0] if isinstance(result, list) and result and isinstance(result[0], list) else result
+                if not isinstance(flat, list):
+                    flat = [flat]
+                raw = []
+                for line in flat:
+                    if isinstance(line, (list, tuple)) and len(line) >= 2:
+                        a, b = line[0], line[1]
+                        if isinstance(b, (list, tuple)) and len(b) > 0:
+                            raw.append(str(b[0]))
+                        elif isinstance(a, str):
+                            raw.append(a)
+                        elif isinstance(b, str):
+                            raw.append(b)
+                return self._join_and_clean(raw) if raw else ""
+            except Exception:
+                return ""
+
+        def _join_and_clean(self, raw_texts):
+            if not raw_texts:
+                return ""
+            if self.output_format == "Single Line":
+                joined_text = " ".join(raw_texts)
+            else:
+                joined_text = " ".join(raw_texts)
+            joined_text = re.sub(r"-(?!\w)", "", joined_text)
+            joined_text = re.sub(r"\s+", " ", joined_text)
+            processed_text = self._apply_text_case(joined_text)
+            processed_text = self._apply_punctuation_and_spacing(processed_text)
+            return processed_text.strip()
 
         def _apply_text_case(self, text: str) -> str:
             if self.text_case == "Uppercase":
@@ -407,6 +469,8 @@ if PADDLE_OCR_AVAILABLE:
                 self.text_case = self.params["text_case"]["value"]
             elif param_key == "output_format":
                 self.output_format = self.params["output_format"]["value"]
+            elif param_key == "crop_padding":
+                self.crop_padding = max(0, min(24, int(self.params.get("crop_padding", {}).get("value", 4) or 4)))
 
 else:
     # If PaddleOCR is not installed, you can define a stub or alternative module

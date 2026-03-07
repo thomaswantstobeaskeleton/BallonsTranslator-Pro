@@ -179,17 +179,21 @@ class OCRGoogleVisionAPI(OCRBase):
             self.logger.debug(f'Image dimensions: {im_h}x{im_w}')
         for blk in blk_list:
             x1, y1, x2, y2 = blk.xyxy
+            x1 = max(0, min(int(round(float(x1))), im_w - 1))
+            y1 = max(0, min(int(round(float(y1))), im_h - 1))
+            x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+            y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
             if self.debug_mode:
                 self.logger.debug(f'Processing block: ({x1}, {y1}, {x2}, {y2})')
-            if y2 < im_h and x2 < im_w and x1 >= 0 and y1 >= 0 and x1 < x2 and y1 < y2:
+            if x1 < x2 and y1 < y2:
                 cropped_img = img[y1:y2, x1:x2]
                 if self.debug_mode:
                     self.logger.debug(f'Cropped image dimensions: {cropped_img.shape}')
-                blk.text = self.ocr(cropped_img)
+                blk.text = [self.ocr(cropped_img)]
             else:
                 if self.debug_mode:
                     self.logger.warning('Invalid text block coordinates')
-                blk.text = ''
+                blk.text = ['']
 
     def ocr_img(self, img: np.ndarray) -> str:
         return self.ocr(img)

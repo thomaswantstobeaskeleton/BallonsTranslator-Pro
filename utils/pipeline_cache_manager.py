@@ -153,7 +153,10 @@ class PipelineCacheManager:
                 cached, blk, tolerance_px, tolerance_angle
             )
             if text_lines is not None and isinstance(text_lines, list):
-                blk.text = list(text_lines)
+                # Keep list-of-lines shape; ensure each line is a string (cache consistency with normalize_block_text).
+                blk.text = [str(ln).strip() if ln is not None else "" for ln in text_lines]
+                if not blk.text:
+                    blk.text = [""]
 
     def cache_ocr_results(
         self,

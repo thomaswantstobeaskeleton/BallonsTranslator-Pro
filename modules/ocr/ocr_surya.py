@@ -283,6 +283,10 @@ if _SURYA_AVAILABLE:
             indices = []
             for idx, blk in enumerate(blk_list):
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
                     blk.text = [""]
                     continue

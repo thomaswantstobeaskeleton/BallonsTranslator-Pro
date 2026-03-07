@@ -105,6 +105,7 @@ if _QWEN3VL_AVAILABLE:
             self._device_for_inputs = None
 
         def _load_model(self):
+            import torch
             model_name = (self.params.get("model_name") or {}).get("value", QWEN3VL_MODEL_OPTIONS[0]) or QWEN3VL_MODEL_OPTIONS[0]
             dev = (self.params.get("device") or {}).get("value", "cpu")
             if dev in ("cuda", "gpu") and torch.cuda.is_available():
@@ -131,7 +132,7 @@ if _QWEN3VL_AVAILABLE:
             attn_impl = (self.params.get("attn_implementation") or {}).get("value", "sdpa") or "sdpa"
             if attn_impl == "flash_attention_2":
                 try:
-                    import torch.utils.checkpoint
+                    import torch.utils.checkpoint as _  # noqa: F401 - ensure flash_attn path is loadable
                 except Exception:
                     attn_impl = "sdpa"
             self.processor = AutoProcessor.from_pretrained(model_name)
@@ -214,6 +215,10 @@ if _QWEN3VL_AVAILABLE:
                     pass
             for blk in blk_list:
                 x1, y1, x2, y2 = blk.xyxy
+                x1 = max(0, min(int(round(float(x1))), im_w - 1))
+                y1 = max(0, min(int(round(float(y1))), im_h - 1))
+                x2 = max(x1 + 1, min(int(round(float(x2))), im_w))
+                y2 = max(y1 + 1, min(int(round(float(y2))), im_h))
                 x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
                 x2, y2 = min(im_w, x2 + pad), min(im_h, y2 + pad)
                 if not (x1 < x2 and y1 < y2):
