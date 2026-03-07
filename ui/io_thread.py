@@ -312,6 +312,21 @@ class MergeThread(ThreadBase):
         self.merge_finished.emit(success_count, fail_count)
 
 
+class ModelDownloadThread(QThread):
+    """Background thread for retrying model package downloads (Tools → Retry model downloads)."""
+    finished_with_result = Signal(bool, str)  # success, error_message
+
+    def run(self):
+        try:
+            from modules.prepare_local_files import prepare_local_files_forall
+            prepare_local_files_forall()
+            self.finished_with_result.emit(True, '')
+        except Exception as e:
+            import traceback
+            msg = traceback.format_exc()
+            self.finished_with_result.emit(False, str(e) + '\n\n' + msg)
+
+
 class GitUpdateThread(QThread):
     """Background thread for 'Update from GitHub': fetch and merge remote changes without overwriting local config."""
     finished_with_result = Signal(bool, str)  # success, message

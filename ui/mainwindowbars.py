@@ -575,6 +575,10 @@ class TitleBar(Widget):
         manageModelsAction.setToolTip(self.tr('Check which models are downloaded and download selected models.'))
         self.manage_models_trigger = manageModelsAction.triggered
 
+        retryModelsAction = QAction(self.tr('Retry model downloads'), self)
+        retryModelsAction.setToolTip(self.tr('Retry downloading model packages (e.g. after a failed first install).'))
+        self.retry_models_trigger = retryModelsAction.triggered
+
         toolsMenu = QMenu(self.toolsToolBtn)
         projectMenu = QMenu(self.tr('Project'), self)
         projectMenu.addAction(mergeToolAction)
@@ -594,6 +598,7 @@ class TitleBar(Widget):
         queueMenu.addAction(batchQueueAction)
         modelsMenu = QMenu(self.tr('Models'), self)
         modelsMenu.addAction(manageModelsAction)
+        modelsMenu.addAction(retryModelsAction)
         toolsMenu.addMenu(projectMenu)
         toolsMenu.addMenu(exportMenuTools)
         toolsMenu.addMenu(sourcesMenu)

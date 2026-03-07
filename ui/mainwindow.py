@@ -11,7 +11,7 @@ import time
 import cv2
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap
 
@@ -38,7 +38,7 @@ from .textedit_area import SourceTextEdit, SelectTextMiniMenu, TransTextEdit
 from .drawingpanel import DrawingPanel
 from .scenetext_manager import SceneTextManager, TextPanel, PasteSrcItemsCommand
 from .mainwindowbars import TitleBar, LeftBar, BottomBar
-from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, GitUpdateThread
+from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, GitUpdateThread, ModelDownloadThread
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
 from .textedit_commands import GlobalRepalceAllCommand
@@ -101,6 +101,31 @@ class PageListView(QListWidget):
 
         return super().contextMenuEvent(e)
 
+
+class ModelDownloadProgressDialog(QDialog):
+    """Modal dialog shown while retrying model downloads (Tools → Retry model downloads)."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(parent.tr('Downloading model packages') if parent else 'Downloading model packages')
+        layout = QVBoxLayout(self)
+        self._label = QLabel(parent.tr('Downloading model packages... This may take several minutes.') if parent else 'Downloading model packages... This may take several minutes.')
+        layout.addWidget(self._label)
+        self._bar = QProgressBar(self)
+        self._bar.setRange(0, 0)  # indeterminate
+        layout.addWidget(self._bar)
+        self.setMinimumWidth(360)
+        self._thread = None
+
+    def set_thread(self, thread):
+        self._thread = thread
+
+    def closeEvent(self, event: QCloseEvent):
+        if self._thread is not None and self._thread.isRunning():
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+
 mainwindow_cls = Widget if (shared.HEADLESS or shared.HEADLESS_CONTINUOUS) else FramelessWindow
 class MainWindow(mainwindow_cls):
 
@@ -123,6 +148,7 @@ class MainWindow(mainwindow_cls):
         super().__init__()
         self._batch_cancelled = False
         self._batch_queue_dialog = None
+        self._initial_model_download_done = False
         self._zip_batch = ZipBatchManager()
         self._current_batch_dir = None
 
@@ -849,6 +875,12 @@ class MainWindow(mainwindow_cls):
                 center = max(100, total - left - right_default)
                 self.comicTransSplitter.setSizes([left, center, right_default])
 
+        # Deferred initial model download (launch.py sets DEFER_INITIAL_MODEL_DOWNLOAD so app opens first)
+        if getattr(shared, 'DEFER_INITIAL_MODEL_DOWNLOAD', False) and not self._initial_model_download_done:
+            shared.DEFER_INITIAL_MODEL_DOWNLOAD = False
+            self._initial_model_download_done = True
+            self._run_deferred_model_download()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         reply = QMessageBox.question(
             self,
@@ -965,6 +997,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
+        self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
         self.titleBar.run_preset_full_trigger.connect(self.on_run_preset_full)
         self.titleBar.run_preset_detect_ocr_trigger.connect(self.on_run_preset_detect_ocr)
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
@@ -1495,6 +1528,66 @@ class MainWindow(mainwindow_cls):
     def on_open_manage_models(self):
         """Open the Manage models dialog (check downloaded models, download selected)."""
         dlg = ModelManagerDialog(self)
+        dlg.exec()
+
+    def _run_deferred_model_download(self):
+        """Run initial model download after window is shown (set by launch.py so app opens first)."""
+        package_ids = getattr(pcfg, 'model_packages_enabled', None)
+        if package_ids is not None and len(package_ids) == 0:
+            return
+        dlg = ModelDownloadProgressDialog(self)
+        thread = ModelDownloadThread(self)
+        dlg.set_thread(thread)
+
+        def on_finished(success: bool, message: str):
+            dlg.accept()
+            if success:
+                create_info_dialog({
+                    'title': self.tr('Download complete.'),
+                    'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
+                })
+            else:
+                tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
+                create_error_dialog(
+                    Exception(message),
+                    self.tr('Model download failed. You can retry from Tools → Retry model downloads.') + '\n\n' + tip,
+                    'ModelDownloadThread'
+                )
+
+        thread.finished_with_result.connect(on_finished)
+        thread.start()
+        dlg.exec()
+
+    def on_retry_model_downloads(self):
+        """Retry downloading model packages (Tools → Retry model downloads). Useful when first-run download failed."""
+        package_ids = getattr(pcfg, 'model_packages_enabled', None)
+        if package_ids is not None and len(package_ids) == 0:
+            create_info_dialog({
+                'title': self.tr('No model packages selected.'),
+                'text': self.tr('Use Tools → Manage models to download individual models, or restart the app to choose packages again.'),
+            })
+            return
+        dlg = ModelDownloadProgressDialog(self)
+        thread = ModelDownloadThread(self)
+        dlg.set_thread(thread)
+
+        def on_finished(success: bool, message: str):
+            dlg.accept()
+            if success:
+                create_info_dialog({
+                    'title': self.tr('Download complete.'),
+                    'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
+                })
+            else:
+                tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
+                create_error_dialog(
+                    Exception(message),
+                    self.tr('Model download failed. You can retry from Tools → Retry model downloads.') + '\n\n' + tip,
+                    'ModelDownloadThread'
+                )
+
+        thread.finished_with_result.connect(on_finished)
+        thread.start()
         dlg.exec()
 
     def run_merge_task(self, on_current=False):
