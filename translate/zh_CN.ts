@@ -171,9 +171,247 @@
         <source>Squeeze</source>
         <translation>收缩</translation>
     </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1011"/>
+        <source>Edit</source>
+        <translation>编辑</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1020"/>
+        <source>Copy translation</source>
+        <translation>复制译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1023"/>
+        <source>Paste translation</source>
+        <translation>粘贴译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1046"/>
+        <source>Clear source text</source>
+        <translation>清空原文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1049"/>
+        <source>Clear translation</source>
+        <translation>清空译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1054"/>
+        <source>Select all text boxes</source>
+        <translation>全选文本框</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1065"/>
+        <source>Text</source>
+        <translation>文本</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1066"/>
+        <source>Spell check source text</source>
+        <translation>拼写检查原文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1069"/>
+        <source>Spell check translation</source>
+        <translation>拼写检查译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1072"/>
+        <source>Trim whitespace</source>
+        <translation>修剪空白</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1075"/>
+        <source>To uppercase</source>
+        <translation>转为大写</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1078"/>
+        <source>To lowercase</source>
+        <translation>转为小写</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1081"/>
+        <source>Toggle strikethrough</source>
+        <translation>切换删除线</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1084"/>
+        <source>Gradient type</source>
+        <translation>渐变类型</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1085"/>
+        <source>Linear</source>
+        <translation>线性</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1086"/>
+        <source>Radial</source>
+        <translation>径向</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1089"/>
+        <source>Text on path</source>
+        <translation>路径文字</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1090"/>
+        <source>None</source>
+        <translation>无</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1099"/>
+        <source>Block</source>
+        <translation>块</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1100"/>
+        <source>Create text box</source>
+        <translation>创建文本框</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1101"/>
+        <source>Add a new text box at the right-click position (default size). Or right-click and drag to set size.</source>
+        <translation>在右键位置添加新文本框（默认大小）。或右键拖动以设置大小。</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1105"/>
+        <source>Merge selected blocks</source>
+        <translation>合并选中块</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1109"/>
+        <source>Split selected region(s)</source>
+        <translation>拆分选中区域</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1112"/>
+        <source>Move block(s) up</source>
+        <translation>块上移</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1116"/>
+        <source>Move block(s) down</source>
+        <translation>块下移</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1124"/>
+        <source>Image / Overlay</source>
+        <translation>图像 / 叠加</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1125"/>
+        <source>Import Image</source>
+        <translation>导入图片</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1129"/>
+        <source>Clear overlay image</source>
+        <translation>清除叠加图</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1138"/>
+        <source>Transform</source>
+        <translation>变换</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1139"/>
+        <source>Free Transform</source>
+        <translation>自由变换</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1144"/>
+        <source>Reset warp</source>
+        <translation>重置变形</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1148"/>
+        <source>Warp preset</source>
+        <translation>变形预设</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1149"/>
+        <source>Arc Up</source>
+        <translation>上弧</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1150"/>
+        <source>Arc Down</source>
+        <translation>下弧</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1151"/>
+        <source>Arch</source>
+        <translation>拱形</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1152"/>
+        <source>Flag</source>
+        <translation>旗帜</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1159"/>
+        <source>Order</source>
+        <translation>顺序</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1160"/>
+        <source>Bring to front</source>
+        <translation>置于顶层</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1163"/>
+        <source>Send to back</source>
+        <translation>置于底层</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1171"/>
+        <source>Format</source>
+        <translation>格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1178"/>
+        <source>Auto fit font size to box</source>
+        <translation>字号自动适应框</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1180"/>
+        <source>Scale font size so text fits the selected text box(es). Use after changing font.</source>
+        <translation>缩放字号使文字适应所选文本框。更改字体后使用。</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1195"/>
+        <source>Run</source>
+        <translation>运行</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1196"/>
+        <source>Detect text in region</source>
+        <translation>检测区域内文字</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1199"/>
+        <source>Detect text on page</source>
+        <translation>检测本页文字</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1202"/>
+        <source>Translate</source>
+        <translation>翻译</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1214"/>
+        <source>Inpaint</source>
+        <translation>图像修复</translation>
+    </message>
+    <message>
+        <location filename="../ui/canvas.py" line="1217"/>
+        <source>Configure menu...</source>
+        <translation>配置菜单...</translation>
+    </message>
 </context>
-<context>
-    <name>ConfigPanel</name>
     <message>
         <location filename="../ui/configpanel.py" line="354"/>
         <source>Text Detection</source>
@@ -439,9 +677,533 @@
         <source>Show only custom fonts</source>
         <translation>只显示 fonts 文件夹下的字体</translation>
     </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="424"/>
+        <source>Default (use module default)</source>
+        <translation>默认（使用模块默认）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="429"/>
+        <source>Default device</source>
+        <translation>默认设备</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="429"/>
+        <source>Preferred device for DL modules when set to Default.</source>
+        <translation>设为默认时，DL 模块优先使用的设备。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="435"/>
+        <source>Release model caches after batch</source>
+        <translation>批处理结束后释放模型缓存</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="436"/>
+        <source>After pipeline finishes (all pages), unload models and clear caches to free RAM. Like "Empty cache after RUN" but only after a full run.</source>
+        <translation>流程全部跑完后卸载模型并清空缓存以释放内存。类似“RUN 后清空缓存”，但仅在完整运行后执行。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="441"/>
+        <source>Skip already translated</source>
+        <translation>跳过已翻译页</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="442"/>
+        <source>Do not call translator for pages where every block already has a translation.</source>
+        <translation>若某页所有块已有译文，则不再调用翻译器。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="447"/>
+        <source>Enable OCR cache</source>
+        <translation>启用 OCR 缓存</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="448"/>
+        <source>Reuse OCR results for the same image/model/language in this session. Reduces redundant OCR runs.</source>
+        <translation>本会话内相同图片/模型/语言复用 OCR 结果，减少重复识别。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="453"/>
+        <source>Auto OCR by source language</source>
+        <translation>按源语言自动选择 OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="454"/>
+        <source>Select OCR module by source language (e.g. Japanese → manga_ocr). Requires language mapping in pipeline.</source>
+        <translation>按源语言选择 OCR 模块（如日语→manga_ocr）。需在流程中配置语言映射。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="459"/>
+        <source>Merge nearby blocks (collision)</source>
+        <translation>合并相邻块（碰撞）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="460"/>
+        <source>Merge detection boxes that are close (collision-based). Use when OCR returns many small boxes.</source>
+        <translation>合并距离较近的检测框（基于碰撞）。OCR 返回很多小框时可使用。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="471"/>
+        <source>Merge gap ratio</source>
+        <translation>合并间隙比例</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="472"/>
+        <source>Vertical expansion ratio for horizontal merge (e.g. 1.5 for typical merge).</source>
+        <translation>水平合并时的纵向扩展比例（如 1.5 用于典型合并）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="481"/>
+        <source>Min blocks to merge</source>
+        <translation>最少合并块数</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="482"/>
+        <source>Only run merge when page has at least this many blocks (avoids merging normal bubble layouts; default 18).</source>
+        <translation>仅当页面至少有这么多块时才执行合并（避免合并正常气泡布局；默认 18）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="492"/>
+        <source>Check / Download module files</source>
+        <translation>检查/下载模块文件</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="493"/>
+        <source>Check and download required model files for all detectors, OCR, inpainters, and translators. Run this if a module fails to load.</source>
+        <translation>检查并下载所有检测器、OCR、修复、翻译所需模型文件。模块加载失败时可运行此项。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="499"/>
+        <source>Off</source>
+        <translation>关</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="501"/>
+        <source>Unload models after idle (minutes)</source>
+        <translation>空闲后卸载模型（分钟）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="501"/>
+        <source>0 = disabled. Unload DL models after N minutes of no Run or canvas activity.</source>
+        <translation>0 = 禁用。在 N 分钟无运行或画布操作后卸载 DL 模型。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="504"/>
+        <source>Image upscaling (Section 6)</source>
+        <translation>图像放大（第 6 节）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="506"/>
+        <source>Initial upscale before detection/OCR</source>
+        <translation>检测/OCR 前初始放大</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="507"/>
+        <source>Upscale page before pipeline (improves small text). Results are scaled back to original size.</source>
+        <translation>流程前放大页面（改善小字）。结果会缩放回原尺寸。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="516"/>
+        <source>Initial upscale factor</source>
+        <translation>初始放大倍数</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="516"/>
+        <source>e.g. 2 = 2x before detection/OCR.</source>
+        <translation>例如 2 = 检测/OCR 前 2 倍。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="519"/>
+        <source>Final upscale when saving result</source>
+        <translation>保存结果时最终放大</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="520"/>
+        <source>Upscale result image when saving (e.g. 2x for nicer export).</source>
+        <translation>保存时放大结果图（如 2 倍以获得更好导出）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="529"/>
+        <source>Final upscale factor</source>
+        <translation>最终放大倍数</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="529"/>
+        <source>e.g. 2 = 2x when saving result.</source>
+        <translation>例如 2 = 保存结果时 2 倍。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="532"/>
+        <source>Auto-scale pipeline params by image area</source>
+        <translation>按图像面积自动缩放流程参数</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="533"/>
+        <source>Scale padding/gaps by image size so settings behave consistently across resolutions.</source>
+        <translation>按图像尺寸缩放边距/间隙，使不同分辨率下设置表现一致。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="539"/>
+        <source>Off</source>
+        <translation>关</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="542"/>
+        <source>OCR crop upscale min side (global)</source>
+        <translation>OCR 裁剪放大最小边（全局）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="542"/>
+        <source>If &gt;0, upscale small crops so longer side &gt;= this before OCR (e.g. 512). Per-OCR params override when set.</source>
+        <translation>若 &gt;0，在 OCR 前将小裁剪图放大使长边 &gt;= 该值（如 512）。单模块设置会覆盖此值。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="546"/>
+        <source>Off</source>
+        <translation>关</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="549"/>
+        <source>Inpaint: spill to disk after N blocks</source>
+        <translation>修复：每 N 块溢出到磁盘</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="549"/>
+        <source>When &gt;0, write intermediate result to temp file every N blocks to reduce peak RAM/VRAM on long pages (e.g. 8 or 12).</source>
+        <translation>当 &gt;0 时，每 N 块将中间结果写入临时文件，以降低长页峰值内存/显存（如 8 或 12）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="393"/>
+        <source>Display</source>
+        <translation>显示</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="395"/>
+        <source>OCR result</source>
+        <translation>OCR 结果</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="398"/>
+        <source>Canvas</source>
+        <translation>画布</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="399"/>
+        <source>Integrations</source>
+        <translation>集成</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="570"/>
+        <source>Reopen last project, confirm before run, recent list limit.</source>
+        <translation>启动时打开上次项目、运行前确认、最近列表数量。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="575"/>
+        <source>Show welcome screen when no project is open</source>
+        <translation>无打开项目时显示欢迎页</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="576"/>
+        <source>On startup, when no project is opened, show the welcome screen to open or create a project (manhua-translator / Komakun style).</source>
+        <translation>启动时若未打开项目，显示欢迎页以打开或创建项目（漫画翻译器 / Komakun 风格）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="581"/>
+        <source>Auto update from GitHub on startup</source>
+        <translation>启动时从 GitHub 自动更新</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="582"/>
+        <source>Check for updates and pull from GitHub when the app starts. Can cause issues or bad results (e.g. merge conflicts, broken code, unexpected behavior). Use only if you understand the risks. Your config and local files are not overwritten.</source>
+        <translation>应用启动时检查更新并从 GitHub 拉取。可能导致问题或异常（如合并冲突、代码损坏、意外行为）。仅在了解风险时使用。配置与本地文件不会被覆盖。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="587"/>
+        <source>Dev mode (show all modules)</source>
+        <translation>开发模式（显示所有模块）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="588"/>
+        <source>Show all modules including experimental or deprecated ones in module lists.</source>
+        <translation>在模块列表中显示所有模块，包括实验性或已弃用的。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="598"/>
+        <source>Recent projects limit (5–30)</source>
+        <translation>最近项目数量（5–30）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="598"/>
+        <source>Maximum number of recent projects in the list.</source>
+        <translation>列表中最近项目的最大数量。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="602"/>
+        <source>Confirm before Run</source>
+        <translation>运行前确认</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="602"/>
+        <source>Show Run / Continue / Cancel dialog when clicking Run.</source>
+        <translation>点击运行时显示 运行/继续/取消 对话框。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="606"/>
+        <source>Manual mode</source>
+        <translation>手动模式</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="607"/>
+        <source>When on, Run processes the current page only (comic-translate style). Useful for step-by-step workflow.</source>
+        <translation>开启后，运行仅处理当前页（漫画翻译风格）。适合逐步工作流。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="612"/>
+        <source>Never</source>
+        <translation>从不</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="613"/>
+        <source>After run: on all pages</source>
+        <translation>运行后：全部页面</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="614"/>
+        <source>After run: on current page only</source>
+        <translation>运行后：仅当前页</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="618"/>
+        <source>After Run: Region merge</source>
+        <translation>运行后：区域合并</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="619"/>
+        <source>Automatically run the Region merge tool after a pipeline run. Uses settings from Tools → Region merge tool.</source>
+        <translation>流程运行后自动执行区域合并工具。使用 工具 → 区域合并工具 中的设置。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="628"/>
+        <source>Dark mode</source>
+        <translation>深色模式</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="629"/>
+        <source>Use dark theme. Restart or toggle View → Dark Mode to apply fully.</source>
+        <translation>使用深色主题。需重启或通过 视图 → 深色模式 切换以完全生效。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="640"/>
+        <source>Bubbly UI</source>
+        <translation>圆角界面</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="641"/>
+        <source>Rounder corners, gradients, softer look. Same as View → Bubbly UI.</source>
+        <translation>更圆角、渐变、柔和外观。与 视图 → 圆角界面 相同。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="651"/>
+        <source>Path to cursor image (.png, .cur)</source>
+        <translation>光标图片路径（.png、.cur）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="654"/>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="663"/>
+        <source>Use custom cursor</source>
+        <translation>使用自定义光标</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="664"/>
+        <source>Use a custom mouse cursor from file. Set path below.</source>
+        <translation>使用文件中的自定义鼠标光标。在下方设置路径。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="672"/>
+        <source>Custom cursor path</source>
+        <translation>自定义光标路径</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="673"/>
+        <source>PNG or CUR file. Applied when "Use custom cursor" is on.</source>
+        <translation>PNG 或 CUR 文件。在“使用自定义光标”开启时生效。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="684"/>
+        <source>Display language</source>
+        <translation>界面语言</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="684"/>
+        <source>UI language. Same as View → Display Language.</source>
+        <translation>界面语言。与 视图 → 界面语言 相同。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="692"/>
+        <source>Config panel font scale (0.8–1.5)</source>
+        <translation>配置面板字体缩放（0.8–1.5）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="692"/>
+        <source>Scale font size in this Config panel. Reopen Config to apply.</source>
+        <translation>缩放本配置面板字体大小。重新打开配置后生效。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="698"/>
+        <source>System default</source>
+        <translation>系统默认</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="699"/>
+        <source>Logical DPI (restart to apply)</source>
+        <translation>逻辑 DPI（需重启生效）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="699"/>
+        <source>0 = use system. Use 96 or 72 if font scaling is wrong.</source>
+        <translation>0 = 使用系统。若字体缩放异常可设为 96 或 72。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="705"/>
+        <source>Auto fit to box</source>
+        <translation>自动适应框</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="706"/>
+        <source>Fixed size (use font size list)</source>
+        <translation>固定大小（使用字号列表）</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="709"/>
+        <source>Text in box</source>
+        <translation>框内文字</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="710"/>
+        <source>How text is fitted in each text box. Auto fit scales font size so text fits the box while keeping line structure (see issue #1077). Fixed size uses the font size list below.</source>
+        <translation>文字在文本框中的适配方式。自动适应会缩放字号使文字贴合框并保持行结构（见 #1077）。固定大小使用下方字号列表。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="714"/>
+        <source>Auto fit: program decides font size so text fits the balloon. Fixed: use the font size list.</source>
+        <translation>自动适应：程序根据气泡决定字号。固定：使用字号列表。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="718"/>
+        <source>decide by program</source>
+        <translation>由程序决定</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="719"/>
+        <source>use global setting</source>
+        <translation>使用全局设置</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="750"/>
+        <source>Default stroke width</source>
+        <translation>默认描边宽度</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="750"/>
+        <source>Global default when "use global setting" is selected for Stroke Size. 0 = no stroke.</source>
+        <translation>描边大小选“使用全局设置”时的全局默认。0 = 无描边。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="757"/>
+        <source>Default stroke color</source>
+        <translation>默认描边颜色</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="757"/>
+        <source>Global default when "use global setting" is selected for Stroke Color.</source>
+        <translation>描边颜色选“使用全局设置”时的全局默认。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="776"/>
+        <source>Auto layout</source>
+        <translation>自动排版</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="777"/>
+        <source>Split translation into multi-lines according to the extracted balloon region.</source>
+        <translation>根据提取的气泡区域将译文分成多行。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="780"/>
+        <source>To uppercase</source>
+        <translation>转为大写</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="783"/>
+        <source>Independent text styles for each projects</source>
+        <translation>每个项目独立字体样式</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="786"/>
+        <source>Show only custom fonts</source>
+        <translation>仅显示自定义字体</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="791"/>
+        <source>Spell check / Auto-correct OCR result</source>
+        <translation>拼写检查 / 自动纠正 OCR 结果</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="792"/>
+        <source>After OCR runs, correct misspelled words using a spell checker when there is a single suggestion (e.g. "teh" → "the"). Requires pyenchant and a system dictionary (e.g. en_US). Enable this in General to auto-correct OCR text.</source>
+        <translation>OCR 运行后，当拼写检查器有单一建议时自动纠正拼写（如 "teh" → "the"）。需要 pyenchant 和系统词典（如 en_US）。在常规中启用以自动纠正 OCR 文本。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="797"/>
+        <source>Result image format</source>
+        <translation>结果图格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="803"/>
+        <source>Quality</source>
+        <translation>质量</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="808"/>
+        <source>WebP lossless</source>
+        <translation>WebP 无损</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="809"/>
+        <source>Use lossless WebP when result format is WebP (ignores quality).</source>
+        <translation>结果格式为 WebP 时使用无损 WebP（忽略质量）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="813"/>
+        <source>Intermediate image format</source>
+        <translation>中间图格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="817"/>
+        <source>Context menu options...</source>
+        <translation>右键菜单选项...</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="818"/>
+        <source>Choose which actions appear in the canvas right-click menu.</source>
+        <translation>选择画布右键菜单中显示的操作。</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="820"/>
+        <source>Right-click menu</source>
+        <translation>右键菜单</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="820"/>
+        <source>Same as View → Context menu options. Show or hide actions in the canvas context menu by category.</source>
+        <translation>与 视图 → 右键菜单选项 相同。按类别显示或隐藏画布右键菜单中的操作。</translation>
+    </message>
 </context>
 <context>
-    <name>DrawingPanel</name>
     <message>
         <location filename="../ui/drawingpanel.py" line="348"/>
         <source>Mask Transparency</source>
@@ -2099,6 +2861,1021 @@ All existing translation results will be cleared!</source>
         <location filename="../ui/mainwindowbars.py" line="68"/>
         <source>Target: </source>
         <translation type="obsolete">目标语言: </translation>
+    </message>
+</context>
+<context>
+    <name>BatchReportDialog</name>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="19"/>
+        <source>Batch report</source>
+        <translation>批处理报告</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="22"/>
+        <source>Status: —</source>
+        <translation>状态：—</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="24"/>
+        <source>Total: —  Skipped: —  Completed: —</source>
+        <translation>总数：—  跳过：—  完成：—</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="28"/>
+        <source>Page</source>
+        <translation>页</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="29"/>
+        <source>Reason</source>
+        <translation>原因</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="30"/>
+        <source>Suggested action</source>
+        <translation>建议操作</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="43"/>
+        <source>Status: No report.</source>
+        <translation>状态：无报告。</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="55"/>
+        <source>Status: {}  Finished: {}</source>
+        <translation>状态：{}  完成时间：{}</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="54"/>
+        <source>Cancelled</source>
+        <translation>已取消</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="54"/>
+        <source>Completed</source>
+        <translation>已完成</translation>
+    </message>
+    <message>
+        <location filename="../ui/batch_report_dialog.py" line="61"/>
+        <source>Total: {}  Skipped: {}  Completed: {}</source>
+        <translation>总数：{}  跳过：{}  完成：{}</translation>
+    </message>
+</context>
+<context>
+    <name>TitleBar</name>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="610"/>
+        <source>Show last batch report</source>
+        <translation>显示上次批处理报告</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="726"/>
+        <source>File</source>
+        <translation>文件</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="772"/>
+        <source>Open Folder ...</source>
+        <translation>打开文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="774"/>
+        <source>Open Images ...</source>
+        <translation>打开图片...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="776"/>
+        <source>Open Project ... *.json</source>
+        <translation>打开项目... *.json</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="781"/>
+        <source>Close project and go to welcome screen</source>
+        <translation>关闭项目并返回欢迎页</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="785"/>
+        <source>Save Project</source>
+        <translation>保存项目</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="789"/>
+        <source>Export</source>
+        <translation>导出</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="790"/>
+        <source>Export as Doc</source>
+        <translation>导出为 Word 文档</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="792"/>
+        <source>Export current page as...</source>
+        <translation>导出当前页为...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="794"/>
+        <source>Export source text as TXT</source>
+        <translation>导出原文为 TXT</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="796"/>
+        <source>Export translation as TXT</source>
+        <translation>导出译文为 TXT</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="798"/>
+        <source>Export source text as markdown</source>
+        <translation>导出原文为 Markdown</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="800"/>
+        <source>Export translation as markdown</source>
+        <translation>导出译文为 Markdown</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="806"/>
+        <source>Import</source>
+        <translation>导入</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="807"/>
+        <source>Import from Doc</source>
+        <translation>从 Word 导入</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="809"/>
+        <source>Import translation from TXT/markdown</source>
+        <translation>从 TXT/Markdown 导入译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="436"/>
+        <source>Keyword substitution for machine translation source text</source>
+        <translation>替换机翻前文本关键字</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="438"/>
+        <source>Keyword substitution for machine translation</source>
+        <translation>替换机翻结果中的关键词</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="440"/>
+        <source>Keyword substitution for source text</source>
+        <translation>替换原文关键词</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="443"/>
+        <source>Translation context (project)...</source>
+        <translation>翻译上下文（项目）...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="446"/>
+        <source>Keyword substitution</source>
+        <translation>关键词替换</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="464"/>
+        <source>Display Language</source>
+        <translation>界面语言</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="478"/>
+        <source>Drawing Board</source>
+        <translation>画板</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="480"/>
+        <source>Text Editor</source>
+        <translation>文本编辑</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="484"/>
+        <source>Spell check panel</source>
+        <translation>拼写检查面板</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="487"/>
+        <source>Keyboard Shortcuts...</source>
+        <translation>键盘快捷键...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="490"/>
+        <source>Context menu options...</source>
+        <translation>右键菜单选项...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="496"/>
+        <source>Light</source>
+        <translation>浅色</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="497"/>
+        <source>Dark</source>
+        <translation>深色</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="508"/>
+        <source>Bubbly UI</source>
+        <translation>圆角界面</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="516"/>
+        <source>Help</source>
+        <translation>帮助</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="517"/>
+        <source>Documentation</source>
+        <translation>文档</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="519"/>
+        <source>About</source>
+        <translation>关于</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="521"/>
+        <source>Update from GitHub</source>
+        <translation>从 GitHub 更新</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="539"/>
+        <source>Theme</source>
+        <translation>主题</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="545"/>
+        <source>Theme &amp; UI customizer...</source>
+        <translation>主题与界面自定义...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="562"/>
+        <source>Region merge tool</source>
+        <translation>区域合并工具</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="592"/>
+        <source>Tools</source>
+        <translation>工具</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="597"/>
+        <source>Re-run detection only</source>
+        <translation>仅重新运行检测</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="599"/>
+        <source>Re-run OCR only</source>
+        <translation>仅重新运行 OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="601"/>
+        <source>Export all pages</source>
+        <translation>导出全部页面</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="604"/>
+        <source>Export all pages as...</source>
+        <translation>导出全部页面为...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="607"/>
+        <source>Check project</source>
+        <translation>检查项目</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="616"/>
+        <source>Manga / Comic source...</source>
+        <translation>漫画来源...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="619"/>
+        <source>Batch queue...</source>
+        <translation>批处理队列...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="631"/>
+        <source>Release model caches</source>
+        <translation>释放模型缓存</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="635"/>
+        <source>Clear OCR and translation caches</source>
+        <translation>清除 OCR 与翻译缓存</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="640"/>
+        <source>Project</source>
+        <translation>项目</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="646"/>
+        <source>Export</source>
+        <translation>导出</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="649"/>
+        <source>Export translation to LPtxt...</source>
+        <translation>导出译文为 LPtxt...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="653"/>
+        <source>Sources</source>
+        <translation>来源</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="655"/>
+        <source>Queue</source>
+        <translation>队列</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="677"/>
+        <source>Pipeline</source>
+        <translation>流程</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="690"/>
+        <source>Run</source>
+        <translation>运行</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="692"/>
+        <source>Translate page</source>
+        <translation>翻译本页</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="693"/>
+        <source>Preset: Full</source>
+        <translation>预设：完整</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="694"/>
+        <source>Preset: Detect + OCR only</source>
+        <translation>预设：仅检测 + OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="695"/>
+        <source>Preset: Translate only</source>
+        <translation>预设：仅翻译</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="696"/>
+        <source>Preset: Inpaint only</source>
+        <translation>预设：仅修复</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="704"/>
+        <source>Pipeline presets</source>
+        <translation>流程预设</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="680"/>
+        <source>Enable Text Dection</source>
+        <translation>启用文本检测</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="681"/>
+        <source>Enable OCR</source>
+        <translation>启用 OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="682"/>
+        <source>Enable Translation</source>
+        <translation>启用翻译</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="683"/>
+        <source>Enable Inpainting</source>
+        <translation>启用修复</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="281"/>
+        <source>Select Directory</source>
+        <translation>选择目录</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="297"/>
+        <source>Comic archives (*.cbz *.zip)</source>
+        <translation>漫画压缩包 (*.cbz *.zip)</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="330"/>
+        <source>Comic RAR archives (*.cbr *.rar)</source>
+        <translation>漫画 RAR 压缩包 (*.cbr *.rar)</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="118"/>
+        <source>Open a comic book archive (.cbz/.zip); extracts to a folder and opens as project.</source>
+        <translation>打开漫画压缩包（.cbz/.zip）；解压到文件夹并作为项目打开。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="122"/>
+        <source>Open a comic book RAR archive (.cbr/.rar). Requires: pip install rarfile; WinRAR/7-Zip in PATH.</source>
+        <translation>打开漫画 RAR 压缩包（.cbr/.rar）。需要：pip install rarfile；PATH 中的 WinRAR/7-Zip。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="137"/>
+        <source>Save current page result image in chosen format (PNG, JPEG, WebP, JXL).</source>
+        <translation>以所选格式（PNG、JPEG、WebP、JXL）保存当前页结果图。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="497"/>
+        <source>Use light theme (Eva Light).</source>
+        <translation>使用浅色主题（Eva Light）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="499"/>
+        <source>Use dark theme (Eva Dark).</source>
+        <translation>使用深色主题（Eva Dark）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="485"/>
+        <source>Show spell check panel (PR #974).</source>
+        <translation>显示拼写检查面板（PR #974）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="492"/>
+        <source>Show or hide canvas right-click menu actions by category.</source>
+        <translation>按类别显示或隐藏画布右键菜单项。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="510"/>
+        <source>Rounder corners, gradients, and softer look.</source>
+        <translation>更圆角、渐变与柔和外观。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="518"/>
+        <source>Open project README (installation and usage).</source>
+        <translation>打开项目 README（安装与使用）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="520"/>
+        <source>Show application version and info.</source>
+        <translation>显示应用版本与信息。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="522"/>
+        <source>Pull latest changes from GitHub. Keeps your config and local files unchanged.</source>
+        <translation>从 GitHub 拉取最新更改。保留配置与本地文件不变。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="546"/>
+        <source>Change accent color, app font, light/dark, simple vs advanced UI.</source>
+        <translation>更改强调色、应用字体、浅/深色、简洁/高级界面。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="605"/>
+        <source>Choose output folder and format (PNG, JPEG, WebP, JXL).</source>
+        <translation>选择输出文件夹与格式（PNG、JPEG、WebP、JXL）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="611"/>
+        <source>Open the report of skipped pages from the last pipeline run.</source>
+        <translation>打开上次流程运行中跳过页面的报告。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="620"/>
+        <source>Process multiple folders in sequence with Pause/Cancel (issue #1020).</source>
+        <translation>按顺序处理多个文件夹，支持暂停/取消（issue #1020）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="632"/>
+        <source>Unload detector/OCR/inpainter/translator models and free GPU memory. Use after a batch to reduce RAM.</source>
+        <translation>卸载检测/OCR/修复/翻译模型并释放显存。批处理后使用以降低内存。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="636"/>
+        <source>Clear in-session OCR and translation caches (current project). Next run will recompute.</source>
+        <translation>清除本次会话的 OCR 与翻译缓存（当前项目）。下次运行将重新计算。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="650"/>
+        <source>Export translations in LPtxt format for auto-labeling tools (e.g. 气泡翻译器自动打标).</source>
+        <translation>以 LPtxt 格式导出译文，供自动打标工具使用（如气泡翻译器自动打标）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="421"/>
+        <source>Edit</source>
+        <translation>编辑</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="423"/>
+        <source>Undo</source>
+        <translation>撤销</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="426"/>
+        <source>Redo</source>
+        <translation>重做</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="429"/>
+        <source>Search</source>
+        <translation>搜索</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="432"/>
+        <source>Global Search</source>
+        <translation>全局搜索</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="579"/>
+        <source>Previous Page</source>
+        <translation>上一页</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="581"/>
+        <source>Next Page</source>
+        <translation>下一页</translation>
+    </message>
+</context>
+<context>
+    <name>BottomBar</name>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1075"/>
+        <source>Run pipeline (same as Pipeline → Run).</source>
+        <translation>运行流程（同 流程 → 运行）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1101"/>
+        <source>Drawing board</source>
+        <translation>画板</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1105"/>
+        <source>Text editor</source>
+        <translation>文本编辑</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1109"/>
+        <source>Spell check panel</source>
+        <translation>拼写检查面板</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1115"/>
+        <source>Original image opacity</source>
+        <translation>原图不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1119"/>
+        <source>Text layer opacity</source>
+        <translation>文字层不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="927"/>
+        <source>Open module settings</source>
+        <translation>打开模块设置</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="972"/>
+        <source>Translate</source>
+        <translation>翻译</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="974"/>
+        <source>Source</source>
+        <translation>源语言</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="976"/>
+        <source>Target</source>
+        <translation>目标语言</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1080"/>
+        <source>Run</source>
+        <translation>运行</translation>
+    </message>
+</context>
+<context>
+    <name>LeftBar</name>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="104"/>
+        <source>Run pipeline (same as Pipeline → Run).</source>
+        <translation>运行流程（同 流程 → 运行）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="83"/>
+        <source>Global Search (Ctrl+G)</source>
+        <translation>全局搜索 (Ctrl+G)</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="155"/>
+        <source>Open Recent</source>
+        <translation>最近打开</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="107"/>
+        <source>Open Folder ...</source>
+        <translation>打开文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="117"/>
+        <source>Open ACBF/CBZ ...</source>
+        <translation>打开 ACBF/CBZ...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="121"/>
+        <source>Open CBR ...</source>
+        <translation>打开 CBR...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="315"/>
+        <source>Open ACBF/CBZ</source>
+        <translation>打开 ACBF/CBZ</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="316"/>
+        <source>Failed to extract archive: {}</source>
+        <translation>解压失败：{}</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="348"/>
+        <source>Open CBR</source>
+        <translation>打开 CBR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="355"/>
+        <source>Failed to extract archive: {}</source>
+        <translation>解压失败：{}</translation>
+    </message>
+</context>
+<context>
+    <name>FontFormatPanel</name>
+    <message>
+        <location filename="../ui/text_panel.py" line="275"/>
+        <source>Font Family</source>
+        <translation>字体</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="280"/>
+        <source>Font Size</source>
+        <translation>字号</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="282"/>
+        <source>Change font size</source>
+        <translation>更改字号</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="292"/>
+        <source>Change line spacing</source>
+        <translation>更改行距</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="296"/>
+        <source>Change font color</source>
+        <translation>更改字体颜色</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="313"/>
+        <source>Change stroke width</source>
+        <translation>更改描边宽度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="325"/>
+        <source>Change letter spacing</source>
+        <translation>更改字间距</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="339"/>
+        <source>Global Font Format</source>
+        <translation>全局字体格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="303"/>
+        <source>Stroke</source>
+        <translation>描边</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="348"/>
+        <source>Advanced Text Format</source>
+        <translation>高级文本格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="369"/>
+        <source>Unfold</source>
+        <translation>展开</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="369"/>
+        <source>Fold</source>
+        <translation>折叠</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="370"/>
+        <source>Source</source>
+        <translation>原文</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="371"/>
+        <source>Translation</source>
+        <translation>译文</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="318"/>
+        <source>Text on path: None</source>
+        <translation>路径文字：无</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="318"/>
+        <source>Circular</source>
+        <translation>圆形</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="318"/>
+        <source>Arc</source>
+        <translation>弧形</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="334"/>
+        <source>Warp: None</source>
+        <translation>变形：无</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="334"/>
+        <source>Arch</source>
+        <translation>拱形</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="334"/>
+        <source>Bulge</source>
+        <translation>凸起</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="334"/>
+        <source>Flag</source>
+        <translation>旗帜</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="400"/>
+        <source>Opacity</source>
+        <translation>不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="423"/>
+        <source>Apply to all blocks</source>
+        <translation>应用到全部块</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="426"/>
+        <source>Save as default</source>
+        <translation>保存为默认</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="430"/>
+        <source>Show Global Font Format</source>
+        <translation>显示全局字体格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="435"/>
+        <source>Show Advanced Font Format</source>
+        <translation>显示高级字体格式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="313"/>
+        <source>Auto fit font size to block: scale font so text fits the bounding box when layout runs.</source>
+        <translation>自动适应块：排版时缩放字号使文字适应边界框。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="319"/>
+        <source>Draw text along a circle or arc (e.g. for balloons, SFX).</source>
+        <translation>沿圆或弧绘制文字（如气泡、拟声词）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="327"/>
+        <source>Arc span in degrees (for Arc text on path).</source>
+        <translation>弧角度数（用于路径弧形文字）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="336"/>
+        <source>Photoshop-like text warp (#1093).</source>
+        <translation>类 Photoshop 文字变形（#1093）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="344"/>
+        <source>Warp intensity.</source>
+        <translation>变形强度。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="355"/>
+        <source>Rounded text box corners. 0 = sharp (rectangle).</source>
+        <translation>文本框圆角。0 = 直角（矩形）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="405"/>
+        <source>Text opacity (quick access)</source>
+        <translation>文字不透明度（快捷）</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="424"/>
+        <source>Apply current global font format to every text block on this page.</source>
+        <translation>将当前全局字体格式应用到本页所有文本框。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="427"/>
+        <source>Save current global font format as the default for new projects and sessions.</source>
+        <translation>将当前全局字体格式保存为新项目与新会话的默认。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="431"/>
+        <source>Show the Global Font Format section (style presets) again.</source>
+        <translation>再次显示全局字体格式区域（样式预设）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_panel.py" line="436"/>
+        <source>Show the Advanced Text Format section again.</source>
+        <translation>再次显示高级文本格式区域。</translation>
+    </message>
+</context>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1070"/>
+        <source>Text Detector</source>
+        <translation>文本检测</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1071"/>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="1072"/>
+        <source>Inpaint</source>
+        <translation>图像修复</translation>
+    </message>
+</context>
+<context>
+    <name>TextAdvancedFormatPanel</name>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="169"/>
+        <source>Proportional</source>
+        <translation>比例</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="170"/>
+        <source>Distance</source>
+        <translation>距离</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="174"/>
+        <source>Line Spacing Type</source>
+        <translation>行距类型</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="181"/>
+        <source>Set Text Opacity</source>
+        <translation>设置文字不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="183"/>
+        <source>Opacity</source>
+        <translation>不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="194"/>
+        <source>Light</source>
+        <translation>细体</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="194"/>
+        <source>Normal</source>
+        <translation>常规</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="194"/>
+        <source>Medium</source>
+        <translation>中等</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="194"/>
+        <source>SemiBold</source>
+        <translation>半粗</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="194"/>
+        <source>Bold</source>
+        <translation>粗体</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="196"/>
+        <source>Font weight (100–900)</source>
+        <translation>字重（100–900）</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="198"/>
+        <source>Font Weight</source>
+        <translation>字重</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="208"/>
+        <source>Shadow</source>
+        <translation>阴影</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="229"/>
+        <source>Blend mode for compositing with the page image</source>
+        <translation>与页面图像的混合模式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="231"/>
+        <source>Blend Mode</source>
+        <translation>混合模式</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="227"/>
+        <source>Multiply</source>
+        <translation>正片叠底</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="227"/>
+        <source>Screen</source>
+        <translation>滤色</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="227"/>
+        <source>Overlay</source>
+        <translation>叠加</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="227"/>
+        <source>Darken</source>
+        <translation>变暗</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="227"/>
+        <source>Lighten</source>
+        <translation>变亮</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="237"/>
+        <source>Outline only</source>
+        <translation>仅描边</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="238"/>
+        <source>Draw stroke only, no fill (set stroke width &gt; 0)</source>
+        <translation>仅绘制描边，无填充（需描边宽度 &gt; 0）</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="241"/>
+        <source>Stroke outline outside only</source>
+        <translation>仅外侧描边</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="242"/>
+        <source>Draw stroke only outside the glyphs (EasyScanlate-style; needs stroke width &gt; 0)</source>
+        <translation>仅在字形外侧绘制描边（EasyScanlate 风格；需描边宽度 &gt; 0）</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="246"/>
+        <source>Foreground overlay image opacity</source>
+        <translation>前景叠加图不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="248"/>
+        <source>Overlay opacity</source>
+        <translation>叠加不透明度</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="265"/>
+        <source>Skew X</source>
+        <translation>倾斜 X</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="268"/>
+        <source>Skew Y</source>
+        <translation>倾斜 Y</translation>
+    </message>
+</context>
+<context>
+    <name>TextGradientGroup</name>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="105"/>
+        <source>Gradient type: Linear or Radial</source>
+        <translation>渐变类型：线性或径向</translation>
+    </message>
+    <message>
+        <location filename="../ui/text_advanced_format.py" line="108"/>
+        <source>Type</source>
+        <translation>类型</translation>
+    </message>
+</context>
+<context>
+    <name>PageListView</name>
+    <message>
+        <location filename="../ui/mainwindow.py" line="91"/>
+        <source>Run OCR on selected pages</source>
+        <translation>对选中页运行 OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="92"/>
+        <source>Run translation on selected pages</source>
+        <translation>对选中页运行翻译</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="93"/>
+        <source>Run inpainting on selected pages</source>
+        <translation>对选中页运行修复</translation>
     </message>
 </context>
 </TS>
