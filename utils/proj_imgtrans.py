@@ -556,6 +556,61 @@ class ProjImgTrans:
         save_path = osp.join(self.directory, self.proj_name() + f'_{dump_target}{suffix}')
         return save_path
 
+    def dump_lptxt_path(self) -> str:
+        """Path for LPtxt export (BallonsTranslator translation → LPtxt format for auto-labeling)."""
+        return osp.join(self.directory, self.proj_name() + '_translations.txt')
+
+    def dump_lptxt(self, save_path: str = None, include_font_info: bool = False) -> str:
+        """
+        Export translations to LPtxt format (used by external auto-labeling tools).
+        Each page: >>>>>>>>[image_name]<<<<<<<< then blocks with ---------------[n]----------------[x,y,1] and translation.
+        Returns the path where the file was written.
+        """
+        if save_path is None:
+            save_path = self.dump_lptxt_path()
+        lines = ["1,0\n", "-\n", "框内\n", "框外\n", "-\n", "备注备注备注\n"]
+        for image_name, blk_list in self.pages.items():
+            img_info = self._image_info.get(image_name, {})
+            w = img_info.get("width")
+            h = img_info.get("height")
+            if w is None or h is None:
+                try:
+                    img_path = osp.join(self.directory, image_name)
+                    if osp.isfile(img_path):
+                        with Image.open(img_path) as img:
+                            w, h = img.width, img.height
+                    else:
+                        w, h = 822, 1200
+                except Exception:
+                    w, h = 822, 1200
+            w, h = int(w), int(h)
+            lines.append(f">>>>>>>>[{image_name}]<<<<<<<<\n")
+            for idx, blk in enumerate(blk_list):
+                xyxy = getattr(blk, "xyxy", [0, 0, 0, 0])
+                if len(xyxy) >= 2:
+                    x, y = float(xyxy[0]), float(xyxy[1])
+                    coord = [x / w, y / h, 1]
+                else:
+                    coord = [0, 0, 1]
+                translation = (blk.translation or "").strip()
+                if include_font_info:
+                    font_name = getattr(blk, "_detected_font_name", "") or ""
+                    font_size = getattr(blk, "_detected_font_size", None)
+                    if isinstance(font_size, (int, float)) and font_size > 0:
+                        font_pt = font_size * 72 / 96
+                        prefix = ""
+                        if font_name:
+                            prefix += f"{{字体：{font_name}}}"
+                        prefix += f"{{字号：{font_pt}}}"
+                        translation = prefix + translation
+                    elif font_name:
+                        translation = f"{{字体：{font_name}}}" + translation
+                lines.append(f"----------------[{idx+1}]----------------{coord}\n")
+                lines.append(f"{translation}\n")
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        return save_path
+
     def dump_txt(self, dump_target: str, suffix='.txt'):
         save_path = self.dump_txt_path(dump_target, suffix=suffix)
         text_all = []

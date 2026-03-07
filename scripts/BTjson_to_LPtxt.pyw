@@ -32,94 +32,80 @@ def prompt_for_size(image_name):
     messagebox.showwarning("警告", f"输入无效，将使用默认尺寸 822*1200")
     return 822, 1200  # 修改为正确的默认尺寸
 
-def get_image_info(json_data, image_name):
-    # 优先从JSON的image_info读取
+def get_image_info(json_data, image_name, json_file_path):
+    """Get image dimensions from image_info, then from image files in project dir, else prompt."""
     image_info = json_data.get("image_info", {})
     if image_name in image_info:
         width = image_info[image_name].get("width")
         height = image_info[image_name].get("height")
         if width and height:
-            return width, height
+            return int(width), int(height)
 
-    # 如果没有在image_info中找到，则尝试读取同名图像文件
     img_dir = os.path.dirname(json_file_path)
     img_base = os.path.splitext(image_name)[0]
-    for ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp"]:
+    for ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp", ".jxl"]:
         candidate = os.path.join(img_dir, img_base + ext)
         if os.path.isfile(candidate):
             size = get_image_size(candidate)
             if size:
                 return size
 
-    # 如果没有图像文件，则提示用户输入
     size = prompt_for_size(image_name)
     return size
 
 def extract_text_and_translation(json_file, include_font_info=False):
     global GLOBAL_PAGE_SIZE
-    global json_file_path  # 保存json文件路径供其他函数使用
     json_file_path = json_file
-    
-    # 打开并加载 JSON 文件
+
     with open(json_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
-    # 获取保存 TXT 文件的目录
+
     output_dir = os.path.dirname(json_file)
-    
-    # 创建输出目录（如果不存在）
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
-    # 遍历页面
-    output_text = []  # 用于存储输出的内容
-    for image_name, items in data.get("pages", {}).items():
-        # 获取图像尺寸
-        PAGE_WIDTH, PAGE_HEIGHT = get_image_info(data, image_name)
 
-        # 写入页面标题
+    output_text = []
+    for image_name, items in data.get("pages", {}).items():
+        PAGE_WIDTH, PAGE_HEIGHT = get_image_info(data, image_name, json_file_path)
+
         output_text.append(f">>>>>>>>[{image_name}]<<<<<<<<\n")
-        
-        # 遍历每一条文本项，获取坐标和翻译
+
         for idx, item in enumerate(items):
-            if "text" in item and "translation" in item:
-                # 获取左上角的坐标（xyxy 中的前两个值）
-                coord = item.get("xyxy", [])
-                if len(coord) >= 2:
-                    coord = coord[:2]  # 只保留前两个坐标
-                    # 将坐标转化为比例
-                    coord = [coord[0] / PAGE_WIDTH, coord[1] / PAGE_HEIGHT, 1]
-                
-                text = item["text"]
-                translation = item["translation"]
-                
-                # 检查是否需要添加字体信息
-                if include_font_info:
-                    font_name = item.get("_detected_font_name", "")
-                    font_size = item.get("_detected_font_size", "")*72/96 # 像素转pt
-                    if font_name or font_size:
-                        font_info = ""
-                        if font_name:
-                            font_info += f"{{字体：{font_name}}}"
-                        if font_size:
-                            font_info += f"{{字号：{font_size}}}"
-                        translation = font_info + translation
-                
-                # 添加格式化的文本到输出列表
-                output_text.append(f"----------------[{idx+1}]----------------{coord}\n")
-                output_text.append(f"{translation}\n")
-    
-    # 获取输出的 TXT 文件路径
+            if "translation" not in item:
+                continue
+            coord = item.get("xyxy", [])
+            if len(coord) >= 2:
+                x, y = float(coord[0]), float(coord[1])
+                coord = [x / PAGE_WIDTH, y / PAGE_HEIGHT, 1]
+            else:
+                coord = [0, 0, 1]
+
+            translation = item["translation"] or ""
+
+            if include_font_info:
+                font_name = item.get("_detected_font_name") or ""
+                font_size_val = item.get("_detected_font_size")
+                if isinstance(font_size_val, (int, float)) and font_size_val > 0:
+                    font_size_pt = font_size_val * 72 / 96
+                    font_info = ""
+                    if font_name:
+                        font_info += f"{{字体：{font_name}}}"
+                    font_info += f"{{字号：{font_size_pt}}}"
+                    translation = font_info + translation
+                elif font_name:
+                    translation = f"{{字体：{font_name}}}" + translation
+
+            output_text.append(f"----------------[{idx+1}]----------------{coord}\n")
+            output_text.append(f"{translation}\n")
+
     json_base = os.path.splitext(os.path.basename(json_file))[0]
     output_file = os.path.join(output_dir, f"{json_base}_translations.txt")
-    
-    # 将内容写入文件
+
     with open(output_file, 'w', encoding='utf-8') as f_out:
         f_out.write("1,0\n-\n框内\n框外\n-\n备注备注备注\n")
         f_out.writelines(output_text)
-    
+
     print(f"翻译文本已保存到: {output_file}")
-    # 弹窗提示
     root = tk.Tk()
     root.withdraw()
     messagebox.showinfo("输出完成", f"翻译文本已成功输出到：\n{output_file}")

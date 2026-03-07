@@ -915,6 +915,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.re_run_ocr_only_trigger.connect(self.on_re_run_ocr_only)
         self.titleBar.batch_export_trigger.connect(self.on_batch_export)
         self.titleBar.batch_export_as_trigger.connect(self.on_batch_export_as)
+        self.titleBar.export_lptxt_trigger.connect(self.on_export_lptxt)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
@@ -2601,6 +2602,27 @@ class MainWindow(mainwindow_cls):
             create_info_dialog(self.tr('Text file exported to ') + self.imgtrans_proj.dump_txt_path(dump_target, suffix))
         except Exception as e:
             create_error_dialog(e, self.tr('Failed to export as TEXT file'))
+
+    def on_export_lptxt(self):
+        """Export translations to LPtxt format (for auto-labeling tools)."""
+        if not self.imgtrans_proj or not self.imgtrans_proj.directory:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        reply = QMessageBox.question(
+            self,
+            self.tr('Export translation to LPtxt'),
+            self.tr('Include font and size info in the LPtxt output?'),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+        include_font_info = reply == QMessageBox.StandardButton.Yes
+        try:
+            path = self.imgtrans_proj.dump_lptxt(include_font_info=include_font_info)
+            create_info_dialog(self.tr('LPtxt exported to: ') + path)
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export LPtxt'))
 
     def on_import_trans_txt(self):
         try:

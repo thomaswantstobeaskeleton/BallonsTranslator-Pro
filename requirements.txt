@@ -68,3 +68,5 @@ rapidocr-onnxruntime
 neverliie-ai-sdk
 betterproto
 protobuf>=3.20.0
+# Optional: MangaForFree/ToonGod and Generic chapter URL when "Use browser (Playwright)" is enabled.
+playwright>=1.40.0

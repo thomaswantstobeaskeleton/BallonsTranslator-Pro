@@ -579,6 +579,10 @@ class TitleBar(Widget):
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)
+        exportLptxtAction = QAction(self.tr('Export translation to LPtxt...'), self)
+        exportLptxtAction.setToolTip(self.tr('Export translations in LPtxt format for auto-labeling tools (e.g. 气泡翻译器自动打标).'))
+        self.export_lptxt_trigger = exportLptxtAction.triggered
+        exportMenuTools.addAction(exportLptxtAction)
         sourcesMenu = QMenu(self.tr('Sources'), self)
         sourcesMenu.addAction(mangaSourceAction)
         queueMenu = QMenu(self.tr('Queue'), self)
