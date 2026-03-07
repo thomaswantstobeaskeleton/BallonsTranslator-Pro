@@ -18,15 +18,17 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QWidget,
     QColorDialog,
+    QApplication,
 )
 
 from utils.config import pcfg, save_config
 
 try:
-    from .custom_widget.hover_animation import install_hover_scale_animation
+    from .custom_widget.hover_animation import install_button_animations
     _has_hover_anim = True
 except Exception:
     _has_hover_anim = False
+    install_button_animations = None
 
 
 def _hex_from_qcolor(c: QColor) -> str:
@@ -112,14 +114,14 @@ class ThemeCustomizerDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
+        btn_layout.setSpacing(8)
         self.apply_btn = QPushButton(self.tr("Apply"))
         self.apply_btn.clicked.connect(self._apply)
         self.close_btn = QPushButton(self.tr("Close"))
         self.close_btn.clicked.connect(self.accept)
-        if _has_hover_anim:
-            install_hover_scale_animation(self.apply_btn, duration_ms=80, size_delta=(2, 1))
-            install_hover_scale_animation(self.close_btn, duration_ms=80, size_delta=(2, 1))
+        if _has_hover_anim and install_button_animations:
+            install_button_animations(self.apply_btn, normal_opacity=0.9, press_opacity=0.74)
+            install_button_animations(self.close_btn, normal_opacity=0.9, press_opacity=0.74)
         btn_layout.addWidget(self.apply_btn)
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
@@ -138,8 +140,12 @@ class ThemeCustomizerDialog(QDialog):
             self._update_accent_button_color()
 
     def _apply(self):
-        # Defer so QComboBox commits its selection first (fixes "apply twice" when picking from dropdown)
-        QTimer.singleShot(0, self._do_apply)
+        # Run apply twice so font combo has committed by the second run (workaround for Qt editable combo)
+        self.font_combo.clearFocus()
+        self.font_size_spin.clearFocus()
+        QApplication.processEvents()
+        self._do_apply()
+        QTimer.singleShot(80, self._do_apply)
 
     def _do_apply(self):
         pcfg.darkmode = self.dark_check.isChecked()

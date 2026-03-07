@@ -377,6 +377,25 @@ def main():
         app_font.setPointSize(10)
     app_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
     app_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.NoSubpixelAntialias)
+    # Patch app setFont so any font with point size <= 0 is sanitized (stops QFont::setPointSize spam from any caller).
+    _original_app_set_font = QGuiApplication.setFont
+    def _app_set_font_sanitized(*args, **kwargs):
+        # Can be called as app.setFont(font) -> (self, font) or QGuiApplication.setFont(font) -> (font,)
+        if args and hasattr(args[0], 'pointSizeF'):
+            font = args[0]
+            rest = ()
+        elif len(args) >= 2:
+            font = args[1]
+            rest = (args[0],)
+        else:
+            return _original_app_set_font(*args, **kwargs)
+        if font.pointSizeF() <= 0 or font.pointSize() <= 0:
+            f = QFont(font)
+            f.setPointSizeF(10.0)
+            f.setPointSize(10)
+            font = f
+        return _original_app_set_font(*(rest + (font,)), **kwargs)
+    QGuiApplication.setFont = _app_set_font_sanitized
     QGuiApplication.setFont(app_font)
     shared.DEFAULT_FONT_FAMILY = app_font.family()
     shared.APP_DEFAULT_FONT = app_font.family()

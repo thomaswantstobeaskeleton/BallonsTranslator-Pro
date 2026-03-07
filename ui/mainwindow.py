@@ -64,6 +64,7 @@ class PageListView(QListWidget):
     run_ocr_images = Signal(list)
     run_translate_images = Signal(list)
     run_inpaint_images = Signal(list)
+    toggle_ignore_requested = Signal(list, bool)  # (pagenames, ignored)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -93,6 +94,11 @@ class PageListView(QListWidget):
             run_translate_act = menu.addAction(self.tr('Run translation on selected pages'))
             run_inpaint_act = menu.addAction(self.tr('Run inpainting on selected pages'))
             menu.addSeparator()
+            ignore_act = menu.addAction(self.tr('Ignore in run'))
+            ignore_act.setToolTip(self.tr('Skip these pages in full run and batch (when "Skip ignored pages" is on).'))
+            include_act = menu.addAction(self.tr('Include in run'))
+            include_act.setToolTip(self.tr('Do not skip these pages in full run and batch.'))
+            menu.addSeparator()
             remove_act = menu.addAction(self.tr('Remove from Project'))
         rst = menu.exec_(e.globalPos())
 
@@ -108,6 +114,10 @@ class PageListView(QListWidget):
             self.run_translate_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == run_inpaint_act:
             self.run_inpaint_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == ignore_act:
+            self.toggle_ignore_requested.emit([item.text() for item in selected_items], True)
+        elif selected_items and rst == include_act:
+            self.toggle_ignore_requested.emit([item.text() for item in selected_items], False)
         elif selected_items and rst == remove_act:
             self.remove_images.emit([item.text() for item in selected_items])
 
@@ -191,17 +201,16 @@ class MainWindow(mainwindow_cls):
         if open_dir != '' and osp.exists(open_dir):
             self.OpenProj(open_dir)
         elif pcfg.open_recent_on_startup:
+            # Auto-open most recent project when user has this preference.
             if len(self.leftBar.recent_proj_list) > 0:
                 proj_dir = self.leftBar.recent_proj_list[0]
                 if osp.exists(proj_dir):
                     self.OpenProj(proj_dir)
 
         if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
+            # When no project is loaded, always show welcome screen so user can open or create one.
             if self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
-                if getattr(pcfg, 'show_welcome_screen', True):
-                    self._show_welcome_screen()
-                else:
-                    self.centralStackWidget.setCurrentIndex(1)
+                self._show_welcome_screen()
 
         if shared.HEADLESS or shared.HEADLESS_CONTINUOUS:
             self.run_batch(**exec_args)
@@ -292,10 +301,13 @@ class MainWindow(mainwindow_cls):
         f = app.font()
         if f.pointSizeF() <= 0:
             f.setPointSizeF(10.0)
+        if f.pointSize() <= 0:
+            f.setPointSize(10)
         if family:
             f.setFamily(family)
         if size > 0 and size <= 72:
             f.setPointSize(size)
+            f.setPointSizeF(float(size))
         if f.pointSizeF() <= 0:
             f.setPointSizeF(10.0)
         if f.pointSize() <= 0:
@@ -336,6 +348,7 @@ class MainWindow(mainwindow_cls):
         self.pageList.reveal_file.connect(self.on_reveal_file)
         self.pageList.remove_images.connect(self.on_remove_images)
         self.pageList.translate_images.connect(self.on_translate_images)
+        self.pageList.toggle_ignore_requested.connect(self.on_toggle_page_ignored)
         self.pageList.run_ocr_images.connect(self.on_run_ocr_images)
         self.pageList.run_translate_images.connect(self.on_run_translate_images)
         self.pageList.run_inpaint_images.connect(self.on_run_inpaint_images)
@@ -345,6 +358,7 @@ class MainWindow(mainwindow_cls):
         self.leftStackWidget = QStackedWidget(self)
         self.leftStackWidget.addWidget(self.pageList)
         self.leftStackWidget.setMinimumWidth(shared.PAGE_LIST_PANE_DEFAULT_WIDTH)
+        self.leftStackWidget.setMaximumWidth(400)
 
         self.global_search_widget = GlobalSearchWidget(self.leftStackWidget)
         self.global_search_widget.req_update_pagetext.connect(self.on_req_update_pagetext)
@@ -741,6 +755,9 @@ class MainWindow(mainwindow_cls):
     def _show_main_content(self):
         """Switch from welcome to main translation view."""
         self.centralStackWidget.setCurrentIndex(1)
+        # Default to text editor panel (index 1) on every project open / app start
+        if not self.rightComicTransStackPanel.isHidden():
+            self.rightComicTransStackPanel.setCurrentIndex(1)
 
     def load_textstyle_from_proj_dir(self, from_proj=False):
         if from_proj:
@@ -882,6 +899,7 @@ class MainWindow(mainwindow_cls):
             self.pageList.addItem(lstitem)
             if imgname == self.imgtrans_proj.current_img:
                 self.pageList.setCurrentItem(lstitem)
+        self._update_page_list_ignored_style()
 
     def pageLabelStateChanged(self):
         setup = self.leftBar.showPageListLabel.isChecked()
@@ -1554,8 +1572,8 @@ class MainWindow(mainwindow_cls):
         else:
             self._batch_queue_dialog.show()
 
-    def _on_batch_start(self, paths: list):
-        self.run_batch(paths)
+    def _on_batch_start(self, paths: list, skip_ignored_pages: bool = True):
+        self.run_batch(paths, skip_ignored_pages=skip_ignored_pages)
 
     def _on_batch_cancel(self):
         self._batch_cancelled = True
@@ -2757,7 +2775,7 @@ class MainWindow(mainwindow_cls):
         self._run_imgtrans_wo_textstyle_update = True
         self.run_imgtrans()
 
-    def on_run_imgtrans(self, continue_mode=False, pages_to_process=None):
+    def on_run_imgtrans(self, continue_mode=False, pages_to_process=None, skip_ignored_in_batch=None):
         self._idle_unload_timer.stop()
         self.backup_blkstyles.clear()
 
@@ -2766,13 +2784,16 @@ class MainWindow(mainwindow_cls):
         self.postprocess_mt_toggle = False
 
         all_disabled = pcfg.module.all_stages_disabled()
-        
+        skip_ignored = skip_ignored_in_batch if skip_ignored_in_batch is not None else getattr(pcfg, 'skip_ignored_in_run', True)
+
         # 继续模式：先检查哪些页面需要处理
         if continue_mode:
             pages_to_process = []
             for page_name in self.imgtrans_proj.pages:
                 if not self.imgtrans_proj.get_page_progress(page_name):
                     pages_to_process.append(page_name)
+            if skip_ignored:
+                pages_to_process = [p for p in pages_to_process if not self.imgtrans_proj.is_page_ignored(p)]
             if len(pages_to_process) == 0:
                 return
         elif pages_to_process is None:
@@ -2780,8 +2801,12 @@ class MainWindow(mainwindow_cls):
                 pages_to_process = [self.imgtrans_proj.current_img]
                 self.imgtrans_proj.set_page_progress(pages_to_process[0], 0)
             else:
-                pages_to_process = []
-                for page_name in self.imgtrans_proj.pages:
+                pages_to_process = list(self.imgtrans_proj.pages.keys())
+                if skip_ignored:
+                    pages_to_process = [p for p in pages_to_process if not self.imgtrans_proj.is_page_ignored(p)]
+                if not pages_to_process:
+                    return
+                for page_name in pages_to_process:
                     self.imgtrans_proj.set_page_progress(page_name, 0)
         else:
             for page_name in pages_to_process:
@@ -3072,6 +3097,45 @@ class MainWindow(mainwindow_cls):
         for idx, sa in enumerate(self.titleBar.stageActions):
             sa.setChecked(pcfg.module.stage_enabled(idx))
         self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_toggle_page_ignored(self, pagenames: list, ignored: bool):
+        """Mark selected pages as ignored (skip in full run) or include in run."""
+        if not pagenames or self.imgtrans_proj.is_empty:
+            return
+        for name in pagenames:
+            if name in self.imgtrans_proj.pages:
+                self.imgtrans_proj.set_page_ignored(name, ignored)
+        if self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        self._update_page_list_ignored_style()
+
+    def _update_page_list_ignored_style(self):
+        """Update page list items to show ignored state: tooltip, muted text, and darkened/lightened row background."""
+        from qtpy.QtGui import QBrush, QColor
+        default_fg = self.pageList.palette().brush(self.pageList.foregroundRole())
+        default_bg = self.pageList.palette().brush(self.pageList.backgroundRole())
+        # Ignored: muted foreground and distinct row background (darkened in light theme, lightened in dark theme)
+        if getattr(pcfg, 'darkmode', False):
+            ignored_fg = QBrush(QColor(120, 120, 120))
+            ignored_bg = QBrush(QColor(45, 45, 48))  # darker than list bg
+        else:
+            ignored_fg = QBrush(QColor(100, 100, 100))
+            ignored_bg = QBrush(QColor(232, 232, 234))  # light gray row
+        for i in range(self.pageList.count()):
+            item = self.pageList.item(i)
+            if item is None:
+                continue
+            name = item.text()
+            is_ignored = self.imgtrans_proj.is_page_ignored(name) if not self.imgtrans_proj.is_empty else False
+            if is_ignored:
+                item.setToolTip(self.tr('Ignored in run (right-click → Include in run to process)'))
+                item.setForeground(ignored_fg)
+                item.setBackground(ignored_bg)
+            else:
+                item.setToolTip('')
+                item.setForeground(default_fg)
+                item.setBackground(default_bg)
 
     def on_remove_images(self, image_names: list):
         if not image_names:
@@ -3453,8 +3517,10 @@ class MainWindow(mainwindow_cls):
             # Replace all blocks on the page (e.g. "Detect text on page")
             old_blks = self.imgtrans_proj.pages.get(page_name, [])
             self.imgtrans_proj.pages[page_name] = list(blk_list)
-            to_remove = [self.st_manager.pairwidget_list[b.idx].blk_item for b in old_blks]
-            to_remove_widgets = [self.st_manager.pairwidget_list[b.idx] for b in old_blks]
+            # Old blocks are TextBlocks (no .idx); widgets and canvas items are in same order as page, so use position index.
+            n_old = len(old_blks)
+            to_remove = [self.st_manager.textblk_item_list[i] for i in range(n_old) if i < len(self.st_manager.textblk_item_list)]
+            to_remove_widgets = [self.st_manager.pairwidget_list[i] for i in range(n_old) if i < len(self.st_manager.pairwidget_list)]
             if to_remove:
                 self.st_manager.deleteTextblkItemList(to_remove, to_remove_widgets)
             im_h, im_w = self.imgtrans_proj.img_array.shape[:2]
@@ -3665,6 +3731,7 @@ class MainWindow(mainwindow_cls):
                 valid_dirs.append(path)
         self.exec_dirs = valid_dirs
         self._batch_cancelled = False
+        self._batch_skip_ignored = kwargs.get('skip_ignored_pages', getattr(pcfg, 'skip_ignored_in_run', True))
         self.run_next_dir()
 
     def run_next_dir(self):
@@ -3704,6 +3771,10 @@ class MainWindow(mainwindow_cls):
         shared.pbar = {}
         npages = len(self.imgtrans_proj.pages)
         if npages > 0:
+            skip_ignored = getattr(self, '_batch_skip_ignored', True)
+            if skip_ignored:
+                npages = len([p for p in self.imgtrans_proj.pages if not self.imgtrans_proj.is_page_ignored(p)])
+        if npages > 0:
             if pcfg.module.enable_detect:
                 shared.pbar['detect'] = tqdm(range(npages), desc="Text Detection")
             if pcfg.module.enable_ocr:
@@ -3712,7 +3783,7 @@ class MainWindow(mainwindow_cls):
                 shared.pbar['translate'] = tqdm(range(npages), desc="Translation")
             if pcfg.module.enable_inpaint:
                 shared.pbar['inpaint'] = tqdm(range(npages), desc="Inpaint")
-        self.on_run_imgtrans()
+        self.on_run_imgtrans(skip_ignored_in_batch=getattr(self, '_batch_skip_ignored', True))
 
     def setupRegisterWidget(self):
         self.titleBar.viewMenu.addSeparator()

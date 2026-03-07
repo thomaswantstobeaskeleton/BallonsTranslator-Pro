@@ -36,11 +36,13 @@ LAYOUT_SCALE_UP_FILL = 0.78  # target fill ratio when scaling up in large bubble
 
 
 class CreateItemCommand(QUndoCommand):
-    def __init__(self, blk_item: TextBlkItem, ctrl, parent=None):
+    def __init__(self, blk_item: TextBlkItem, ctrl, page_name: str = None, mask_backup: tuple = None, parent=None):
         super().__init__(parent)
         self.blk_item = blk_item
         self.ctrl: SceneTextManager = ctrl
         self.op_count = -1
+        self.page_name = page_name
+        self.mask_backup = mask_backup  # (x1, y1, x2, y2, region_array) to restore mask on undo
         self.ctrl.addTextBlock(self.blk_item)
         self.pairw = self.ctrl.pairwidget_list[self.blk_item.idx]
         self.ctrl.txtblkShapeControl.setBlkItem(self.blk_item)
@@ -53,6 +55,19 @@ class CreateItemCommand(QUndoCommand):
         self.ctrl.recoverTextblkItemList([self.blk_item], [self.pairw])
 
     def undo(self):
+        if self.page_name and self.ctrl.canvas.imgtrans_proj.current_img == self.page_name:
+            pages = self.ctrl.canvas.imgtrans_proj.pages.get(self.page_name, [])
+            blk = self.blk_item.blk
+            for i in range(len(pages)):
+                if pages[i] is blk:
+                    pages.pop(i)
+                    break
+            if self.mask_backup is not None:
+                x1, y1, x2, y2, region = self.mask_backup
+                mask = self.ctrl.canvas.imgtrans_proj.load_mask_by_imgname(self.page_name)
+                if mask is not None and 0 <= y1 < y2 <= mask.shape[0] and 0 <= x1 < x2 <= mask.shape[1]:
+                    mask[y1:y2, x1:x2] = region
+                    self.ctrl.canvas.imgtrans_proj.save_mask(self.page_name, mask)
         self.ctrl.deleteTextblkItemList([self.blk_item], [self.pairw])
 
 
@@ -917,6 +932,9 @@ class SceneTextManager(QObject):
             return
 
         blk_font = blkitem.font()
+        if blk_font.pointSizeF() <= 0 or blk_font.pointSize() <= 0:
+            blk_font.setPointSizeF(10.0)
+            blk_font.setPointSize(10)
         fmt = blkitem.get_fontformat()
         blk_font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, fmt.letter_spacing * 100)
         text_size_func = lambda text: get_text_size(QFontMetricsF(blk_font), text)
@@ -1289,7 +1307,7 @@ class SceneTextManager(QObject):
         blkitem.repaint_background()
 
     def onEndCreateTextBlock(self, rect: QRectF):
-        xyxy = np.array([rect.x(), rect.y(), rect.right(), rect.bottom()])        
+        xyxy = np.array([rect.x(), rect.y(), rect.right(), rect.bottom()])
         xyxy = np.round(xyxy).astype(np.int32)
         block = TextBlock(xyxy)
         xywh = np.copy(xyxy)
@@ -1298,7 +1316,27 @@ class SceneTextManager(QObject):
         block.src_is_vertical = self.formatpanel.global_format.vertical
         blk_item = TextBlkItem(block, len(self.textblk_item_list), set_format=False, show_rect=True)
         blk_item.set_fontformat(self.formatpanel.global_format)
-        self.canvas.push_undo_command(CreateItemCommand(blk_item, self))
+
+        page_name = self.canvas.imgtrans_proj.current_img
+        mask_backup = None
+        if page_name:
+            self.canvas.imgtrans_proj.pages.setdefault(page_name, []).append(block)
+            if self.canvas.imgtrans_proj.img_valid and self.canvas.imgtrans_proj.img_array is not None:
+                img = self.canvas.imgtrans_proj.img_array
+                im_h, im_w = img.shape[:2]
+                x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+                x1, x2 = max(0, min(x1, im_w)), max(0, min(x2, im_w))
+                y1, y2 = max(0, min(y1, im_h)), max(0, min(y2, im_h))
+                if x2 > x1 and y2 > y1:
+                    mask = self.canvas.imgtrans_proj.load_mask_by_imgname(page_name)
+                    if mask is None or mask.shape[0] != im_h or mask.shape[1] != im_w:
+                        mask = np.full((im_h, im_w), 255, dtype=np.uint8)
+                    region_backup = mask[y1:y2, x1:x2].copy()
+                    mask[y1:y2, x1:x2] = 0
+                    self.canvas.imgtrans_proj.save_mask(page_name, mask)
+                    mask_backup = (x1, y1, x2, y2, region_backup)
+
+        self.canvas.push_undo_command(CreateItemCommand(blk_item, self, page_name, mask_backup))
 
     def on_paste2selected_textitems(self):
         blkitems = self.canvas.selected_text_items()

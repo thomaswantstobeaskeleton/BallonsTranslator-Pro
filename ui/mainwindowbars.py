@@ -9,7 +9,7 @@ from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEve
 from modules.translators import BaseTranslator
 from modules.translators.base import lang_display_label
 from .custom_widget import Widget, PaintQSlider, SmallComboBox, ConfigClickableLabel, sanitize_font
-from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
+from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation, install_button_animations
 from utils.shared import TITLEBAR_HEIGHT, WINDOW_BORDER_WIDTH, BOTTOMBAR_HEIGHT, LEFTBAR_WIDTH, LEFTBTN_WIDTH
 from .framelesswindow import FramelessMoveResize
 from utils.config import pcfg
@@ -186,15 +186,16 @@ class LeftBar(Widget):
         self.setGeometry(0, 0, 300, 500)
         self.setMouseTracking(True)
 
-        install_hover_opacity_animation(self.openBtn, duration_ms=100, normal_opacity=0.9)
-        if getattr(pcfg, 'bubbly_ui', True):
-            install_hover_scale_animation(self.openBtn, duration_ms=80, size_delta=(3, 2))
+        install_button_animations(
+            self.openBtn,
+            normal_opacity=0.9,
+            press_opacity=0.74,
+            with_scale=True,
+        )
         for w in (self.showPageListLabel, self.globalSearchChecker, self.imgTransChecker, self.configChecker):
-            install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88)
-        # Skip QGraphicsOpacityEffect on run button to avoid "paint device can only be painted by one painter" conflicts.
-        # install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=1.0)
-        if getattr(pcfg, 'bubbly_ui', True):
-            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+            install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88, press_opacity=0.74)
+        # Run button: scale animation persists even when Bubbly UI is off
+        install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
@@ -542,7 +543,7 @@ class TitleBar(Widget):
         viewMenu.addMenu(themeMenu)
         viewMenu.addAction(darkModeAction)
         viewMenu.addAction(bubblyUIAction)
-        themeCustomizerAction = QAction(self.tr('Theme & UI customizer...'), self)
+        themeCustomizerAction = QAction(self.tr('Theme and UI customizer...'), self)
         themeCustomizerAction.setToolTip(self.tr('Change accent color, app font, light/dark, simple vs advanced UI.'))
         viewMenu.addAction(themeCustomizerAction)
         self.theme_customizer_trigger = themeCustomizerAction.triggered
@@ -762,9 +763,7 @@ class TitleBar(Widget):
             hlayout.setSpacing(0)
 
         for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn):
-            install_hover_opacity_animation(btn, duration_ms=100, normal_opacity=0.9)
-            if getattr(pcfg, 'bubbly_ui', True):
-                install_hover_scale_animation(btn, duration_ms=80, size_delta=(3, 2))
+            install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74, with_scale=True)
 
     def setLeftBar(self, leftBar):
         """Build File menu and connect to left bar (open/save/export/import). Call from mainwindow after both are created."""
@@ -1080,8 +1079,7 @@ class BottomBar(Widget):
         self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
         self.runBtn.clicked.connect(self.run_clicked.emit)
         self.runBtn.setFont(sanitize_font(self.runBtn.font()))
-        if getattr(pcfg, 'bubbly_ui', True):
-            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+        install_button_animations(self.runBtn, normal_opacity=0.88, press_opacity=0.72, with_scale=True)
         runBtnWrapper = QWidget(self)
         runBtnLayout = QVBoxLayout(runBtnWrapper)
         runBtnLayout.setContentsMargins(0, 3, 0, 0)
@@ -1171,12 +1169,9 @@ class BottomBar(Widget):
         self.hlayout.setContentsMargins(0, 0, 10, WINDOW_BORDER_WIDTH)
         self.hlayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # Hover animations for bottom bar controls
-        if getattr(pcfg, 'bubbly_ui', True):
-            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
-        install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=0.88)
+        # Hover + press animations for bottom bar controls (runBtn already has install_button_animations above)
         for chk in (self.paintChecker, self.texteditChecker, self.spellCheckChecker, self.textblockChecker):
-            install_hover_opacity_animation(chk, duration_ms=100, normal_opacity=0.88)
+            install_hover_opacity_animation(chk, duration_ms=100, normal_opacity=0.88, press_opacity=0.74)
 
 
     def onPaintCheckerPressed(self):
