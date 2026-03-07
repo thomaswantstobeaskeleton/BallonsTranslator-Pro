@@ -416,6 +416,7 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | **Text Editor** | Switch to text edit mode (T) |
 | **Keyboard Shortcuts...** | Customize keybinds (Ctrl+K) |
 | **Context menu options...** | Show/hide canvas right-click actions by category (Ctrl+Shift+O) |
+| **Theme & UI customizer...** | Accent color, app font (family/size), dark/light theme, simple vs advanced UI. Stored in `config.json` (gitignored); new users get defaults from `config/config.example.json` (no custom font). |
 | **Help** | **Documentation** (open README), **About** (version), **Update from GitHub** (pull latest changes; config preserved) |
 | **Dark Mode** | Toggle dark theme |
 
@@ -481,8 +482,8 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 | `data/models/` | Detection, OCR, inpainting model files (e.g. `comictextdetector.pt.onnx`, `lama_large_512px.ckpt`) |
 | `data/translation_context/<series_id>/` | Series glossary (`glossary.txt`), recent context (`recent_context.json`) |
 | `data/libs/` | Some runtime libraries |
-| `config/config.json` | User config (modules, shortcuts, save format, etc.) |
-| `config/config.example.json` | Recommended defaults (used on first run when config.json is missing) |
+| `config/config.json` | User config (modules, shortcuts, save format, theme, app font, etc.). Not in repo (gitignored). |
+| `config/config.example.json` | Recommended defaults (used on first run when config.json is missing). Includes default theme/font so new users and releases get system font. |
 | `fonts/` | Custom fonts (370+ included) |
 | `~/BallonsTranslator/Downloaded Chapters` | Default Manga source download folder |
 
@@ -880,6 +881,10 @@ Module-specific params (CTD box score, mask dilation, inpaint_size, translator A
 | | `logical_dpi` | int | 0 | 0 = system; 96/72 for font scaling (restart to apply) |
 | | `confirm_before_run` | bool | true | Show Run/Continue/Cancel dialog |
 | | `darkmode` | bool | false | Dark mode (synced with View → Dark Mode) |
+| | `bubbly_ui` | bool | true | Advanced UI (rounder corners, gradients) |
+| | `accent_color_hex` | str | '' | Theme accent color (e.g. #1E93E5); empty = theme default |
+| | `app_font_family` | str | '' | App-wide font family; empty = system default |
+| | `app_font_size` | int | 0 | App-wide font size (0 = system default) |
 | | `display_lang` | str | — | UI language |
 | | `config_panel_font_scale` | float | 1.0 | Config panel font scale (0.8–1.5) |
 | **General → OCR** | Spell check / auto-correct | — | — | After OCR, correct misspellings (pyenchant) |
