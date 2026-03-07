@@ -92,12 +92,17 @@ class DangoSwitch(QWidget):
         super().mousePressEvent(event)
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self._draw_bg(painter)
-        self._draw_slider(painter)
-        self._draw_text(painter)
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            self._draw_bg(painter)
+            self._draw_slider(painter)
+            self._draw_text(painter)
+        finally:
+            painter.end()
 
     def _draw_bg(self, painter):
         painter.save()

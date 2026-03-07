@@ -8,7 +8,7 @@ from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon
 
 from modules.translators import BaseTranslator
 from modules.translators.base import lang_display_label
-from .custom_widget import Widget, PaintQSlider, SmallComboBox, ConfigClickableLabel
+from .custom_widget import Widget, PaintQSlider, SmallComboBox, ConfigClickableLabel, sanitize_font
 from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 from utils.shared import TITLEBAR_HEIGHT, WINDOW_BORDER_WIDTH, BOTTOMBAR_HEIGHT, LEFTBAR_WIDTH, LEFTBTN_WIDTH
 from .framelesswindow import FramelessMoveResize
@@ -187,7 +187,8 @@ class LeftBar(Widget):
             install_hover_scale_animation(self.openBtn, duration_ms=80, size_delta=(3, 2))
         for w in (self.showPageListLabel, self.globalSearchChecker, self.imgTransChecker, self.configChecker):
             install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88)
-        install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=1.0)
+        # Skip QGraphicsOpacityEffect on run button to avoid "paint device can only be painted by one painter" conflicts.
+        # install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=1.0)
         if getattr(pcfg, 'bubbly_ui', True):
             install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
 
@@ -905,6 +906,7 @@ class TranslatorSelectionWidget(Widget):
         label_tgt.clicked.connect(self.cfg_clicked)
         
         self.selector = SmallComboBox()
+        self.selector.setMinimumWidth(180)  # Issue #16: readable translator names in dropdown
         self.src_selector = SmallComboBox()
         self.tgt_selector = SmallComboBox()
         self.cfg_btn = SmallConfigPutton()
@@ -985,8 +987,20 @@ class BottomBar(Widget):
 
         self.runBtn = QPushButton(self.tr('Run'))
         self.runBtn.setObjectName('BottomBarRunBtn')
+        self.runBtn.setEnabled(True)
+        self.runBtn.setFixedHeight(26)
+        self.runBtn.setMinimumWidth(50)
         self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
         self.runBtn.clicked.connect(self.run_clicked.emit)
+        self.runBtn.setFont(sanitize_font(self.runBtn.font()))
+        if getattr(pcfg, 'bubbly_ui', True):
+            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+
+        for w in (self.textdet_selector, self.ocr_selector, self.inpaint_selector):
+            w.selector.setFont(sanitize_font(w.selector.font()))
+        self.trans_selector.selector.setFont(sanitize_font(self.trans_selector.selector.font()))
+        self.trans_selector.src_selector.setFont(sanitize_font(self.trans_selector.src_selector.font()))
+        self.trans_selector.tgt_selector.setFont(sanitize_font(self.trans_selector.tgt_selector.font()))
 
         self.hlayout = QHBoxLayout(self)
         self.paintChecker = QCheckBox()
@@ -1054,12 +1068,20 @@ class BottomBar(Widget):
         self.spellcheck_checkchanged.emit()
 
     def setPipelineVisible(self, visible: bool):
-        """Show or hide pipeline strip (detectors, OCR, inpaint, translate, Run). Hide when view is Config."""
-        self.textdet_selector.setVisible(visible)
-        self.ocr_selector.setVisible(visible)
-        self.inpaint_selector.setVisible(visible)
-        self.trans_selector.setVisible(visible)
-        self.runBtn.setVisible(visible)
+        """Show or hide pipeline strip. When showing, respect each stage's enable flag (Issue #18)."""
+        if not visible:
+            self.textdet_selector.setVisible(False)
+            self.ocr_selector.setVisible(False)
+            self.inpaint_selector.setVisible(False)
+            self.trans_selector.setVisible(False)
+            self.runBtn.setVisible(False)
+        else:
+            self.textdet_selector.setVisible(pcfg.module.enable_detect)
+            self.ocr_selector.setVisible(pcfg.module.enable_ocr)
+            self.trans_selector.setVisible(pcfg.module.enable_translate)
+            self.inpaint_selector.setVisible(pcfg.module.enable_inpaint)
+            self.runBtn.setVisible(True)
+            self.runBtn.setEnabled(True)
 
     def onTextblockCheckerClicked(self):
         self.textblock_checkchanged.emit()

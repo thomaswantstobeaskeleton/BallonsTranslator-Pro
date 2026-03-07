@@ -67,19 +67,24 @@ class SliderHandle(QWidget):
         self.radiusAni.start()
 
     def paintEvent(self, e):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            painter.setRenderHints(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
 
-        # draw outer circle
-        isDark = isDarkTheme()
-        painter.setPen(QColor(0, 0, 0, 90 if isDark else 25))
-        painter.setBrush(QColor(69, 69, 69) if isDark else QColor(225, 228, 235))
-        painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+            # draw outer circle
+            isDark = isDarkTheme()
+            painter.setPen(QColor(0, 0, 0, 90 if isDark else 25))
+            painter.setBrush(QColor(69, 69, 69) if isDark else QColor(225, 228, 235))
+            painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
 
-        # draw innert circle
-        painter.setBrush(themeColor())
-        painter.drawEllipse(QPoint(11, 11), self.radius, self.radius)
+            # draw innert circle
+            painter.setBrush(themeColor())
+            painter.drawEllipse(QPoint(11, 11), self.radius, self.radius)
+        finally:
+            painter.end()
 
 
 class Slider(QSlider):
@@ -147,47 +152,52 @@ class Slider(QSlider):
         return int((v - pd) / gs * (self.maximum() - self.minimum()) + self.minimum())
 
     def paintEvent(self, e):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 115) if isDarkTheme() else QColor(0, 0, 0, 100))
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            painter.setRenderHints(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 115) if isDarkTheme() else QColor(0, 0, 0, 100))
 
-        if self.orientation() == Qt.Orientation.Horizontal:
-            self._drawHorizonGroove(painter)
-        else:
-            self._drawVerticalGroove(painter)
-
-        if hasattr(self, 'draw_content') and self.hovering:
-            # its a bad idea to display text like this, but I leave it as it is for now
-            
-            option = QStyleOptionSlider()
-            self.initStyleOption(option)
-
-            rect = self.style().subControlRect(
-                QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
-            rect = slider_subcontrol_rect(rect, self)
-            
-            value = self.value()
-            value_str = str(value)
-                
-            painter.setPen(QColor(*C.SLIDERHANDLE_COLOR,255))
-            font = painter.font()
-            font.setPointSizeF(8)
-            fm = QFontMetrics(font)
-            painter.setFont(font)
-
-            is_hor = self.orientation() == Qt.Orientation.Horizontal
-            if is_hor: 
-                value_w = fm.boundingRect(value_str).width()
-                dx = self.width() - value_w
+            if self.orientation() == Qt.Orientation.Horizontal:
+                self._drawHorizonGroove(painter)
             else:
-                dx = dy = 0
+                self._drawVerticalGroove(painter)
 
-            dy = self.height() - fm.height() + fm.descent()
-            painter.drawText(dx, dy, value_str)
+            if hasattr(self, 'draw_content') and self.hovering:
+                # its a bad idea to display text like this, but I leave it as it is for now
+                
+                option = QStyleOptionSlider()
+                self.initStyleOption(option)
 
-            if self.draw_content is not None:
-                painter.drawText(0, dy, self.draw_content, )
+                rect = self.style().subControlRect(
+                    QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
+                rect = slider_subcontrol_rect(rect, self)
+                
+                value = self.value()
+                value_str = str(value)
+                    
+                painter.setPen(QColor(*C.SLIDERHANDLE_COLOR,255))
+                font = painter.font()
+                font.setPointSizeF(max(1.0, font.pointSizeF()) if font.pointSizeF() > 0 else 8)
+                fm = QFontMetrics(font)
+                painter.setFont(font)
+
+                is_hor = self.orientation() == Qt.Orientation.Horizontal
+                if is_hor: 
+                    value_w = fm.boundingRect(value_str).width()
+                    dx = self.width() - value_w
+                else:
+                    dx = dy = 0
+
+                dy = self.height() - fm.height() + fm.descent()
+                painter.drawText(dx, dy, value_str)
+
+                if self.draw_content is not None:
+                    painter.drawText(0, dy, self.draw_content, )
+        finally:
+            painter.end()
                 
 
     def _drawHorizonGroove(self, painter: QPainter):

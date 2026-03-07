@@ -1,9 +1,28 @@
-from qtpy.QtWidgets import QApplication, QAbstractScrollArea, QGraphicsOpacityEffect, QWidget, QVBoxLayout, QHBoxLayout
-from qtpy.QtCore import QEvent, Qt, QPropertyAnimation, QTimer, Signal, QPoint, Property, QAbstractAnimation
+from qtpy.QtWidgets import QApplication, QAbstractScrollArea, QWidget, QVBoxLayout, QHBoxLayout
+from qtpy.QtCore import QEvent, Qt, QPropertyAnimation, QTimer, Signal, QPoint, Property, QAbstractAnimation, QObject
 from qtpy.QtGui import QMouseEvent, QPainter, QColor
 
+
+class _OpacityHolder(QObject):
+    """Holds opacity 0..1 for animation without QGraphicsOpacityEffect (avoids painter conflicts)."""
+    opacityChanged = Signal(float)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._opacity = 0.0
+
+    @Property(float, notify=opacityChanged)
+    def opacity(self):
+        return self._opacity
+
+    @opacity.setter
+    def opacity(self, v):
+        if self._opacity != v:
+            self._opacity = v
+            self.opacityChanged.emit(v)
+
+
 class ScrollBarGroove(QWidget):
-    """ Scroll bar groove """
+    """ Scroll bar groove (opacity animated without QGraphicsEffect to avoid painter conflicts). """
 
     def __init__(self, orient: Qt.Orientation, parent):
         super().__init__(parent=parent)
@@ -18,10 +37,12 @@ class ScrollBarGroove(QWidget):
             self.layout().addStretch(1)
             self.layout().setContentsMargins(3, 0, 3, 0)
 
-        self.opacityEffect = QGraphicsOpacityEffect(self)
-        self.opacityAni = QPropertyAnimation(self.opacityEffect, b'opacity', self)
-        self.setGraphicsEffect(self.opacityEffect)
-        self.opacityEffect.setOpacity(0)
+        self._opacityHolder = _OpacityHolder(self)
+        self.opacityAni = QPropertyAnimation(self)
+        self.opacityAni.setTargetObject(self._opacityHolder)
+        self.opacityAni.setPropertyName(b'opacity')
+        self.opacityAni.setDuration(150)
+        self._opacityHolder.opacityChanged.connect(self.update)
 
     def fadeIn(self):
         self.opacityAni.setEndValue(1)
@@ -34,41 +55,45 @@ class ScrollBarGroove(QWidget):
         self.opacityAni.start()
 
     def paintEvent(self, e):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-
-        painter.setBrush(QColor(0, 0, 0, 30))
-        painter.drawRoundedRect(self.rect(), 6, 6)
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            painter.setOpacity(self._opacityHolder.opacity)
+            painter.setRenderHints(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 30))
+            painter.drawRoundedRect(self.rect(), 6, 6)
+        finally:
+            painter.end()
 
 
 # ScrollBarHandle, ScrollBar and FlowLayout are modified from https://github.com/zhiyiYo/PyQt-Fluent-Widgets/blob/master/qfluentwidgets/components/widgets/scroll_bar.py
 
 class ScrollBarHandle(QWidget):
-    """ Scroll bar handle """
+    """ Scroll bar handle (opacity for fadeout without QGraphicsEffect to avoid painter conflicts). """
 
     def __init__(self, orient: Qt.Orientation, parent=None, fadeout: bool = False):
         super().__init__(parent)
         self.orient = orient
 
         if fadeout:
-            self.effect = effect = QGraphicsOpacityEffect(self, opacity=1.0)
-            self.setGraphicsEffect(effect)
-            self.fadeAnimation = QPropertyAnimation(
-                self,
-                propertyName=b"opacity",
-                targetObject=effect,
-                duration=300,
-                startValue=1.0,
-                endValue=0.,
-            )
-            # self.fadeAnimation.setEasingCurve(QEasingCurve.Type.InQuint)
+            self._opacityHolder = _OpacityHolder(self)
+            self._opacityHolder.opacity = 1.0
+            self.fadeAnimation = QPropertyAnimation(self)
+            self.fadeAnimation.setTargetObject(self._opacityHolder)
+            self.fadeAnimation.setPropertyName(b'opacity')
+            self.fadeAnimation.setDuration(300)
+            self.fadeAnimation.setStartValue(1.0)
+            self.fadeAnimation.setEndValue(0.0)
             self.fadeAnimation.finished.connect(self.hide)
+            self._opacityHolder.opacityChanged.connect(self.update)
             fixsize = 5
             self.anime_timer = QTimer(self)
             self.anime_timer.setSingleShot(True)
             self.anime_timer.timeout.connect(self.start_fade_animation)
         else:
+            self._opacityHolder = None
             fixsize = 3
          
         if orient == Qt.Vertical:
@@ -80,37 +105,48 @@ class ScrollBarHandle(QWidget):
 
     def start_fade_animation(self):
         self.show()
-        if self.fadeAnimation.state() == QAbstractAnimation.State.Running:
+        if self._opacityHolder and self.fadeAnimation.state() == QAbstractAnimation.State.Running:
             self.fadeAnimation.stop()
         self.fadeAnimation.start()
 
     def prepareFadeout(self):
+        if not self.fadeout:
+            return
         self.anime_timer.stop()
         self.anime_timer.start(700)
         if self.isHidden():
             self.show()
-        if self.fadeAnimation.state() == QAbstractAnimation.State.Running:
+        if self._opacityHolder and self.fadeAnimation.state() == QAbstractAnimation.State.Running:
             self.fadeAnimation.stop()
-        if self.effect.opacity() != 1.:
-            self.effect.setOpacity(1.)
+        if self._opacityHolder and self._opacityHolder.opacity != 1.0:
+            self._opacityHolder.opacity = 1.0
 
     def stopFadeout(self):
+        if not self.fadeout:
+            return
         if self.fadeAnimation.state() == QAbstractAnimation.State.Running:
             self.fadeAnimation.stop()
         self.anime_timer.stop()
         self.show()
-        if self.effect.opacity() != 1.:
-            self.effect.setOpacity(1.)
+        if self._opacityHolder and self._opacityHolder.opacity != 1.0:
+            self._opacityHolder.opacity = 1.0
 
     def paintEvent(self, e):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            if self._opacityHolder is not None:
+                painter.setOpacity(max(0.0, min(1.0, self._opacityHolder.opacity)))
+            painter.setRenderHints(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
 
-        r = self.width() / 2 if self.orient == Qt.Vertical else self.height() / 2
-        c = QColor(0, 0, 0, 90)
-        painter.setBrush(c)
-        painter.drawRoundedRect(self.rect(), r, r)
+            r = self.width() / 2 if self.orient == Qt.Vertical else self.height() / 2
+            c = QColor(0, 0, 0, 90)
+            painter.setBrush(c)
+            painter.drawRoundedRect(self.rect(), r, r)
+        finally:
+            painter.end()
 
 
 class ScrollBar(QWidget):
@@ -393,7 +429,7 @@ class ScrollBar(QWidget):
 
     def _onOpacityAniValueChanged(self):
         if not self.fadeout:
-            opacity = self.groove.opacityEffect.opacity()
+            opacity = self.groove._opacityHolder.opacity
             if self.orientation() == Qt.Vertical:
                 self.handle.setFixedWidth(int(3 + opacity * 3))
             else:

@@ -161,17 +161,24 @@ class DrawingLayer(QGraphicsPixmapItem):
         if pixmap.isNull():
             self.drawed_pixmap = None
             return
+        # Paint to a copy to avoid "paint device can only be painted by one painter" when
+        # the scene uses the same pixmap elsewhere (e.g. with QGraphicsEffect).
+        out = pixmap.copy()
         p = QPainter()
-        p.begin(pixmap)
-        for key in self.qimg_dict:
-            item = self.qimg_dict[key]
-            info = self.drawing_items_info[key]
-            if isinstance(item, QImage):
-                p.setCompositionMode(info['compose'])
-                p.drawImage(info['pos'][0], info['pos'][1], item)
-        p.end()
-        painter.drawPixmap(self.offset(), pixmap)
-        self.drawed_pixmap = pixmap
+        if not p.begin(out):
+            painter.drawPixmap(self.offset(), pixmap)
+            return
+        try:
+            for key in self.qimg_dict:
+                item = self.qimg_dict[key]
+                info = self.drawing_items_info[key]
+                if isinstance(item, QImage):
+                    p.setCompositionMode(info['compose'])
+                    p.drawImage(info['pos'][0], info['pos'][1], item)
+        finally:
+            p.end()
+        painter.drawPixmap(self.offset(), out)
+        self.drawed_pixmap = out
 
     def get_drawed_pixmap(self, format=QImage.Format.Format_ARGB32) -> QPixmap:
         pixmap = self.pixmap() if self.drawed_pixmap is None else self.drawed_pixmap
