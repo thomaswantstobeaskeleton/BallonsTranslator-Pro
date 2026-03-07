@@ -177,7 +177,14 @@ class BaseModule:
         return p
     
     def set_param_value(self, param_key: str, param_value, convert_dtype=True):
-        assert self.params is not None and param_key in self.params
+        if self.params is None or param_key not in self.params:
+            LOGGER.debug(
+                "Module %s: ignoring set_param_value for unknown key %r (params keys: %s)",
+                getattr(self, "name", self.__class__.__name__),
+                param_key,
+                list(self.params.keys()) if self.params else None,
+            )
+            return
         p = self.params[param_key]
         if isinstance(p, dict):
             if convert_dtype:
@@ -206,7 +213,8 @@ class BaseModule:
             self.params[param_key] = param_value
 
     def updateParam(self, param_key: str, param_content):
-        self.set_param_value(param_key, param_content)
+        if self.params is not None and param_key in self.params:
+            self.set_param_value(param_key, param_content)
 
     @property
     def low_vram_mode(self):

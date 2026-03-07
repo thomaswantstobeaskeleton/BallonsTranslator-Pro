@@ -66,7 +66,14 @@ class ModuleThread(QThread):
     def _set_module(self, module_name: str):
         old_module = self.module
         register = self.module_register
-        if module_name not in register.module_dict:
+        valid_keys = None
+        if self.module_key == 'textdetector':
+            valid_keys = GET_VALID_TEXTDETECTORS()
+        elif self.module_key == 'ocr':
+            valid_keys = GET_VALID_OCR()
+        elif self.module_key == 'translator':
+            valid_keys = GET_VALID_TRANSLATORS()
+        if module_name not in register.module_dict or (valid_keys is not None and module_name not in valid_keys):
             fallback = None
             if self.module_key == 'textdetector':
                 valid = GET_VALID_TEXTDETECTORS()
@@ -78,6 +85,11 @@ class ModuleThread(QThread):
                 fallback = valid[0] if valid else None
                 if fallback:
                     cfg_module.ocr = fallback
+            elif self.module_key == 'translator':
+                valid = GET_VALID_TRANSLATORS()
+                fallback = "google" if "google" in valid else (valid[0] if valid else None)
+                if fallback:
+                    cfg_module.translator = fallback
             elif self.module_key == 'inpainter':
                 valid = GET_VALID_INPAINTERS()
                 fallback = valid[0] if valid else None
@@ -1306,7 +1318,7 @@ class ModuleManager(QObject):
     imgtrans_pipeline_finished = Signal()
     blktrans_pipeline_finished = Signal(int, list)
     page_trans_finished = Signal(int)
-    detect_region_finished = Signal(str, list)  # page_name, new_blk_list
+    detect_region_finished = Signal(str, list, bool)  # page_name, new_blk_list, replace (replace page blocks)
 
     # Translation failure in batch: user choice (retry/skip/terminate)
     translation_failure_request = Signal(str, str)  # msg, page_key
@@ -1396,6 +1408,25 @@ class ModuleManager(QObject):
 
         config_panel.unload_models.connect(self.unload_all_models)
 
+
+    def refresh_module_dropdowns(self):
+        """Repopulate detector/OCR/translator dropdowns from GET_VALID_* (e.g. after dev_mode toggle)."""
+        if not hasattr(self, 'textdetect_panel'):
+            return
+        self.textdetect_panel.module_combobox.clear()
+        textdetector_params = merge_config_module_params(cfg_module.textdetector_params, GET_VALID_TEXTDETECTORS(), TEXTDETECTORS.get)
+        self.textdetect_panel.addModulesParamWidgets(textdetector_params)
+        self.textdetect_panel.setModule(cfg_module.textdetector if cfg_module.textdetector in GET_VALID_TEXTDETECTORS() else (GET_VALID_TEXTDETECTORS()[0] if GET_VALID_TEXTDETECTORS() else ''))
+
+        self.ocr_panel.module_combobox.clear()
+        ocr_params = merge_config_module_params(cfg_module.ocr_params, GET_VALID_OCR(), OCR.get)
+        self.ocr_panel.addModulesParamWidgets(ocr_params)
+        self.ocr_panel.setModule(cfg_module.ocr if cfg_module.ocr in GET_VALID_OCR() else (GET_VALID_OCR()[0] if GET_VALID_OCR() else ''))
+
+        self.translator_panel.module_combobox.clear()
+        translator_params = merge_config_module_params(cfg_module.translator_params, GET_VALID_TRANSLATORS(), TRANSLATORS.get)
+        self.translator_panel.addModulesParamWidgets(translator_params)
+        self.translator_panel.setModule(cfg_module.translator if cfg_module.translator in GET_VALID_TRANSLATORS() else (GET_VALID_TRANSLATORS()[0] if GET_VALID_TRANSLATORS() else ''))
 
     def unload_all_models(self):
         unload_modules(self, {'textdetector', 'inpainter', 'ocr', 'translator'})
@@ -1718,8 +1749,9 @@ class ModuleManager(QObject):
             self.textdetect_thread.terminate()
         self.textdetect_thread.setTextDetector(textdetector)
 
-    def run_detect_region(self, rect, img_array, page_name: str):
-        """Run text detection on a cropped region; emit detect_region_finished(page_name, blk_list) with blocks in full-image coordinates."""
+    def run_detect_region(self, rect, img_array, page_name: str, replace_if_full_page: bool = False):
+        """Run text detection on a cropped region; emit detect_region_finished(page_name, blk_list, replace).
+        When replace_if_full_page is True (e.g. "Detect text on page"), existing blocks are replaced."""
         import numpy as np
         h, w = img_array.shape[:2]
         x1 = max(0, int(rect.x()))
@@ -1727,31 +1759,31 @@ class ModuleManager(QObject):
         x2 = min(w, int(rect.x() + rect.width()))
         y2 = min(h, int(rect.y() + rect.height()))
         if x2 <= x1 or y2 <= y1:
-            self.detect_region_finished.emit(page_name, [])
+            self.detect_region_finished.emit(page_name, [], replace_if_full_page)
             return
         crop = np.ascontiguousarray(img_array[y1:y2, x1:x2])
         if crop.size == 0 or crop.shape[0] < 2 or crop.shape[1] < 2:
-            self.detect_region_finished.emit(page_name, [])
+            self.detect_region_finished.emit(page_name, [], replace_if_full_page)
             return
         manager = self
+        replace = replace_if_full_page
         def job():
             try:
                 if manager.textdetector is None:
-                    manager.detect_region_finished.emit(page_name, [])
+                    manager.detect_region_finished.emit(page_name, [], replace)
                     return
                 mask, blk_list = manager.textdetector.detect(crop, None)
             except Exception as e:
                 create_error_dialog(e, manager.tr('Detection in region failed.'), 'DetectRegion')
-                manager.detect_region_finished.emit(page_name, [])
+                manager.detect_region_finished.emit(page_name, [], replace)
                 return
             for blk in blk_list:
                 blk.xyxy = [blk.xyxy[0] + x1, blk.xyxy[1] + y1, blk.xyxy[2] + x1, blk.xyxy[3] + y1]
                 if getattr(blk, 'lines', None):
                     for line in blk.lines:
-                        for pt in line:
-                            pt[0] += x1
-                            pt[1] += y1
-            manager.detect_region_finished.emit(page_name, blk_list)
+                        for i, pt in enumerate(line):
+                            line[i] = [pt[0] + x1, pt[1] + y1]
+            manager.detect_region_finished.emit(page_name, blk_list, replace)
         self.textdetect_thread.job = job
         self.textdetect_thread.start()
 
@@ -1945,22 +1977,31 @@ class ModuleManager(QObject):
                                param_key: str, param_content: dict):
             
         if param_content.get('flush', False):
-            param_widget: ParamComboBox = param_content['widget']
-            param_widget.blockSignals(True)
-            current_item = param_widget.currentText()
-            param_widget.clear()
-            param_widget.addItems(module.flush(param_key))
-            param_widget.setCurrentText(current_item)
-            param_widget.blockSignals(False)
-        elif param_content.get('select_path', False):
-            dialog = QFileDialog()
-            f = module.params[param_key].get('path_filter', None)
-            p = dialog.getOpenFileUrl(self.parent(), filter=f)[0].toLocalFile()
-            if osp.exists(p):
+            if getattr(module, 'params', None) is not None and param_key in module.params:
                 param_widget: ParamComboBox = param_content['widget']
-                param_widget.setCurrentText(p)
+                param_widget.blockSignals(True)
+                current_item = param_widget.currentText()
+                param_widget.clear()
+                param_widget.addItems(module.flush(param_key))
+                param_widget.setCurrentText(current_item)
+                param_widget.blockSignals(False)
+        elif param_content.get('select_path', False):
+            if getattr(module, 'params', None) is not None and param_key in module.params:
+                dialog = QFileDialog()
+                f = module.params[param_key].get('path_filter', None)
+                p = dialog.getOpenFileUrl(self.parent(), filter=f)[0].toLocalFile()
+                if osp.exists(p):
+                    param_widget: ParamComboBox = param_content['widget']
+                    param_widget.setCurrentText(p)
         else:
-            module.updateParam(param_key, param_content['content'])
+            if getattr(module, 'params', None) is not None and param_key in module.params:
+                module.updateParam(param_key, param_content['content'])
+            else:
+                LOGGER.debug(
+                    "Module %s: skipping param update for unknown key %r",
+                    getattr(module, 'name', type(module).__name__),
+                    param_key,
+                )
 
     def handle_page_changed(self):
         if not self.imgtrans_thread.isRunning():
