@@ -4,6 +4,8 @@
 
 Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
 
+**中文说明：** [README_zh_CN.md](README_zh_CN.md)
+
 ---
 
 ## At a glance
@@ -679,7 +681,7 @@ Select the detector from the **Text detection** dropdown in the settings panel. 
 | **ctd** | Select **ctd**; set device, detect_size, box score threshold, merge tolerance, etc. | ComicTextDetector; primary manga detector. See [Settings](#71-ctd-comictextdetector) below. |
 | **paddle_det** | Select **paddle_det**; needs `paddlepaddle`, `paddleocr`. | Paddle OCR detection; pair with paddle_ocr or paddle_rec_v5. |
 | **easyocr_det** | Select **easyocr_det**; needs `easyocr`. | CRAFT-based; pair with easyocr_ocr. |
-| **ysgyolo** | Select **ysgyolo**; put YOLO `.pt` in `data/models/` with name starting with `ysgyolo` (e.g. `ysgyolo_comic_speech_bubble_v8m.pt`). | For comic bubble detection; pair with any OCR. |
+| **ysgyolo** | Select **ysgyolo**; put YOLO `.pt` in `data/models/` with name starting with `ysgyolo` (e.g. ogkalu's `ysgyolo_comic_speech_bubble_v8m.pt`, or YSG 淫書館 models from [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector)). | For comic bubble detection; pair with any OCR. **YSG series** = YSGforMTL only; other .pt (ogkalu, Kiuyha, etc.) are not YSG. |
 | **stariver_ocr** | Select **stariver_ocr**; fill User/Password in params. | API returns boxes+text; set OCR to **none_ocr**. |
 
 ### New in this fork
@@ -830,7 +832,7 @@ Design and research are documented in **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md
 
 - **lama_large_512px:** Options 512, 768, 1024, 1536, 2048. Default 1024. Smaller = less VRAM, gentler on small bubbles; larger = more detail on big regions. Avoid 2048 unless needed (risk of artifacts).
 - **Inpaint tiling (OOM fix):** Config → Inpainting (or DL Module) → **Inpaint tile size** (0 = off; 512–1024 for OOM), **Inpaint tile overlap** (64 px). Tiling activates when image is > 1.5× tile size; tiles are processed separately and stitched with overlap blending. Use only when you get out-of-memory errors; tiling can cause grey or blurry bubbles.
-- **Exclude labels from inpainting (optional):** Config → Inpainting → **Exclude certain labels from inpainting** (off by default). When enabled, enter comma-separated detector labels (e.g. `other, scene`); blocks with those labels are not inpainted (e.g. leave scene text or signs as-is). Requires a detector that sets block labels (e.g. YSG YOLO). When off, all detected text regions are inpainted.
+- **Exclude labels from inpainting (optional):** Config → Inpainting → **Exclude certain labels from inpainting** (off by default). When enabled, enter comma-separated detector labels (e.g. `other, scene`); blocks with those labels are not inpainted (e.g. leave scene text or signs as-is). Requires a detector that sets block labels (e.g. YSG 淫書館 or other comic YOLO). When off, all detected text regions are inpainted.
 - **Inpaint full image (workaround for broken per-block):** Config → Inpainting → **Inpaint full image (no per-block crops)**. When enabled, the whole image is inpainted at once instead of cropping per text block. Uses more VRAM and can be slower, but avoids crop/mask issues that cause bad results with some models (e.g. all Lama variants). **Try this first if inpainting looks wrong.** Alternatively use **opencv-telea** or **patchmatch** (Config → Inpainting) — no model download, CPU-only, often more reliable on difficult pages.
 - **Dark blobs or corruption even with full image:** If you still get a large dark smudge, white X, or glitchy area after enabling "Inpaint full image," the cause is usually (1) **Lama** struggling with that page, or (2) the **mask** covering too much (e.g. one big detected region). **Do this:** Switch to **opencv-telea** or **patchmatch** (Config → Inpainting) and run inpainting again on the same page — they use a different algorithm and often avoid the artifact. Also try: set **mask_dilation** to **0** (Inpainter params, for lama_large_512px), then **re-run detection** so the mask is rebuilt from text blocks only; then run inpainting again.
 - **lama_mpe, aot:** 1024 or 2048.
