@@ -16,8 +16,11 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QGroupBox,
+    QCheckBox,
 )
 from qtpy.QtCore import Signal, Qt
+
+from .custom_widget.hover_animation import install_button_animations
 
 
 def _collect_dirs(parent_path: str, include_subfolders: bool) -> list:
@@ -41,7 +44,7 @@ def _collect_dirs(parent_path: str, include_subfolders: bool) -> list:
 class BatchQueueDialog(QDialog):
     """Dialog to manage a batch queue of folders and run the pipeline with Pause/Resume/Cancel."""
 
-    start_queue_requested = Signal(list)
+    start_queue_requested = Signal(list, bool)  # (paths, skip_ignored_pages)
     pause_requested = Signal()
     resume_requested = Signal()
     cancel_requested = Signal()
@@ -76,6 +79,11 @@ class BatchQueueDialog(QDialog):
         group_layout.addLayout(btn_row)
         layout.addWidget(group)
 
+        self.skip_ignored_checker = QCheckBox(self.tr("Skip ignored pages"))
+        self.skip_ignored_checker.setChecked(True)
+        self.skip_ignored_checker.setToolTip(self.tr("If checked, pages marked as \"Ignore in run\" in each project are not processed."))
+        layout.addWidget(self.skip_ignored_checker)
+
         self.status_label = QLabel(self.tr("Queue: 0 items. Add folders and click Start."))
         self.status_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(self.status_label)
@@ -103,8 +111,14 @@ class BatchQueueDialog(QDialog):
         control_row.addStretch()
         layout.addLayout(control_row)
 
+        for btn in (self.start_btn, self.pause_btn, self.resume_btn, self.cancel_btn):
+            install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74)
+        for btn in (add_btn, add_sub_btn, remove_btn, clear_btn):
+            install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74)
+
         close_btn = QPushButton(self.tr("Close"))
         close_btn.clicked.connect(self.accept)
+        install_button_animations(close_btn, normal_opacity=0.9, press_opacity=0.74)
         layout.addWidget(close_btn)
 
         self._update_buttons()
@@ -167,7 +181,7 @@ class BatchQueueDialog(QDialog):
                 self.tr("Add at least one folder to the queue."),
             )
             return
-        self.start_queue_requested.emit(paths)
+        self.start_queue_requested.emit(paths, self.skip_ignored_checker.isChecked())
         self._set_running(True)
 
     def _on_pause(self):

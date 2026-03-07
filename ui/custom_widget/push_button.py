@@ -1,11 +1,10 @@
 from qtpy.QtWidgets import QPushButton
 
-from .hover_animation import install_hover_opacity_animation, install_hover_scale_animation
+from .hover_animation import install_button_animations
 
 
 class NoBorderPushBtn(QPushButton):
-    """Push button with bubbly hover feedback (opacity + slight scale)."""
+    """Push button with hover + click animations (opacity and optional scale)."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        install_hover_opacity_animation(self, duration_ms=100, normal_opacity=0.88)
-        install_hover_scale_animation(self, duration_ms=80, size_delta=(3, 2))
+        install_button_animations(self, normal_opacity=0.88, press_opacity=0.72)

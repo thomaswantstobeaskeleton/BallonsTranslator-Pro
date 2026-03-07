@@ -839,14 +839,18 @@ class Canvas(QGraphicsScene):
             self.mid_btn_pressed = True
             self.pan_initial_pos = event.screenPos()
             return
-        
+
         if self.imgtrans_proj.img_valid:
             if self.textblock_mode and len(self.selectedItems()) == 0 and self.textEditMode():
                 if btn == Qt.MouseButton.RightButton:
-                    return self.startCreateTextblock(event.scenePos())
+                    self.startCreateTextblock(event.scenePos())
+                    event.accept()
+                    return
             elif self.creating_normal_rect:
                 if btn == Qt.MouseButton.RightButton or btn == Qt.MouseButton.LeftButton:
-                    return self.startCreateTextblock(event.scenePos(), hide_control=True)
+                    self.startCreateTextblock(event.scenePos(), hide_control=True)
+                    event.accept()
+                    return
 
             elif btn == Qt.MouseButton.LeftButton:
                 # user is drawing using the pen/inpainting tool (only when drawing panel is active)
@@ -861,11 +865,13 @@ class Canvas(QGraphicsScene):
                     erasing = self.image_edit_mode == ImageEditMode.PenTool
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.erasing_pen, erasing)
                 elif not self.painting:
-                    # rubber band selection
+                    # rubber band selection / detect region rect – accept so scene gets move/release during drag
                     self.rubber_band_origin = event.scenePos()
                     self.rubber_band.setGeometry(QRectF(self.rubber_band_origin, self.rubber_band_origin).normalized())
                     self.rubber_band.show()
                     self.rubber_band.setZValue(1)
+                    event.accept()
+                    return
 
         return super().mousePressEvent(event)
 
@@ -929,8 +935,9 @@ class Canvas(QGraphicsScene):
             self.baseLayer.setRect(QRectF(im_rect))
             if im_rect != self.sceneRect():
                 self.setSceneRect(0, 0, im_rect.width(), im_rect.height())
-            # Default zoom: fit whole page in view so left/right and top/bottom connect to panels. User can still zoom.
-            QTimer.singleShot(0, self.fitToView)
+            # Only run fitToView on initial load (scale still 1.0) so switching pages doesn't reset zoom to ~114%.
+            if self.scale_factor == 1.0:
+                QTimer.singleShot(0, self.fitToView)
 
         self.setDrawingLayer()
 

@@ -6,6 +6,7 @@ from qtpy.QtGui import QDoubleValidator
 
 from utils.shared import CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from .push_button import NoBorderPushBtn
+from .combo_delegate import install_combo_hover_animation
 
 
 class ComboBox(QComboBox):
@@ -16,6 +17,7 @@ class ComboBox(QComboBox):
         self.scrollWidget = scrollWidget
         if options is not None:
             self.addItems(options)
+        install_combo_hover_animation(self)
 
     def setScrollWidget(self, scrollWidget: QWidget):
         self.scrollWidget = scrollWidget

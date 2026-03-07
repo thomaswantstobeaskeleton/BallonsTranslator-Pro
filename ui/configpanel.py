@@ -7,6 +7,8 @@ from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout,
     QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox, QFileDialog)
 
 from .custom_widget import ConfigComboBox, Widget, DangoSwitch
+from .custom_widget.smooth_scroll import SmoothScrollArea
+from .custom_widget.focus_ring import FocusRingFrame
 from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils import shared as C
@@ -159,6 +161,8 @@ def checkbox_with_label(name: str, discription: str = None, target_block: QWidge
         vertical_layout = True
     else:
         vertical_layout = False
+        from .custom_widget.widget import _sanitize_font
+        checkbox.setFont(_sanitize_font(checkbox.font()))
 
     if target_block is None:
         sublock = ConfigSubBlock(checkbox, name, vertical_layout=vertical_layout)
@@ -234,9 +238,11 @@ class ConfigBlock(Widget):
         return self.subblock_list[idx]
 
 
-class ConfigContent(QScrollArea):
+class ConfigContent(SmoothScrollArea):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.setSmoothScrollDuration(getattr(pcfg, 'smooth_scroll_duration_ms', 0))
+        self.setMotionBlurOnScroll(getattr(pcfg, 'motion_blur_on_scroll', False))
         self.config_block_list: List[ConfigBlock] = []
         self.scrollContent = Widget()
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -287,6 +293,9 @@ class TableItem(QStandardItem):
 
     def setBold(self, bold: bool):
         font = self.font()
+        if font.pointSize() <= 0 or font.pointSizeF() <= 0:
+            font.setPointSizeF(10.0)
+            font.setPointSize(10)
         font.setBold(bold)
         self.setFont(font)
 
@@ -317,6 +326,14 @@ class ConfigTable(QTreeView):
         self.last_selected: TableItem = None
         self.setHeaderHidden(True)
         self.setMinimumWidth(260)
+
+    def showEvent(self, event):
+        # Avoid QFont::setPointSize <= 0 (-1) from default font on Windows
+        from .custom_widget.widget import _sanitize_font
+        f = self.font()
+        if f.pointSizeF() <= 0 or f.pointSize() <= 0:
+            self.setFont(_sanitize_font(f))
+        super().showEvent(event)
 
     def addHeader(self, header: str) -> TableItem:
         rootNode = self.model().invisibleRootItem()
@@ -382,6 +399,8 @@ class ConfigPanel(Widget):
         self.setObjectName("ConfigPanel")
         self.configTable = ConfigTable()
         self.configTable.tableitem_pressed.connect(self.onTableItemPressed)
+        self.configTreeFocusRing = FocusRingFrame()
+        self.configTreeFocusRing.setChild(self.configTable)
         self.configContent = ConfigContent()
         # Ensure content has enough width so Typesetting combos and Test translator/OCR buttons don't get cut off
         self.configContent.setMinimumWidth(420)
@@ -614,6 +633,12 @@ class ConfigPanel(Widget):
         )
         self.manual_mode_checker.stateChanged.connect(self.on_manual_mode_changed)
 
+        self.skip_ignored_in_run_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Skip ignored pages in run'),
+            discription=self.tr('When on, full run and batch queue skip pages marked as "Ignore in run" in the page list context menu.')
+        )
+        self.skip_ignored_in_run_checker.stateChanged.connect(self.on_skip_ignored_in_run_changed)
+
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
         self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
@@ -650,6 +675,44 @@ class ConfigPanel(Widget):
         )
         generalConfigPanel.addSublock(bubbly_ui_sublock)
         self.bubbly_ui_checker.checkedChanged.connect(self.on_bubbly_ui_checker_changed)
+
+        self.smooth_scroll_spin = QSpinBox()
+        self.smooth_scroll_spin.setRange(0, 400)
+        self.smooth_scroll_spin.setSingleStep(20)
+        self.smooth_scroll_spin.setValue(getattr(pcfg, 'smooth_scroll_duration_ms', 0))
+        self.smooth_scroll_spin.setSpecialValueText(self.tr('Off'))
+        smooth_scroll_sublock = ConfigSubBlock(
+            self.smooth_scroll_spin,
+            self.tr('Smooth scroll (ms)'),
+            discription=self.tr('Animate scroll position on wheel for an enhanced feel. 0 = off. 80–200 = subtle. Applies to config and dialogs.'),
+            vertical_layout=False
+        )
+        generalConfigPanel.addSublock(smooth_scroll_sublock)
+        self.smooth_scroll_spin.valueChanged.connect(self.on_smooth_scroll_changed)
+
+        self.motion_blur_on_scroll_checker = QCheckBox()
+        self.motion_blur_on_scroll_checker.setChecked(bool(getattr(pcfg, 'motion_blur_on_scroll', False)))
+        motion_blur_sublock = ConfigSubBlock(
+            self.motion_blur_on_scroll_checker,
+            self.tr('Motion blur on scroll'),
+            discription=self.tr('Briefly blur content during scroll (can be costly on some systems).'),
+            vertical_layout=False,
+            insert_stretch=True
+        )
+        generalConfigPanel.addSublock(motion_blur_sublock)
+        self.motion_blur_on_scroll_checker.stateChanged.connect(self.on_motion_blur_on_scroll_changed)
+
+        self.reduce_motion_checker = QCheckBox()
+        self.reduce_motion_checker.setChecked(bool(getattr(pcfg, 'reduce_motion', False)))
+        reduce_motion_sublock = ConfigSubBlock(
+            self.reduce_motion_checker,
+            self.tr('Reduce motion'),
+            discription=self.tr('Shorter or no UI animations (accessibility / preference).'),
+            vertical_layout=False,
+            insert_stretch=True
+        )
+        generalConfigPanel.addSublock(reduce_motion_sublock)
+        self.reduce_motion_checker.stateChanged.connect(self.on_reduce_motion_changed)
 
         self.use_custom_cursor_checker = DangoSwitch(self)
         self.use_custom_cursor_checker.setChecked(bool(getattr(pcfg, 'use_custom_cursor', False)))
@@ -847,7 +910,7 @@ class ConfigPanel(Widget):
         self.searchurl_combobox.currentTextChanged.connect(self.on_searchurl_changed)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.configTable)
+        splitter.addWidget(self.configTreeFocusRing)
         splitter.addWidget(self.configContent)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
@@ -935,6 +998,9 @@ class ConfigPanel(Widget):
         pcfg.manual_mode = self.manual_mode_checker.isChecked()
         self.manual_mode_changed.emit()
 
+    def on_skip_ignored_in_run_changed(self):
+        pcfg.skip_ignored_in_run = self.skip_ignored_in_run_checker.isChecked()
+
     def _open_context_menu_config(self):
         dlg = ContextMenuConfigDialog(self)
         dlg.exec()
@@ -950,6 +1016,19 @@ class ConfigPanel(Widget):
     def on_bubbly_ui_checker_changed(self):
         pcfg.bubbly_ui = self.bubbly_ui_checker.isChecked()
         self.bubbly_ui_changed.emit(pcfg.bubbly_ui)
+
+    def on_smooth_scroll_changed(self, value: int):
+        pcfg.smooth_scroll_duration_ms = value
+        if hasattr(self, 'configContent') and hasattr(self.configContent, 'setSmoothScrollDuration'):
+            self.configContent.setSmoothScrollDuration(value)
+
+    def on_motion_blur_on_scroll_changed(self):
+        pcfg.motion_blur_on_scroll = self.motion_blur_on_scroll_checker.isChecked()
+        if hasattr(self, 'configContent') and hasattr(self.configContent, 'setMotionBlurOnScroll'):
+            self.configContent.setMotionBlurOnScroll(pcfg.motion_blur_on_scroll)
+
+    def on_reduce_motion_changed(self):
+        pcfg.reduce_motion = self.reduce_motion_checker.isChecked()
 
     def on_use_custom_cursor_changed(self):
         pcfg.use_custom_cursor = self.use_custom_cursor_checker.isChecked()
@@ -1266,6 +1345,18 @@ class ConfigPanel(Widget):
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
         if hasattr(self, 'manual_mode_checker'):
             self.manual_mode_checker.setChecked(getattr(pcfg, 'manual_mode', False))
+        if hasattr(self, 'skip_ignored_in_run_checker'):
+            self.skip_ignored_in_run_checker.setChecked(getattr(pcfg, 'skip_ignored_in_run', True))
+        if hasattr(self, 'smooth_scroll_spin'):
+            self.smooth_scroll_spin.setValue(getattr(pcfg, 'smooth_scroll_duration_ms', 0))
+            if hasattr(self, 'configContent') and hasattr(self.configContent, 'setSmoothScrollDuration'):
+                self.configContent.setSmoothScrollDuration(getattr(pcfg, 'smooth_scroll_duration_ms', 0))
+        if hasattr(self, 'motion_blur_on_scroll_checker'):
+            self.motion_blur_on_scroll_checker.setChecked(getattr(pcfg, 'motion_blur_on_scroll', False))
+            if hasattr(self, 'configContent') and hasattr(self.configContent, 'setMotionBlurOnScroll'):
+                self.configContent.setMotionBlurOnScroll(getattr(pcfg, 'motion_blur_on_scroll', False))
+        if hasattr(self, 'reduce_motion_checker'):
+            self.reduce_motion_checker.setChecked(getattr(pcfg, 'reduce_motion', False))
         arm = getattr(pcfg, 'auto_region_merge_after_run', 'never')
         arm_idx = self.auto_region_merge_combobox.findData(arm)
         if arm_idx >= 0:
