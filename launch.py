@@ -298,9 +298,12 @@ def main():
             pass
         shared.FIRST_RUN_NO_CONFIG = False
 
-    # Download selected model packages; can take several minutes on first run
-    LOGGER.info('Downloading selected model packages (this may take a few minutes)...')
-    prepare_local_files_forall()
+    # Download selected model packages; defer to after window is shown (GUI) so user can retry from Tools if it fails
+    if args.headless or getattr(args, 'headless_continuous', False):
+        LOGGER.info('Downloading selected model packages (this may take a few minutes)...')
+        prepare_local_files_forall()
+    else:
+        shared.DEFER_INITIAL_MODEL_DOWNLOAD = True
 
     if not args.headless and not getattr(args, 'headless_continuous', False):
         ps = QGuiApplication.primaryScreen()
