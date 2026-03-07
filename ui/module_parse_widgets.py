@@ -321,6 +321,22 @@ class ModuleConfigParseWidget(QWidget):
         self.visibleWidget: QWidget = None
         self.module_dict: dict = {}
 
+    def clearModuleList(self):
+        """Clear combobox, param widgets, and map. Use before repopulating (e.g. on dev_mode toggle)."""
+        try:
+            self.module_combobox.currentTextChanged.disconnect(self.on_module_changed)
+        except (TypeError, AttributeError):
+            pass
+        self.module_combobox.blockSignals(True)
+        self.module_combobox.clear()
+        self.module_combobox.blockSignals(False)
+        while self.params_layout.count():
+            item = self.params_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.param_widget_map.clear()
+        self.visibleWidget = None
+
     def addModulesParamWidgets(self, module_dict: dict):
         invalid_module_keys = []
         valid_modulekeys = self.get_valid_module_keys()

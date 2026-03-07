@@ -1413,17 +1413,17 @@ class ModuleManager(QObject):
         """Repopulate detector/OCR/translator dropdowns from GET_VALID_* (e.g. after dev_mode toggle)."""
         if not hasattr(self, 'textdetect_panel'):
             return
-        self.textdetect_panel.module_combobox.clear()
+        self.textdetect_panel.clearModuleList()
         textdetector_params = merge_config_module_params(cfg_module.textdetector_params, GET_VALID_TEXTDETECTORS(), TEXTDETECTORS.get)
         self.textdetect_panel.addModulesParamWidgets(textdetector_params)
         self.textdetect_panel.setModule(cfg_module.textdetector if cfg_module.textdetector in GET_VALID_TEXTDETECTORS() else (GET_VALID_TEXTDETECTORS()[0] if GET_VALID_TEXTDETECTORS() else ''))
 
-        self.ocr_panel.module_combobox.clear()
+        self.ocr_panel.clearModuleList()
         ocr_params = merge_config_module_params(cfg_module.ocr_params, GET_VALID_OCR(), OCR.get)
         self.ocr_panel.addModulesParamWidgets(ocr_params)
         self.ocr_panel.setModule(cfg_module.ocr if cfg_module.ocr in GET_VALID_OCR() else (GET_VALID_OCR()[0] if GET_VALID_OCR() else ''))
 
-        self.translator_panel.module_combobox.clear()
+        self.translator_panel.clearModuleList()
         translator_params = merge_config_module_params(cfg_module.translator_params, GET_VALID_TRANSLATORS(), TRANSLATORS.get)
         self.translator_panel.addModulesParamWidgets(translator_params)
         self.translator_panel.setModule(cfg_module.translator if cfg_module.translator in GET_VALID_TRANSLATORS() else (GET_VALID_TRANSLATORS()[0] if GET_VALID_TRANSLATORS() else ''))
