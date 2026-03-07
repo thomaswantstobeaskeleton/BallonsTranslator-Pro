@@ -253,6 +253,9 @@ class ProgramConfig(Config):
     gsearch_range: int = 0
     darkmode: bool = False
     bubbly_ui: bool = True
+    accent_color_hex: str = ''  # Theme customizer: e.g. #1E93E5 (blue) or #9B59B6 (purple). Empty = use theme default.
+    app_font_family: str = ''   # Theme customizer: app-wide font. Empty = system default.
+    app_font_size: int = 0      # Theme customizer: app-wide font size. 0 = system default.
     use_custom_cursor: bool = False
     custom_cursor_path: str = ''
     textselect_mini_menu: bool = True
@@ -382,7 +385,7 @@ CONFIG_KEY_ORDER = (
     "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path",
     "fsearch_case", "fsearch_whole_word", "fsearch_regex", "fsearch_range",
     "gsearch_case", "gsearch_whole_word", "gsearch_regex", "gsearch_range",
-    "darkmode", "bubbly_ui", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
+    "darkmode", "bubbly_ui", "accent_color_hex", "app_font_family", "app_font_size", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
     "saladict_shortcut", "search_url", "ocr_sublist", "restore_ocr_empty", "pre_mt_sublist", "mt_sublist",
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
     "supersampling_factor", "show_text_style_preset", "expand_tstyle_panel", "show_text_effect_panel",
@@ -562,7 +565,11 @@ def json_dump_program_config(obj, **kwargs):
 
 
 def save_config():
+    """Save program config to user config file (config/config.json). Never writes to config.example.json."""
     global pcfg
+    if osp.basename(shared.CONFIG_PATH) == 'config.example.json':
+        LOGGER.warning('Refusing to save to config.example.json; user config is config.json (gitignored).')
+        return False
     try:
         tmp_save_tgt = shared.CONFIG_PATH + '.tmp'
         with open(tmp_save_tgt, 'w', encoding='utf8') as f:
@@ -571,7 +578,7 @@ def save_config():
         LOGGER.error(f'Failed save config to {tmp_save_tgt}: {e}')
         LOGGER.error(traceback.format_exc())
         return False
-    
+
     os.replace(tmp_save_tgt, shared.CONFIG_PATH)
     LOGGER.info('Config saved')
     return True
