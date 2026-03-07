@@ -2,9 +2,9 @@ import os.path as osp
 from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea
+from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QComboBox
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize
-from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon
+from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent
 
 from modules.translators import BaseTranslator
 from modules.translators.base import lang_display_label
@@ -118,6 +118,10 @@ class LeftBar(Widget):
         actionOpenACBFCBZ.setToolTip(self.tr("Open a comic book archive (.cbz/.zip); extracts to a folder and opens as project."))
         actionOpenACBFCBZ.triggered.connect(self.onOpenACBFCBZ)
 
+        actionOpenCBR = QAction(self.tr("Open CBR ..."), self)
+        actionOpenCBR.setToolTip(self.tr("Open a comic book RAR archive (.cbr/.rar). Requires: pip install rarfile; WinRAR/7-Zip in PATH."))
+        actionOpenCBR.triggered.connect(self.onOpenCBR)
+
         actionSaveProj = QAction(self.tr("Save Project"), self)
         self.save_proj = actionSaveProj.triggered
         actionSaveProj.setShortcut(QKeySequence.fromString(get_shortcut("file.save_proj", getattr(pcfg, "shortcuts", None))))
@@ -151,7 +155,7 @@ class LeftBar(Widget):
         self.recentMenu = QMenu(self.tr("Open Recent"), self)
 
         openMenu = QMenu(self)
-        openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenACBFCBZ, actionOpenProj])
+        openMenu.addActions([actionOpenFolder, actionOpenImages, actionOpenACBFCBZ, actionOpenCBR, actionOpenProj])
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
         actionCloseProject = QAction(self.tr("Close project and go to welcome screen"), self)
@@ -309,6 +313,45 @@ class LeftBar(Widget):
             QMessageBox.warning(
                 self,
                 self.tr("Open ACBF/CBZ"),
+                self.tr("Failed to extract archive: {}").format(str(e)),
+            )
+
+    def onOpenCBR(self) -> None:
+        d = None
+        if len(self.recent_proj_list) > 0:
+            for projp in self.recent_proj_list:
+                if not osp.isdir(projp):
+                    projp = osp.dirname(projp)
+                if osp.exists(projp):
+                    d = projp
+                    break
+        dialog = QFileDialog(self)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        dialog.setNameFilter(self.tr("Comic RAR archives (*.cbr *.rar)"))
+        if d:
+            dialog.setDirectory(d)
+        if not dialog.exec():
+            return
+        selected = dialog.selectedFiles()
+        if not selected or not osp.isfile(selected[0]):
+            return
+        cbr_path = str(selected[0])
+        try:
+            from utils.archive_utils import extract_cbr_to_folder
+            out_dir = osp.join(osp.dirname(cbr_path), Path(cbr_path).stem)
+            extract_cbr_to_folder(cbr_path, out_dir=out_dir)
+            self.updateRecentProjList(out_dir)
+            self.open_dir.emit(out_dir)
+        except RuntimeError as e:
+            QMessageBox.warning(
+                self,
+                self.tr("Open CBR"),
+                str(e),
+            )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                self.tr("Open CBR"),
                 self.tr("Failed to extract archive: {}").format(str(e)),
             )
 
@@ -564,6 +607,12 @@ class TitleBar(Widget):
         validateProjAction = QAction(self.tr('Check project'), self)
         self.validate_project_trigger = validateProjAction.triggered
 
+        showBatchReportAction = QAction(self.tr('Show last batch report'), self)
+        showBatchReportAction.setToolTip(self.tr('Open the report of skipped pages from the last pipeline run.'))
+        showBatchReportAction.setEnabled(False)
+        self.show_batch_report_trigger = showBatchReportAction.triggered
+        self.show_batch_report_action = showBatchReportAction
+
         mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
         self.manga_source_trigger = mangaSourceAction.triggered
 
@@ -579,12 +628,21 @@ class TitleBar(Widget):
         retryModelsAction.setToolTip(self.tr('Retry downloading model packages (e.g. after a failed first install).'))
         self.retry_models_trigger = retryModelsAction.triggered
 
+        releaseCachesAction = QAction(self.tr('Release model caches'), self)
+        releaseCachesAction.setToolTip(self.tr('Unload detector/OCR/inpainter/translator models and free GPU memory. Use after a batch to reduce RAM.'))
+        self.release_model_caches_trigger = releaseCachesAction.triggered
+
+        clearPipelineCachesAction = QAction(self.tr('Clear OCR and translation caches'), self)
+        clearPipelineCachesAction.setToolTip(self.tr('Clear in-session OCR and translation caches (current project). Next run will recompute.'))
+        self.clear_pipeline_caches_trigger = clearPipelineCachesAction.triggered
+
         toolsMenu = QMenu(self.toolsToolBtn)
         projectMenu = QMenu(self.tr('Project'), self)
         projectMenu.addAction(mergeToolAction)
         projectMenu.addAction(reRunDetectAction)
         projectMenu.addAction(reRunOCRAction)
         projectMenu.addAction(validateProjAction)
+        projectMenu.addAction(showBatchReportAction)
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)
@@ -599,6 +657,9 @@ class TitleBar(Widget):
         modelsMenu = QMenu(self.tr('Models'), self)
         modelsMenu.addAction(manageModelsAction)
         modelsMenu.addAction(retryModelsAction)
+        modelsMenu.addSeparator()
+        modelsMenu.addAction(releaseCachesAction)
+        modelsMenu.addAction(clearPipelineCachesAction)
         toolsMenu.addMenu(projectMenu)
         toolsMenu.addMenu(exportMenuTools)
         toolsMenu.addMenu(sourcesMenu)
@@ -853,12 +914,13 @@ class SelectionWithConfigWidget(Widget):
 
     def __init__(self, selector_name: str, add_cfg_btn=True, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         label = ConfigClickableLabel(text=selector_name)
         label.clicked.connect(self.cfg_clicked)
         
         self.selector = SmallComboBox()
-
-        self.cfg_btn = None
+        self.selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.selector.setMinimumContentsLength(10)
         if add_cfg_btn:
             self.cfg_btn = SmallConfigPutton()
             self.cfg_btn.setObjectName('BottomBarCfgBtn')
@@ -876,7 +938,6 @@ class SelectionWithConfigWidget(Widget):
         layout2.addWidget(self.selector)
         layout2.addWidget(self.cfg_btn)
         layout2.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(label)
         layout.addLayout(layout2)
 
     def enterEvent(self, event: QEvent) -> None:
@@ -907,6 +968,7 @@ class TranslatorSelectionWidget(Widget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         label = ConfigClickableLabel(text=self.tr('Translate'))
         label.clicked.connect(self.cfg_clicked)
         label_src = ConfigClickableLabel(text=self.tr('Source'))
@@ -915,9 +977,14 @@ class TranslatorSelectionWidget(Widget):
         label_tgt.clicked.connect(self.cfg_clicked)
         
         self.selector = SmallComboBox()
-        self.selector.setMinimumWidth(220)  # Issue #16: readable translator names (e.g. text-generation-webui)
+        self.selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.selector.setMinimumContentsLength(10)
         self.src_selector = SmallComboBox()
+        self.src_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.src_selector.setMinimumContentsLength(8)
         self.tgt_selector = SmallComboBox()
+        self.tgt_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.tgt_selector.setMinimumContentsLength(8)
         self.cfg_btn = SmallConfigPutton()
         self.cfg_btn.setObjectName('BottomBarCfgBtn')
         self.cfg_btn.setToolTip(self.tr('Open module settings'))
@@ -973,6 +1040,17 @@ class TranslatorSelectionWidget(Widget):
         except (ValueError, IndexError):
             combobox.setCurrentIndex(0)
 
+
+class HorizontalWheelScrollArea(QScrollArea):
+    """Scroll area that maps vertical wheel to horizontal scroll (for bottom bar pipeline strip)."""
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        hbar = self.horizontalScrollBar()
+        if hbar.isVisible():
+            delta = event.angleDelta().y() if hasattr(event, 'angleDelta') else event.delta()
+            hbar.setValue(hbar.value() - delta)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 
 class BottomBar(Widget):
@@ -1045,21 +1123,24 @@ class BottomBar(Widget):
         
         # Pipeline modules in a horizontal scroll area so they don't get squished
         self.pipelineContainer = QWidget(self)
+        self.pipelineContainer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         pipelineLayout = QHBoxLayout(self.pipelineContainer)
         pipelineLayout.setContentsMargins(0, 0, 0, 0)
-        pipelineLayout.setSpacing(0)
+        pipelineLayout.setSpacing(8)
+        pipelineLayout.addStretch(1)
         pipelineLayout.addWidget(self.textdet_selector)
         pipelineLayout.addWidget(self.ocr_selector)
         pipelineLayout.addWidget(self.inpaint_selector)
         pipelineLayout.addWidget(self.trans_selector)
-        self.pipelineScroll = QScrollArea(self)
+        self.pipelineScroll = HorizontalWheelScrollArea(self)
         self.pipelineScroll.setWidget(self.pipelineContainer)
-        self.pipelineScroll.setWidgetResizable(False)
+        self.pipelineScroll.setWidgetResizable(True)
         self.pipelineScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.pipelineScroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.pipelineScroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.pipelineScroll.setMaximumHeight(BOTTOMBAR_HEIGHT)
         self.pipelineScroll.setMinimumWidth(120)
+        self.pipelineScroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.pipelineScroll.setStyleSheet("""
             QScrollBar:horizontal {
                 height: 4px;
@@ -1078,17 +1159,24 @@ class BottomBar(Widget):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
         """)
         
-        # Layout: Pipeline (scroll) | Run | spacer | sliders | Right panel (Drawing, Text, Spell check, text block mode)
+        # Layout: Pipeline (stretches from left to Run) | Run | sliders | canvas mode
         self.hlayout.addWidget(self.pipelineScroll, 1)
         self.hlayout.addWidget(self.runBtnWrapper)
-        self.hlayout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Minimum))
         self.hlayout.addWidget(self.textlayerSlider)
         self.hlayout.addWidget(self.originalSlider)
         self.hlayout.addWidget(self.paintChecker)
         self.hlayout.addWidget(self.texteditChecker)
         self.hlayout.addWidget(self.spellCheckChecker)
         self.hlayout.addWidget(self.textblockChecker)
-        self.hlayout.setContentsMargins(60, 0, 10, WINDOW_BORDER_WIDTH)
+        self.hlayout.setContentsMargins(0, 0, 10, WINDOW_BORDER_WIDTH)
+        self.hlayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Hover animations for bottom bar controls
+        if getattr(pcfg, 'bubbly_ui', True):
+            install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+        install_hover_opacity_animation(self.runBtn, duration_ms=100, normal_opacity=0.88)
+        for chk in (self.paintChecker, self.texteditChecker, self.spellCheckChecker, self.textblockChecker):
+            install_hover_opacity_animation(chk, duration_ms=100, normal_opacity=0.88)
 
 
     def onPaintCheckerPressed(self):
