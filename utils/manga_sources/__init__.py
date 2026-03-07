@@ -8,8 +8,7 @@ from .manhwa_reader import ManhwaReaderClient
 from .generic_chapter_url import GenericChapterUrlClient
 from .mangaforfree import MangaForFreeClient
 from .toongod import ToonGodClient
-from .manganato import MangaNatoClient
-from .mangafire import MangaFireClient
+from .mangakakalot import MangakakalotClient
 from .naruraw import NaruRawClient
 from .manhwaraw import ManhwaRawClient
 from .onekkk import OneKkkClient
@@ -22,8 +21,7 @@ __all__ = [
     "GenericChapterUrlClient",
     "MangaForFreeClient",
     "ToonGodClient",
-    "MangaNatoClient",
-    "MangaFireClient",
+    "MangakakalotClient",
     "NaruRawClient",
     "ManhwaRawClient",
     "OneKkkClient",

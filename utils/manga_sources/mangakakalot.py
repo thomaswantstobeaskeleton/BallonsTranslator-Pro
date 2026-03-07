@@ -1,8 +1,8 @@
 """
-MangaFire site client (mangafire.to / mangafire.co).
+Mangakakalot.gg site client (www.mangakakalot.gg).
 Search and chapter list via HTTP or Playwright; chapter images use GenericChapterUrlClient.
-Manga URL: /manga/{title}.{id}, Chapter: /read/{title}.{id}/{lang}/chapter-{num}.
-Ref: MangaFire-API, FMHY manga sources.
+URLs: manga /manga/{slug}, chapter /manga/{slug}/chapter-{num}.
+Ref: Kotatsu parsers #1522/#1524, FMHY manga sources.
 """
 from __future__ import annotations
 
@@ -15,15 +15,14 @@ import requests
 from bs4 import BeautifulSoup
 
 from .generic_chapter_url import fetch_html_playwright
-from .url_utils import infer_id, normalize_base_url, slugify_keyword
+from .url_utils import infer_id, normalize_base_url
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-# MangaFire filter/search page and manga page
-SEARCH_ITEM = "a[href*='/manga/']"
-MANGAFIRE_MANGA_PATH = re.compile(r"^/manga/([^/]+)$")
-CHAPTER_LINK = "a[href*='/read/']"
+# Manga page: /manga/{slug}, Chapter: /manga/{slug}/chapter-{num}
+MANGA_PATH = re.compile(r"^/manga/([^/]+)/?$")
+CHAPTER_PATH = re.compile(r"^/manga/[^/]+/chapter-[^/]+/?$")
 
 
 def _absolute_url(base: str, href: str) -> str:
@@ -35,12 +34,12 @@ def _absolute_url(base: str, href: str) -> str:
     return urljoin(base, h)
 
 
-class MangaFireClient:
-    """Sync client for MangaFire (mangafire.to). Search via /filter, manga /manga/title.id, chapters /read/..."""
+class MangakakalotClient:
+    """Sync client for Mangakakalot.gg. Search, feed, download via generic chapter URL."""
 
     def __init__(
         self,
-        base_url: str = "https://mangafire.to",
+        base_url: str = "https://www.mangakakalot.gg",
         timeout: int = 25,
         request_delay: float = 0.5,
     ):
@@ -61,61 +60,71 @@ class MangaFireClient:
             headers["Referer"] = referer
         return self.session.get(url, timeout=self.timeout, headers=headers or None)
 
-    def search(self, keyword: str, limit: int = 25, use_playwright: bool = False, headless: bool = True) -> List[dict]:
-        """Search by keyword. MangaFire often requires JS (VRF); use_playwright=True recommended."""
+    def search(
+        self,
+        keyword: str,
+        limit: int = 25,
+        use_playwright: bool = False,
+        headless: bool = True,
+    ) -> List[dict]:
+        """Search by keyword. Tries /search/story/{query} then /search?q=."""
         if not keyword or not keyword.strip():
             return []
         keyword = keyword.strip()
-        search_url = urljoin(self.base_url, f"/filter?keyword={quote(keyword)}&page=1&type=")
+        query_slug = keyword.replace(" ", "_").lower()
+        query_enc = quote(keyword)
+        urls_to_try = [
+            urljoin(self.base_url, f"/search/story/{quote(query_slug)}"),
+            urljoin(self.base_url, f"/search?q={query_enc}"),
+            urljoin(self.base_url, f"/search/story/{query_enc}"),
+        ]
         html = None
-        if use_playwright:
-            html = fetch_html_playwright(
-                search_url,
-                wait_selector="a[href*='/manga/']",
-                timeout_ms=25000,
-                headless=headless,
-            )
+        for url in urls_to_try:
+            if use_playwright:
+                html = fetch_html_playwright(
+                    url,
+                    wait_selector="a[href*='/manga/']",
+                    timeout_ms=20000,
+                    headless=headless,
+                )
+            if not html:
+                try:
+                    r = self._get(url)
+                    r.raise_for_status()
+                    html = r.text
+                except requests.RequestException:
+                    continue
+            if html and ("/manga/" in html or "manga" in html.lower()):
+                break
         if not html:
-            try:
-                r = self._get(search_url)
-                r.raise_for_status()
-                html = r.text
-            except requests.RequestException:
-                return []
-        return self._parse_search_results(html or "")[:limit]
+            return []
+        return self._parse_search_results(html)[:limit]
 
     def _parse_search_results(self, html: str) -> List[dict]:
         soup = BeautifulSoup(html, "html.parser")
         results: List[dict] = []
         base = self.base_url
-        seen_urls: set = set()
+        seen: set = set()
 
-        for a in soup.select(SEARCH_ITEM):
+        for a in soup.select('a[href*="/manga/"]'):
             href = a.get("href")
             if not href:
                 continue
             full_url = _absolute_url(base, str(href))
             path = urlparse(full_url).path.strip("/")
-            m = MANGAFIRE_MANGA_PATH.match("/" + path) if path else None
-            if not m:
-                if "/read/" in full_url or "/filter" in full_url or "/type/" in full_url or "/genre/" in full_url:
-                    continue
-                if "/manga/" not in full_url:
-                    continue
-                parts = path.split("/")
-                if len(parts) < 2 or parts[0] != "manga":
-                    continue
-                manga_id = parts[1]
-            else:
-                manga_id = m.group(1)
-            if manga_id in seen_urls or full_url in seen_urls:
+            if "/chapter-" in path or "/genre/" in path or "/manga-list" in path or "/manga_list" in path:
                 continue
-            seen_urls.add(manga_id)
-            seen_urls.add(full_url)
+            m = re.match(r"^manga/([^/]+)/?$", path)
+            if not m:
+                continue
+            slug = m.group(1)
+            if slug in seen:
+                continue
+            seen.add(slug)
             title = (a.get_text() or "").strip()
             if not title or len(title) > 300:
-                title = manga_id
-            results.append({"id": manga_id, "title": title, "url": full_url})
+                title = slug.replace("-", " ")
+            results.append({"id": slug, "title": title, "url": full_url})
 
         return results
 
@@ -128,14 +137,17 @@ class MangaFireClient:
         use_playwright: bool = False,
         headless: bool = True,
     ) -> List[dict]:
-        """Get chapter list. Chapters have id=full chapter URL for generic download."""
-        manga_url = urljoin(self.base_url, f"/manga/{manga_id}")
+        """Get chapter list. manga_id = slug. Chapter id = full URL."""
+        slug = (manga_id or "").strip().strip("/")
+        if not slug:
+            return []
+        manga_url = urljoin(self.base_url, f"/manga/{slug}")
         html = None
         if use_playwright:
             html = fetch_html_playwright(
                 manga_url,
-                wait_selector="a[href*='/read/']",
-                timeout_ms=25000,
+                wait_selector="a[href*='/chapter-']",
+                timeout_ms=20000,
                 headless=headless,
             )
         if not html:
@@ -147,33 +159,31 @@ class MangaFireClient:
                 return []
         if not html:
             return []
-        return self._parse_chapters(html, manga_id, limit=limit, order=order)
+        return self._parse_chapters(html, limit=limit, order=order)
 
-    def _parse_chapters(self, html: str, manga_id: str, limit: int = 500, order: str = "asc") -> List[dict]:
+    def _parse_chapters(self, html: str, limit: int = 500, order: str = "asc") -> List[dict]:
         soup = BeautifulSoup(html, "html.parser")
         chapters: List[dict] = []
         seen_urls: set = set()
 
-        for a in soup.select(CHAPTER_LINK):
+        for a in soup.select('a[href*="/manga/"][href*="/chapter-"]'):
             href = a.get("href")
             if not href:
                 continue
             full_url = _absolute_url(self.base_url, str(href))
             if full_url in seen_urls:
                 continue
-            if "/read/" not in full_url:
-                continue
-            # Skip "Start Reading" / nav links that don't have chapter number
-            if "/chapter-" not in full_url and "/chapter_" not in full_url:
+            path = urlparse(full_url).path
+            if not re.search(r"/manga/[^/]+/chapter-", path):
                 continue
             seen_urls.add(full_url)
-            title = (a.get_text() or "").strip()
-            ch_id = infer_id(full_url)
+            title = (a.get_text() or "").strip() or infer_id(full_url) or f"Ch.{len(chapters) + 1}"
             chapters.append({
                 "id": full_url,
-                "display": title or ch_id or f"Ch.{len(chapters) + 1}",
+                "display": title,
                 "index": len(chapters) + 1,
             })
+
         if order == "desc":
             chapters.reverse()
         return chapters[:limit]

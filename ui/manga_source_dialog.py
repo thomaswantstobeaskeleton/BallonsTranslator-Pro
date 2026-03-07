@@ -40,8 +40,7 @@ from utils.manga_sources import (
     GenericChapterUrlClient,
     MangaForFreeClient,
     ToonGodClient,
-    MangaNatoClient,
-    MangaFireClient,
+    MangakakalotClient,
     NaruRawClient,
     ManhwaRawClient,
     OneKkkClient,
@@ -49,6 +48,7 @@ from utils.manga_sources import (
 from utils.manga_sources.generic_chapter_url import ensure_playwright_chromium_installed
 from utils.config import pcfg, save_config, ProgramConfig
 from utils.logger import logger as LOGGER
+from utils.manga_sources.search_translate import translate_search_query
 
 
 def _sanitize_filename(name: str) -> str:
@@ -71,7 +71,7 @@ def _extract_mangadex_chapter_id(url_or_id: str) -> Optional[str]:
 
 # Source combo: (display label, source_id). Manhwa Reader is shown only when API is up.
 # generic_chapter_url and *_url sources use paste-chapter-URL flow (same backend).
-GENERIC_CHAPTER_SOURCE_IDS = ("generic_chapter_url", "mangafire_url", "manganato_url", "raws_manhwa_manhua_url")
+GENERIC_CHAPTER_SOURCE_IDS = ("generic_chapter_url", "raws_manhwa_manhua_url")
 SOURCE_OPTIONS: List[tuple] = [
     ("MangaDex", "mangadex"),
     ("MangaDex (raw / original language)", "mangadex_raw"),
@@ -81,14 +81,11 @@ SOURCE_OPTIONS: List[tuple] = [
     ("Manhwa Reader", "manhwa_reader"),
     ("MangaForFree", "mangaforfree"),
     ("ToonGod", "toongod"),
-    ("MangaNato", "manganato"),
-    ("MangaFire", "mangafire"),
+    ("Mangakakalot", "mangakakalot"),
     ("NaruRaw (Japanese raw)", "naruraw"),
     ("ManhwaRaw (Korean raw)", "manhwaraw"),
     ("1kkk (Chinese manhua)", "onekkk"),
     ("Generic (chapter URL)", "generic_chapter_url"),
-    ("MangaFire (chapter URL)", "mangafire_url"),
-    ("MangaNato (chapter URL)", "manganato_url"),
     ("Raws / Manhwa / Manhua (chapter URL)", "raws_manhwa_manhua_url"),
     ("Local folder", "local_folder"),
 ]
@@ -130,8 +127,7 @@ class MangaSourceWorker(QObject):
         self._generic_chapter = GenericChapterUrlClient(timeout=25, request_delay=delay)
         self._mangaforfree = MangaForFreeClient(base_url="https://mangaforfree.com", timeout=25, request_delay=delay)
         self._toongod = ToonGodClient(base_url="https://toongod.org", timeout=25, request_delay=delay)
-        self._manganato = MangaNatoClient(base_url="https://manganato.com", timeout=25, request_delay=delay)
-        self._mangafire = MangaFireClient(base_url="https://mangafire.to", timeout=25, request_delay=delay)
+        self._mangakakalot = MangakakalotClient(base_url="https://www.mangakakalot.gg", timeout=25, request_delay=delay)
         self._naruraw = NaruRawClient(base_url="https://naruraw.net", timeout=25, request_delay=delay)
         self._manhwaraw = ManhwaRawClient(base_url="https://manhwaraw.club", timeout=25, request_delay=delay)
         self._onekkk = OneKkkClient(base_url="https://www.1kkk.com", timeout=25, request_delay=delay)
@@ -191,17 +187,10 @@ class MangaSourceWorker(QObject):
                 self.search_finished.emit(results)
             except Exception as e:
                 self.error.emit(str(e))
-        elif source_id == "manganato":
-            self._manganato.request_delay = delay
+        elif source_id == "mangakakalot":
+            self._mangakakalot.request_delay = delay
             try:
-                results = self._manganato.search(title, limit=25, use_playwright=use_playwright, headless=headless)
-                self.search_finished.emit(results)
-            except Exception as e:
-                self.error.emit(str(e))
-        elif source_id == "mangafire":
-            self._mangafire.request_delay = delay
-            try:
-                results = self._mangafire.search(title, limit=25, use_playwright=use_playwright, headless=headless)
+                results = self._mangakakalot.search(title, limit=25, use_playwright=use_playwright, headless=headless)
                 self.search_finished.emit(results)
             except Exception as e:
                 self.error.emit(str(e))
@@ -282,17 +271,10 @@ class MangaSourceWorker(QObject):
                 self.feed_finished.emit(chapters)
             except Exception as e:
                 self.error.emit(str(e))
-        elif source_id == "manganato":
-            self._manganato.request_delay = delay
+        elif source_id == "mangakakalot":
+            self._mangakakalot.request_delay = delay
             try:
-                chapters = self._manganato.get_feed(manga_id, translated_language=lang, limit=500, order="asc", use_playwright=use_playwright, headless=headless)
-                self.feed_finished.emit(chapters)
-            except Exception as e:
-                self.error.emit(str(e))
-        elif source_id == "mangafire":
-            self._mangafire.request_delay = delay
-            try:
-                chapters = self._mangafire.get_feed(manga_id, translated_language=lang, limit=500, order="asc", use_playwright=use_playwright, headless=headless)
+                chapters = self._mangakakalot.get_feed(manga_id, translated_language=lang, limit=500, order="asc", use_playwright=use_playwright, headless=headless)
                 self.feed_finished.emit(chapters)
             except Exception as e:
                 self.error.emit(str(e))
@@ -353,7 +335,7 @@ class MangaSourceWorker(QObject):
                 "Use MangaDex for download, or open the chapter link in your browser."
             )
             return
-        if source_id in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk") or source_id in GENERIC_CHAPTER_SOURCE_IDS:
+        if source_id in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk") or source_id in GENERIC_CHAPTER_SOURCE_IDS:
             self._do_download_generic_chapter_url(
                 chapter_infos, base_dir, manga_title, data_saver, use_playwright=use_playwright, headless=headless
             )
@@ -558,6 +540,13 @@ class MangaSourceDialog(QDialog):
         self._search_btn = QPushButton(self.tr("Search"))
         self._search_btn.clicked.connect(self._on_search)
         row2.addWidget(self._search_btn)
+        self._translate_raw_search_check = QCheckBox(self.tr("Translate search to original language (for raw sources)"))
+        self._translate_raw_search_check.setToolTip(
+            self.tr("When searching NaruRaw, ManhwaRaw, or 1kkk: translate your search term from English to Japanese/Korean/Chinese so raw titles are found.")
+        )
+        self._translate_raw_search_check.setChecked(getattr(pcfg, "manga_source_translate_raw_search", True))
+        self._translate_raw_search_check.toggled.connect(self._save_config_to_pcfg)
+        row2.addWidget(self._translate_raw_search_check)
         search_layout.addLayout(row2)
         row_url = QHBoxLayout()
         self._url_edit = QLineEdit()
@@ -778,20 +767,19 @@ class MangaSourceDialog(QDialog):
             self._lang_label.setText(self.tr("Language:"))
         for w in self._search_row_widgets:
             w.setVisible(not self._is_url_source and not self._is_local_folder and not self._is_generic_chapter_url)
+        self._translate_raw_search_check.setVisible(
+            source in ("naruraw", "manhwaraw", "onekkk")
+        )
         for w in self._url_row_widgets:
             w.setVisible(self._is_url_source or self._is_generic_chapter_url)
         self._use_playwright_check.setVisible(
-            self._is_generic_chapter_url or source in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk")
+            self._is_generic_chapter_url or source in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk")
         )
         headless_visible = self._use_playwright_check.isVisible()
         self._playwright_headless_check.setVisible(headless_visible)
         self._install_chromium_btn.setVisible(headless_visible)
         if self._is_generic_chapter_url:
-            if source == "mangafire_url":
-                self._url_edit.setPlaceholderText(self.tr("Paste MangaFire chapter page URL..."))
-            elif source == "manganato_url":
-                self._url_edit.setPlaceholderText(self.tr("Paste MangaNato chapter page URL..."))
-            elif source == "raws_manhwa_manhua_url":
+            if source == "raws_manhwa_manhua_url":
                 self._url_edit.setPlaceholderText(self.tr("Paste chapter URL (raw manga, manhwa, manhua sites)..."))
             else:
                 self._url_edit.setPlaceholderText(self.tr("Paste chapter page URL (HTML with images)..."))
@@ -821,7 +809,7 @@ class MangaSourceDialog(QDialog):
             self._status_label.setText("" if self._is_url_source else self._status_label.text())
         elif self._is_generic_chapter_url:
             self._status_label.setText(self.tr("Paste a chapter page URL and click Load chapter. For JS-heavy sites enable \"Use browser (Playwright)\"."))
-        elif source in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk"):
+        elif source in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk"):
             self._status_label.setText(self.tr("Search by title, load chapters, then download. Enable \"Use browser (Playwright)\" if the site uses Cloudflare or lazy-loaded images."))
         self._on_playwright_toggled(self._use_playwright_check.isChecked())
 
@@ -850,10 +838,15 @@ class MangaSourceDialog(QDialog):
         source_id = self._source_combo.currentData() or "mangadex"
         if source_id in ("mangadex_url", "local_folder"):
             return
+        # For raw sources: optionally translate search query to Japanese/Korean/Chinese
+        if source_id in ("naruraw", "manhwaraw", "onekkk") and self._translate_raw_search_check.isChecked():
+            translated = translate_search_query(title, source_id)
+            if translated:
+                title = translated
         self._status_label.setText(self.tr("Searching..."))
         self._search_btn.setEnabled(False)
         lang = self._lang_combo.currentData() or "en"
-        use_playwright = self._use_playwright_check.isChecked() if source_id in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk") else False
+        use_playwright = self._use_playwright_check.isChecked() if source_id in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk") else False
         headless = self._playwright_headless_check.isChecked()
         self._worker.run_search.emit(title, source_id, lang, use_playwright, headless)
 
@@ -893,7 +886,7 @@ class MangaSourceDialog(QDialog):
         lang = self._lang_combo.currentData() or "en"
         self._status_label.setText(self.tr("Loading chapters..."))
         self._load_ch_btn.setEnabled(False)
-        use_playwright = self._use_playwright_check.isChecked() if source_id in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk") else False
+        use_playwright = self._use_playwright_check.isChecked() if source_id in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk") else False
         headless = self._playwright_headless_check.isChecked()
         self._worker.run_feed.emit(manga_id, lang, source_id, use_playwright, headless)
 
@@ -947,6 +940,7 @@ class MangaSourceDialog(QDialog):
         pcfg.manga_source_request_delay = self._delay_spin.value()
         pcfg.manga_source_open_after_download = self._open_after_download_check.isChecked()
         pcfg.manga_source_playwright_headless = self._playwright_headless_check.isChecked()
+        pcfg.manga_source_translate_raw_search = self._translate_raw_search_check.isChecked()
         try:
             save_config()
         except Exception:
@@ -989,7 +983,7 @@ class MangaSourceDialog(QDialog):
             self._data_saver_check.isChecked(),
             source_id,
         )
-        if source_id in ("mangaforfree", "toongod", "manganato", "mangafire", "naruraw", "manhwaraw", "onekkk") or source_id in GENERIC_CHAPTER_SOURCE_IDS:
+        if source_id in ("mangaforfree", "toongod", "mangakakalot", "naruraw", "manhwaraw", "onekkk") or source_id in GENERIC_CHAPTER_SOURCE_IDS:
             payload = payload + (self._use_playwright_check.isChecked(), self._playwright_headless_check.isChecked())
         self._worker.run_download.emit(payload)
 
