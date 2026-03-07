@@ -73,9 +73,24 @@ We did not port any Komakun code; the architecture is different (API-first vs lo
 
 ---
 
+## Mangahanhua-Scripts-for-Indesign (jqk4388)
+
+**Repo:** [jqk4388/Mangahanhua-Scripts-for-Indesign](https://github.com/jqk4388/Mangahanhua-Scripts-for-Indesign)
+
+A suite of **Adobe InDesign ExtendScript (JSX)** scripts for manga layout and lettering (漫画汉化 / 日漫英译). Runs **inside InDesign only**; no code runs inside BallonsTranslator. Scripts: **LabelPlus TXT (LPtxt) import** (place translation at coordinates, apply styles), **ID2LPtxt export** (InDesign → LPtxt for proofreading), jieba/LLM line-breaking (Chinese), strokes, text effects, image linking, print/web export presets. Dependency: `Library/KTUlib.jsx`.
+
+### Relationship with BallonsTranslator
+
+- We **export LPtxt** (File / Tools → Export translation to LPtxt) in the **same format** their import script expects: page markers `>>>>>>>>[image_name]<<<<<<<<`, blocks `----------------[n]----------------[x,y,1]` plus text, optional `{字体：...}{字号：...}`.
+- **Workflow:** Translate in BT → Export LPtxt → open InDesign → run their “LabelPlus TXT 导入” script → place and style text. No port of their JSX into BT; we only produce compatible LPtxt.
+- See **[docs/INDESIGN_LPTXT_WORKFLOW.md](INDESIGN_LPTXT_WORKFLOW.md)** for format details and step-by-step workflow.
+
+---
+
 ## Summary
 
 - **manga-image-translator:** Same CTD model and pipeline; we added **det_invert**, **det_gamma_correct**, **det_rotate** to **ctd** to align with their detection options.
 - **manga-translator-ui (hgmzhn):** We added **Hint original regions**, **check_br_and_retry**, **post-translation check**, **extract_glossary**, **replace_translation_mode**, **center_text_in_bubble**, **optimize_line_breaks**, and documented workflows/config in **RELATED_PROJECTS_RESEARCH.md**.
 - **yahao333/manga_translator:** Frontend-only; no detector/OCR to integrate.
 - **Komakun:** Browser IDE with cloud APIs; different stack; no code ported.
+- **Mangahanhua-Scripts-for-Indesign:** InDesign-only JSX; we export **LPtxt** in their format so users can import in InDesign. See [INDESIGN_LPTXT_WORKFLOW.md](INDESIGN_LPTXT_WORKFLOW.md).
