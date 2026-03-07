@@ -344,6 +344,7 @@ class MainWindow(mainwindow_cls):
 
         self.leftStackWidget = QStackedWidget(self)
         self.leftStackWidget.addWidget(self.pageList)
+        self.leftStackWidget.setMinimumWidth(shared.PAGE_LIST_PANE_DEFAULT_WIDTH)
 
         self.global_search_widget = GlobalSearchWidget(self.leftStackWidget)
         self.global_search_widget.req_update_pagetext.connect(self.on_req_update_pagetext)
@@ -487,8 +488,8 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.setStretchFactor(1, 10)
         self.comicTransSplitter.setStretchFactor(2, 1)
         # Allow user to resize the right panel by dragging the splitter (wider or narrower)
-        self.rightComicTransStackPanel.setMinimumWidth(320)
-        self.rightComicTransStackPanel.setMaximumWidth(900)
+        self.rightComicTransStackPanel.setMinimumWidth(280)
+        self.rightComicTransStackPanel.setMaximumWidth(860)
         self._comic_trans_splitter_initialized = False
         self.imgtrans_progress_msgbox = ImgtransProgressMessageBox()
         self.resetStyleSheet()
@@ -902,9 +903,9 @@ class MainWindow(mainwindow_cls):
             self._comic_trans_splitter_initialized = True
             total = self.comicTransSplitter.width()
             if total > 400:
-                s = self.comicTransSplitter.sizes()
-                right_default = 322
-                left = s[0] if s else 200
+                right_default = 282
+                # Default left pane to the same width it locks at when dragging (PAGE_LIST_PANE_DEFAULT_WIDTH).
+                left = shared.PAGE_LIST_PANE_DEFAULT_WIDTH
                 center = max(100, total - left - right_default)
                 self.comicTransSplitter.setSizes([left, center, right_default])
 

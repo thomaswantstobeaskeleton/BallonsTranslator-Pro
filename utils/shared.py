@@ -49,6 +49,8 @@ TEXTEFFECT_MAXHEIGHT = 500
 
 LEFTBAR_WIDTH = 48
 LEFTBTN_WIDTH = 28
+# Default width of the left pane (page list / global search). Also used as minimum so it "locks" when dragging the splitter.
+PAGE_LIST_PANE_DEFAULT_WIDTH = 240
 
 LDPI = 96.
 DPI = 188.75
