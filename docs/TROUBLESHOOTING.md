@@ -65,6 +65,18 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 
 ---
 
+## 5. First run seems stuck or very slow
+
+**Symptoms:** After "Choose models to download" you see "Checking connectivity to the model hosters..." and the app appears to hang for one or more minutes; or downloads are slow.
+
+| What to do | Notes |
+|------------|--------|
+| **Normal on first run** | The first launch downloads model files (hundreds of MB to over 1 GB depending on packages). You should see progress lines like "downloading data/models/...". Let it finish. |
+| **Skip connectivity check** | If the connectivity check takes too long (e.g. firewalled or slow DNS), set **DISABLE_MODEL_SOURCE_CHECK=True** before running: `set DISABLE_MODEL_SOURCE_CHECK=True` (Windows CMD) or `export DISABLE_MODEL_SOURCE_CHECK=True` (Linux/macOS), then `python launch.py`. Some download backends use this to skip pre-download reachability checks. |
+| **Text style warning** | If you see "Text style does not exist" on first run, it is harmless: the app creates `config/textstyles/default.json` and continues. |
+
+---
+
 ## Quick reference
 
 | Issue | First step |
@@ -73,3 +85,4 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 | HF 401 / gated | Accept model terms on huggingface.co, create HF token, set in Config → General or `HF_TOKEN`. |
 | Translator/OCR "invalid key" | Set API key in Config → DL Module → that module’s params; use Test button; check proxy if needed. |
 | Pip conflict / import error | See [OPTIONAL_DEPENDENCIES.md](OPTIONAL_DEPENDENCIES.md); use a clean venv and only install deps for modules you use. |
+| First run "stuck" / slow | Downloads take several minutes; set `DISABLE_MODEL_SOURCE_CHECK=True` to skip long connectivity check if needed. See §5 above. |

@@ -527,16 +527,28 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     except Exception:
         pass
 
-    p = pcfg.text_styles_path
-    if not osp.exists(pcfg.text_styles_path):
-        dp = osp.join(shared.DEFAULT_TEXTSTYLE_DIR, 'default.json')
+    p = (pcfg.text_styles_path or '').strip()
+    if not p:
+        p = osp.join(shared.DEFAULT_TEXTSTYLE_DIR, 'default.json')
+        pcfg.text_styles_path = p
+    p = osp.normpath(osp.abspath(p))
+    pcfg.text_styles_path = p
+    dp = osp.normpath(osp.abspath(osp.join(shared.DEFAULT_TEXTSTYLE_DIR, 'default.json')))
+    if not osp.exists(p):
         if p != dp and osp.exists(dp):
             p = dp
-            LOGGER.warning(f'Text style {p} does not exist, use the default from {dp}.')
+            pcfg.text_styles_path = p
+            LOGGER.warning(f'Text style path missing; using default at {dp}.')
         else:
+            try:
+                os.makedirs(osp.dirname(dp), exist_ok=True)
+            except Exception:
+                pass
             with open(dp, 'w', encoding='utf8') as f:
                 f.write(json.dumps([],  ensure_ascii=False))
             LOGGER.info(f'New text style file created at {dp}.')
+            p = dp
+            pcfg.text_styles_path = p
     load_textstyle_from(p)
 
     # Create config.json on first run so ZIP users get recommended defaults from config.example.json

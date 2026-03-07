@@ -298,6 +298,8 @@ def main():
             pass
         shared.FIRST_RUN_NO_CONFIG = False
 
+    # Download selected model packages; can take several minutes on first run
+    LOGGER.info('Downloading selected model packages (this may take a few minutes)...')
     prepare_local_files_forall()
 
     if not args.headless and not getattr(args, 'headless_continuous', False):
