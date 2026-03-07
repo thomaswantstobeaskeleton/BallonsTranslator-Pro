@@ -13,7 +13,7 @@ body:
         1. 请确保在提交建议前更新仓库：`git pull`（Windows 可用 `.\git\bin\git.exe pull` 或 `.\PortableGit\bin\git.exe pull`）
         2. 检查是否已有类似建议存在。
 
-        **本仓库为 BallonsTranslator Pro 分支。** 针对原版 BallonsTranslator 的建议请向上游提交。
+        **本仓库为 BallonsTranslator Pro 分支。** 针对原版 BallonsTranslator 的建议请向上游提交。配置提示：若需看到全部检测/OCR/翻译选项，可在 **配置 → 常规 → 启动** 中启用 **开发者模式（显示所有模块）**。
   - type: textarea
     validations:
       required: true
@@ -71,4 +71,4 @@ body:
     attributes:
       label: 其他信息
       description: |
-        其他你想提供的信息（使用场景、考虑过的方案等）。
+        其他你想提供的信息（使用场景、考虑过的方案等）。开发者模式：**配置 → 常规 → 启动 → 开发者模式（显示所有模块）**。

@@ -16,6 +16,8 @@ body:
         3. Provide as much detail as possible, including crash logs (if applicable).
 
         **This is the BallonsTranslator Pro fork.** If your issue is about the original BallonsTranslator, please report it upstream.
+
+        **Tip:** If a module does not appear in the detector/OCR/translator dropdowns, enable **Config → General → Startup → Dev mode (show all modules)** to list all modules (including not-yet-downloaded).
   - type: textarea
     validations:
       required: true
@@ -49,6 +51,7 @@ body:
       label: Text Detector
       options:
         - Not applicable
+        - callisto_ocr_det
         - ctd
         - craft_det
         - dptext_detr
@@ -57,8 +60,10 @@ body:
         - hunyuan_ocr_det
         - magi_det
         - mmocr_det
+        - olm_ocr_det
         - paddle_det
         - paddle_det_v5
+        - qwen2_vl_ocr_2b_det
         - stariver_ocr
         - surya_det
         - swintextspotter_v2
@@ -70,6 +75,7 @@ body:
       options:
         - Not applicable
         - bing_ocr
+        - callisto_ocr
         - chandra_ocr
         - deepseek_ocr
         - docowl2_ocr
@@ -98,12 +104,14 @@ body:
         - none_ocr
         - ocean_ocr
         - ocrflux
+        - olm_ocr
         - one_ocr
         - paddle_ocr
         - paddle_rec_v5
         - PaddleOCRVLManga
         - paddle_vl
         - paddleocr_vl_hf
+        - qwen2_vl_ocr_2b
         - qwen2vl_7b
         - stariver_ocr
         - surya_ocr
@@ -151,7 +159,7 @@ body:
         - LLM_API_Translator
         - m2m100
         - nllb200
-        - None
+        - No translator (skip)
         - opus_mt
         - Papago
         - Sakura
@@ -168,6 +176,7 @@ body:
       description: Only if you use "Run second detector" and the bug involves it.
       options:
         - Not applicable / not used
+        - callisto_ocr_det
         - ctd
         - craft_det
         - dptext_detr
@@ -176,8 +185,10 @@ body:
         - hunyuan_ocr_det
         - magi_det
         - mmocr_det
+        - olm_ocr_det
         - paddle_det
         - paddle_det_v5
+        - qwen2_vl_ocr_2b_det
         - stariver_ocr
         - surya_det
         - swintextspotter_v2
@@ -198,4 +209,4 @@ body:
     attributes:
       label: Additional Information
       description: |
-        Any other relevant details (config, project type, etc.).
+        Any other relevant details (config, project type, etc.). Dev mode is under **Config → General → Startup → Dev mode (show all modules)** if a module is missing from dropdowns.

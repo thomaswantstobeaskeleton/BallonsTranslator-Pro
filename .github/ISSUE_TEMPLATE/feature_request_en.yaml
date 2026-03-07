@@ -13,7 +13,7 @@ body:
         1. Ensure your repository is up-to-date: `git pull` (or `.\git\bin\git.exe pull` / `.\PortableGit\bin\git.exe pull` on Windows)
         2. Check if a similar feature request already exists.
 
-        **This is the BallonsTranslator Pro fork.** Feature ideas for the original BallonsTranslator should be reported upstream.
+        **This is the BallonsTranslator Pro fork.** Feature ideas for the original BallonsTranslator should be reported upstream. Config tip: **Dev mode (show all modules)** is under **Config → General → Startup** if you need to see every detector/OCR/translator option.
   - type: textarea
     validations:
       required: true
@@ -71,4 +71,4 @@ body:
     attributes:
       label: Additional Information
       description: |
-        Any other context (use case, alternatives considered, etc.).
+        Any other context (use case, alternatives considered, etc.). Dev mode: **Config → General → Startup → Dev mode (show all modules)**.

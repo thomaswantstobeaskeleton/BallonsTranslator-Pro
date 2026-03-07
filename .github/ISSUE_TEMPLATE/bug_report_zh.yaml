@@ -15,6 +15,8 @@ body:
         3. 请尽可能提供详细信息，包括崩溃日志（如有）。
 
         **本仓库为 BallonsTranslator Pro 分支。** 若问题属于原版 BallonsTranslator，请向上游反馈。
+
+        **提示：** 若某模块未出现在检测/OCR/翻译下拉列表中，请启用 **配置 → 常规 → 启动 → 开发者模式（显示所有模块）** 以列出全部模块（含未下载）。
   - type: textarea
     validations:
       required: true
@@ -48,6 +50,7 @@ body:
       label: 文本检测
       options:
         - 不适用
+        - callisto_ocr_det
         - ctd
         - craft_det
         - dptext_detr
@@ -56,8 +59,10 @@ body:
         - hunyuan_ocr_det
         - magi_det
         - mmocr_det
+        - olm_ocr_det
         - paddle_det
         - paddle_det_v5
+        - qwen2_vl_ocr_2b_det
         - stariver_ocr
         - surya_det
         - swintextspotter_v2
@@ -69,6 +74,7 @@ body:
       options:
         - 不适用
         - bing_ocr
+        - callisto_ocr
         - chandra_ocr
         - deepseek_ocr
         - docowl2_ocr
@@ -97,12 +103,14 @@ body:
         - none_ocr
         - ocean_ocr
         - ocrflux
+        - olm_ocr
         - one_ocr
         - paddle_ocr
         - paddle_rec_v5
         - PaddleOCRVLManga
         - paddle_vl
         - paddleocr_vl_hf
+        - qwen2_vl_ocr_2b
         - qwen2vl_7b
         - stariver_ocr
         - surya_ocr
@@ -150,7 +158,7 @@ body:
         - LLM_API_Translator
         - m2m100
         - nllb200
-        - None
+        - 不翻译 (No translator)
         - opus_mt
         - Papago
         - Sakura
@@ -167,6 +175,7 @@ body:
       description: 仅在使用「运行第二检测器」且问题与之相关时选择。
       options:
         - 不适用 / 未使用
+        - callisto_ocr_det
         - ctd
         - craft_det
         - dptext_detr
@@ -175,8 +184,10 @@ body:
         - hunyuan_ocr_det
         - magi_det
         - mmocr_det
+        - olm_ocr_det
         - paddle_det
         - paddle_det_v5
+        - qwen2_vl_ocr_2b_det
         - stariver_ocr
         - surya_det
         - swintextspotter_v2
@@ -197,4 +208,4 @@ body:
     attributes:
       label: 其他信息
       description: |
-        其他你想提供的信息（配置、项目类型等）。
+        其他你想提供的信息（配置、项目类型等）。若某模块在下拉列表中缺失，开发者模式位于 **配置 → 常规 → 启动 → 开发者模式（显示所有模块）**。
