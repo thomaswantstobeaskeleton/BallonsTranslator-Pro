@@ -1110,6 +1110,7 @@ The main application and all other modules work with the versions in `requiremen
 | **docs/MANHUA_BEST_SETTINGS.md** | Recommended detection, OCR, and inpainting settings for manhua (Chinese comics). |
 | **docs/PROMPT_FIND_MANGA_DOWNLOAD_SOURCES.md** | In-depth prompt for ChatGPT/LLMs to find manga APIs with direct image URLs for implementing more download sources. |
 | **docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md** | Design and implementation of translation context: glossary, previous-page context, series-level storage, and integration with LLM translator. |
+| **docs/TRANSLATIONS.md** | UI translations (e.g. 简体中文): edit `translate/zh_CN.ts`, compile with `python scripts/compile_translation.py` or `lrelease translate/zh_CN.ts`. |
 | **docs/ISSUES_STATUS.md** | Status of recent GitHub issues (#8–#19): fixed, addressed, or open; for triage and release notes. |
 | **doc/FORMATTING_COMPARISON_AI_VS_MAIN.md** | Comparison of formatting and layout behavior (webcomics/manhua) between this fork and BallonsTranslator-ai; useful when migrating or choosing settings. |
 | **Original README** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) – base setup, Windows/Mac, translators, AMD ROCm/ZLUDA. |
