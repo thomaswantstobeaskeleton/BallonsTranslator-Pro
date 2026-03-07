@@ -71,3 +71,5 @@ betterproto
 protobuf>=3.20.0
 # Optional: MangaForFree/ToonGod and Generic chapter URL when "Use browser (Playwright)" is enabled.
 playwright>=1.40.0
+# Optional: Open CBR/RAR comic archives (File → Open CBR). Requires WinRAR or 7-Zip (UnRAR) in PATH.
+rarfile

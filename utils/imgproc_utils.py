@@ -380,19 +380,21 @@ def get_block_mask(xywh: List, mask_array: np.ndarray, angle: int):
             cv2.fillPoly(itmsk, poly.reshape(-1, 4, 2), color=(255))
             px1, px2, py1, py2 = 0, itmsk.shape[1], 0, itmsk.shape[0]
             if x1 < 0:
-                px1 = -x1
+                px1 = -int(x1)
                 x1 = 0
             if x2 > im_w:
                 px2 = im_w - x2
                 x2 = im_w
             if y1 < 0:
-                py1 = -y1
+                py1 = -int(y1)
                 y1 = 0
             if y2 > im_h:
                 py2 = im_h - y2
                 y2 = im_h
-            itmsk = itmsk[py1: py2, px1: px2]
-            msk = cv2.bitwise_and(mask_array[y1: y2, x1: x2], itmsk)
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            py1, py2, px1, px2 = int(py1), int(round(py2)), int(px1), int(round(px2))
+            itmsk = itmsk[py1:py2, px1:px2]
+            msk = cv2.bitwise_and(mask_array[y1:y2, x1:x2], itmsk)
     else:
         x1, y1, x2, y2 = x, y, x+w, y+h
         if x2 < 0 or x2 - x1 < 2 or x1 >= im_w - 1 \
@@ -407,7 +409,8 @@ def get_block_mask(xywh: List, mask_array: np.ndarray, angle: int):
                 y1 = 0
             if y2 > im_h:
                 y2 = im_h
-            msk = mask_array[y1: y2, x1: x2]
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            msk = mask_array[y1:y2, x1:x2]
 
     return msk, [x1, y1, x2, y2]
         

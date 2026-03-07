@@ -57,25 +57,33 @@ try:
     # Workaround: model config may have rope_type='default' but ROPE_INIT_FUNCTIONS expects keys that
     # use transformers' rope_parameters (with "factor"), which SuryaDecoderConfig doesn't have. Provide
     # a simple default RoPE init using only config.rope_theta.
+    # Note: surya.common.surya.decoder imports ROPE_INIT_FUNCTIONS from transformers.modeling_rope_utils,
+    # so this patches the shared dict. Other OCRs (e.g. PaddleOCRVLManga) call rope_fn(config) with one arg;
+    # accept optional device so both rope_fn(config, device) and rope_fn(config) work.
     try:
         import torch
         import surya.common.surya.decoder as _surya_dec
 
-        def _default_rope_init(config, device):
+        def _default_rope_init(config, device=None):
             """Basic RoPE (no scaling factor) for configs with rope_type='default' and no rope_parameters."""
+            if device is None or (hasattr(device, "type") and device.type == "meta"):
+                device = torch.device("cpu")
             base = getattr(config, "rope_theta", 10000.0)
             head_dim = getattr(config, "head_dim", None) or (
                 config.hidden_size // config.num_attention_heads
             )
             dim = int(head_dim * getattr(config, "partial_rotary_factor", 1.0))
+            # Create on CPU to avoid "Cannot copy out of meta tensor" when model uses meta device for lazy init
+            create_device = torch.device("cpu")
             inv_freq = 1.0 / (
                 base
                 ** (
-                    torch.arange(0, dim, 2, dtype=torch.int64)
-                    .to(device=device, dtype=torch.float)
+                    torch.arange(0, dim, 2, dtype=torch.int64, device=create_device)
+                    .float()
                     / dim
                 )
             )
+            inv_freq = inv_freq.to(device)
             return inv_freq, 1.0
 
         if "default" not in _surya_dec.ROPE_INIT_FUNCTIONS:

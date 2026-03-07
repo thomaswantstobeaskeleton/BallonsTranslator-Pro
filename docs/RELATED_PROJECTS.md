@@ -87,6 +87,20 @@ A suite of **Adobe InDesign ExtendScript (JSX)** scripts for manga layout and le
 
 ---
 
+## Comic-Translate (ogkalu2)
+
+**Repo:** [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate)
+
+Desktop app for translating comics (BDs, Manga, Manhwa, Fumetti) in many formats (image, PDF, EPUB, CBR, CBZ). Pipeline: RT-DETR-v2 bubble-and-text detection → language-routed OCR (manga-ocr / Pororo / PPOCRv5) → LaMa or AOT-GAN inpainting → LLM translation (GPT-4.1, Claude-4.5, Gemini-2.5) with **full-page text and optional page image** as context. Features: **webtoon (long-strip) mode** with visible-area detect/OCR/translate, **OCR and translation caching** by image hash, Manual mode toggle, PySide6 + ONNX.
+
+### Relationship with BallonsTranslator
+
+- We already use the **same bubble detector** via **HF object detection** (model `ogkalu/comic-text-and-bubble-detector`) and **labels_include** (bubble, text_bubble, text_free).
+- We have many more detectors, OCRs, and inpainters; project save; batch queue; translation context and glossary; no webtoon mode or pipeline-level OCR/translation cache.
+- **Research and implementation ideas** (caching, optional page image for LLM, auto OCR by language, CBR, manual mode, etc.) are in **[docs/COMIC_TRANSLATE_RESEARCH.md](COMIC_TRANSLATE_RESEARCH.md)**.
+
+---
+
 ## Summary
 
 - **manga-image-translator:** Same CTD model and pipeline; we added **det_invert**, **det_gamma_correct**, **det_rotate** to **ctd** to align with their detection options.

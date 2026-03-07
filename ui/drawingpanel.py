@@ -492,6 +492,7 @@ class DrawingPanel(Widget):
         pcfg.drawpanel.current_tool = ImageEditMode.HandTool
         self.canvas.gv.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.canvas.image_edit_mode = ImageEditMode.HandTool
+        self.canvas.restoreDefaultCursor()
 
     def _ensure_mask_visible(self) -> None:
         """When entering mask-editing (Rect/Inpaint), show the mask if it was hidden (transparency 0)."""
@@ -562,7 +563,8 @@ class DrawingPanel(Widget):
         self.canvas.gv.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.canvas.image_edit_mode = ImageEditMode.RectTool
         self._ensure_mask_visible()
-        self.setCrossCursor()
+        if self.isVisible():
+            self.setCrossCursor()
 
     def set_config(self, config: DrawPanelConfig):
         # Support legacy 3-component pentool_color
@@ -875,7 +877,8 @@ class DrawingPanel(Widget):
         self.setCrossCursor()
         
     def setCrossCursor(self):
-        self.canvas.gv.setCursor(self.get_pen_cursor(draw_shape=False))
+        if self.isVisible():
+            self.canvas.gv.setCursor(self.get_pen_cursor(draw_shape=False))
 
     def on_scale_tool(self, pos: QPointF):
         if self.scale_tool_pos is None:
@@ -909,10 +912,12 @@ class DrawingPanel(Widget):
             self.setInpaintCursor()
 
     def setPenCursor(self):
-        self.canvas.gv.setCursor(self.get_pen_cursor(shape=self.penConfigPanel.shape))
+        if self.isVisible():
+            self.canvas.gv.setCursor(self.get_pen_cursor(shape=self.penConfigPanel.shape))
 
     def setInpaintCursor(self):
-        self.canvas.gv.setCursor(self.get_pen_cursor(INPAINT_BRUSH_COLOR, self.inpaint_pen.width(), shape=self.inpaintConfigPanel.shape))
+        if self.isVisible():
+            self.canvas.gv.setCursor(self.get_pen_cursor(INPAINT_BRUSH_COLOR, self.inpaint_pen.width(), shape=self.inpaintConfigPanel.shape))
 
     def on_handchecker_changed(self):
         if self.handTool.isChecked():

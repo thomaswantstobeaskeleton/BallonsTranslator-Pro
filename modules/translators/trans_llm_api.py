@@ -241,6 +241,10 @@ class LLM_API_Translator(BaseTranslator):
             "description": "Frequency penalty (OpenAI).",
         },
         "presence penalty": {"value": 0.0, "description": "Presence penalty (OpenAI)."},
+        "include_page_image": {
+            "value": False,
+            "description": "Include the current page image as context for the model (vision-capable models only). Helps with layout and style.",
+        },
     }
 
     def _setup_translator(self):
@@ -1066,6 +1070,33 @@ class LLM_API_Translator(BaseTranslator):
             return summary
         return "...\n" + long_context[-max_chars:]
 
+    def _build_user_content_with_optional_image(self, prompt: str):
+        """Build user message content: plain text or text + page image when include_page_image is on."""
+        include = self.get_param_value("include_page_image")
+        if not include or include is False or (isinstance(include, str) and include.strip().lower() in ("false", "0", "no")):
+            return prompt
+        img = getattr(self, "_current_page_image", None)
+        if img is None:
+            return prompt
+        try:
+            import base64
+            import cv2
+            if hasattr(img, "shape") and len(img.shape) >= 2:
+                if len(img.shape) == 3 and img.shape[2] == 3:
+                    img_encode = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                else:
+                    img_encode = img
+                _, buf = cv2.imencode(".png", img_encode)
+                if buf is not None:
+                    b64 = base64.standard_b64encode(buf.tobytes()).decode("ascii")
+                    return [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]
+        except Exception as e:
+            self.logger.debug("Failed to attach page image to LLM request: %s", e)
+        return prompt
+
     def _request_translation(self, prompt: str, expected_count: Optional[int] = None) -> Optional[TranslationResponse]:
         provider = self._effective_provider_for_model()
         current_api_key = "lm-studio"
@@ -1099,7 +1130,7 @@ class LLM_API_Translator(BaseTranslator):
 
         messages = [
             {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": self._build_user_content_with_optional_image(prompt)},
         ]
 
         api_args = {

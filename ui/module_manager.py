@@ -338,27 +338,75 @@ class TranslateThread(ModuleThread):
                 translations = [getattr(blk, "translation", "") or "" for blk in page]
                 self.translator.append_page_to_series_context(series_path, sources, translations)
         else:
-            try:
-                setattr(self.translator, '_current_page_key', page_key)
-                self.translator.translate_textblk_lst(page)
-            except CriticalTranslationError as e:
-                create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {page_key})', 'TranslationFailed')
-                self.stop_requested = True
-            except Exception as e:
-                if not getattr(cfg_module, "translation_soft_failure_continue", True):
+            trans_from_cache = False
+            if getattr(cfg_module, 'translation_cache_enabled', False) and page and self.imgtrans_proj is not None:
+                try:
+                    from utils.pipeline_cache_manager import (
+                        get_pipeline_cache_manager,
+                        _generate_image_hash,
+                        _settings_hash,
+                    )
+                    img = self.imgtrans_proj.read_img(page_key)
+                    if img is not None:
+                        cm = get_pipeline_cache_manager()
+                        image_hash = _generate_image_hash(img)
+                        trans_name = getattr(cfg_module, 'translator', '') or ''
+                        src_lang = getattr(cfg_module, 'translate_source', '') or ''
+                        tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
+                        ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                        trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
+                        if cm.can_serve_all_blocks_from_translation_cache(trans_key, page):
+                            cm.apply_cached_translation_to_blocks(trans_key, page)
+                            trans_from_cache = True
+                except Exception as _e:
+                    LOGGER.debug("Translation cache check failed: %s", _e)
+            if not trans_from_cache:
+                try:
+                    setattr(self.translator, '_current_page_key', page_key)
+                    _page_img = self.imgtrans_proj.read_img(page_key) if self.imgtrans_proj else None
+                    setattr(self.translator, '_current_page_image', _page_img)
+                    self.translator.translate_textblk_lst(page)
+                except CriticalTranslationError as e:
                     create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {page_key})', 'TranslationFailed')
                     self.stop_requested = True
+                except Exception as e:
+                    if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                        create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {page_key})', 'TranslationFailed')
+                        self.stop_requested = True
+                    else:
+                        LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", page_key, e)
+                        placeholder = "[Translation failed]"
+                        for blk in page:
+                            if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                                blk.translation = placeholder
                 else:
-                    LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", page_key, e)
-                    placeholder = "[Translation failed]"
-                    for blk in page:
-                        if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
-                            blk.translation = placeholder
-            else:
-                if series_path and hasattr(self.translator, "append_page_to_series_context"):
-                    sources = [blk.get_text() for blk in page]
-                    translations = [getattr(blk, "translation", "") or "" for blk in page]
-                    self.translator.append_page_to_series_context(series_path, sources, translations)
+                    if getattr(cfg_module, 'translation_cache_enabled', False) and page and self.imgtrans_proj is not None:
+                        try:
+                            from utils.pipeline_cache_manager import (
+                                get_pipeline_cache_manager,
+                                _generate_image_hash,
+                                _settings_hash,
+                            )
+                            img = self.imgtrans_proj.read_img(page_key)
+                            if img is not None:
+                                cm = get_pipeline_cache_manager()
+                                image_hash = _generate_image_hash(img)
+                                trans_name = getattr(cfg_module, 'translator', '') or ''
+                                src_lang = getattr(cfg_module, 'translate_source', '') or ''
+                                tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
+                                ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
+                                cm.cache_translation_results(trans_key, page)
+                        except Exception as _e:
+                            LOGGER.debug("Translation cache store failed: %s", _e)
+                    if series_path and hasattr(self.translator, "append_page_to_series_context"):
+                        sources = [blk.get_text() for blk in page]
+                        translations = [getattr(blk, "translation", "") or "" for blk in page]
+                        self.translator.append_page_to_series_context(series_path, sources, translations)
+            elif series_path and hasattr(self.translator, "append_page_to_series_context"):
+                sources = [blk.get_text() for blk in page]
+                translations = [getattr(blk, "translation", "") or "" for blk in page]
+                self.translator.append_page_to_series_context(series_path, sources, translations)
         if emit_finished:
             self.finish_translate_page.emit(page_key)
 
@@ -469,6 +517,7 @@ class ImgtransThread(QThread):
         self._pause_requested = False
         self._resume_event = threading.Event()
         self._resume_event.set()
+        self._last_batch_report = None
 
     def on_module_thread_stopped(self):
         while True:
@@ -772,6 +821,35 @@ class ImgtransThread(QThread):
         self.inpaint_thread.num_process_pages = self.num_pages
         self.translate_thread.num_process_pages = self.num_pages
 
+        try:
+            from utils.batch_report import start_batch_report
+            start_batch_report(pages_to_iterate)
+        except Exception:
+            pass
+
+        # Auto OCR by source language: optionally use a different OCR module for this run
+        self._auto_ocr_instance = None
+        self._auto_ocr_key = None
+        if cfg_module.enable_ocr and getattr(cfg_module, 'ocr_auto_by_language', False):
+            try:
+                from utils.ocr_lang_mapping import get_ocr_key_for_language
+                from modules import OCR
+                fallback = getattr(cfg_module, 'ocr', None) or 'mit48px'
+                effective_key = get_ocr_key_for_language(
+                    getattr(cfg_module, 'translate_source', '') or '', fallback
+                )
+                valid_ocr = GET_VALID_OCR()
+                if effective_key != getattr(cfg_module, 'ocr', None) and effective_key in valid_ocr:
+                    ocr_cls = OCR.module_dict.get(effective_key)
+                    if ocr_cls is not None:
+                        params = cfg_module.get_params('ocr').get(effective_key)
+                        self._auto_ocr_instance = ocr_cls(**(params or {}))
+                        self._auto_ocr_instance.load_model()
+                        self._auto_ocr_key = effective_key
+                        LOGGER.info('Auto OCR by language: using %s for source %s', effective_key, getattr(cfg_module, 'translate_source', ''))
+            except Exception as e:
+                LOGGER.warning('Auto OCR by language failed: %s. Using default OCR.', e)
+
         low_vram_trans = False
         if self.translator is not None:
             low_vram_trans = self.translator.low_vram_mode
@@ -860,6 +938,11 @@ class ImgtransThread(QThread):
                             LOGGER.warning('Dual text detection failed: %s', e)
                 except Exception as e:
                     LOGGER.error("Text detection failed for page: %s", imgname, exc_info=True)
+                    try:
+                        from utils.batch_report import register_batch_skip
+                        register_batch_skip(imgname, "detection", str(e))
+                    except Exception:
+                        pass
                     create_error_dialog(e, self.tr('Text Detection Failed.') + f' (page: {imgname})', 'TextDetectFailed')
                     blk_list = []
                 self.detect_counter += 1
@@ -1002,25 +1085,66 @@ class ImgtransThread(QThread):
 
             if cfg_module.enable_ocr:
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR running')
+                ocr_runner = getattr(self, '_auto_ocr_instance', None) if getattr(cfg_module, 'ocr_auto_by_language', False) else None
+                if ocr_runner is None:
+                    ocr_runner = self.ocr
+                ocr_name_for_cache = getattr(self, '_auto_ocr_key', None) or getattr(cfg_module, 'ocr', '') or ''
                 try:
-                    # Optional one-step VLM translation: OCR module writes blk.translation directly from image.
-                    if (
-                        getattr(cfg_module, "translation_mode", "two_step") == "one_step_vlm"
-                        and getattr(cfg_module, "enable_translate", False)
-                        and hasattr(self.ocr, "run_ocr_translate")
-                    ):
+                    ocr_ran = False
+                    if getattr(cfg_module, 'ocr_cache_enabled', True) and blk_list:
                         try:
-                            self.ocr.run_ocr_translate(img, blk_list, cfg_module.translate_source, cfg_module.translate_target)
-                            # Ensure source text exists for later editing (keep original OCR empty)
-                            for blk in blk_list:
-                                if getattr(blk, "text", None) is None:
-                                    blk.text = [""]
-                        except NotImplementedError:
-                            self.ocr.run_ocr(img, blk_list)
-                    else:
-                        self.ocr.run_ocr(img, blk_list)
+                            from utils.pipeline_cache_manager import (
+                                get_pipeline_cache_manager,
+                                _generate_image_hash,
+                            )
+                            cm = get_pipeline_cache_manager()
+                            image_hash = _generate_image_hash(img)
+                            source_lang = getattr(cfg_module, 'translate_source', '') or ''
+                            device = getattr(ocr_runner, 'device', '') or '' if ocr_runner else ''
+                            ocr_cache_key = cm.get_ocr_cache_key(image_hash, ocr_name_for_cache, source_lang, device)
+                            if cm.can_serve_all_blocks_from_ocr_cache(ocr_cache_key, blk_list):
+                                cm.apply_cached_ocr_to_blocks(ocr_cache_key, blk_list)
+                                ocr_ran = True
+                        except Exception as _e:
+                            LOGGER.debug("OCR cache check failed: %s", _e)
+                    if not ocr_ran:
+                        # Optional one-step VLM translation: OCR module writes blk.translation directly from image.
+                        if (
+                            getattr(cfg_module, "translation_mode", "two_step") == "one_step_vlm"
+                            and getattr(cfg_module, "enable_translate", False)
+                            and hasattr(ocr_runner, "run_ocr_translate")
+                        ):
+                            try:
+                                ocr_runner.run_ocr_translate(img, blk_list, cfg_module.translate_source, cfg_module.translate_target)
+                                # Ensure source text exists for later editing (keep original OCR empty)
+                                for blk in blk_list:
+                                    if getattr(blk, "text", None) is None:
+                                        blk.text = [""]
+                            except NotImplementedError:
+                                ocr_runner.run_ocr(img, blk_list)
+                        else:
+                            ocr_runner.run_ocr(img, blk_list)
+                        if getattr(cfg_module, 'ocr_cache_enabled', True) and blk_list:
+                            try:
+                                from utils.pipeline_cache_manager import (
+                                    get_pipeline_cache_manager,
+                                    _generate_image_hash,
+                                )
+                                cm = get_pipeline_cache_manager()
+                                image_hash = _generate_image_hash(img)
+                                source_lang = getattr(cfg_module, 'translate_source', '') or ''
+                                device = getattr(ocr_runner, 'device', '') or '' if ocr_runner else ''
+                                ocr_cache_key = cm.get_ocr_cache_key(image_hash, ocr_name_for_cache, source_lang, device)
+                                cm.cache_ocr_results(ocr_cache_key, blk_list)
+                            except Exception as _e:
+                                LOGGER.debug("OCR cache store failed: %s", _e)
                 except Exception as e:
                     LOGGER.error("OCR failed for page: %s", imgname, exc_info=True)
+                    try:
+                        from utils.batch_report import register_batch_skip
+                        register_batch_skip(imgname, "ocr", str(e))
+                    except Exception:
+                        pass
                     create_error_dialog(e, self.tr('OCR Failed.') + f' (page: {imgname})', 'OCRFailed')
                 self.ocr_counter += 1
 
@@ -1122,22 +1246,66 @@ class ImgtransThread(QThread):
                     self.translate_thread.push_pagekey_queue(imgname)
                 elif not low_vram_trans:
                     self._set_translation_context_for_page(imgname, pages_to_iterate)
-                    try:
-                        setattr(self.translator, '_current_page_key', imgname)
-                        self.translator.translate_textblk_lst(blk_list)
-                    except CriticalTranslationError as e:
-                        create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
-                        self.stop_requested = True
-                        break
-                    except Exception as e:
-                        if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                    trans_from_cache = False
+                    if getattr(cfg_module, 'translation_cache_enabled', False) and blk_list:
+                        try:
+                            from utils.pipeline_cache_manager import (
+                                get_pipeline_cache_manager,
+                                _generate_image_hash,
+                                _settings_hash,
+                            )
+                            cm = get_pipeline_cache_manager()
+                            image_hash = _generate_image_hash(img)
+                            trans_name = getattr(cfg_module, 'translator', '') or ''
+                            src_lang = getattr(cfg_module, 'translate_source', '') or ''
+                            tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
+                            ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                            trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
+                            if cm.can_serve_all_blocks_from_translation_cache(trans_key, blk_list):
+                                cm.apply_cached_translation_to_blocks(trans_key, blk_list)
+                                trans_from_cache = True
+                        except Exception as _e:
+                            LOGGER.debug("Translation cache check failed: %s", _e)
+                    if not trans_from_cache:
+                        try:
+                            setattr(self.translator, '_current_page_key', imgname)
+                            setattr(self.translator, '_current_page_image', img)
+                            self.translator.translate_textblk_lst(blk_list)
+                        except CriticalTranslationError as e:
                             create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
                             self.stop_requested = True
                             break
-                        LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", imgname, e)
-                        for blk in blk_list:
-                            if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
-                                blk.translation = "[Translation failed]"
+                        except Exception as e:
+                            if not getattr(cfg_module, "translation_soft_failure_continue", True):
+                                create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
+                                self.stop_requested = True
+                                break
+                            LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", imgname, e)
+                            try:
+                                from utils.batch_report import register_batch_skip
+                                register_batch_skip(imgname, "translation", str(e))
+                            except Exception:
+                                pass
+                            for blk in blk_list:
+                                if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
+                                    blk.translation = "[Translation failed]"
+                        if getattr(cfg_module, 'translation_cache_enabled', False) and blk_list:
+                            try:
+                                from utils.pipeline_cache_manager import (
+                                    get_pipeline_cache_manager,
+                                    _generate_image_hash,
+                                    _settings_hash,
+                                )
+                                cm = get_pipeline_cache_manager()
+                                image_hash = _generate_image_hash(img)
+                                trans_name = getattr(cfg_module, 'translator', '') or ''
+                                src_lang = getattr(cfg_module, 'translate_source', '') or ''
+                                tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
+                                ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
+                                cm.cache_translation_results(trans_key, blk_list)
+                            except Exception as _e:
+                                LOGGER.debug("Translation cache store failed: %s", _e)
                     self._append_page_to_series_context(imgname, blk_list)
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
@@ -1206,6 +1374,10 @@ class ImgtransThread(QThread):
                     if getattr(blk, 'lines', None) and len(blk.lines) > 0:
                         blk.lines = [[[p[0] / scale, p[1] / scale] for p in line] for line in blk.lines]
 
+        # Release auto-OCR override so we don't hold an extra model
+        self._auto_ocr_instance = None
+        self._auto_ocr_key = None
+
         if cfg_module.enable_translate and low_vram_trans:
             unload_modules(self, ['textdetector', 'inpainter', 'ocr'])
             for imgname in pages_to_iterate:
@@ -1227,6 +1399,8 @@ class ImgtransThread(QThread):
                 if not skip:
                     try:
                         setattr(self.translator, '_current_page_key', imgname)
+                        _page_img = self.imgtrans_proj.read_img(imgname) if self.imgtrans_proj else None
+                        setattr(self.translator, '_current_page_image', _page_img)
                         self.translator.translate_textblk_lst(blk_list)
                     except CriticalTranslationError as e:
                         create_error_dialog(e, self.tr('Translation Failed.') + f' (page: {imgname})', 'TranslationFailed')
@@ -1238,6 +1412,11 @@ class ImgtransThread(QThread):
                             self.stop_requested = True
                             break
                         LOGGER.warning("Translation failed (soft) for page %s: %s. Using placeholders and continuing.", imgname, e)
+                        try:
+                            from utils.batch_report import register_batch_skip
+                            register_batch_skip(imgname, "translation", str(e))
+                        except Exception:
+                            pass
                         for blk in blk_list:
                             if getattr(blk, "translation", None) is None or str(blk.translation).strip() == "":
                                 blk.translation = "[Translation failed]"
@@ -1245,6 +1424,14 @@ class ImgtransThread(QThread):
                 self.translate_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_TRANSLATE)
                 self.update_translate_progress.emit(self.translate_counter)
+
+        try:
+            from utils.batch_report import finalize_batch_report
+            self._last_batch_report = finalize_batch_report(
+                self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set())
+            )
+        except Exception:
+            self._last_batch_report = None
 
         if (self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set())) and (not cfg_module.enable_translate or not self.parallel_trans):
             self.pipeline_stopped.emit()
@@ -1681,6 +1868,10 @@ class ModuleManager(QObject):
         # 线程完成了，直接关闭窗口
         self.progress_msgbox.hide()
         self.imgtrans_pipeline_finished.emit()
+
+    def get_last_batch_report(self):
+        """Return the batch report from the last pipeline run (skipped pages, reasons). None if none."""
+        return getattr(self.imgtrans_thread, '_last_batch_report', None)
 
     def setTranslator(self, translator: str = None):
         if translator is None:

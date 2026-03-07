@@ -258,9 +258,8 @@ class SourceTextEdit(QTextEdit):
 
         if e.modifiers() == Qt.KeyboardModifier.ControlModifier:
             if e.key() == Qt.Key.Key_A:
-                e.accept()
-                self.select_all_blocks_requested.emit()
-                return
+                # In the text box: select all text in this editor (default behavior). Select-all-blocks is only when canvas has focus (mainwindow eventFilter).
+                return super().keyPressEvent(e)
             if e.key() == Qt.Key.Key_Z:
                 e.accept()
                 self.undo_signal.emit()

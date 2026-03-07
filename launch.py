@@ -14,6 +14,23 @@ warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*
 # Disable Paddle oneDNN before any Paddle import (avoids ConvertPirAttribute2RuntimeAttribute error on Windows)
 os.environ["FLAGS_use_mkldnn"] = "0"
 
+# Skip slow "Checking connectivity to the model hosters" check (avoids long wait; set to "0" to re-enable)
+if "DISABLE_MODEL_SOURCE_CHECK" not in os.environ:
+    os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+
+# Reduce verbose logging from Hugging Face / transformers (HTTP request lines, etc.)
+import logging
+for _name in (
+    "huggingface_hub",
+    "huggingface_hub._client",
+    "huggingface_hub.file_download",
+    "httpx",
+    "httpcore",
+    "transformers",
+    "urllib3",
+):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 # PyTorch allocator fragmentation mitigation (Section 7: fewer CUDA OOMs from fragmentation)
 if "PYTORCH_ALLOC_CONF" not in os.environ:
     os.environ["PYTORCH_ALLOC_CONF"] = "max_split_size_mb:512"

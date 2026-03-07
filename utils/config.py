@@ -102,6 +102,10 @@ class ModuleConfig(Config):
     # Translation caching (saves API costs for deterministic settings/reruns)
     translation_cache_enabled: bool = False
     translation_cache_deterministic_only: bool = True
+    # In-session OCR cache: reuse OCR results for same image/model/language (comic-translate style). Reduces redundant OCR runs.
+    ocr_cache_enabled: bool = True
+    # When True, pipeline selects OCR by source language (e.g. Japanese → manga_ocr, Korean → preferred Korean OCR). Fallback: current OCR.
+    ocr_auto_by_language: bool = False
     # Typesetting / layout (auto layout for translated text blocks)
     layout_optimal_breaks: bool = True
     layout_hyphenation: bool = True
@@ -303,6 +307,10 @@ class ProgramConfig(Config):
     context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
     huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
     translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
+    # Release detector/OCR/inpainter/translator caches and gc after pipeline finishes (all pages). Reduces RSS when idle.
+    release_caches_after_batch: bool = False
+    # Manual mode: run pipeline on current page only (comic-translate style). Run button still works but processes one page.
+    manual_mode: bool = False
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:
@@ -397,6 +405,7 @@ CONFIG_KEY_ORDER = (
     "manga_source_translate_raw_search",
     "model_packages_enabled",
     "dev_mode",
+    "release_caches_after_batch", "manual_mode",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
     "huggingface_token", "translator_last_model_by_provider",
 )
@@ -473,6 +482,12 @@ def load_config(config_path: str = shared.CONFIG_PATH):
     if isinstance(tp, dict):
         for old in ('rtdetr_v2', 'rtdetr_comic'):
             tp.pop(old, None)
+    # Migrate removed surya_ocr (OCR disabled; use surya_det + other OCR)
+    if getattr(pcfg.module, 'ocr', None) == 'surya_ocr':
+        pcfg.module.ocr = 'rapidocr'
+        op = getattr(pcfg.module, 'ocr_params', None)
+        if isinstance(op, dict):
+            op.pop('surya_ocr', None)
     # Section 9: clamp numeric settings
     try:
         from utils.validation import clamp_settings

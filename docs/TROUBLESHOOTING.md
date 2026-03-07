@@ -77,6 +77,37 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 
 ---
 
+## 6. Pipeline caches, CBR, batch report, manual mode
+
+**OCR and translation caches (Config → DL Module):**
+
+| Option | What it does |
+|--------|--------------|
+| **Enable OCR cache** | Reuses OCR results for the same image/model/language in the current session. Reduces redundant OCR runs when re-running or changing only translation. |
+| **Translation cache** | Reuses translation results for the same source text and settings (when deterministic). Saves API cost on re-runs. |
+| **Clear OCR and translation caches** | Tools → Models → **Clear OCR and translation caches**. Clears in-session caches so the next run recomputes. |
+| **Release model caches** | Tools → Models → **Release model caches**. Unloads detector/OCR/inpainter/translator models and frees GPU/RAM. |
+| **Release model caches after batch** | Config → General. When on, models are unloaded automatically after each full pipeline run. |
+| **Manual mode** | Config → General. When on, **Run** processes only the current page (comic-translate style). |
+
+**Opening CBR (RAR comic archives):** Use **File → Open CBR ...** for `.cbr`/`.rar` files. Requires `pip install rarfile` and **WinRAR** or **7-Zip** (with UnRAR) in your system PATH. If it fails, the app shows a message with these requirements.
+
+**Batch report:** If pages were skipped during a run (e.g. soft translation failure), a **Batch report** may open automatically. Use **Tools → Project → Show last batch report** to open it again; double-click a row to jump to that page.
+
+**Run OCR or translation on selected pages:** In the page list (left), right-click selected pages → **Run OCR on selected pages**, **Run translation on selected pages**, or **Run inpainting on selected pages**. Runs only that stage on the selected pages; uses caches.
+
+---
+
+## 7. Tips: comic-style bubbles and detector
+
+For **comic-style speech bubbles** (bubble + text regions), you can use the **Hugging Face object-detection** detector with a model that outputs both bubbles and text:
+
+- **Config → DL Module → Detector** → choose **hf_object_det** (or similar).
+- Set **Model ID** to e.g. `ogkalu/comic-text-and-bubble-detector` (or another model that predicts both bubble and text regions).
+- In the detector params, set **Labels to include** so that both `bubble` and `text_bubble` (or the model’s label names) are included. This lets the pipeline treat bubbles as first-class regions for layout and inpainting.
+
+See [COMIC_TRANSLATE_RESEARCH.md](COMIC_TRANSLATE_RESEARCH.md) for more detector and layout notes.
+
 ## Quick reference
 
 | Issue | First step |
@@ -86,3 +117,5 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 | Translator/OCR "invalid key" | Set API key in Config → DL Module → that module’s params; use Test button; check proxy if needed. |
 | Pip conflict / import error | See [OPTIONAL_DEPENDENCIES.md](OPTIONAL_DEPENDENCIES.md); use a clean venv and only install deps for modules you use. |
 | First run "stuck" / slow | Downloads take several minutes; set `DISABLE_MODEL_SOURCE_CHECK=True` to skip long connectivity check if needed. See §5 above. |
+| CBR open fails | Install `pip install rarfile` and add WinRAR or 7-Zip (UnRAR) to PATH. See §6. |
+| Batch report / skipped pages | Tools → Project → Show last batch report; double-click row to open page. See §6. |

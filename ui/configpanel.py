@@ -369,6 +369,7 @@ class ConfigPanel(Widget):
     custom_cursor_changed = Signal()
     display_lang_changed = Signal(str)
     dev_mode_changed = Signal()
+    manual_mode_changed = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -430,12 +431,30 @@ class ConfigPanel(Widget):
         self.empty_runcache_checker, msublock = checkbox_with_label(self.tr('Empty cache after RUN'), discription=self.tr('Empty cache after RUN to save memory.'))
         dlConfigPanel.vlayout.addWidget(msublock)
         self.empty_runcache_checker.stateChanged.connect(self.on_runcache_changed)
+        self.release_caches_after_batch_checker, rcb_sublock = checkbox_with_label(
+            self.tr('Release model caches after batch'),
+            discription=self.tr('After pipeline finishes (all pages), unload models and clear caches to free RAM. Like "Empty cache after RUN" but only after a full run.')
+        )
+        dlConfigPanel.vlayout.addWidget(rcb_sublock)
+        self.release_caches_after_batch_checker.stateChanged.connect(self.on_release_caches_after_batch_changed)
         self.skip_already_translated_checker, skip_sublock = checkbox_with_label(
             self.tr('Skip already translated'),
             discription=self.tr('Do not call translator for pages where every block already has a translation.')
         )
         dlConfigPanel.vlayout.addWidget(skip_sublock)
         self.skip_already_translated_checker.stateChanged.connect(self._on_skip_already_translated_changed)
+        self.ocr_cache_enabled_checker, ocr_cache_sublock = checkbox_with_label(
+            self.tr('Enable OCR cache'),
+            discription=self.tr('Reuse OCR results for the same image/model/language in this session. Reduces redundant OCR runs.')
+        )
+        dlConfigPanel.vlayout.addWidget(ocr_cache_sublock)
+        self.ocr_cache_enabled_checker.stateChanged.connect(self._on_ocr_cache_enabled_changed)
+        self.ocr_auto_by_language_checker, ocr_auto_sublock = checkbox_with_label(
+            self.tr('Auto OCR by source language'),
+            discription=self.tr('Select OCR module by source language (e.g. Japanese → manga_ocr). Requires language mapping in pipeline.')
+        )
+        dlConfigPanel.vlayout.addWidget(ocr_auto_sublock)
+        self.ocr_auto_by_language_checker.stateChanged.connect(self._on_ocr_auto_by_language_changed)
         self.merge_nearby_blocks_checker, merge_sublock = checkbox_with_label(
             self.tr('Merge nearby blocks (collision)'),
             discription=self.tr('Merge detection boxes that are close (collision-based). Use when OCR returns many small boxes.')
@@ -582,6 +601,12 @@ class ConfigPanel(Widget):
 
         self.confirm_before_run_checker, _ = generalConfigPanel.addCheckBox(self.tr('Confirm before Run'), discription=self.tr('Show Run / Continue / Cancel dialog when clicking Run.'))
         self.confirm_before_run_checker.stateChanged.connect(self.on_confirm_before_run_changed)
+
+        self.manual_mode_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Manual mode'),
+            discription=self.tr('When on, Run processes the current page only (comic-translate style). Useful for step-by-step workflow.')
+        )
+        self.manual_mode_checker.stateChanged.connect(self.on_manual_mode_changed)
 
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
@@ -834,6 +859,15 @@ class ConfigPanel(Widget):
     def on_runcache_changed(self):
         pcfg.module.empty_runcache = self.empty_runcache_checker.isChecked()
 
+    def on_release_caches_after_batch_changed(self):
+        pcfg.release_caches_after_batch = self.release_caches_after_batch_checker.isChecked()
+
+    def _on_ocr_cache_enabled_changed(self):
+        pcfg.module.ocr_cache_enabled = self.ocr_cache_enabled_checker.isChecked()
+
+    def _on_ocr_auto_by_language_changed(self):
+        pcfg.module.ocr_auto_by_language = self.ocr_auto_by_language_checker.isChecked()
+
     def _on_skip_already_translated_changed(self):
         pcfg.module.skip_already_translated = self.skip_already_translated_checker.isChecked()
 
@@ -890,6 +924,10 @@ class ConfigPanel(Widget):
 
     def on_confirm_before_run_changed(self):
         pcfg.confirm_before_run = self.confirm_before_run_checker.isChecked()
+
+    def on_manual_mode_changed(self):
+        pcfg.manual_mode = self.manual_mode_checker.isChecked()
+        self.manual_mode_changed.emit()
 
     def _open_context_menu_config(self):
         dlg = ContextMenuConfigDialog(self)
@@ -1186,6 +1224,12 @@ class ConfigPanel(Widget):
         self._update_webp_lossless_visibility()
         self.load_model_checker.setChecked(pcfg.module.load_model_on_demand)
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)
+        if hasattr(self, 'release_caches_after_batch_checker'):
+            self.release_caches_after_batch_checker.setChecked(getattr(pcfg, 'release_caches_after_batch', False))
+        if hasattr(self, 'ocr_cache_enabled_checker'):
+            self.ocr_cache_enabled_checker.setChecked(getattr(pcfg.module, 'ocr_cache_enabled', True))
+        if hasattr(self, 'ocr_auto_by_language_checker'):
+            self.ocr_auto_by_language_checker.setChecked(getattr(pcfg.module, 'ocr_auto_by_language', False))
         if hasattr(self, 'skip_already_translated_checker'):
             self.skip_already_translated_checker.setChecked(getattr(pcfg.module, 'skip_already_translated', False))
         if hasattr(self, 'merge_nearby_blocks_checker'):
@@ -1214,6 +1258,8 @@ class ConfigPanel(Widget):
         self.dev_mode_checker.setChecked(getattr(pcfg, 'dev_mode', False))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
+        if hasattr(self, 'manual_mode_checker'):
+            self.manual_mode_checker.setChecked(getattr(pcfg, 'manual_mode', False))
         arm = getattr(pcfg, 'auto_region_merge_after_run', 'never')
         arm_idx = self.auto_region_merge_combobox.findData(arm)
         if arm_idx >= 0:

@@ -432,6 +432,11 @@ class FontFormatPanel(Widget):
         self.showGlobalFontFormatBtn.clicked.connect(self._on_show_global_font_format_clicked)
         self.showGlobalFontFormatBtn.setVisible(not getattr(pcfg, "show_text_style_preset", True))
 
+        self.showAdvancedFontFormatBtn = QPushButton(self.tr("Show Advanced Font Format"))
+        self.showAdvancedFontFormatBtn.setToolTip(self.tr("Show the Advanced Text Format section again."))
+        self.showAdvancedFontFormatBtn.clicked.connect(self._on_show_advanced_font_format_clicked)
+        self.showAdvancedFontFormatBtn.setVisible(not getattr(pcfg, "text_advanced_format_panel", True))
+
         self.textadvancedfmt_panel = TextAdvancedFormatPanel(
             self.tr('Advanced Text Format'),
             config_name='text_advanced_format_panel',
@@ -464,6 +469,7 @@ class FontFormatPanel(Widget):
         vl0.addWidget(self.textstyle_panel.view_widget)
         vl0.addWidget(self.applyToAllBlocksBtn)
         vl0.addWidget(self.saveAsDefaultBtn)
+        vl0.addWidget(self.showAdvancedFontFormatBtn)
         vl0.addWidget(self.textadvancedfmt_panel.view_widget)
         vl0.setSpacing(0)
         vl0.setContentsMargins(0, 0, 0, 0)
@@ -533,6 +539,16 @@ class FontFormatPanel(Widget):
         self.showGlobalFontFormatBtn.setVisible(False)
         if hasattr(shared, "config_name_to_view_widget") and "show_text_style_preset" in shared.config_name_to_view_widget:
             d = shared.config_name_to_view_widget["show_text_style_preset"]
+            if "action" in d and d["action"] is not None:
+                d["action"].setChecked(True)
+
+    def _on_show_advanced_font_format_clicked(self):
+        """Restore the Advanced Text Format section when it was hidden."""
+        pcfg.text_advanced_format_panel = True
+        self.textadvancedfmt_panel.view_widget.setVisible(True)
+        self.showAdvancedFontFormatBtn.setVisible(False)
+        if hasattr(shared, "config_name_to_view_widget") and "text_advanced_format_panel" in shared.config_name_to_view_widget:
+            d = shared.config_name_to_view_widget["text_advanced_format_panel"]
             if "action" in d and d["action"] is not None:
                 d["action"].setChecked(True)
 

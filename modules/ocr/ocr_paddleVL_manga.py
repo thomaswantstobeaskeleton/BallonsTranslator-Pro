@@ -126,6 +126,12 @@ def _ensure_rope_init_patch():
 class PaddleOCRVLManga(OCRBase):
     params = {
         'device': DEVICE_SELECTOR(),
+        "language_hint": {
+            "type": "selector",
+            "options": ["Default (OCR:)", "Chinese (OCR: 请识别图中的文字)", "Japanese (OCR: 画像の文字を認識)"],
+            "value": "Default (OCR:)",
+            "description": "Prompt hint to reduce misrecognition (e.g. Chinese text read as Japanese). Use Chinese for manhua.",
+        },
         "max_new_tokens": {
             "value": 512,
             "description": "Max generation tokens"
@@ -183,13 +189,19 @@ class PaddleOCRVLManga(OCRBase):
         self.processor = None
 
     def ocr_img(self, img: np.ndarray) -> str:
-        # Prepare the prompt
+        hint = self.get_param_value('language_hint') or "Default (OCR:)"
+        if hint.startswith("Chinese"):
+            prompt_text = "OCR: 请识别图中的文字"
+        elif hint.startswith("Japanese"):
+            prompt_text = "OCR: 画像の文字を認識"
+        else:
+            prompt_text = "OCR:"
         messages = [
             {
                 "role": "user",
                 "content": [
                     {"type": "image", "image": img},
-                    {"type": "text", "text": "OCR:"},
+                    {"type": "text", "text": prompt_text},
                 ],
             }
         ]
@@ -231,15 +243,20 @@ class PaddleOCRVLManga(OCRBase):
             _ensure_rope_default()
             _ensure_rope_init_patch()
             try:
-                model = AutoModelForCausalLM.from_pretrained(
-                    MODEL_PATH,
-                    trust_remote_code=True,
-                    dtype=torch.float16 if self.device == "cuda" else torch.float32
-                ).to(self.device).eval()
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Unrecognized keys in.*rope_parameters")
+                    warnings.filterwarnings("ignore", message=".*layers were not sharded")
+                    warnings.filterwarnings("ignore", message=".*AttentionMaskConverter.*deprecated")
+                    model = AutoModelForCausalLM.from_pretrained(
+                        MODEL_PATH,
+                        trust_remote_code=True,
+                        dtype=torch.float16 if self.device == "cuda" else torch.float32
+                    ).to(self.device).eval()
 
-                processor = AutoProcessor.from_pretrained(
-                    MODEL_PATH, trust_remote_code=True, use_fast=True
-                )
+                    processor = AutoProcessor.from_pretrained(
+                        MODEL_PATH, trust_remote_code=True, use_fast=True
+                    )
             except ImportError as e:
                 if "SlidingWindowCache" in str(e):
                     try:

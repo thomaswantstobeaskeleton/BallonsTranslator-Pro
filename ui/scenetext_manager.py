@@ -715,6 +715,8 @@ class SceneTextManager(QObject):
             for item in selections:
                 item.oldPos = item.pos()
         self.changeHoveringWidget(self.pairwidget_list[blk_id].e_trans)
+        # Select the corresponding pair widget on the right bar (no focus in source/translation)
+        self.textEditList.set_selected_list([blk_id])
 
     def onTextBlkItemEndEdit(self, blk_id: int):
         self.canvas.editing_textblkitem = None

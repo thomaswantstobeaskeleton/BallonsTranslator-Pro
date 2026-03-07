@@ -109,7 +109,7 @@ class CustomGV(QGraphicsView):
             self.ctrl_pressed = True
 
         modifiers = e.modifiers()
-        if modifiers == Qt.KeyboardModifier.ControlModifier:
+        if modifiers in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
             if key == QKEY.Key_A:
                 self.canvas.select_all_signal.emit()
                 e.accept()
@@ -251,6 +251,7 @@ class Canvas(QGraphicsScene):
         self.gv.canvas = self
         self.gv.setAcceptDrops(True)
         self.gv.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.gv.setFocusProxy(None)
 
         self.gv.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.context_menu_requested.connect(self.on_create_contextmenu)
@@ -266,7 +267,8 @@ class Canvas(QGraphicsScene):
         self.ctrl_relesed = self.gv.ctrl_released
         self.vscroll_bar = self.gv.verticalScrollBar()
         self.hscroll_bar = self.gv.horizontalScrollBar()
-        # self.default_cursor = self.gv.cursor()
+        self._default_canvas_cursor = Qt.CursorShape.OpenHandCursor
+        self.gv.setCursor(self._default_canvas_cursor)
         self.rubber_band = self.addWidget(QRubberBand(QRubberBand.Shape.Rectangle))
         self.rubber_band.hide()
         self.rubber_band_origin = None
@@ -676,6 +678,10 @@ class Canvas(QGraphicsScene):
                 compose_mode = QPainter.CompositionMode.CompositionMode_DestinationOut
                 self.drawingLayer.addQImage(0, 0, self.stroke_img_item._img, compose_mode, self.erase_img_key)
 
+    def restoreDefaultCursor(self):
+        """Restore the canvas view to the default hand/grab cursor (e.g. after leaving rect/pen/inpaint mode)."""
+        self.gv.setCursor(self._default_canvas_cursor)
+
     def startCreateTextblock(self, pos: QPointF, hide_control: bool = False):
         pos = pos / self.scale_factor
         self.creating_textblock = True
@@ -691,7 +697,7 @@ class Canvas(QGraphicsScene):
 
     def endCreateTextblock(self, btn=0):
         self.creating_textblock = False
-        self.gv.setCursor(Qt.CursorShape.ArrowCursor)
+        self.restoreDefaultCursor()
         self.txtblkShapeControl.hide()
         textblk_created = False
         rect = self.txtblkShapeControl.rect()
@@ -708,7 +714,7 @@ class Canvas(QGraphicsScene):
         """Cancel in-progress rect or hide rect tool selection (#126). Returns True if something was cancelled."""
         if self.creating_textblock and self.creating_normal_rect:
             self.creating_textblock = False
-            self.gv.setCursor(Qt.CursorShape.ArrowCursor)
+            self.restoreDefaultCursor()
             self.txtblkShapeControl.hide()
             return True
         if self.image_edit_mode == ImageEditMode.RectTool and self.txtblkShapeControl.isVisible() and self.txtblkShapeControl.blk_item is None:
@@ -727,7 +733,7 @@ class Canvas(QGraphicsScene):
         elif self.creating_textblock:
             self.txtblkShapeControl.setRect(QRectF(self.create_block_origin, event.scenePos() / self.scale_factor).normalized())
         
-        elif self.stroke_img_item is not None:
+        elif self.stroke_img_item is not None and self.editor_index == 0:
             if self.stroke_img_item.is_painting:
                 pos = self.inpaintLayer.mapFromScene(event.scenePos())
                 if self.erase_img_key is None:
@@ -758,6 +764,12 @@ class Canvas(QGraphicsScene):
 
     def clearToolStates(self):
         self.end_scale_tool.emit()
+
+    def clearDrawingStroke(self):
+        """Clear any in-progress pen/inpaint stroke (e.g. when switching to text panel)."""
+        if self.stroke_img_item is not None:
+            self.removeItem(self.stroke_img_item)
+            self.stroke_img_item = None
 
     def selected_text_items(self, sort: bool = True) -> List[TextBlkItem]:
         sel_textitems = []
@@ -818,15 +830,15 @@ class Canvas(QGraphicsScene):
                     return self.startCreateTextblock(event.scenePos(), hide_control=True)
 
             elif btn == Qt.MouseButton.LeftButton:
-                # user is drawing using the pen/inpainting tool
+                # user is drawing using the pen/inpainting tool (only when drawing panel is active)
                 if self.scale_tool_mode:
                     self.begin_scale_tool.emit(event.scenePos())
-                elif self.painting:
+                elif self.painting and self.editor_index == 0:
                     text_eraser = self.image_edit_mode == ImageEditMode.TextEraserTool
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.painting_pen, text_eraser=text_eraser)
 
             elif btn == Qt.MouseButton.RightButton:
-                if self.painting and self.image_edit_mode != ImageEditMode.TextEraserTool:
+                if self.painting and self.editor_index == 0 and self.image_edit_mode != ImageEditMode.TextEraserTool:
                     erasing = self.image_edit_mode == ImageEditMode.PenTool
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.erasing_pen, erasing)
                 elif not self.painting:
@@ -961,6 +973,7 @@ class Canvas(QGraphicsScene):
             self.textblock_mode = False
         else:
             # self.gv.setCursor(self.default_cursor)
+            self.restoreDefaultCursor()
             self.gv.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self.image_edit_mode = ImageEditMode.NONE
 

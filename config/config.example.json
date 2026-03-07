@@ -50,6 +50,8 @@
     "translation_soft_failure_continue": true,
     "translation_cache_enabled": false,
     "translation_cache_deterministic_only": true,
+    "ocr_cache_enabled": true,
+    "ocr_auto_by_language": false,
     "layout_optimal_breaks": true,
     "layout_hyphenation": true,
     "layout_collision_check": true,
@@ -147,5 +149,7 @@
   "region_merge_settings": {},
   "context_menu": {},
   "huggingface_token": "",
-  "translator_last_model_by_provider": {}
+  "translator_last_model_by_provider": {},
+  "release_caches_after_batch": false,
+  "manual_mode": false
 }
