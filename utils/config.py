@@ -311,6 +311,14 @@ class ProgramConfig(Config):
     release_caches_after_batch: bool = False
     # Manual mode: run pipeline on current page only (comic-translate style). Run button still works but processes one page.
     manual_mode: bool = False
+    # When True (default), full run and batch skip pages marked as "ignored" in the page list.
+    skip_ignored_in_run: bool = True
+    # Smooth scroll: animate scroll position on wheel (ms). 0 = off. 80–200 = subtle enhanced feel.
+    smooth_scroll_duration_ms: int = 0
+    # When True, briefly apply motion blur to scroll area viewport during scroll (can be costly).
+    motion_blur_on_scroll: bool = False
+    # When True, shorten or disable UI animations (accessibility / preference). Durations → 0 or minimal; scale and motion-blur effects off.
+    reduce_motion: bool = False
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:
@@ -405,7 +413,8 @@ CONFIG_KEY_ORDER = (
     "manga_source_translate_raw_search",
     "model_packages_enabled",
     "dev_mode",
-    "release_caches_after_batch", "manual_mode",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",
+    "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
     "huggingface_token", "translator_last_model_by_provider",
 )

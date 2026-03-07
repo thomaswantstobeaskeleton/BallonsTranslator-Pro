@@ -151,5 +151,9 @@
   "huggingface_token": "",
   "translator_last_model_by_provider": {},
   "release_caches_after_batch": false,
-  "manual_mode": false
+  "manual_mode": false,
+  "skip_ignored_in_run": true,
+  "smooth_scroll_duration_ms": 0,
+  "motion_blur_on_scroll": false,
+  "reduce_motion": false
 }
