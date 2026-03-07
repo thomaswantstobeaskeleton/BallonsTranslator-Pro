@@ -258,6 +258,8 @@ class MainWindow(mainwindow_cls):
         if f.pointSizeF() <= 0:
             f.setPointSizeF(10.0)
         app.setFont(f)
+        # So main window and children inherit; widgets with stylesheet font-size may keep that size
+        self.setFont(f)
 
     def setupUi(self):
         screen_size = QGuiApplication.primaryScreen().geometry().size()

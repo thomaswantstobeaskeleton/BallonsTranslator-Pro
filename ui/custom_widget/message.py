@@ -212,23 +212,8 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
     
     def showEvent(self, e: QShowEvent) -> None:
         super().showEvent(e)
-        # Bubbly fade-in when dialog appears
-        effect = QGraphicsOpacityEffect(self)
-        effect.setOpacity(0.0)
-        self.setGraphicsEffect(effect)
-        anim = QPropertyAnimation(effect, b"opacity", self)
-        anim.setDuration(200)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        self._show_anim_ref[:] = [anim]
-
-        def on_finished():
-            if self.graphicsEffect() == effect:
-                self.setGraphicsEffect(None)
-            self._show_anim_ref.clear()
-        anim.finished.connect(on_finished)
-        anim.start()
+        # Skip QGraphicsOpacityEffect fade-in to avoid "A paint device can only be painted by one painter at a time"
+        # when main window or progress bars repaint during model loading.
     
     def on_stop_clicked(self):
         self.stop_clicked.emit()
