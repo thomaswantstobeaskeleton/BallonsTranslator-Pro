@@ -11,7 +11,7 @@ This document maps the **curated list of 20+ models per category** (from communi
 | Recommendation | Status | How to use / note |
 |----------------|--------|--------------------|
 | **1) ogkalu/comic-text-and-bubble-detector** (Transformer/RT-DETR) | ✅ **Default for hf_object_det** | Would require a new detector that loads this Hugging Face model. **ysgyolo** can load Ultralytics RT-DETR **.pt** checkpoints if the model path contains `rtdetr` (e.g. `ysgyolo_rtdetr_something.pt` in `data/models`), but the ogkalu transformer-based “comic-text-and-bubble-detector” is not a drop-in .pt. |
-| **2) ogkalu/comic-speech-bubble-detector-yolov8m** | ✅ **Supported via ysgyolo** | Download the YOLOv8 medium weights from [Hugging Face](https://huggingface.co/ogkalu/comic-speech-bubble-detector-yolov8m), save as `data/models/ysgyolo_comic_speech_bubble_v8m.pt` (or any name starting with `ysgyolo`), then select that path in **ysgyolo** detector. |
+| **2) ogkalu/comic-speech-bubble-detector-yolov8m** | ✅ **Supported via ysgyolo** | Download the YOLOv8 medium weights from [Hugging Face](https://huggingface.co/ogkalu/comic-speech-bubble-detector-yolov8m), save as `data/models/ysgyolo_comic_speech_bubble_v8m.pt` (or any name starting with `ysgyolo`), then select that path in **ysgyolo** detector. This is **not** an YSG (淫書館) model; **YSG** refers only to [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector). |
 | **3) mayocream/comic-text-detector-onnx** | ⚠️ **Optional** | Use **ctd** with device=CPU and **custom_onnx_path** to your ONNX file. Default CTD ONNX when empty. |
 
 ---
@@ -22,7 +22,7 @@ This document maps the **curated list of 20+ models per category** (from communi
 |-------------------|----------------------|--------|
 | **SwinTextSpotter v2** | ✅ **swintextspotter_v2** | Optional repo; set **repo_path**. Spotter (det+rec). |
 | **DPText-DETR** | ✅ **dptext_detr** | Optional repo; set **repo_path**. Detection only. |
-| **Manga/comic YOLO (e.g. ogkalu comic-speech-bubble)** | ✅ **ysgyolo** | Use model `ysgyolo_comic_speech_bubble_v8m.pt` in `data/models`. |
+| **Manga/comic YOLO (e.g. ogkalu comic-speech-bubble)** | ✅ **ysgyolo** | Use model `ysgyolo_comic_speech_bubble_v8m.pt` in `data/models` (from ogkalu; not YSG series). **YSG (淫書館)** = [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) only. |
 | **CTD (ComicTextDetector)** | ✅ **ctd** | Built-in. detect_size up to 2400. Optional **custom_onnx_path** for alternate ONNX (e.g. mayocream). |
 | **PaddleOCR det** | ✅ **paddle_det**, **paddle_det_v5** | Full pipeline with paddle_rec / paddle_rec_v5. |
 | **Surya detection** | ✅ **surya_det** | Pair with surya_ocr. |
@@ -30,7 +30,7 @@ This document maps the **curated list of 20+ models per category** (from communi
 | **MMOCR (DBNet etc.)** | ✅ **mmocr_det** | Pair with mmocr_ocr. Same deps: mim install mmengine mmcv mmdet mmocr. |
 | **HunyuanOCR spotting** | ✅ **hunyuan_ocr_det** | Full-image spotting; use with none_ocr or hunyuan_ocr. |
 | **Stariver (API)** | ✅ **stariver_ocr** | Detector returns boxes+text; use with none_ocr. |
-| **Magi, TextMamba, YSG** | ✅ **magi_det**, **textmamba_det**, **ysgyolo** | **textmamba_det**: stub (official code not yet released; raises clear error). **magi_det**, **ysgyolo**: detection only; pair with any OCR. |
+| **Magi, TextMamba, YSG (淫书馆)** | ✅ **magi_det**, **textmamba_det**, **ysgyolo** | **textmamba_det**: stub (official code not yet released; raises clear error). **magi_det**, **ysgyolo**: detection only; pair with any OCR. **YSG (淫书馆)** = [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector) by lhj5426 (19 months from data to training). Same author’s earlier YOLOv8: [ogkalu/manga-text-detector-yolov8s](https://huggingface.co/ogkalu/manga-text-detector-yolov8s). The **ysgyolo** detector can also load other comic YOLO .pt (ogkalu, Kiuyha, etc.); those are not "YSG series". |
 | **DBNet / PAN / PSENet** | ✅ (via **mmocr_det**) | MMOCR includes DBNet and other backbones. |
 | **CRAFT, TextSnake, SAM-backboned, DocLAYNET, etc.** | ✅ **craft_det**, **hf_object_det**, **mmocr_det** (TextSnake) | **hf_object_det**: default model_id = ogkalu/comic-text-and-bubble-detector. **craft_det**: CRAFT. **mmocr_det**: DBNet/TextSnake. SAM/DocLAYNET not integrated. |
 | **TextHawk2, TextMonkey** | ❌ Not integrated | LVLM/OCR-free; would need new spotter/OCR modules. |

@@ -16,6 +16,8 @@ Use **conjoined_dedup_iou** (e.g. 0.85) to merge duplicate boxes from different 
 
 ## Conjoined YOLO models (work well together)
 
+**Note:** The filename prefix `ysgyolo_` is a convention for "YOLO .pt in data/models". **YSG (淫書館)** refers only to [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector); do not categorize other YOLO models (ogkalu, Kiuyha, etc.) under "YSG series".
+
 Place each `.pt` in `data/models/` with a name starting with `ysgyolo` (or any path). List them in **conjoined_yolo_paths**, one per line or comma-separated. All run; results are merged and deduplicated.
 
 | Model | HF repo | Save as (in data/models/) | Strength |

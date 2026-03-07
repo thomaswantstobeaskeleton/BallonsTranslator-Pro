@@ -48,8 +48,8 @@ class ModelPackageSelectorDialog(QDialog):
         group_layout = QVBoxLayout(group)
         for package_id in MODEL_PACKAGES:
             label, desc = PACKAGE_LABELS.get(package_id, (package_id, ""))
-            cb = QCheckBox(label)
-            cb.setToolTip(desc)
+            cb = QCheckBox(self.tr(label))
+            cb.setToolTip(self.tr(desc))
             cb.setProperty("package_id", package_id)
             if package_id == "core":
                 cb.setChecked(True)

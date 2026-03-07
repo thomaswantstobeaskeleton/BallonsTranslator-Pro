@@ -348,8 +348,9 @@ class ProgramConfig(Config):
             if module_cfg['translator'] in repl_pairs:
                 module_cfg['translator'] = repl_pairs[module_cfg['translator']]
 
-        # Legacy: existing configs without this key used to download all models at startup
-        config_dict.setdefault("model_packages_enabled", None)
+        # Legacy: configs that lack this key or have null used to download all models. Default to core-only (Issue #15).
+        if config_dict.get("model_packages_enabled") is None:
+            config_dict["model_packages_enabled"] = ["core"]
 
         return ProgramConfig(**config_dict)
     

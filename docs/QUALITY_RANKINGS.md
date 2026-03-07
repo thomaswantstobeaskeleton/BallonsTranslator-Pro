@@ -36,7 +36,7 @@ Best for: general document and scene text. MMOCR (DBNet++) often leads ICDAR/Tot
 | Module | Model | Notes |
 |--------|--------|--------|
 | **craft_det** | CRAFT (craft-text-detector) | Curved and scene text; historically strong. Requires opencv<4.5.4.62 (see OPTIONAL_DEPENDENCIES.md). |
-| **ysgyolo** | YOLO (e.g. ogkalu comic-speech-bubble-yolov8m) | Good for speech-bubble-only with comic-trained weights. |
+| **ysgyolo** | YOLO (e.g. ogkalu comic-speech-bubble-yolov8m, or YSG 淫書館 from [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector)) | Good for speech-bubble-only with comic-trained weights. **YSG series** = YSGforMTL only; do not label other YOLO models as YSG. |
 | **dptext_detr** | DPText-DETR | DETR-based scene text; optional repo. |
 | **swintextspotter_v2** | SwinTextSpotter v2 | Spotter (det+rec); optional repo; high quality, heavier setup. |
 | **easyocr_det** | EasyOCR detection | CRAFT-based; decent general use; outclassed by Tier 2 for accuracy. |

@@ -879,7 +879,7 @@
     <message>
         <location filename="../ui/mainwindowbars.py" line="143"/>
         <source>RUN</source>
-        <translation type="unfinished"></translation>
+        <translation>运行</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="104"/>
@@ -1025,6 +1025,36 @@ All existing translation results will be cleared!</source>
         <location filename="../ui/mainwindow.py" line="206"/>
         <source>Keyword substitution for machine translation source text</source>
         <translation>替换机翻前文本关键字</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1559"/>
+        <source>Download complete.</source>
+        <translation>下载完成。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1560"/>
+        <source>Model packages have been downloaded. You can use the pipeline now.</source>
+        <translation>模型包已下载完成，现在可以使用流程了。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1563"/>
+        <source>If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.</source>
+        <translation>若网络检查过慢或失败，可设置 DISABLE_MODEL_SOURCE_CHECK=True 后重试。详见 docs/TROUBLESHOOTING.md。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1566"/>
+        <source>Model download failed. You can retry from Tools → Retry model downloads.</source>
+        <translation>模型下载失败。可从 工具 → 重试下载模型 再次尝试。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1579"/>
+        <source>No model packages selected.</source>
+        <translation>未选择任何模型包。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="1580"/>
+        <source>Use Tools → Manage models to download individual models, or restart the app to choose packages again.</source>
+        <translation>请通过 工具 → 管理模型 下载所需模型，或重启程序重新选择模型包。</translation>
     </message>
 </context>
 <context>
@@ -1319,7 +1349,7 @@ All existing translation results will be cleared!</source>
     <message>
         <location filename="../ui/drawingpanel.py" line="217"/>
         <source>Ctrl+D</source>
-        <translation></translation>
+        <translation>Ctrl+D</translation>
     </message>
     <message>
         <location filename="../ui/drawingpanel.py" line="224"/>
@@ -1856,6 +1886,117 @@ All existing translation results will be cleared!</source>
         <location filename="../ui/mainwindowbars.py" line="298"/>
         <source>Keyword substitution for machine translation source text</source>
         <translation>替换机翻前文本关键字</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="574"/>
+        <source>Manage models...</source>
+        <translation>管理模型...</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="575"/>
+        <source>Check which models are downloaded and download selected models.</source>
+        <translation>查看已下载的模型并下载所选模型。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="578"/>
+        <source>Retry model downloads</source>
+        <translation>重试下载模型</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="579"/>
+        <source>Retry downloading model packages (e.g. after a failed first install).</source>
+        <translation>重新下载模型包（例如首次安装失败后可使用）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="599"/>
+        <source>Models</source>
+        <translation>模型</translation>
+    </message>
+</context>
+<context>
+    <name>ModelPackageSelectorDialog</name>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="30"/>
+        <source>Choose models to download</source>
+        <translation>选择要下载的模型</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="40"/>
+        <source>Select which model packages to download now. You can download more later via Tools → Manage models.</source>
+        <translation>选择现在要下载的模型包。之后可通过 工具 → 管理模型 下载更多。</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="47"/>
+        <source>Model packages</source>
+        <translation>模型包</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="62"/>
+        <source>Skip (Core only)</source>
+        <translation>跳过（仅核心包）</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="63"/>
+        <source>Download only the Core package (recommended minimum).</source>
+        <translation>仅下载核心包（推荐最低配置）。</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="65"/>
+        <source>Download selected</source>
+        <translation>下载所选</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Core (recommended)</source>
+        <translation>核心包（推荐）</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Text detection, inpainting, OCR, pkuseg — minimal to run</source>
+        <translation>文本检测、图像修复、OCR、pkuseg — 最低可运行配置</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Advanced OCR</source>
+        <translation>高级 OCR</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px</source>
+        <translation>漫画用 PaddleOCR-VL（约 1.7 GB）、MIT 48px/32px</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Advanced inpainting</source>
+        <translation>高级图像修复</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>LaMa variants, ONNX, PatchMatch</source>
+        <translation>LaMa 变体、ONNX、PatchMatch</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Optional ONNX inpainting</source>
+        <translation>可选 ONNX 图像修复</translation>
+    </message>
+    <message>
+        <location filename="../ui/model_package_selector_dialog.py" line="51"/>
+        <source>Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)</source>
+        <translation>Lama 2025 / lama-manga ONNX（体积更小，适合 CPU）</translation>
+    </message>
+</context>
+<context>
+    <name>ModelDownloadProgressDialog</name>
+    <message>
+        <location filename="../ui/mainwindow.py" line="109"/>
+        <source>Downloading model packages</source>
+        <translation>正在下载模型包</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindow.py" line="111"/>
+        <source>Downloading model packages... This may take several minutes.</source>
+        <translation>正在下载模型包……可能需要几分钟。</translation>
     </message>
 </context>
 <context>

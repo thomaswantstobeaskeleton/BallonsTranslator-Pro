@@ -12,6 +12,15 @@ from utils.textblock import mit_merge_textlines, sort_regions, examine_textblk, 
 from utils.imgproc_utils import xywh2xyxypoly
 from utils.proj_imgtrans import ProjImgTrans
 
+"""
+ysgyolo detector: loads any Ultralytics YOLO (or RT-DETR) .pt from data/models.
+**YSG (淫书馆)** refers only to models from [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector),
+developed by the author (lhj5426) from data collection through training over 19 months.
+Early work by the same author: [ogkalu/manga-text-detector-yolov8s](https://huggingface.co/ogkalu/manga-text-detector-yolov8s) (YOLOv8).
+Other .pt files (e.g. ogkalu comic-speech-bubble, Kiuyha Manga-Bubble-YOLO) are generic comic YOLO models,
+not "YSG series". The filename prefix ysgyolo_ is a convention for "YOLO .pt in data/models".
+"""
+
 MODEL_DIR = 'data/models'
 CKPT_LIST = []
 
