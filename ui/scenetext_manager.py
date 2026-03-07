@@ -3,7 +3,7 @@ from typing import List, Union, Tuple
 import numpy as np
 import copy
 
-from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem
+from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem, QGraphicsBlurEffect
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF, QPoint
 from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
@@ -395,6 +395,8 @@ class SceneTextManager(QObject):
         self.hovering_transwidget : TransTextEdit = None
 
         self.prev_blkitem: TextBlkItem = None
+        self._moving_blur_item: TextBlkItem = None  # item currently showing drag blur
+        self._drag_blur_radius = 3  # motion-blur style when dragging text blocks
 
     def on_switch_textitem(self, switch_delta: int, key_event: QKeyEvent = None, current_editing_widget: Union[SourceTextEdit, TransTextEdit] = None):
         n_blk = len(self.textblk_item_list)
@@ -744,9 +746,21 @@ class SceneTextManager(QObject):
             self.txtblkShapeControl.setBlkItem(blk_item)
 
     def onTextBlkItemMoving(self, item: TextBlkItem):
+        # Motion-blur style: add blur effect while dragging
+        if self._moving_blur_item is None:
+            self._moving_blur_item = item
+            blur = QGraphicsBlurEffect()
+            blur.setBlurRadius(self._drag_blur_radius)
+            if hasattr(blur, 'setBlurHints'):
+                blur.setBlurHints(QGraphicsBlurEffect.BlurHint.PerformanceHint)
+            item.setGraphicsEffect(blur)
         self.txtblkShapeControl.updateBoundingRect()
 
     def onTextBlkItemMoved(self):
+        # Remove blur effect after drop
+        if self._moving_blur_item is not None:
+            self._moving_blur_item.setGraphicsEffect(None)
+            self._moving_blur_item = None
         selected_blks = self.canvas.selected_text_items()
         if len(selected_blks) > 0:
             self.canvas.push_undo_command(MoveBlkItemsCommand(selected_blks, self.txtblkShapeControl))
