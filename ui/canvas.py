@@ -4,7 +4,7 @@ import os
 
 from qtpy.QtWidgets import QApplication, QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
 from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSizeF, QEvent
-from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent
+from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent, QMouseEvent
 
 try:
     from qtpy.QtWidgets import QUndoStack, QUndoCommand
@@ -161,6 +161,11 @@ class CustomGV(QGraphicsView):
         if e.mimeData().hasUrls():
             # issue #908, https://stackoverflow.com/questions/4177720/accepting-drops-on-a-qgraphicsscene
             e.setAccepted(True)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Ensure view gets focus when clicking on canvas so Ctrl+A selects all text blocks."""
+        self.setFocus()
+        super().mousePressEvent(event)
 
 
 class Canvas(QGraphicsScene):
@@ -1033,7 +1038,7 @@ class Canvas(QGraphicsScene):
                 edit_menu.addSeparator()
             if context_menu_visible('edit_select_all'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
-                select_all_act = edit_menu.addAction(self.tr("Select all"))
+                select_all_act = edit_menu.addAction(self.tr("Select all text boxes"))
                 select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
 
             # --- Text (selection) ---

@@ -49,11 +49,11 @@ QSplitter:handle {
 }
 
 QSplitter::handle:pressed {
-    background: rgb(30, 147, 229)
+    background: @accentColor
 }
 
 ConfigSubBlock::hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 SourceTextEdit {
@@ -89,7 +89,7 @@ QPlainTextEdit {
 }
 
 QPlainTextEdit:focus {
-    border: 1px solid rgb(30, 147, 229);
+    border: 1px solid @accentColor;
  }
 
 QComboBox::drop-down {
@@ -97,7 +97,7 @@ QComboBox::drop-down {
 }
 
 QComboBox::hover {
-    border: 1px solid rgb(30, 147, 229);
+    border: 1px solid @accentColor;
 }
 
 QComboBox::down-arrow {
@@ -117,7 +117,7 @@ QFontComboBox#FontFamilyBox {
 }
 
 QFontComboBox#FontFamilyBox::hover {
-    border: 1px solid rgb(30, 147, 229);
+    border: 1px solid @accentColor;
 }
 
 SizeComboBox {
@@ -130,7 +130,7 @@ SizeComboBox {
 }
 
 SizeComboBox::hover {
-    border: 1px solid rgb(30, 147, 229);
+    border: 1px solid @accentColor;
 }
 
 SizeComboBox::down-arrow {
@@ -192,7 +192,7 @@ ColorPickerLabel {
 }
 
 ColorPickerLabel::hover {
-    border: 2px solid rgb(30, 147, 229);
+    border: 2px solid @accentColor;
 }
 
 SmallColorPickerLabel {
@@ -214,11 +214,11 @@ AlignmentChecker::indicator {
 }
 
 AlignmentChecker::indicator:checked {
-    background-color: rgb(30, 147, 229);
+    background-color: @accentColor;
 }
 
 AlignmentChecker::indicator:hover {
-    border: 2px solid rgb(30, 147, 229);
+    border: 2px solid @accentColor;
 }
 
 AlignmentChecker#AlignLeftChecker::indicator {
@@ -266,12 +266,12 @@ QFontChecker::indicator {
 }
 
 QFontChecker::indicator::hover {
-    border: 2px solid rgb(30, 147, 229);
+    border: 2px solid @accentColor;
 }
 
 QFontChecker::indicator::checked {
-    border: 2px solid rgb(30, 147, 229);
-    background-color: rgb(30, 147, 229);
+    border: 2px solid @accentColor;
+    background-color: @accentColor;
 }
 
 QFontChecker#FontBoldChecker::indicator {
@@ -452,7 +452,7 @@ QPushButton#closeBtn::hover {
 }
 
 TextCheckerLabel::hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 QCheckBox#TransChecker::indicator {
@@ -470,7 +470,7 @@ QCheckBox#TransChecker::indicator:checked {
 }
 
 QCheckBox#TransChecker::indicator:hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 QCheckBox#PaintChecker::indicator {
@@ -488,7 +488,7 @@ QCheckBox#PaintChecker::indicator:checked {
 }
 
 QCheckBox#PaintChecker::indicator:hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 QCheckBox#TexteditChecker::indicator {
@@ -506,7 +506,7 @@ QCheckBox#TexteditChecker::indicator:checked {
 }
 
 QCheckBox#TexteditChecker::indicator:hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 QCheckBox#TextblockChecker::indicator{
@@ -520,7 +520,7 @@ QCheckBox#TextblockChecker::indicator{
 }
 
 QCheckBox#TextblockChecker::indicator:hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 QCheckBox#TextblockChecker::indicator:checked{
@@ -735,7 +735,7 @@ QLabel#angleLabel {
 }
 
 .ClickableLabel::hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 .ConfigClickableLabel {
@@ -743,11 +743,11 @@ QLabel#angleLabel {
 }
 
 .ConfigClickableLabel::hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 .ExpandLabel::hover {
-    background-color: rgba(30, 147, 229, 20%);
+    background-color: @accentColorRgba20;
 }
 
 DrawToolCheckBox::indicator {
@@ -758,7 +758,7 @@ DrawToolCheckBox::indicator {
 }
 
 DrawToolCheckBox::indicator:checked {
-    background-color: rgba(30, 147, 229, 80);
+    background-color: @accentColorRgba80;
 }
 
 DrawToolCheckBox#DrawHandTool::indicator {
@@ -941,7 +941,7 @@ TitleBarToolBtn {
 }
 
 TitleBarToolBtn::hover {
-    background-color: rgb(30, 147, 229);
+    background-color: @accentColor;
     color: whitesmoke;
 }
 
@@ -957,7 +957,7 @@ QProgressBar {
     background-color: @borderColor;
 }
 QProgressBar::chunk {
-    background-color: rgb(30, 147, 229);
+    background-color: @accentColor;
 }
 
 

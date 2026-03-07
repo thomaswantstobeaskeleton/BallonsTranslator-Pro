@@ -2,7 +2,7 @@ import os.path as osp
 from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox
+from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon
 
@@ -499,6 +499,10 @@ class TitleBar(Widget):
         viewMenu.addMenu(themeMenu)
         viewMenu.addAction(darkModeAction)
         viewMenu.addAction(bubblyUIAction)
+        themeCustomizerAction = QAction(self.tr('Theme & UI customizer...'), self)
+        themeCustomizerAction.setToolTip(self.tr('Change accent color, app font, light/dark, simple vs advanced UI.'))
+        viewMenu.addAction(themeCustomizerAction)
+        self.theme_customizer_trigger = themeCustomizerAction.triggered
         viewMenu.addSeparator()
         viewMenu.addMenu(helpMenu)
         self.viewToolBtn.setMenu(viewMenu)
@@ -906,7 +910,7 @@ class TranslatorSelectionWidget(Widget):
         label_tgt.clicked.connect(self.cfg_clicked)
         
         self.selector = SmallComboBox()
-        self.selector.setMinimumWidth(180)  # Issue #16: readable translator names in dropdown
+        self.selector.setMinimumWidth(220)  # Issue #16: readable translator names (e.g. text-generation-webui)
         self.src_selector = SmallComboBox()
         self.tgt_selector = SmallComboBox()
         self.cfg_btn = SmallConfigPutton()
@@ -995,6 +999,12 @@ class BottomBar(Widget):
         self.runBtn.setFont(sanitize_font(self.runBtn.font()))
         if getattr(pcfg, 'bubbly_ui', True):
             install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+        runBtnWrapper = QWidget(self)
+        runBtnLayout = QVBoxLayout(runBtnWrapper)
+        runBtnLayout.setContentsMargins(0, 3, 0, 0)
+        runBtnLayout.setSpacing(0)
+        runBtnLayout.addWidget(self.runBtn)
+        self.runBtnWrapper = runBtnWrapper
 
         for w in (self.textdet_selector, self.ocr_selector, self.inpaint_selector):
             w.selector.setFont(sanitize_font(w.selector.font()))
@@ -1028,12 +1038,44 @@ class BottomBar(Widget):
         self.textlayerSlider.setValue(100)
         self.textlayerSlider.setRange(0, 100)
         
-        # Layout: Pipeline (det, ocr, inpaint, trans) | Run | spacer | sliders | Right panel (Drawing, Text, Spell check, text block mode)
-        self.hlayout.addWidget(self.textdet_selector)
-        self.hlayout.addWidget(self.ocr_selector)
-        self.hlayout.addWidget(self.inpaint_selector)
-        self.hlayout.addWidget(self.trans_selector)
-        self.hlayout.addWidget(self.runBtn)
+        # Pipeline modules in a horizontal scroll area so they don't get squished
+        self.pipelineContainer = QWidget(self)
+        pipelineLayout = QHBoxLayout(self.pipelineContainer)
+        pipelineLayout.setContentsMargins(0, 0, 0, 0)
+        pipelineLayout.setSpacing(0)
+        pipelineLayout.addWidget(self.textdet_selector)
+        pipelineLayout.addWidget(self.ocr_selector)
+        pipelineLayout.addWidget(self.inpaint_selector)
+        pipelineLayout.addWidget(self.trans_selector)
+        self.pipelineScroll = QScrollArea(self)
+        self.pipelineScroll.setWidget(self.pipelineContainer)
+        self.pipelineScroll.setWidgetResizable(False)
+        self.pipelineScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.pipelineScroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pipelineScroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.pipelineScroll.setMaximumHeight(BOTTOMBAR_HEIGHT)
+        self.pipelineScroll.setMinimumWidth(120)
+        self.pipelineScroll.setStyleSheet("""
+            QScrollBar:horizontal {
+                height: 4px;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+            QScrollBar::handle:horizontal {
+                min-width: 24px;
+                border-radius: 2px;
+                background: rgba(128, 128, 128, 0.4);
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: rgba(128, 128, 128, 0.6);
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+        """)
+        
+        # Layout: Pipeline (scroll) | Run | spacer | sliders | Right panel (Drawing, Text, Spell check, text block mode)
+        self.hlayout.addWidget(self.pipelineScroll, 1)
+        self.hlayout.addWidget(self.runBtnWrapper)
         self.hlayout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Minimum))
         self.hlayout.addWidget(self.textlayerSlider)
         self.hlayout.addWidget(self.originalSlider)
@@ -1070,17 +1112,19 @@ class BottomBar(Widget):
     def setPipelineVisible(self, visible: bool):
         """Show or hide pipeline strip. When showing, respect each stage's enable flag (Issue #18)."""
         if not visible:
+            self.pipelineScroll.setVisible(False)
             self.textdet_selector.setVisible(False)
             self.ocr_selector.setVisible(False)
             self.inpaint_selector.setVisible(False)
             self.trans_selector.setVisible(False)
-            self.runBtn.setVisible(False)
+            self.runBtnWrapper.setVisible(False)
         else:
+            self.pipelineScroll.setVisible(True)
             self.textdet_selector.setVisible(pcfg.module.enable_detect)
             self.ocr_selector.setVisible(pcfg.module.enable_ocr)
             self.trans_selector.setVisible(pcfg.module.enable_translate)
             self.inpaint_selector.setVisible(pcfg.module.enable_inpaint)
-            self.runBtn.setVisible(True)
+            self.runBtnWrapper.setVisible(True)
             self.runBtn.setEnabled(True)
 
     def onTextblockCheckerClicked(self):

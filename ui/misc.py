@@ -172,14 +172,45 @@ def parse_stylesheet(theme: str = '', reverse_icon: bool = False) -> str:
     with open(C.THEME_PATH, 'r', encoding='utf8') as f:
         theme_dict: Dict = json.loads(f.read())
     if not theme or theme not in theme_dict:
-        tgt_theme: Dict = theme_dict[list(theme_dict.keys())[0]]
+        tgt_theme: Dict = dict(theme_dict[list(theme_dict.keys())[0]])
     else:
-        tgt_theme: Dict = theme_dict[theme]
+        tgt_theme: Dict = dict(theme_dict[theme])
+
+    if '@accentColor' not in tgt_theme:
+        tgt_theme['@accentColor'] = '#1E93E5'
+        tgt_theme['@accentColorRgb'] = '30, 147, 229'
+        tgt_theme['@accentColorRgba20'] = 'rgba(30, 147, 229, 20%)'
+        tgt_theme['@accentColorRgba35'] = 'rgba(30, 147, 229, 0.35)'
+        tgt_theme['@accentColorRgba80'] = 'rgba(30, 147, 229, 0.8)'
+
+    # Optional accent color override from config (theme customizer)
+    try:
+        from utils.config import pcfg
+        accent_hex = getattr(pcfg, 'accent_color_hex', None) or getattr(pcfg, 'accent_color_hex', '')
+        if isinstance(accent_hex, str) and accent_hex.strip().startswith('#'):
+            h = accent_hex.strip().lstrip('#')
+            if len(h) >= 6:
+                r = int(h[0:2], 16)
+                g = int(h[2:4], 16)
+                b = int(h[4:6], 16)
+                tgt_theme['@accentColor'] = accent_hex.strip() if len(accent_hex.strip()) <= 9 else ('#' + h[:6])
+                tgt_theme['@accentColorRgb'] = f"{r}, {g}, {b}"
+                tgt_theme['@accentColorRgba20'] = f"rgba({r}, {g}, {b}, 20%)"
+                tgt_theme['@accentColorRgba35'] = f"rgba({r}, {g}, {b}, 0.35)"
+                tgt_theme['@accentColorRgba80'] = f"rgba({r}, {g}, {b}, 0.8)"
+    except Exception:
+        pass
 
     C.FOREGROUND_FONTCOLOR = hex2rgb(tgt_theme['@qwidgetForegroundColor'])
     C.SLIDERHANDLE_COLOR = hex2rgb(tgt_theme['@sliderHandleColor'])
+    # Replace longer accent keys first so @accentColor doesn't turn @accentColorRgba20 into #1E93E5Rgba20
+    accent_keys_ordered = [k for k in tgt_theme if k.startswith('@accent')]
+    accent_keys_ordered.sort(key=len, reverse=True)
+    for key in accent_keys_ordered:
+        stylesheet = stylesheet.replace(key, tgt_theme[key])
     for key, val in tgt_theme.items():
-        stylesheet = stylesheet.replace(key, val)
+        if key not in accent_keys_ordered:
+            stylesheet = stylesheet.replace(key, val)
     # Fallback for missing icons (e.g. when icons/ is gitignored and not present on clone)
     _icons_dir = osp.join(C.PROGRAM_PATH, 'icons')
     if not osp.exists(osp.join(_icons_dir, 'drawingtools_texteraser.svg')):
