@@ -373,6 +373,8 @@ def main():
         app_font = app.font()
     if app_font.pointSizeF() <= 0:
         app_font.setPointSizeF(10.0)
+    if app_font.pointSize() <= 0:
+        app_font.setPointSize(10)
     app_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
     app_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.NoSubpixelAntialias)
     QGuiApplication.setFont(app_font)
