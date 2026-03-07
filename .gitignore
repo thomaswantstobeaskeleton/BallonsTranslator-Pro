@@ -32,6 +32,7 @@ stariver_ocr_error.txt
 ballontrans_pylibs_win
 config/config.json
 config/config.local.json
+config/*.tmp
 .env
 .env.*
 !.env.example

@@ -1,3 +1,4 @@
+# BallonsTranslator-Pro — Python 3.8+ (3.10+ recommended). See docs/OPTIONAL_DEPENDENCIES.md for conflicts.
 # Core deps for first run. launch.py installs PyTorch (CUDA/CPU/ROCm) automatically; use TORCH_COMMAND to override.
 # See https://pytorch.org/ for manual PyTorch install.
 
