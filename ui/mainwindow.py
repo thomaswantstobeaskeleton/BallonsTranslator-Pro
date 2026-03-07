@@ -1530,6 +1530,18 @@ class MainWindow(mainwindow_cls):
         dlg = ModelManagerDialog(self)
         dlg.exec()
 
+    def _reset_modules_to_core_defaults(self):
+        """Set detector, OCR, inpainter, and translator to core defaults after models are downloaded."""
+        pcfg.module.textdetector = 'ctd'
+        pcfg.module.ocr = 'manga_ocr'
+        pcfg.module.inpainter = 'aot'
+        pcfg.module.translator = 'google'
+        save_config()
+        self.module_manager.setTextDetector('ctd')
+        self.module_manager.setOCR('manga_ocr')
+        self.module_manager.setInpainter('aot')
+        self.module_manager.setTranslator('google')
+
     def _run_deferred_model_download(self):
         """Run initial model download after window is shown (set by launch.py so app opens first)."""
         package_ids = getattr(pcfg, 'model_packages_enabled', None)
@@ -1542,6 +1554,7 @@ class MainWindow(mainwindow_cls):
         def on_finished(success: bool, message: str):
             dlg.accept()
             if success:
+                self._reset_modules_to_core_defaults()
                 create_info_dialog({
                     'title': self.tr('Download complete.'),
                     'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
@@ -1574,6 +1587,7 @@ class MainWindow(mainwindow_cls):
         def on_finished(success: bool, message: str):
             dlg.accept()
             if success:
+                self._reset_modules_to_core_defaults()
                 create_info_dialog({
                     'title': self.tr('Download complete.'),
                     'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
