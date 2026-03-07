@@ -341,8 +341,8 @@ class ProjImgTrans:
         try:
             with open(tmp_save_tgt, "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.to_dict(), ensure_ascii=False, cls=TextBlkEncoder))
-        except:
-            raise Exception(f'Failed to write {self.to_dict()}')
+        except OSError as e:
+            raise Exception(f'Failed to write {tmp_save_tgt}') from e
         if osp.exists(self.proj_path) and keep_exist_as_backup:
             os.replace(self.proj_path, self.proj_path + '.backup')
             os.replace(tmp_save_tgt, self.proj_path)
