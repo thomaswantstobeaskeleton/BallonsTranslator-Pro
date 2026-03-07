@@ -288,6 +288,7 @@ class ProgramConfig(Config):
     manga_source_download_dir: str = ''
     manga_source_request_delay: float = 0.3
     manga_source_open_after_download: bool = False
+    manga_source_playwright_headless: bool = True
     shortcuts: Dict = field(default_factory=dict)
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
@@ -380,7 +381,7 @@ CONFIG_KEY_ORDER = (
     "expand_teffect_panel", "text_advanced_format_panel", "expand_tadvanced_panel", "config_panel_font_scale",
     "default_device", "unload_after_idle_minutes", "ocr_spell_check",
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
-    "manga_source_request_delay", "manga_source_open_after_download",
+    "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
     "huggingface_token", "translator_last_model_by_provider",
 )

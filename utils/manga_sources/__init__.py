@@ -6,6 +6,13 @@ from .comick_source import ComickSourceClient
 from .gomanga_api import GomangaApiClient
 from .manhwa_reader import ManhwaReaderClient
 from .generic_chapter_url import GenericChapterUrlClient
+from .mangaforfree import MangaForFreeClient
+from .toongod import ToonGodClient
+from .manganato import MangaNatoClient
+from .mangafire import MangaFireClient
+from .naruraw import NaruRawClient
+from .manhwaraw import ManhwaRawClient
+from .onekkk import OneKkkClient
 
 __all__ = [
     "MangaDexClient",
@@ -13,4 +20,11 @@ __all__ = [
     "GomangaApiClient",
     "ManhwaReaderClient",
     "GenericChapterUrlClient",
+    "MangaForFreeClient",
+    "ToonGodClient",
+    "MangaNatoClient",
+    "MangaFireClient",
+    "NaruRawClient",
+    "ManhwaRawClient",
+    "OneKkkClient",
 ]
