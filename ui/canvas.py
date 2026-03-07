@@ -3,7 +3,7 @@ from typing import List, Union
 import os
 
 from qtpy.QtWidgets import QApplication, QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
-from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSizeF, QEvent
+from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSizeF, QEvent, QTimer
 from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent, QMouseEvent
 
 try:
@@ -597,6 +597,25 @@ class Canvas(QGraphicsScene):
         factor = target_scale / self.scale_factor
         self.scaleImage(factor)
 
+    def fitToView(self):
+        """Zoom canvas so the whole page/image fits in the viewport (left/right and top/bottom). Used as default on load."""
+        if not self.gv.isVisible() or not self.imgtrans_proj.img_valid or self.base_pixmap is None:
+            return
+        view_w = max(1, self.gv.viewport().width())
+        view_h = max(1, self.gv.viewport().height())
+        img_w = self.base_pixmap.width()
+        img_h = self.base_pixmap.height()
+        if img_w <= 0 or img_h <= 0:
+            return
+        scale_w = view_w / img_w
+        scale_h = view_h / img_h
+        target_scale = min(scale_w, scale_h)
+        # Slightly zoom in from "fit" so the default is not too zoomed out (1.6x the fit scale, capped at max).
+        target_scale = min(target_scale * 1.6, CANVAS_SCALE_MAX)
+        target_scale = np.clip(target_scale, CANVAS_SCALE_MIN, CANVAS_SCALE_MAX)
+        factor = target_scale / self.scale_factor
+        self.scaleImage(factor)
+
     def onViewResized(self):
         gv_w, gv_h = self.gv.geometry().width(), self.gv.geometry().height()
 
@@ -910,7 +929,8 @@ class Canvas(QGraphicsScene):
             self.baseLayer.setRect(QRectF(im_rect))
             if im_rect != self.sceneRect():
                 self.setSceneRect(0, 0, im_rect.width(), im_rect.height())
-            self.scaleImage(1)
+            # Default zoom: fit whole page in view so left/right and top/bottom connect to panels. User can still zoom.
+            QTimer.singleShot(0, self.fitToView)
 
         self.setDrawingLayer()
 
