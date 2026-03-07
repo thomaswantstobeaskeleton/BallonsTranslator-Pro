@@ -213,8 +213,10 @@ class BaseModule:
             self.params[param_key] = param_value
 
     def updateParam(self, param_key: str, param_content):
-        if self.params is not None and param_key in self.params:
-            self.set_param_value(param_key, param_content)
+        """Update a single param by key. Ignores unknown keys (Issue #19: avoid AssertionError from stale UI)."""
+        if self.params is None or param_key not in self.params:
+            return
+        self.set_param_value(param_key, param_content)
 
     @property
     def low_vram_mode(self):
