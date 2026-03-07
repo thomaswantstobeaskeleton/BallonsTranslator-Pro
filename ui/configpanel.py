@@ -86,7 +86,9 @@ class ConfigTextLabel(QLabel):
         font = self.font()
         if font_weight is not None:
             font.setWeight(font_weight)
-        font.setPointSizeF(max(1, fontsize) if fontsize <= 0 else fontsize)
+        size = max(1, fontsize) if fontsize <= 0 else fontsize
+        font.setPointSizeF(float(size))
+        font.setPointSize(max(1, int(size)))  # avoid QFont::setPointSize <= 0 (Windows default -1)
         self.setFont(font)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         self.setOpenExternalLinks(True)
@@ -149,7 +151,9 @@ def checkbox_with_label(name: str, discription: str = None, target_block: QWidge
     checkbox = QCheckBox()
     if discription is not None:
         font = checkbox.font()
-        font.setPointSizeF(max(1.0, _config_font_size(CONFIG_FONTSIZE_CONTENT) * 0.8))
+        size = max(1.0, _config_font_size(CONFIG_FONTSIZE_CONTENT) * 0.8)
+        font.setPointSizeF(size)
+        font.setPointSize(max(1, int(size)))  # avoid QFont::setPointSize <= 0
         checkbox.setFont(font)
         checkbox.setText(discription)
         vertical_layout = True
@@ -274,7 +278,9 @@ class TableItem(QStandardItem):
     def __init__(self, text, fontsize):
         super().__init__()
         font = self.font()
-        font.setPointSizeF(max(1, fontsize) if fontsize <= 0 else fontsize)
+        size = max(1, fontsize) if fontsize <= 0 else fontsize
+        font.setPointSizeF(float(size))
+        font.setPointSize(max(1, int(size)))  # avoid QFont::setPointSize <= 0
         self.setFont(font)
         self.setText(text)
         self.setEditable(False)

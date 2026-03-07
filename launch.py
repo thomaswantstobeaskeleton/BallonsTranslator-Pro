@@ -368,7 +368,7 @@ def main():
         fdb = QFontDatabase()
         shared.FONT_FAMILIES = set(fdb.families())
 
-    app_font = QFont('Microsoft YaHei UI')
+    app_font = QFont('Microsoft YaHei UI')  # default UI font name (fallback: system font)
     if not app_font.exactMatch() or sys.platform == 'darwin':
         app_font = app.font()
     if app_font.pointSizeF() <= 0:
