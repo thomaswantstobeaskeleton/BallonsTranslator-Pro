@@ -61,6 +61,9 @@ class PageListView(QListWidget):
     reveal_file = Signal()
     remove_images = Signal(list)
     translate_images = Signal(list)
+    run_ocr_images = Signal(list)
+    run_translate_images = Signal(list)
+    run_inpaint_images = Signal(list)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -86,6 +89,9 @@ class PageListView(QListWidget):
         if selected_items:
             menu.addSeparator()
             translate_act = menu.addAction(self.tr('Translate Selected Images'))
+            run_ocr_act = menu.addAction(self.tr('Run OCR on selected pages'))
+            run_translate_act = menu.addAction(self.tr('Run translation on selected pages'))
+            run_inpaint_act = menu.addAction(self.tr('Run inpainting on selected pages'))
             menu.addSeparator()
             remove_act = menu.addAction(self.tr('Remove from Project'))
         rst = menu.exec_(e.globalPos())
@@ -96,6 +102,12 @@ class PageListView(QListWidget):
             self.selectAll()
         elif selected_items and rst == translate_act:
             self.translate_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == run_ocr_act:
+            self.run_ocr_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == run_translate_act:
+            self.run_translate_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == run_inpaint_act:
+            self.run_inpaint_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == remove_act:
             self.remove_images.emit([item.text() for item in selected_items])
 
@@ -151,6 +163,7 @@ class MainWindow(mainwindow_cls):
         self._initial_model_download_done = False
         self._zip_batch = ZipBatchManager()
         self._current_batch_dir = None
+        self._last_batch_report = None
 
         shared.create_errdialog_in_mainthread = self.create_errdialog.emit
         self.create_errdialog.connect(self.on_create_errdialog)
@@ -277,12 +290,16 @@ class MainWindow(mainwindow_cls):
         if not app:
             return
         f = app.font()
+        if f.pointSizeF() <= 0:
+            f.setPointSizeF(10.0)
         if family:
             f.setFamily(family)
         if size > 0 and size <= 72:
             f.setPointSize(size)
         if f.pointSizeF() <= 0:
             f.setPointSizeF(10.0)
+        if f.pointSize() <= 0:
+            f.setPointSize(10)
         app.setFont(f)
         # So main window and children inherit; widgets with stylesheet font-size may keep that size
         self.setFont(f)
@@ -319,6 +336,9 @@ class MainWindow(mainwindow_cls):
         self.pageList.reveal_file.connect(self.on_reveal_file)
         self.pageList.remove_images.connect(self.on_remove_images)
         self.pageList.translate_images.connect(self.on_translate_images)
+        self.pageList.run_ocr_images.connect(self.on_run_ocr_images)
+        self.pageList.run_translate_images.connect(self.on_run_translate_images)
+        self.pageList.run_inpaint_images.connect(self.on_run_inpaint_images)
         self.pageList.setHidden(True)
         self.pageList.currentItemChanged.connect(self.pageListCurrentItemChanged)
 
@@ -393,6 +413,8 @@ class MainWindow(mainwindow_cls):
         self.canvas.clear_overlay_signal.connect(self.on_clear_overlay)
 
         self.app.installEventFilter(self)
+        self.canvas.gv.installEventFilter(self)
+        self.canvas.gv.viewport().installEventFilter(self)
 
         self.bottomBar.originalSlider.valueChanged.connect(self.canvas.setOriginalTransparencyBySlider)
         self.bottomBar.textlayerSlider.valueChanged.connect(self.canvas.setTextLayerTransparencyBySlider)
@@ -616,6 +638,7 @@ class MainWindow(mainwindow_cls):
         self.configPanel.custom_cursor_changed.connect(self._on_config_custom_cursor_changed)
         self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
         self.configPanel.dev_mode_changed.connect(self.on_dev_mode_changed)
+        self.configPanel.manual_mode_changed.connect(self._update_run_button_tooltip)
         if pcfg.let_show_only_custom_fonts_flag:
             self.on_show_only_custom_font(True)
 
@@ -661,6 +684,16 @@ class MainWindow(mainwindow_cls):
             LOGGER.error(traceback.format_exc())
             pcfg.mt_sublist = []
             self.mtSubWidget.loadCfgSublist(pcfg.mt_sublist)
+
+        self._update_run_button_tooltip()
+
+    def _update_run_button_tooltip(self):
+        base = self.tr('Run pipeline (same as Pipeline → Run).')
+        if getattr(pcfg, 'manual_mode', False):
+            base += ' ' + self.tr('Manual mode: runs current page only.')
+        self.leftBar.runBtn.setToolTip(base)
+        self.titleBar.runToolBtn.setToolTip(base)
+        self.bottomBar.runBtn.setToolTip(base)
 
     def setupImgTransUI(self):
         self.centralStackWidget.setCurrentIndex(1)
@@ -994,10 +1027,13 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_export_as_trigger.connect(self.on_batch_export_as)
         self.titleBar.export_lptxt_trigger.connect(self.on_export_lptxt)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
+        self.titleBar.show_batch_report_trigger.connect(self._show_batch_report_dialog)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
+        self.titleBar.release_model_caches_trigger.connect(self.on_release_model_caches)
+        self.titleBar.clear_pipeline_caches_trigger.connect(self.on_clear_pipeline_caches)
         self.titleBar.run_preset_full_trigger.connect(self.on_run_preset_full)
         self.titleBar.run_preset_detect_ocr_trigger.connect(self.on_run_preset_detect_ocr)
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
@@ -1028,8 +1064,13 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("canvas.zoom_out", "Ctrl+-", self.canvas.gv.scale_down_signal.emit)
         _mk_shortcut("canvas.delete", "Ctrl+D", self.shortcutCtrlD)
         _mk_shortcut("canvas.space", "Space", self.shortcutSpace)
-        _mk_shortcut("canvas.select_all", "Ctrl+A", self.shortcutSelectAll)
+        sel_all_shortcut = _mk_shortcut("canvas.select_all", "Ctrl+A", self.shortcutSelectAll)
+        sel_all_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         _mk_shortcut("canvas.escape", "Escape", self.shortcutEscape)
+        # Widget-level Ctrl+A when canvas view has focus: select all text blocks on canvas
+        self._canvas_select_all_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.SelectAll), self.canvas.gv)
+        self._canvas_select_all_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self._canvas_select_all_shortcut.activated.connect(self.on_select_all_canvas)
         _mk_shortcut("format.bold", "Ctrl+B", self.shortcutBold)
         _mk_shortcut("format.italic", "Ctrl+I", self.shortcutItalic)
         _mk_shortcut("format.underline", "Ctrl+U", self.shortcutUnderline)
@@ -1311,18 +1352,24 @@ class MainWindow(mainwindow_cls):
         if focus is self.pageList or (focus and self.pageList.isAncestorOf(focus)):
             self.pageList.selectAll()
             return
-        if self.centralStackWidget.currentIndex() == 0:
-            self.st_manager.set_blkitems_selection(True)
+        if self.centralStackWidget.currentIndex() == 1:
+            self.on_select_all_canvas()
 
     def eventFilter(self, obj, event):
-        """Intercept Ctrl+A when canvas (or its viewport) has focus so select-all-blocks works."""
+        """Intercept Ctrl+A when canvas (or its viewport) has focus; select all text blocks on canvas."""
         if event.type() == QEvent.Type.KeyPress:
             e = event
             if e.key() == Qt.Key.Key_A and e.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
-                # Target is canvas view or its viewport/child (obj may be QWindow during pipeline; isAncestorOf expects QWidget)
-                if obj is self.canvas.gv or (isinstance(obj, QWidget) and self.canvas.gv.isAncestorOf(obj)):
-                    if self.centralStackWidget.currentIndex() == 0:
-                        self.st_manager.set_blkitems_selection(True)
+                if self.centralStackWidget.currentIndex() == 1:
+                    if obj is self.canvas.gv or obj is self.canvas.gv.viewport():
+                        self.on_select_all_canvas()
+                        return True
+                    focus = QApplication.focusWidget()
+                    on_canvas = (
+                        focus is self.canvas.gv or (focus and isinstance(focus, QWidget) and self.canvas.gv.isAncestorOf(focus))
+                    )
+                    if on_canvas:
+                        self.on_select_all_canvas()
                         return True
         return super().eventFilter(obj, event)
 
@@ -1600,6 +1647,36 @@ class MainWindow(mainwindow_cls):
         thread.finished_with_result.connect(on_finished)
         thread.start()
         dlg.exec()
+
+    def on_release_model_caches(self):
+        """Unload all models and clear pipeline cache to free GPU/RAM (Tools → Release model caches)."""
+        import gc
+        if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
+            self.module_manager.unload_all_models()
+            try:
+                from utils.pipeline_cache import get_pipeline_cache
+                cache = get_pipeline_cache(True)
+                if cache is not None:
+                    cache.clear()
+            except Exception:
+                pass
+            gc.collect()
+            self._reset_idle_unload_timer()
+
+    def on_clear_pipeline_caches(self):
+        """Clear in-session OCR/translation caches (Tools → Clear OCR and translation caches)."""
+        try:
+            from utils.pipeline_cache import get_pipeline_cache
+            cache = get_pipeline_cache(True)
+            if cache is not None:
+                cache.clear()
+        except Exception:
+            pass
+        try:
+            from utils.pipeline_cache_manager import clear_block_level_caches
+            clear_block_level_caches()
+        except Exception:
+            pass
 
     def run_merge_task(self, on_current=False):
         """Run the region merge task."""
@@ -2351,6 +2428,15 @@ class MainWindow(mainwindow_cls):
             for idx, sa in enumerate(self.titleBar.stageActions):
                 sa.setChecked(pcfg.module.stage_enabled(idx))
             self._detection_only_restore = None
+        if getattr(self, '_run_stages_restore', None) is not None:
+            det, ocr, trans, inp = self._run_stages_restore
+            pcfg.module.enable_detect = det
+            pcfg.module.enable_ocr = ocr
+            pcfg.module.enable_translate = trans
+            pcfg.module.enable_inpaint = inp
+            for idx, sa in enumerate(self.titleBar.stageActions):
+                sa.setChecked(pcfg.module.stage_enabled(idx))
+            self._run_stages_restore = None
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
         self.postprocess_mt_toggle = True
@@ -2363,7 +2449,18 @@ class MainWindow(mainwindow_cls):
                     cache.clear()
             except Exception:
                 pass
-        else:
+        elif getattr(pcfg, 'release_caches_after_batch', False) and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
+            import gc
+            self.module_manager.unload_all_models()
+            try:
+                from utils.pipeline_cache import get_pipeline_cache
+                cache = get_pipeline_cache(True)
+                if cache is not None:
+                    cache.clear()
+            except Exception:
+                pass
+            gc.collect()
+        if not (pcfg.module.empty_runcache or getattr(pcfg, 'release_caches_after_batch', False)):
             self._reset_idle_unload_timer()
         if shared.args.export_translation_txt:
             self.on_export_txt('translation')
@@ -2388,6 +2485,42 @@ class MainWindow(mainwindow_cls):
             self.run_next_dir()
             return
         self.maybe_auto_run_region_merge()
+        if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
+            report = self.module_manager.get_last_batch_report()
+            self._last_batch_report = report
+            if report and report.get("skipped") and len(report["skipped"]) > 0:
+                self._show_batch_report_dialog()
+            self.titleBar.show_batch_report_action.setEnabled(
+                bool(self._last_batch_report and len(self._last_batch_report.get("skipped", {})) > 0)
+            )
+
+    def _show_batch_report_dialog(self):
+        """Show the batch report dialog with last report (if any)."""
+        if not hasattr(self, '_batch_report_dialog') or self._batch_report_dialog is None:
+            from .batch_report_dialog import BatchReportDialog
+            self._batch_report_dialog = BatchReportDialog(self)
+            self._batch_report_dialog.page_activated.connect(self._go_to_page_from_report)
+        self._batch_report_dialog.set_report(self._last_batch_report)
+        self._batch_report_dialog.show()
+        self._batch_report_dialog.raise_()
+        self._batch_report_dialog.activateWindow()
+
+    def _go_to_page_from_report(self, page_key: str):
+        """Switch to the given page (from batch report double-click)."""
+        if self.imgtrans_proj.is_empty or page_key not in self.imgtrans_proj.pages:
+            return
+        self.imgtrans_proj.set_current_img(page_key)
+        idx = self.imgtrans_proj.pagename2idx(page_key)
+        if idx >= 0 and self.pageList.count() > idx:
+            self.page_changing = True
+            self.pageList.setCurrentRow(idx)
+            self.page_changing = False
+        self.canvas.clear_undostack(update_saved_step=True)
+        self.canvas.updateCanvas()
+        self.st_manager.updateSceneTextitems()
+        self.titleBar.setTitleContent(page_name=self.imgtrans_proj.current_img)
+        self.module_manager.handle_page_changed()
+        self.drawingPanel.handle_page_changed()
 
     def maybe_auto_run_region_merge(self):
         """If configured, run Region merge after pipeline (all pages or current page)."""
@@ -2642,9 +2775,13 @@ class MainWindow(mainwindow_cls):
             if len(pages_to_process) == 0:
                 return
         elif pages_to_process is None:
-            pages_to_process = []
-            for page_name in self.imgtrans_proj.pages:
-                self.imgtrans_proj.set_page_progress(page_name, 0)
+            if getattr(pcfg, 'manual_mode', False) and self.imgtrans_proj.current_img:
+                pages_to_process = [self.imgtrans_proj.current_img]
+                self.imgtrans_proj.set_page_progress(pages_to_process[0], 0)
+            else:
+                pages_to_process = []
+                for page_name in self.imgtrans_proj.pages:
+                    self.imgtrans_proj.set_page_progress(page_name, 0)
         else:
             for page_name in pages_to_process:
                 if page_name in self.imgtrans_proj.pages:
@@ -2684,6 +2821,9 @@ class MainWindow(mainwindow_cls):
 
     def on_transpanel_changed(self):
         self.canvas.editor_index = self.rightComicTransStackPanel.currentIndex()
+        if self.rightComicTransStackPanel.currentIndex() != 0:
+            self.canvas.restoreDefaultCursor()
+            self.canvas.clearDrawingStroke()
         if not self.canvas.textEditMode() and self.canvas.search_widget.isVisible():
             self.canvas.search_widget.hide()
         self.canvas.updateLayers()
@@ -2879,6 +3019,57 @@ class MainWindow(mainwindow_cls):
     def on_translate_images(self, image_names: list):
         if not image_names:
             return
+        self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_run_ocr_images(self, image_names: list):
+        if not image_names:
+            return
+        self._run_stages_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = True
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_run_translate_images(self, image_names: list):
+        if not image_names:
+            return
+        self._run_stages_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = False
+        pcfg.module.enable_translate = True
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_run_inpaint_images(self, image_names: list):
+        if not image_names:
+            return
+        self._run_stages_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = False
+        pcfg.module.enable_ocr = False
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = True
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
         self.on_run_imgtrans(pages_to_process=image_names)
 
     def on_remove_images(self, image_names: list):
@@ -3111,9 +3302,10 @@ class MainWindow(mainwindow_cls):
             self.canvas.setProjSaveState(False)
 
     def on_select_all_canvas(self):
-        for blk in self.st_manager.textblk_item_list:
-            blk.setSelected(True)
-        self.st_manager.on_incanvas_selection_changed()
+        # Comic trans (canvas) view is centralStackWidget index 1; index 0 = welcome, 2 = config
+        if self.centralStackWidget.currentIndex() != 1:
+            return
+        self.st_manager.set_blkitems_selection(True)
 
     def on_spell_check_src(self):
         """Open spell check panel and run check on source text so misspelled words are listed."""
@@ -3590,6 +3782,8 @@ class MainWindow(mainwindow_cls):
         setattr(pcfg, cfg_name, show)
         if cfg_name == 'show_text_style_preset' and hasattr(self, 'textPanel'):
             self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(not show)
+        if cfg_name == 'text_advanced_format_panel' and hasattr(self, 'textPanel'):
+            self.textPanel.formatpanel.showAdvancedFontFormatBtn.setVisible(not show)
 
     def on_hide_view_widget(self, cfg_name: str):
         d = shared.config_name_to_view_widget[cfg_name]
@@ -3600,3 +3794,5 @@ class MainWindow(mainwindow_cls):
         setattr(pcfg, cfg_name, False)
         if cfg_name == 'show_text_style_preset' and hasattr(self, 'textPanel'):
             self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(True)
+        if cfg_name == 'text_advanced_format_panel' and hasattr(self, 'textPanel'):
+            self.textPanel.formatpanel.showAdvancedFontFormatBtn.setVisible(True)

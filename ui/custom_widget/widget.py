@@ -5,9 +5,10 @@ from qtpy.QtGui import QFont
 
 def _sanitize_font(font: QFont) -> QFont:
     """Ensure point size is > 0 to avoid QFont::setPointSize warnings (e.g. Windows default -1)."""
-    if font.pointSizeF() <= 0:
+    if font.pointSizeF() <= 0 or font.pointSize() <= 0:
         f = QFont(font)
         f.setPointSizeF(10.0)
+        f.setPointSize(10)  # ensure integer point size is valid (Qt may use setPointSize internally)
         return f
     return font
 
