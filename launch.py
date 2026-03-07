@@ -281,6 +281,20 @@ def main():
     from modules.base import init_module_registries
     from modules.prepare_local_files import prepare_local_files_forall
     init_module_registries()
+
+    # First launch: let user choose which model packages to download (Issue #15)
+    if getattr(shared, 'FIRST_RUN_NO_CONFIG', False) and not args.headless and not getattr(args, 'headless_continuous', False):
+        from ui.model_package_selector_dialog import ModelPackageSelectorDialog
+        dialog = ModelPackageSelectorDialog()
+        dialog.exec()
+        config.model_packages_enabled = dialog.get_selected_package_ids()
+        try:
+            from utils.config import save_config
+            save_config()
+        except Exception:
+            pass
+        shared.FIRST_RUN_NO_CONFIG = False
+
     prepare_local_files_forall()
 
     if not args.headless and not getattr(args, 'headless_continuous', False):

@@ -368,6 +368,7 @@ class ConfigPanel(Widget):
     bubbly_ui_changed = Signal(bool)
     custom_cursor_changed = Signal()
     display_lang_changed = Signal(str)
+    dev_mode_changed = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -562,6 +563,12 @@ class ConfigPanel(Widget):
             discription=self.tr('Check for updates and pull from GitHub when the app starts. Can cause issues or bad results (e.g. merge conflicts, broken code, unexpected behavior). Use only if you understand the risks. Your config and local files are not overwritten.')
         )
         self.auto_update_from_github_checker.stateChanged.connect(self.on_auto_update_from_github_changed)
+
+        self.dev_mode_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Dev mode (show all modules)'),
+            discription=self.tr('When enabled, detector / OCR / translator dropdowns show all modules including not downloaded or incompatible. When disabled, only ready-to-use modules are shown.')
+        )
+        self.dev_mode_checker.stateChanged.connect(self.on_dev_mode_changed)
 
         self.recent_proj_list_max_spin = QSpinBox()
         self.recent_proj_list_max_spin.setRange(5, 30)
@@ -862,6 +869,10 @@ class ConfigPanel(Widget):
 
     def on_auto_update_from_github_changed(self):
         pcfg.auto_update_from_github = self.auto_update_from_github_checker.isChecked()
+
+    def on_dev_mode_changed(self):
+        pcfg.dev_mode = self.dev_mode_checker.isChecked()
+        self.dev_mode_changed.emit()
 
     def on_recent_proj_list_max_changed(self, value: int):
         pcfg.recent_proj_list_max = value
@@ -1192,6 +1203,7 @@ class ConfigPanel(Widget):
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
         self.show_welcome_screen_checker.setChecked(getattr(pcfg, 'show_welcome_screen', True))
+        self.dev_mode_checker.setChecked(getattr(pcfg, 'dev_mode', False))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))
         arm = getattr(pcfg, 'auto_region_merge_after_run', 'never')

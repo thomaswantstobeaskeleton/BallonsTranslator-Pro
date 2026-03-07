@@ -110,6 +110,10 @@ class CustomGV(QGraphicsView):
 
         modifiers = e.modifiers()
         if modifiers == Qt.KeyboardModifier.ControlModifier:
+            if key == QKEY.Key_A:
+                self.canvas.select_all_signal.emit()
+                e.accept()
+                return
             if key == QKEY.Key_V:
                 # self.ctrlv_pressed.emit(e)
                 if self.canvas.handle_ctrlv():
@@ -199,7 +203,8 @@ class Canvas(QGraphicsScene):
     squeeze_blk = Signal()
 
     run_blktrans = Signal(int)
-    run_detect_region = Signal(QRectF)
+    run_detect_region = Signal(QRectF, bool)  # rect, replace_page (True = "Detect text on page" -> replace blocks)
+
 
     begin_scale_tool = Signal(QPointF)
     scale_tool = Signal(QPointF)
@@ -1346,10 +1351,10 @@ class Canvas(QGraphicsScene):
                 self.squeeze_blk.emit()
             elif rst == detect_region_act:
                 if saved_rect is not None:
-                    self.run_detect_region.emit(saved_rect)
+                    self.run_detect_region.emit(saved_rect, False)
             elif rst == detect_page_act:
                 if self.imgtrans_proj is not None and self.imgtrans_proj.img_valid and self.sceneRect().isValid():
-                    self.run_detect_region.emit(self.sceneRect())
+                    self.run_detect_region.emit(self.sceneRect(), True)
             elif rst == translate_act:
                 self.run_blktrans.emit(-1)
             elif rst == ocr_act:

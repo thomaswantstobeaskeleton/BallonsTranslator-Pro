@@ -545,6 +545,7 @@ class MainWindow(mainwindow_cls):
         self.configPanel.bubbly_ui_changed.connect(self.on_config_bubbly_ui_changed)
         self.configPanel.custom_cursor_changed.connect(self._on_config_custom_cursor_changed)
         self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
+        self.configPanel.dev_mode_changed.connect(self.on_dev_mode_changed)
         if pcfg.let_show_only_custom_fonts_flag:
             self.on_show_only_custom_font(True)
 
@@ -1214,8 +1215,7 @@ class MainWindow(mainwindow_cls):
 
     def shortcutSelectAll(self):
         if self.centralStackWidget.currentIndex() == 0:
-            if self.textPanel.isVisible():
-                self.st_manager.set_blkitems_selection(True)
+            self.st_manager.set_blkitems_selection(True)
 
     def shortcutSpace(self):
         if self.centralStackWidget.currentIndex() == 0:
@@ -2392,6 +2392,29 @@ class MainWindow(mainwindow_cls):
         if lang != pcfg.display_lang:
             pcfg.display_lang = lang
             self.set_display_lang(lang)
+
+    def on_dev_mode_changed(self):
+        """Refresh detector/OCR/translator dropdowns after dev_mode toggle."""
+        valid_det = GET_VALID_TEXTDETECTORS()
+        valid_ocr = GET_VALID_OCR()
+        valid_trans = GET_VALID_TRANSLATORS()
+        self.bottomBar.textdet_selector.selector.clear()
+        self.bottomBar.textdet_selector.selector.addItems(valid_det)
+        self.bottomBar.textdet_selector.selector.setCurrentText(
+            pcfg.module.textdetector if pcfg.module.textdetector in valid_det else (valid_det[0] if valid_det else '')
+        )
+        self.bottomBar.ocr_selector.selector.clear()
+        self.bottomBar.ocr_selector.selector.addItems(valid_ocr)
+        self.bottomBar.ocr_selector.selector.setCurrentText(
+            pcfg.module.ocr if pcfg.module.ocr in valid_ocr else (valid_ocr[0] if valid_ocr else '')
+        )
+        self.bottomBar.trans_selector.selector.clear()
+        self.bottomBar.trans_selector.selector.addItems(valid_trans)
+        self.bottomBar.trans_selector.selector.setCurrentText(
+            pcfg.module.translator if pcfg.module.translator in valid_trans else (valid_trans[0] if valid_trans else '')
+        )
+        if hasattr(self, 'module_manager') and self.module_manager is not None:
+            self.module_manager.refresh_module_dropdowns()
     
     def run_imgtrans(self):
         if not self.imgtrans_proj.is_all_pages_no_text and not pcfg.module.keep_exist_textlines:
@@ -3042,24 +3065,39 @@ class MainWindow(mainwindow_cls):
         self.st_manager.updateSceneTextitems()
         self.canvas.setProjSaveState(False)
 
-    def on_run_detect_region(self, rect):
+    def on_run_detect_region(self, rect, replace_page: bool = False):
         if not self.imgtrans_proj.img_valid or self.imgtrans_proj.img_array is None:
             return
         page_name = self.imgtrans_proj.current_img
         if not page_name:
             return
-        self.module_manager.run_detect_region(rect, self.imgtrans_proj.img_array, page_name)
+        self.module_manager.run_detect_region(rect, self.imgtrans_proj.img_array, page_name, replace_if_full_page=replace_page)
 
-    def on_detect_region_finished(self, page_name: str, blk_list: List):
-        if page_name != self.imgtrans_proj.current_img or not blk_list:
+    def on_detect_region_finished(self, page_name: str, blk_list: List, replace: bool = False):
+        if page_name != self.imgtrans_proj.current_img:
             return
-        im_h, im_w = self.imgtrans_proj.img_array.shape[:2]
-        for blk in blk_list:
-            if getattr(blk, 'lines', None) and len(blk.lines) > 0:
-                examine_textblk(blk, im_w, im_h, sort=True)
-        self.imgtrans_proj.pages[page_name].extend(blk_list)
-        for blk in blk_list:
-            self.st_manager.addTextBlock(blk)
+        if replace:
+            # Replace all blocks on the page (e.g. "Detect text on page")
+            old_blks = self.imgtrans_proj.pages.get(page_name, [])
+            self.imgtrans_proj.pages[page_name] = list(blk_list)
+            to_remove = [self.st_manager.pairwidget_list[b.idx].blk_item for b in old_blks]
+            to_remove_widgets = [self.st_manager.pairwidget_list[b.idx] for b in old_blks]
+            if to_remove:
+                self.st_manager.deleteTextblkItemList(to_remove, to_remove_widgets)
+            im_h, im_w = self.imgtrans_proj.img_array.shape[:2]
+            for blk in blk_list:
+                if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                    examine_textblk(blk, im_w, im_h, sort=True)
+            for blk in blk_list:
+                self.st_manager.addTextBlock(blk)
+        elif blk_list:
+            im_h, im_w = self.imgtrans_proj.img_array.shape[:2]
+            for blk in blk_list:
+                if getattr(blk, 'lines', None) and len(blk.lines) > 0:
+                    examine_textblk(blk, im_w, im_h, sort=True)
+            self.imgtrans_proj.pages[page_name].extend(blk_list)
+            for blk in blk_list:
+                self.st_manager.addTextBlock(blk)
         self.canvas.setProjSaveState(False)
         self.global_search_widget.set_document_edited()
 

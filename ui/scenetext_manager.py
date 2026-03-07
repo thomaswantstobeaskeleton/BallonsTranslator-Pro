@@ -521,6 +521,8 @@ class SceneTextManager(QObject):
         pair_widget.e_source.undo_signal.connect(self.on_textedit_undo)
         pair_widget.e_source.show_select_menu.connect(self.on_show_select_menu)
         pair_widget.e_source.focus_out.connect(self.on_pairw_focusout)
+        pair_widget.e_source.select_all_blocks_requested.connect(lambda: self.set_blkitems_selection(True))
+        pair_widget.e_trans.select_all_blocks_requested.connect(lambda: self.set_blkitems_selection(True))
 
         pair_widget.e_trans.setPlainText(blk_item.toPlainText())
         pair_widget.e_trans.focus_in.connect(self.on_transwidget_focus_in)
@@ -556,6 +558,8 @@ class SceneTextManager(QObject):
             pair_widget.e_source.undo_signal.connect(self.on_textedit_undo)
             pair_widget.e_source.show_select_menu.connect(self.on_show_select_menu)
             pair_widget.e_source.focus_out.connect(self.on_pairw_focusout)
+            pair_widget.e_source.select_all_blocks_requested.connect(lambda: self.set_blkitems_selection(True))
+            pair_widget.e_trans.select_all_blocks_requested.connect(lambda: self.set_blkitems_selection(True))
             pair_widget.e_trans.focus_in.connect(self.on_transwidget_focus_in)
             pair_widget.e_trans.propagate_user_edited.connect(self.on_propagate_transwidget_edit)
             pair_widget.e_trans.ensure_scene_visible.connect(self.on_ensure_textitem_svisible)

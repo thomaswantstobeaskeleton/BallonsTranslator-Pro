@@ -200,6 +200,30 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
     return result
 
 
+def get_available_module_keys(registry) -> List[str]:
+    """
+    Return module keys that are ready to use: either no file list / download-on-load,
+    or all required files are present with valid hash. Used to hide not-downloaded or
+    incomplete modules from dropdowns when dev_mode is False.
+    """
+    program_path = getattr(shared, "PROGRAM_PATH", "") or os.getcwd()
+    result = []
+    for module_key in registry.module_dict.keys():
+        module_class = registry.get(module_key)
+        if module_class is None:
+            continue
+        mod_info = {
+            "display_name": module_key,
+            "module_class": module_class,
+        }
+        r = _check_one_module(mod_info, include_import_check=False)
+        status = r["status"]
+        # ok = downloaded and hash valid; no_download_list = no files needed (e.g. API); download_on_load = fetches on first use
+        if status in ("ok", "no_download_list", "download_on_load"):
+            result.append(module_key)
+    return result
+
+
 def _check_one_module(module_info: Dict[str, Any], include_import_check: bool) -> Dict[str, Any]:
     """Check one module's files; optionally try import. Returns dict with module_info, status, details, import_error?."""
     module_class = module_info["module_class"]

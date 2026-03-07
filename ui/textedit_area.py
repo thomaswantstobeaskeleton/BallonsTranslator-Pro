@@ -68,6 +68,7 @@ class SourceTextEdit(QTextEdit):
     text_changed = Signal()
     show_select_menu = Signal(QPoint, str)
     focus_out = Signal(int)
+    select_all_blocks_requested = Signal()  # Issue #17: Ctrl+A in field -> select all text blocks
 
     def __init__(self, idx, parent, fold=False, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -256,6 +257,10 @@ class SourceTextEdit(QTextEdit):
             return
 
         if e.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if e.key() == Qt.Key.Key_A:
+                e.accept()
+                self.select_all_blocks_requested.emit()
+                return
             if e.key() == Qt.Key.Key_Z:
                 e.accept()
                 self.undo_signal.emit()

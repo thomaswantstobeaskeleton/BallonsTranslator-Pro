@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import Union, List, Optional
 import os.path as osp
 import os
 
@@ -7,8 +7,20 @@ from .base import BaseModule, LOGGER
 import utils.shared as shared
 from utils.download_util import download_and_check_files
 
+# Optional ONNX inpainter models (modules only registered when onnxruntime is installed)
+OPTIONAL_ONNX_MODELS = [
+    {
+        "url": "https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx",
+        "files": osp.join(shared.PROGRAM_PATH, "data/models/inpainting_lama_2025jan.onnx"),
+    },
+    {
+        "url": "https://huggingface.co/mayocream/lama-manga-onnx/resolve/main/lama-manga.onnx",
+        "files": osp.join(shared.PROGRAM_PATH, "data/models/lama_manga.onnx"),
+    },
+]
 
-def download_and_check_module_files(module_class_list: List[BaseModule] = None):
+
+def download_and_check_module_files(module_class_list: Optional[List[BaseModule]] = None):
     if module_class_list is None:
         module_class_list = []
         for registered in [INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS]:
@@ -24,18 +36,10 @@ def download_and_check_module_files(module_class_list: List[BaseModule] = None):
                 continue
             LOGGER.error(f'Please save these files manually to specified path and restart the application, otherwise {module_class} will be unavailable.')
 
-    # Optional ONNX inpainter models (modules only registered when onnxruntime is installed)
-    optional_onnx_models = [
-        {
-            "url": "https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx",
-            "files": osp.join(shared.PROGRAM_PATH, "data/models/inpainting_lama_2025jan.onnx"),
-        },
-        {
-            "url": "https://huggingface.co/mayocream/lama-manga-onnx/resolve/main/lama-manga.onnx",
-            "files": osp.join(shared.PROGRAM_PATH, "data/models/lama_manga.onnx"),
-        },
-    ]
-    for kw in optional_onnx_models:
+
+def download_optional_onnx_models():
+    """Download optional ONNX inpainter assets (called when optional_onnx package is selected)."""
+    for kw in OPTIONAL_ONNX_MODELS:
         download_and_check_files(**kw)
 
 
@@ -79,11 +83,33 @@ def prepare_pkuseg():
 
 
 def prepare_local_files_forall():
+    """
+    Download model files for selected packages only.
+    model_packages_enabled is None = legacy "download all". Otherwise only modules in selected packages.
+    """
+    import utils.config as program_config
+    from utils.model_packages import (
+        get_module_classes_for_packages,
+        package_ids_include_pkuseg,
+        package_ids_include_optional_onnx,
+    )
 
-    # download files required by detect, ocr, inpaint and translators
-    download_and_check_module_files()
+    pcfg = program_config.pcfg
+    package_ids = getattr(pcfg, "model_packages_enabled", None)
 
-    prepare_pkuseg()
+    module_list = get_module_classes_for_packages(package_ids)
+    if module_list is None:
+        # Legacy: download all modules
+        download_and_check_module_files()
+    else:
+        # Selected packages only
+        download_and_check_module_files(module_list)
+
+    if package_ids_include_optional_onnx(package_ids):
+        download_optional_onnx_models()
+
+    if package_ids_include_pkuseg(package_ids):
+        prepare_pkuseg()
 
     if shared.CACHE_UPDATED:
         shared.dump_cache()

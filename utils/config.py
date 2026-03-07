@@ -1,7 +1,7 @@
 import json, os, traceback
 import os.path as osp
 import copy
-from typing import Callable
+from typing import Callable, Optional
 
 from . import shared
 from .fontformat import FontFormat
@@ -290,6 +290,10 @@ class ProgramConfig(Config):
     manga_source_open_after_download: bool = False
     manga_source_playwright_headless: bool = True
     manga_source_translate_raw_search: bool = True  # For raw sources: translate search query to Japanese/Korean/Chinese
+    # Model packages to download at startup (None = legacy "all"; ["core"] = minimal). See utils.model_packages.
+    model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
+    # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
+    dev_mode: bool = False
     shortcuts: Dict = field(default_factory=dict)
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
@@ -341,6 +345,9 @@ class ProgramConfig(Config):
             if module_cfg['translator'] in repl_pairs:
                 module_cfg['translator'] = repl_pairs[module_cfg['translator']]
 
+        # Legacy: existing configs without this key used to download all models at startup
+        config_dict.setdefault("model_packages_enabled", None)
+
         return ProgramConfig(**config_dict)
     
 
@@ -384,6 +391,8 @@ CONFIG_KEY_ORDER = (
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
     "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
     "manga_source_translate_raw_search",
+    "model_packages_enabled",
+    "dev_mode",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
     "huggingface_token", "translator_last_model_by_provider",
 )
@@ -427,15 +436,18 @@ def load_config(config_path: str = shared.CONFIG_PATH):
         shared.CONFIG_PATH = config_path
         LOGGER.info(f'Using specified config file at {shared.CONFIG_PATH}')
 
-    if osp.exists(shared.CONFIG_PATH):
+    config_file_existed = osp.exists(shared.CONFIG_PATH)
+    if config_file_existed:
         try:
             config = ProgramConfig.load(shared.CONFIG_PATH)
         except Exception as e:
             LOGGER.exception(e)
             LOGGER.warning("Failed to load config file, using default config")
             config = ProgramConfig()
-    else:
+        shared.FIRST_RUN_NO_CONFIG = False
+    if not config_file_existed:
         LOGGER.info(f'{shared.CONFIG_PATH} does not exist, new config file will be created.')
+        shared.FIRST_RUN_NO_CONFIG = True
         example_path = osp.join(osp.dirname(shared.CONFIG_PATH), 'config.example.json')
         if osp.isfile(example_path):
             try:
