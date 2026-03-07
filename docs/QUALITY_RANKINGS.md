@@ -46,6 +46,9 @@ Best for: general document and scene text. MMOCR (DBNet++) often leads ICDAR/Tot
 | Module | Model | Notes |
 |--------|--------|--------|
 | **hunyuan_ocr_det** | HunyuanOCR spotting | Full-image spotting (det+rec in one); use with none_ocr. |
+| **olm_ocr_det** | OlmOCR 7B spotting | Full-page spotter (det+rec); same model as olm_ocr; prompt for JSON box+text (issue #872). |
+| **callisto_ocr_det** | Callisto-OCR3-2B spotting | Full-page spotter; 2B, fast; prompt for JSON box+text (issue #872). |
+| **qwen2_vl_ocr_2b_det** | Qwen2-VL-OCR-2B spotting | Full-page spotter; 2B; prompt for JSON box+text (issue #872). |
 | **stariver_ocr** | Stariver API | Boxes+text via API; use with none_ocr; quality = service. |
 | **textmamba_det** | TextMamba (stub) | Not runnable; official code not released. Paper: CTW1500 89.7%, TotalText 89.2%. |
 
@@ -86,6 +89,9 @@ Best for: high accuracy under size constraints.
 | Module | Model | Notes |
 |--------|--------|--------|
 | **qwen2vl_7b** | Qwen2.5-VL 7B / OlmOCR 7B | Strong extraction; heavy VRAM. |
+| **olm_ocr** | OlmOCR 7B (Allen AI) | Dedicated OlmOCR with language prompt; best-in-class on olmOCR-Bench (see issue #872). |
+| **callisto_ocr** | Callisto-OCR3-2B-Instruct | Fast 2B OCR; language-aware prompt; good quality/speed (issue #872). |
+| **qwen2_vl_ocr_2b** | Qwen2-VL-OCR-2B-Instruct | Fast 2B OCR; language-aware prompt (issue #872). |
 | **deepseek_ocr** | DeepSeek-OCR | ~75% olmOCR; good layout handling. |
 | **nanonets_ocr** | Nanonets-OCR2-3B | Document/scene hybrid VLM. |
 | **ocrflux** | OCRFlux 3B | Modern VLM-style document OCR. |
