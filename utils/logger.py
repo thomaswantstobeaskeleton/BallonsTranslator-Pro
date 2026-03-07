@@ -65,6 +65,7 @@ class ColoredLogger(logging.Logger):
 
         console = logging.StreamHandler()
         console.setFormatter(color_formatter)
+        console.setLevel(logging.INFO)
 
         self.addHandler(console)
         return
@@ -102,3 +103,28 @@ logging.setLoggerClass(ColoredLogger)
 logger = logging.getLogger('BallonsTranslatorPro')
 logger.setLevel(logging.DEBUG)
 logger.propagate = False
+
+
+def apply_dev_mode_logging(enable: bool) -> None:
+    """
+    When dev_mode is True: show DEBUG and above on console and enable INFO for common libs (testing/debugging).
+    When dev_mode is False: show INFO and above on console, reduce third-party noise.
+    """
+    for h in logger.handlers:
+        if isinstance(h, logging.StreamHandler):
+            h.setLevel(logging.DEBUG if enable else logging.INFO)
+            break
+    if enable:
+        logging.root.setLevel(logging.INFO)
+        for name in ("BallonsTranslator", "BallonsTranslatorPro", "BallonTranslator"):
+            try:
+                logging.getLogger(name).setLevel(logging.DEBUG)
+            except Exception:
+                pass
+        for name in ("transformers", "urllib3", "httpx"):
+            try:
+                logging.getLogger(name).setLevel(logging.INFO)
+            except Exception:
+                pass
+    else:
+        logging.root.setLevel(logging.WARNING)

@@ -566,7 +566,10 @@ class ConfigPanel(Widget):
 
         self.dev_mode_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Dev mode (show all modules)'),
-            discription=self.tr('When enabled, detector / OCR / translator dropdowns show all modules including not downloaded or incompatible. When disabled, only ready-to-use modules are shown.')
+            discription=self.tr(
+                'For testing and debugging. When enabled: (1) Detector / OCR / translator dropdowns show all modules, including not-yet-downloaded or incompatible. '
+                '(2) Console/py.exe window shows more log output (DEBUG and third-party INFO). When disabled: only ready-to-use modules are listed and console shows INFO and above.'
+            )
         )
         self.dev_mode_checker.stateChanged.connect(self.on_dev_mode_changed)
 
@@ -872,6 +875,11 @@ class ConfigPanel(Widget):
 
     def on_dev_mode_changed(self):
         pcfg.dev_mode = self.dev_mode_checker.isChecked()
+        try:
+            from utils.logger import apply_dev_mode_logging
+            apply_dev_mode_logging(pcfg.dev_mode)
+        except Exception:
+            pass
         self.dev_mode_changed.emit()
 
     def on_recent_proj_list_max_changed(self, value: int):

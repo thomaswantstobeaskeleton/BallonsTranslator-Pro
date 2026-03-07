@@ -269,6 +269,9 @@ def main():
 
     setup_logging(shared.LOGGING_PATH)
 
+    from utils.logger import apply_dev_mode_logging
+    apply_dev_mode_logging(getattr(config, 'dev_mode', False))
+
     app_args = sys.argv
     if args.headless or getattr(args, 'headless_continuous', False):
         app_args = sys.argv + ['-platform', 'offscreen']
