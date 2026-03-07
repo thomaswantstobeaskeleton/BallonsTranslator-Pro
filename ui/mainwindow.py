@@ -11,7 +11,7 @@ import time
 import cv2
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap
 
@@ -1319,8 +1319,8 @@ class MainWindow(mainwindow_cls):
         if event.type() == QEvent.Type.KeyPress:
             e = event
             if e.key() == Qt.Key.Key_A and e.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
-                # Target is canvas view or its viewport/child
-                if obj is self.canvas.gv or (obj and self.canvas.gv.isAncestorOf(obj)):
+                # Target is canvas view or its viewport/child (obj may be QWindow during pipeline; isAncestorOf expects QWidget)
+                if obj is self.canvas.gv or (isinstance(obj, QWidget) and self.canvas.gv.isAncestorOf(obj)):
                     if self.centralStackWidget.currentIndex() == 0:
                         self.st_manager.set_blkitems_selection(True)
                         return True
