@@ -202,6 +202,7 @@ class ProjImgTrans:
                     img_info['finish_code'] = 0
                 else:
                     img_info['finish_code'] = RunStatus.FIN_ALL
+            img_info.setdefault('ignored', False)
             
         set_img_failed = False
         if 'current_img' in proj_dict:
@@ -223,6 +224,20 @@ class ProjImgTrans:
 
     def set_page_progress(self, pagename, code):
         self._image_info[pagename]['finish_code'] = code 
+
+    def is_page_ignored(self, pagename: str) -> bool:
+        """True if this page is marked to be skipped in full/batch run."""
+        if pagename not in self._image_info:
+            return False
+        return bool(self._image_info[pagename].get('ignored', False))
+
+    def set_page_ignored(self, pagename: str, ignored: bool):
+        """Mark page as ignored (skip in full run) or not."""
+        if pagename not in self.pages:
+            return
+        if pagename not in self._image_info:
+            self._image_info[pagename] = {'finish_code': 0, 'ignored': False}
+        self._image_info[pagename]['ignored'] = bool(ignored)
 
     def update_page_progress(self, pagename, code):
         self._image_info[pagename]['finish_code'] |= code 
@@ -330,7 +345,7 @@ class ProjImgTrans:
             self.pages[imgname] = []
             self._pagename2idx[imgname] = ii
             self._idx2pagename[ii] = imgname
-            self._image_info[imgname] = {'finish_code': 0}
+            self._image_info[imgname] = {'finish_code': 0, 'ignored': False}
         self.set_current_img_byidx(0)
         self.save()
         

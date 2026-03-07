@@ -89,27 +89,37 @@ def _looks_like_points(obj) -> bool:
 
 def _parse_rec_output(rec_out) -> tuple:
     """Return (text, score) from RapidOCR recognition output. Handles (text, score), (score, text), or (points, text, score)."""
-    text, score = "", 0.0
+    texts_with_scores = _parse_rec_output_all(rec_out)
+    if not texts_with_scores:
+        return ("", 0.0)
+    # Return first line and its score (backward compatible)
+    return (texts_with_scores[0][0], texts_with_scores[0][1])
+
+
+def _parse_rec_output_all(rec_out) -> List[tuple]:
+    """Return list of (text, score) for every line in RapidOCR output. Use when rec returns multiple lines."""
+    results = []
     try:
+        items = []
         if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
-            item = rec_out[0][0]
+            items = list(rec_out[0])
+        elif hasattr(rec_out, "txts") and rec_out.txts:
+            scores = getattr(rec_out, "scores", None) or [0.0] * len(rec_out.txts)
+            for i, txt in enumerate(rec_out.txts):
+                results.append((str(txt).strip() if txt else "", float(scores[i]) if i < len(scores) else 0.0))
+            return results
+        elif isinstance(rec_out, list) and len(rec_out) > 0:
+            items = rec_out if isinstance(rec_out[0], (list, tuple)) else [rec_out]
+        if not items:
+            return results
+        for item in items:
             if isinstance(item, (list, tuple)):
                 text, score = _item_to_text_score(item)
             else:
-                text = str(item)
-        elif hasattr(rec_out, "txts") and rec_out.txts and len(rec_out.txts) > 0:
-            text = rec_out.txts[0]
-            score = getattr(rec_out, "scores", [0.0])[0]
-        elif isinstance(rec_out, list) and len(rec_out) > 0:
-            item = rec_out[0]
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                text, score = _item_to_text_score(item)
-            elif isinstance(item, (list, tuple)) and len(item) > 0:
-                text = item[0]
-            else:
-                text = str(item) if item else ""
+                text, score = str(item).strip(), 0.0
+            if text or score > 0:
+                results.append((str(text).strip() if text else "", float(score)))
     except (ValueError, TypeError, IndexError):
-        # Fallback: avoid treating (points, text, score) as text=points
         if isinstance(rec_out, tuple) and rec_out[0] and len(rec_out[0]) > 0:
             item = rec_out[0][0]
             if isinstance(item, (list, tuple)) and len(item) >= 3 and _looks_like_points(item[0]):
@@ -118,23 +128,11 @@ def _parse_rec_output(rec_out) -> tuple:
                     score = float(item[2])
                 except (TypeError, ValueError):
                     score = 0.0
+                results.append((text, score))
             else:
                 text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
-                score = 0.0
-        elif isinstance(rec_out, list) and len(rec_out) > 0:
-            item = rec_out[0]
-            if isinstance(item, (list, tuple)) and len(item) >= 3 and _looks_like_points(item[0]):
-                text = str(item[1]).strip() if item[1] else ""
-                try:
-                    score = float(item[2])
-                except (TypeError, ValueError):
-                    score = 0.0
-            else:
-                text = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
-                score = 0.0
-        else:
-            score = 0.0
-    return (str(text).strip() if text else "", float(score))
+                results.append((text, 0.0))
+    return results if results else [("", 0.0)]
 
 
 def _item_to_text_score(item) -> tuple:
@@ -197,8 +195,8 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                 "description": "If >0, upscale crop so longer side >= this (e.g. 512). 0 = off.",
             },
             "min_confidence": {
-                "value": 0.2,
-                "description": "Minimum recognition confidence (0–1). Results below this are cleared. EasyScanlate default: 0.2.",
+                "value": 0.06,
+                "description": "Minimum recognition confidence (0–1). Results below this are cleared. Default 0.06 keeps more text; raise to filter noise.",
             },
             "description": "RapidOCR recognition on crops (ONNX). Install: pip install rapidocr-onnxruntime",
         }
@@ -250,6 +248,46 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                     pass
 
             for blk in blk_list:
+                min_conf = float((self.params.get("min_confidence") or {}).get("value", 0.06) or 0)
+                text_parts = []
+
+                # Multi-line block: run OCR on each line's crop so we get every row, not just the first.
+                if getattr(blk, "lines", None) and len(blk.lines) > 1:
+                    for line_pts in blk.lines:
+                        if not isinstance(line_pts, (list, tuple)) or len(line_pts) < 4:
+                            continue
+                        xs = [p[0] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        ys = [p[1] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        if not xs or not ys:
+                            continue
+                        x1 = max(0, int(min(xs)) - pad)
+                        y1 = max(0, int(min(ys)) - pad)
+                        x2 = min(im_w, int(max(xs)) + pad)
+                        y2 = min(im_h, int(max(ys)) + pad)
+                        if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
+                            text_parts.append("")
+                            continue
+                        quad_rel = [[float(p[0]) - x1, float(p[1]) - y1] for p in line_pts[:4]]
+                        crop = _get_rotate_crop_image(img[y1:y2, x1:x2], quad_rel)
+                        if crop is None or crop.size == 0:
+                            text_parts.append("")
+                            continue
+                        crop = preprocess_for_ocr(crop, recipe=recipe, upscale_min_side=upscale_min_side)
+                        if crop.ndim == 2:
+                            crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2RGB)
+                        try:
+                            rec_out = self.rec_engine(crop)
+                        except Exception as e:
+                            self.logger.debug("RapidOCR rec failed on line crop: %s", e)
+                            text_parts.append("")
+                            continue
+                        line_text, line_score = _parse_rec_output(rec_out)
+                        if min_conf > 0 and line_score < min_conf:
+                            line_text = ""
+                        text_parts.append(line_text if line_text else "")
+                    blk.text = text_parts if text_parts else [""]
+                    continue
+
                 # Build a crop that covers all lines in the block, not just the first one.
                 if blk.lines:
                     xs, ys = [], []
@@ -298,11 +336,16 @@ if _RAPIDOCR_AVAILABLE and _RapidOCR is not None:
                     self.logger.debug("RapidOCR rec failed on crop: %s", e)
                     blk.text = [""]
                     continue
-                text, _score = _parse_rec_output(rec_out)
-                min_conf = float((self.params.get("min_confidence") or {}).get("value", 0.2) or 0)
-                if min_conf > 0 and _score < min_conf:
-                    text = ""
-                blk.text = [text] if text else [""]
+                all_lines = _parse_rec_output_all(rec_out)
+                if not all_lines:
+                    blk.text = [""]
+                    continue
+                text_parts = []
+                for line_text, line_score in all_lines:
+                    if min_conf > 0 and line_score < min_conf:
+                        line_text = ""
+                    text_parts.append(line_text if line_text else "")
+                blk.text = text_parts if text_parts else [""]
 
         def ocr_img(self, img: np.ndarray) -> str:
             if self.rec_engine is None:

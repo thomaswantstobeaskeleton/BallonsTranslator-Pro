@@ -345,7 +345,34 @@ if _OCEAN_AVAILABLE:
                     pad = max(0, min(24, int(cp.get("value", 0))))
                 except (TypeError, ValueError):
                     pass
+            min_side = 24
             for blk in blk_list:
+                # Multi-line block: run OCR on each line's crop so we get every row.
+                if getattr(blk, "lines", None) and len(blk.lines) > 1:
+                    text_parts = []
+                    for line_pts in blk.lines:
+                        if not isinstance(line_pts, (list, tuple)) or len(line_pts) < 4:
+                            continue
+                        xs = [p[0] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        ys = [p[1] for p in line_pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        if not xs or not ys:
+                            continue
+                        x1 = max(0, int(min(xs)) - pad)
+                        y1 = max(0, int(min(ys)) - pad)
+                        x2 = min(im_w, int(max(xs)) + pad)
+                        y2 = min(im_h, int(max(ys)) + pad)
+                        if not (0 <= x1 < x2 <= im_w and 0 <= y1 < y2 <= im_h):
+                            text_parts.append("")
+                            continue
+                        crop = img[y1:y2, x1:x2]
+                        if crop.size == 0 or crop.shape[0] < min_side or crop.shape[1] < min_side:
+                            text_parts.append("")
+                            continue
+                        pil_img = _cv2_to_pil_rgb(crop)
+                        line_text = self._run_one(pil_img)
+                        text_parts.append(line_text if line_text else "")
+                    blk.text = text_parts if text_parts else [""]
+                    continue
                 x1, y1, x2, y2 = blk.xyxy
                 if pad > 0:
                     x1 = max(0, x1 - pad)
@@ -360,7 +387,6 @@ if _OCEAN_AVAILABLE:
                     blk.text = [""]
                     continue
                 # Ocean processor rejects "image too small" (e.g. 14x14); skip to avoid warning and empty result
-                min_side = 24
                 if crop.shape[0] < min_side or crop.shape[1] < min_side:
                     self.logger.debug(
                         "Ocean-OCR: crop too small (%s), skipping (min %s px).",

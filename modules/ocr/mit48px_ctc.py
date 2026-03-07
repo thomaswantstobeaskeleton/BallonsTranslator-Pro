@@ -460,7 +460,8 @@ class OCR48pxCTC:
                         total_bg(int(bg * 255))
                         total_bb(int(bb * 255))
                 prob = np.exp(total_logprob())
-                if prob < 0.3 :
+                # Keep lower-confidence blocks so pages don't lose most text (was 0.3).
+                if prob < 0.06:
                     continue
                 textblk.text.append(''.join(cur_texts))
                 textblk.update_font_colors(

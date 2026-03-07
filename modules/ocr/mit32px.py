@@ -584,7 +584,8 @@ class OCR32pxModel:
             
             for i, (pred_chars_index, prob, fr, fg, fb, br, bg, bb) in enumerate(ret) :
                 textblk = textblk_lst[textblk_lst_indices[i+chunck_idx]]
-                if prob < 0.5 :
+                # Keep lower-confidence blocks so pages don't lose most text (was 0.5).
+                if prob < 0.12 :
                     continue
                 fr = (torch.clip(fr.view(-1), 0, 1).mean() * 255).long().item()
                 fg = (torch.clip(fg.view(-1), 0, 1).mean() * 255).long().item()
@@ -618,10 +619,10 @@ class OCR32pxModel:
         img = (torch.from_numpy(img[np.newaxis, ...]).float() - 127.5) / 127.5
         img = einops.rearrange(img, 'N H W C -> N C H W')
         if self.device != 'cpu':
-            images = images.to(self.device)
+            img = img.to(self.device)
         ret = self.net.infer_beam_batch(img, widths, beams_k = 5, max_seq_length = 255)
         for i, (pred_chars_index, prob, fr, fg, fb, br, bg, bb) in enumerate(ret) :
-            if prob < 0.5 :
+            if prob < 0.12 :
                 continue
             seq = []
             for chid in pred_chars_index :
