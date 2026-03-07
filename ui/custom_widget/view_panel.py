@@ -43,18 +43,23 @@ class ExpandLabel(Widget):
         font = self.textlabel.font()
         if font.pointSize() <= 0 and font.pointSizeF() <= 0:
             font.setPointSizeF(1.0)
+            font.setPointSize(1)
         if size_type == 'normal':
             if shared.ON_MACOS:
                 font.setPointSize(13)
+                font.setPointSizeF(13.0)
             else:
-                font.setPointSizeF(10)
+                font.setPointSizeF(10.0)
+                font.setPointSize(10)
             self.setFixedHeight(26)
             self.arrowlabel.setFixedSize(CHEVRON_SIZE, CHEVRON_SIZE)
         elif size_type == 'small':
             if shared.ON_MACOS:
                 font.setPointSize(10)
+                font.setPointSizeF(10.0)
             else:
                 font.setPointSizeF(8)
+                font.setPointSize(8)
             self.setFixedHeight(20)
             self.arrowlabel.setFixedSize(CHEVRON_SIZE_SMALL, CHEVRON_SIZE_SMALL)
         else:

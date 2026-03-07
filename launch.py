@@ -380,6 +380,17 @@ def main():
     QGuiApplication.setFont(app_font)
     shared.DEFAULT_FONT_FAMILY = app_font.family()
     shared.APP_DEFAULT_FONT = app_font.family()
+    # Patch QWidget.setFont so any font with point size <= 0 is sanitized before reaching Qt (stops QFont::setPointSize spam).
+    from qtpy.QtWidgets import QWidget as _QWidget
+    _original_set_font = _QWidget.setFont
+    def _set_font_sanitized(self, font):
+        if font.pointSizeF() <= 0 or font.pointSize() <= 0:
+            f = QFont(font)
+            f.setPointSizeF(10.0)
+            f.setPointSize(10)
+            font = f
+        return _original_set_font(self, font)
+    _QWidget.setFont = _set_font_sanitized
     # Note: Qt6 removed QFont/QFontDatabase insertSubstitution; use a CJK-capable font in text style if you see empty squares (□).
 
     if args.ldpi is not None:

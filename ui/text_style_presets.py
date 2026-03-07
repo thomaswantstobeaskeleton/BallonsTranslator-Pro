@@ -9,6 +9,7 @@ from utils.fontformat import FontFormat
 from utils.config import save_text_styles, text_styles
 from utils import config as C
 from .custom_widget import PanelArea, Widget, FlowLayout
+from .custom_widget.widget import sanitize_font
 
 
 class ArrowLeftButton(QPushButton):
@@ -172,7 +173,7 @@ class TextStyleLabel(Widget):
         return super().mouseReleaseEvent(event)
 
     def updatePreview(self):
-        font = self.stylelabel.font()
+        font = sanitize_font(self.stylelabel.font())
         font.setFamily(self.fontfmt.font_family)
         self.stylelabel.setFont(font)
 
