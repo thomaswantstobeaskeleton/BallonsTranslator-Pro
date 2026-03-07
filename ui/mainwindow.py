@@ -1554,11 +1554,8 @@ class MainWindow(mainwindow_cls):
         def on_finished(success: bool, message: str):
             dlg.accept()
             if success:
-                self._reset_modules_to_core_defaults()
-                create_info_dialog({
-                    'title': self.tr('Download complete.'),
-                    'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
-                })
+                # Do not reset modules or show popup on normal launch; only Tools → Retry does that.
+                pass
             else:
                 tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
                 create_error_dialog(
