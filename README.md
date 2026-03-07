@@ -25,7 +25,7 @@ Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslato
 
 ### Disclaimer: models and testing
 
-Currently some ysgyolo and hf models cause inpainting issues, huge overcorrection and misalignment, i have yet to find a fix, so use certain models with caution.
+Currently some yolo and hf models cause inpainting issues, huge overcorrection and misalignment, i have yet to find a fix, so use certain models with caution.
 
 This fork adds **many new optional modules** (detectors, OCR engines, inpainters). **Not all of them have been tested in every environment** (Windows/Linux/macOS, CPU/CUDA, all language pairs). Some issues may persist—e.g. dependency conflicts (see [§8 Optional dependency conflicts](#8-optional-dependency-conflicts-and-workarounds)), OOM on low VRAM, or model-specific bugs. Use **docs/QUALITY_RANKINGS.md** and **docs/MANHUA_BEST_SETTINGS.md** for recommended combinations. If you hit a problem with a particular module, try another from the same category or report an issue with details (OS, device, config). Known dependency conflicts (e.g. craft_det, simple_lama) are documented in **docs/OPTIONAL_DEPENDENCIES.md**.
 
