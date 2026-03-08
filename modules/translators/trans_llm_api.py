@@ -242,6 +242,7 @@ class LLM_API_Translator(BaseTranslator):
         },
         "presence penalty": {"value": 0.0, "description": "Presence penalty (OpenAI)."},
         "include_page_image": {
+            "type": "checkbox",
             "value": False,
             "description": "Include the current page image as context for the model (vision-capable models only). Helps with layout and style.",
         },
@@ -1070,10 +1071,29 @@ class LLM_API_Translator(BaseTranslator):
             return summary
         return "...\n" + long_context[-max_chars:]
 
+    def _include_page_image_enabled(self) -> bool:
+        """True only if include_page_image is explicitly enabled. Handles bool, str, and missing param."""
+        try:
+            if not hasattr(self, "params") or self.params is None or "include_page_image" not in self.params:
+                return False
+            include = self.get_param_value("include_page_image")
+        except Exception:
+            return False
+        if include is True:
+            return True
+        if include is False or include is None:
+            return False
+        if isinstance(include, str):
+            s = include.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return False
+
     def _build_user_content_with_optional_image(self, prompt: str):
         """Build user message content: plain text or text + page image when include_page_image is on."""
-        include = self.get_param_value("include_page_image")
-        if not include or include is False or (isinstance(include, str) and include.strip().lower() in ("false", "0", "no")):
+        if not self._include_page_image_enabled():
             return prompt
         img = getattr(self, "_current_page_image", None)
         if img is None:
@@ -1165,8 +1185,38 @@ class LLM_API_Translator(BaseTranslator):
             completion = self.client.chat.completions.create(**api_args)
         except Exception as e:
             err_str = str(e).lower()
-            # Some models (e.g. StepFun via OpenRouter) don't support response_format json_object; retry without it
+            # Text-only model (e.g. Llama 3.3 70B): OpenRouter returns 404 "No endpoints found that support image input". Retry without page image.
             if (
+                provider in ["OpenRouter", "OpenAI", "Grok", "Google"]
+                and ("404" in err_str or "not found" in err_str)
+                and "image" in err_str
+            ):
+                user_content = api_args["messages"][-1].get("content") if api_args.get("messages") else None
+                if isinstance(user_content, list) and any(
+                    isinstance(c, dict) and c.get("type") == "image_url" for c in user_content
+                ):
+                    text_only = next(
+                        (c.get("text", "") for c in user_content if isinstance(c, dict) and c.get("type") == "text"),
+                        prompt,
+                    )
+                    self.logger.warning(
+                        "Model does not support image input. Retrying with text-only (turn off 'Include page image' for this model)."
+                    )
+                    api_args = dict(api_args)
+                    api_args["messages"] = [
+                        api_args["messages"][0],
+                        {"role": "user", "content": text_only},
+                    ]
+                    try:
+                        completion = self.client.chat.completions.create(**api_args)
+                    except Exception as e2:
+                        self.logger.error(f"API request failed: {e2}")
+                        raise
+                else:
+                    self.logger.error(f"API request failed: {e}")
+                    raise
+            # Some models (e.g. StepFun via OpenRouter) don't support response_format json_object; retry without it
+            elif (
                 provider in ["OpenAI", "Grok", "Google", "OpenRouter"]
                 and "response_format" in err_str
                 and "not supported" in err_str
@@ -1326,9 +1376,7 @@ class LLM_API_Translator(BaseTranslator):
                     )
                     self.logger.debug(f"Raw content from API: {raw_content}")
                     raise e
-        else:
-            self.logger.warning("No valid message content in API response.")
-            return None
+        # (no else: when try succeeds we keep validated_response and fall through to return it)
 
         if hasattr(completion, "usage") and completion.usage:
             self.token_count += completion.usage.total_tokens
