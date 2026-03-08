@@ -270,6 +270,10 @@ if _HUNYUAN_AVAILABLE:
                     return_tensors="pt",
                 )
                 inputs = {k: (v.to(self.model.device) if hasattr(v, "to") else v) for k, v in inputs.items()}
+                # HunyuanVL can expect 4D image tensors [B,C,H,W]; processor sometimes returns 3D [C,H,W].
+                for k, v in inputs.items():
+                    if isinstance(v, torch.Tensor) and v.dim() == 3 and v.shape[0] in (1, 3, 4):
+                        inputs[k] = v.unsqueeze(0)
                 max_tokens = 256
                 mt = self.params.get("max_new_tokens", {})
                 if isinstance(mt, dict):

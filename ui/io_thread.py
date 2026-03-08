@@ -231,10 +231,14 @@ class MergeThread(ThreadBase):
             LOGGER.error('Not a BallonsTranslator JSON (no "pages" key)')
             self.merge_finished.emit(0, total)
             return
-        
-        mode = self.config.get("MERGE_MODE", "NONE")
-        modified = False
 
+        mode = self.config.get("MERGE_MODE", "NONE")
+        if mode == "NONE":
+            # Nothing to do; don't iterate or report failures.
+            self.merge_finished.emit(total, 0)
+            return
+
+        modified = False
         failed_images = []
 
         for i, img_name in enumerate(self.img_list):

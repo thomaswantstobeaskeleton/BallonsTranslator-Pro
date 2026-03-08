@@ -410,6 +410,15 @@ def main():
             font = f
         return _original_set_font(self, font)
     _QWidget.setFont = _set_font_sanitized
+    # Patch QFont.setPointSize/setPointSizeF so any caller passing <= 0 (e.g. Windows default -1) never triggers Qt warning.
+    _original_set_pt = QFont.setPointSize
+    _original_set_ptf = QFont.setPointSizeF
+    def _set_point_size_clamped(self, size):
+        return _original_set_pt(self, max(1, int(size)))
+    def _set_point_size_f_clamped(self, size):
+        return _original_set_ptf(self, max(1.0, float(size)))
+    QFont.setPointSize = _set_point_size_clamped
+    QFont.setPointSizeF = _set_point_size_f_clamped
     # Note: Qt6 removed QFont/QFontDatabase insertSubstitution; use a CJK-capable font in text style if you see empty squares (□).
 
     if args.ldpi is not None:
