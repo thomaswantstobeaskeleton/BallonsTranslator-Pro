@@ -2668,8 +2668,10 @@ class MainWindow(mainwindow_cls):
             self.st_manager.updateSceneTextitems()
 
         if not pcfg.module.enable_detect and pcfg.module.enable_translate:
-            for blkitem in self.st_manager.textblk_item_list:
-                blkitem.squeezeBoundingRect()
+            # Skip squeeze when auto layout ran; layout_textblk already set box size and squeeze would narrow/stretch boxes
+            if not self.st_manager.auto_textlayout_flag:
+                for blkitem in self.st_manager.textblk_item_list:
+                    blkitem.squeezeBoundingRect()
 
         if page_index + 1 == self.imgtrans_proj.num_pages:
             self.st_manager.auto_textlayout_flag = False

@@ -584,8 +584,21 @@ class TextBlkItem(QGraphicsTextItem):
         self.old_undo_steps = self.document().availableUndoSteps()
 
     def on_document_enlarged(self):
+        """Layout wants to change size. Cap width at 1.2x and height at 1.3x; when cut-off, only allow width to grow (no full height)."""
         size = self.documentSize()
-        self.set_size(size.width(), size.height())
+        cw = self._display_rect.width()
+        ch = self._display_rect.height()
+        nw = size.width()
+        nh = size.height()
+        # Cap width growth at 1.2x; never shrink
+        width_cap = cw * 1.2 if cw > 0 else nw
+        use_w = max(nw, cw)
+        use_w = min(use_w, width_cap)
+        # Cap height growth at 1.3x; when cut-off (nh > cap) only widen, don't allow full height
+        height_cap = ch * 1.3 if ch > 0 else nh
+        use_h = min(nh, height_cap)
+        if use_w != cw or use_h != ch:
+            self.set_size(use_w, use_h, set_layout_maxsize=True, preserve_topleft=True)
 
     def get_scale(self) -> float:
         tl = self.topLevelItem()
@@ -1527,9 +1540,9 @@ class TextBlkItem(QGraphicsTextItem):
             scale = self.scene().scale_factor
         return scale
             
-    def set_size(self, w: float, h: float, set_layout_maxsize=False, set_blk_size=True):
+    def set_size(self, w: float, h: float, set_layout_maxsize=False, set_blk_size=True, preserve_topleft=False):
         '''
-        rotation invariant
+        rotation invariant. When preserve_topleft=True, do not move the item (keep top-left fixed so box stays in bubble).
         '''
 
         if set_layout_maxsize:
@@ -1537,38 +1550,40 @@ class TextBlkItem(QGraphicsTextItem):
 
         old_w = self._display_rect.width()
         old_h = self._display_rect.height()
+        oc = self.sceneBoundingRect().center() if not preserve_topleft else None
 
-        oc = self.sceneBoundingRect().center()
         self._display_rect.setWidth(w)
         self._display_rect.setHeight(h)
         self.setCenterTransform()
-        pos_shift = oc - self.sceneBoundingRect().center()
-        pos_shift = pos_shift / self.scene_scale_factor()
-        
-        align_c = align_tl = align_tr = False
-        if self.fontformat.vertical:
-            align_tr = True
-        else:
-            alignment = self.fontformat.alignment
-            if alignment == TextAlignment.Left:
-                align_tl = True
-            elif alignment == TextAlignment.Right:
+
+        if not preserve_topleft and oc is not None:
+            pos_shift = oc - self.sceneBoundingRect().center()
+            pos_shift = pos_shift / self.scene_scale_factor()
+            
+            align_c = align_tl = align_tr = False
+            if self.fontformat.vertical:
                 align_tr = True
             else:
-                align_c = True
+                alignment = self.fontformat.alignment
+                if alignment == TextAlignment.Left:
+                    align_tl = True
+                elif alignment == TextAlignment.Right:
+                    align_tr = True
+                else:
+                    align_c = True
 
-        if align_c:
-            pass
-        else:
-            dw, dh = (w - old_w) / 2, (h - old_h) / 2
-            if align_tr:
-                dw = -dw
-            rad = -np.deg2rad(self.rotation())
-            c, s = np.cos(rad), np.sin(rad)
-            dx = c * dw + s * dh
-            dy = -s * dw + c * dh
-            pos_shift = pos_shift + QPointF(dx, dy)
+            if align_c:
+                pass
+            else:
+                dw, dh = (w - old_w) / 2, (h - old_h) / 2
+                if align_tr:
+                    dw = -dw
+                rad = -np.deg2rad(self.rotation())
+                c, s = np.cos(rad), np.sin(rad)
+                dx = c * dw + s * dh
+                dy = -s * dw + c * dh
+                pos_shift = pos_shift + QPointF(dx, dy)
 
-        self.setPos(self.pos() + pos_shift)
+            self.setPos(self.pos() + pos_shift)
         if self.blk is not None and set_blk_size:
             self.blk._bounding_rect = self.absBoundingRect()

@@ -116,6 +116,8 @@ class ModuleConfig(Config):
     center_text_in_bubble: bool = False
     # Try larger font / fewer lines so text fits with fewer line breaks (test combinations; manga-translator-ui style).
     optimize_line_breaks: bool = False
+    # When True, clamp text box size to the detected balloon and keep position fixed (no growing/moving after layout).
+    layout_constrain_to_bubble: bool = True
     finish_code: int = 15
     run_preset_name: str = 'Full'
     # --- Section 6 / 6.1: Image upscaling & per-stage resizing ---

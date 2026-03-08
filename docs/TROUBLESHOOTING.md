@@ -45,14 +45,40 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 | **Format** | Paste the key as given (no extra spaces). OpenAI keys often start with `sk-`; Google/others vary. If the UI has a "Test" button (e.g. **Test translator**), use it to verify. |
 | **OpenAI** | Key from [platform.openai.com](https://platform.openai.com/api-keys). Ensure the account has credits and the model you chose is available. |
 | **Google / Gemini** | Use an API key from Google AI Studio or Cloud. Check quota and that the model name in the dropdown matches your access. |
-| **OpenRouter** | Key from [openrouter.ai](https://openrouter.ai). Free models (e.g. `openrouter/free`) may have rate limits. |
+| **OpenRouter** | Key from [openrouter.ai](https://openrouter.ai). Free models (ID ending in `:free`) have strict rate limits; see **§4 OpenRouter free-tier 429** below. |
 | **DeepL / others** | Key from the provider’s dashboard; set in the same Translator/OCR params. |
 | **Proxy** | If behind a proxy: Config → Translator (or module) → **Proxy** (e.g. `http://127.0.0.1:7897`). See README "Translation context" for proxy format. |
-| **Rate limits / quota** | "Too many requests" or "quota exceeded" → wait, or switch model/provider, or check the provider’s usage page. |
+| **Rate limits / quota** | "Too many requests" or "quota exceeded" → wait, or switch model/provider, or check the provider’s usage page. For OpenRouter free models, see §4. |
 
 ---
 
-## 4. Dependency conflicts
+## 4. OpenRouter free-tier 429 (rate limit)
+
+**Symptoms:** `Error code: 429`, "temporarily rate-limited upstream", or "Provider returned error" when using an OpenRouter model whose ID ends in `:free` (e.g. `meta-llama/llama-3.3-70b-instruct:free`).
+
+**Documented limits (as of 2024–2025):**
+
+| Limit | Value | Source |
+|-------|--------|--------|
+| **Requests per minute (RPM)** | 20 | [OpenRouter docs](https://openrouter.ai/docs/api/reference/limits) |
+| **Requests per day (RPD)** | 200 (no credits); higher if you have purchased credits | Same |
+| **429 from "upstream"** | Even under 20 RPM, the **upstream provider** (e.g. Venice, Z.AI) can be globally rate-limited; OpenRouter returns 429 in that case too | [OpenRouter examples #11](https://github.com/OpenRouterTeam/openrouter-examples/issues/11) |
+
+**Recommended LLM_API_Translator settings for free models:**
+
+| Param | Recommended | Reason |
+|-------|-------------|--------|
+| **Delay** | 3.5–5 s | 60 ÷ 20 RPM = 3 s minimum between requests; 3.5–5 s leaves headroom and reduces upstream 429s. |
+| **Max requests per minute** | 6–10 | Stays under OpenRouter’s 20 RPM; lower = safer. |
+| **Rate limit delay** | 60–90 s | When you get 429, wait this long before retry so upstream can recover. |
+
+**Where to set:** Config → DL Module → **Translator** → **LLM_API_Translator** → **Delay**, **Max requests per minute**, **Rate limit delay**.
+
+**Other options:** Use a paid model (no `:free`), add your own OpenRouter key and purchase credits for higher limits, or use **model fallbacks** (multiple models) so the app can switch when one is rate-limited.
+
+---
+
+## 5. Dependency conflicts
 
 **Symptoms:** `pip` reports conflicting versions when installing, or a specific detector/OCR/inpainter fails to import or run.
 
@@ -65,7 +91,7 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 
 ---
 
-## 5. First run seems stuck or very slow
+## 6. First run seems stuck or very slow
 
 **Symptoms:** After "Choose models to download" you see "Checking connectivity to the model hosters..." and the app appears to hang for one or more minutes; or downloads are slow.
 
@@ -77,7 +103,7 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 
 ---
 
-## 6. Pipeline caches, CBR, batch report, manual mode
+## 7. Pipeline caches, CBR, batch report, manual mode
 
 **OCR and translation caches (Config → DL Module):**
 
@@ -98,7 +124,7 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 
 ---
 
-## 7. Tips: comic-style bubbles and detector
+## 8. Tips: comic-style bubbles and detector
 
 For **comic-style speech bubbles** (bubble + text regions), you can use the **Hugging Face object-detection** detector with a model that outputs both bubbles and text:
 
@@ -112,10 +138,49 @@ See [COMIC_TRANSLATE_RESEARCH.md](COMIC_TRANSLATE_RESEARCH.md) for more detector
 
 | Issue | First step |
 |-------|------------|
+| OpenRouter 429 / free tier | Config → Translator → LLM_API_Translator: **Delay** 3.5–5 s, **Max requests per minute** 6–10, **Rate limit delay** 60–90 s. See §4. |
+| Translation overflows bubble | Config → General → Typesetting: **Text in box** = Auto fit to box, **Auto layout** on. See §9. |
 | GPU OOM | Load model on demand, unload after idle, or lower detect_size / inpaint_size / use tiled inpainting. |
 | HF 401 / gated | Accept model terms on huggingface.co, create HF token, set in Config → General or `HF_TOKEN`. |
 | Translator/OCR "invalid key" | Set API key in Config → DL Module → that module’s params; use Test button; check proxy if needed. |
 | Pip conflict / import error | See [OPTIONAL_DEPENDENCIES.md](OPTIONAL_DEPENDENCIES.md); use a clean venv and only install deps for modules you use. |
-| First run "stuck" / slow | Downloads take several minutes; set `DISABLE_MODEL_SOURCE_CHECK=True` to skip long connectivity check if needed. See §5 above. |
-| CBR open fails | Install `pip install rarfile` and add WinRAR or 7-Zip (UnRAR) to PATH. See §6. |
-| Batch report / skipped pages | Tools → Project → Show last batch report; double-click row to open page. See §6. |
+| First run "stuck" / slow | Downloads take several minutes; set `DISABLE_MODEL_SOURCE_CHECK=True` to skip long connectivity check if needed. See §6 above. |
+| CBR open fails | Install `pip install rarfile` and add WinRAR or 7-Zip (UnRAR) to PATH. See §7. |
+| Batch report / skipped pages | Tools → Project → Show last batch report; double-click row to open page. See §7. |
+
+---
+
+## 9. Translation text overflows bubble or formats badly
+
+**Symptoms:** After translation, the text box resizes and extends outside the speech bubble, or text is poorly formatted (wrong line breaks, too big/small).
+
+**What helps:** Use **Auto layout** and **Text in box** = **Auto fit to box** so layout uses the balloon region for line breaks and font scaling.
+
+**Settings that help:**
+
+| Where | Setting | Recommendation |
+|-------|---------|----------------|
+| **Config → General → Typesetting** | **Text in box** | Set to **Auto fit to box** so the program scales font size to fit the balloon. |
+| **Config → General → Typesetting** | **Auto layout** | Leave **on** so translation is split into lines according to the balloon region. |
+| **Config → General → Typesetting** | **Font Size** | **Decide by program** lets layout choose font size; use **use global setting** only if you want a fixed size. |
+| **config.json** (optional) | `module.layout_optimal_breaks` | Keep `true` (default) for better line breaks. |
+| **config.json** (optional) | `module.layout_collision_check` | Keep `true` (default) so layout retries when text would overflow. |
+
+**Per-block:** Select one or more text blocks → right-click → **Format → Auto fit font size to box** to scale font so text fits the current box.
+
+**If it still overflows:** The bubble region comes from the detector mask. Try a different **Text detection** module or increase **box_padding** slightly so the detected region fully contains the bubble; then re-run Detect and Translate.
+
+---
+
+## 10. Text boxes in wrong position, stacked at top-left, or outside the image
+
+**Symptoms:** After translation or layout, text boxes are all at the top-left, or some boxes appear far outside the image.
+
+| What to check | Notes |
+|---------------|--------|
+| **Constrain text box to bubble** | Config → General → Typesetting → **Constrain text box to bubble**. When **on**, the box is forced to the detected bubble region (with correct image coordinates). If issues persist, try turning it **off** to see if layout without constrain works. |
+| **Initial upscale** | Config → General → **Initial upscale** (image_upscale_initial). When **on**, detection runs on a 2× (or larger) image; block coordinates are scaled back at the end of the pipeline. If the run was interrupted (e.g. before inpainting finished), blocks can stay in upscaled coordinates and appear in the wrong place. **Try turning Initial upscale off** to test whether positions fix. |
+| **center_text_in_bubble** | If present in `config.json` under `module`, it is **ignored** (the feature was removed). Safe to delete or leave as-is. |
+| **Merge gap ratio** | In `config.json`, `module.merge_nearby_blocks_gap_ratio` should be a normal value (e.g. `1.5`). A value like `0.999...` can be a float artifact; set to `1.5` if you use merge nearby blocks. |
+
+**Code safeguard:** When **Constrain text box to bubble** is on, the layout now clamps the text box to the image bounds so it never extends outside the panel, even if the bubble region is wrong or there is an upscale/coordinate mismatch.

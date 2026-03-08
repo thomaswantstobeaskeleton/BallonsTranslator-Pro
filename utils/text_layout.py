@@ -501,13 +501,14 @@ def layout_text(
             srcline_wlist=srcline_wlist,
         )
 
-    # Collision-aware retries by shrinking available width
+    # Collision-aware retries by shrinking available width (gentle shrink so we don't squeeze horizontally too much)
     retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
     maxw = max_central_width
     if maxw == np.inf:
         maxw = mask.shape[1]
+    shrink_per_retry = 0.97  # was 0.92; gentler so layout stays closer to bubble width
     for attempt in range(retries):
-        cur_maxw = max(16, int(maxw * (0.92 ** attempt)))
+        cur_maxw = max(16, int(maxw * (shrink_per_retry ** attempt)))
         lines, adjust_xy = _layout_once(cur_maxw)
         if not lines:
             continue

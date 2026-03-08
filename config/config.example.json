@@ -59,6 +59,7 @@
     "layout_collision_max_retries": 3,
     "center_text_in_bubble": false,
     "optimize_line_breaks": false,
+    "layout_constrain_to_bubble": true,
     "finish_code": 15,
     "run_preset_name": "Full",
     "ocr_upscale_min_side": 0,

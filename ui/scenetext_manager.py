@@ -1016,6 +1016,8 @@ class SceneTextManager(QObject):
         adaptive_fntsize = False
         resize_ratio = 1
         force_fit = getattr(fmt, 'auto_fit_font_size', False)
+        # When Auto layout is on (and font size = "decide by program"): scale font to fit balloon area and avoid overflow.
+        # When off: we still wrap to balloon and may shrink if overflow (post_resize_ratio), but no initial balloon-based scaling.
         if (self.auto_textlayout_flag and pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag) or force_fit:
             if blkitem.blk.src_is_vertical and blkitem.blk.vertical != blkitem.blk.src_is_vertical:
                 adaptive_fntsize = True
@@ -1078,6 +1080,9 @@ class SceneTextManager(QObject):
                 abs_centroid = blkitem.blk.lines[0][0]
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
+        # Use full bubble width for line breaking when available so we get fewer lines and don't squeeze horizontally
+        if region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0:
+            max_central_width = float(region_rect[2])
 
         # Optional: DP optimal breaks + hyphenation for non-CJK text (improves ugly wraps)
         forced_lines = None
@@ -1089,7 +1094,8 @@ class SceneTextManager(QObject):
                 and region_rect is not None
                 and len(region_rect) >= 4
             ):
-                maxw_px = int(max(32, min(region_rect[2], bounding_rect[2]) * 0.95))
+                # Use full bubble width so we get fewer, longer lines (not squeezed)
+                maxw_px = int(max(32, region_rect[2]))
 
                 def measure_token(s: str) -> int:
                     return int(ffmt.horizontalAdvance(s))
@@ -1177,16 +1183,6 @@ class SceneTextManager(QObject):
                 blkitem.setFontSize(new_font_size)
                 blk_font.setPointSizeF(new_font_size)
 
-            # Center text block inside bubble/region (manga-translator-ui style)
-            if getattr(pcfg.module, "center_text_in_bubble", False) and region_rect is not None and len(region_rect) >= 4:
-                rx, ry, rw, rh = region_rect[0], region_rect[1], region_rect[2], region_rect[3]
-                tw, th = xywh[2], xywh[3]
-                cx = rx + rw / 2
-                cy = ry + rh / 2
-                # xywh in layout_text is mask-local; center position in image coords for setRect below
-                xywh[0] = int(cx - tw / 2)
-                xywh[1] = int(cy - th / 2)
-
             if restore_charfmts:
                 char_fmts = blkitem.get_char_fmts()        
         
@@ -1195,30 +1191,56 @@ class SceneTextManager(QObject):
             # Height: ensure minimum (single-line/descenders) and add bottom padding so last line doesn't sit on edge
             layout_h = max(int(xywh[3]), line_height)
             layout_h = int(layout_h * LAYOUT_HEIGHT_PADDING)
-            blkitem.set_size(maxw * LAYOUT_WIDTH_STROKE_FACTOR, layout_h, set_layout_maxsize=True)
+            layout_w = maxw * LAYOUT_WIDTH_STROKE_FACTOR
+            # Constrain text box to detected bubble: use bubble region as exact box (no size change, keep centered)
+            constrain_to_bubble = bool(getattr(pcfg.module, "layout_constrain_to_bubble", True)) and region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0
+            if constrain_to_bubble:
+                # Use bubble region size and position so box stays fixed and centered in bubble
+                # region_rect from extract_ballon_region is in mask/crop coords; convert position to image coords
+                layout_w = region_rect[2]
+                layout_h = region_rect[3]
+            elif region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0:
+                # Even when not fully constraining: cap height to bubble so box never extends past, and don't squeeze narrower than bubble
+                layout_h = min(layout_h, region_rect[3])
+                layout_w = max(layout_w, region_rect[2])
+            blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
             blkitem.setPlainText(new_text)
             blkitem._ensure_transparent_document_background()
-            if getattr(pcfg.module, "center_text_in_bubble", False) and region_rect is not None and len(region_rect) >= 4:
-                br = blkitem.absBoundingRect(qrect=True)
-                blkitem.setRect([
-                    xywh[0],
-                    xywh[1],
-                    br.width(),
-                    br.height(),
-                ], repaint=True)
+            rw, rh = layout_w, layout_h  # keep for final clamp when constrain is on
+            if constrain_to_bubble:
+                # Set box to exact bubble region in image coords (mask_xyxy = crop top-left in image)
+                im_x = mask_xyxy[0] + region_rect[0]
+                im_y = mask_xyxy[1] + region_rect[1]
+                rw, rh = region_rect[2], region_rect[3]
+                # Clamp to image bounds so box never goes outside the image (handles bad region_rect or upscale mismatch)
+                im_x = max(0, min(im_x, im_w - 1))
+                im_y = max(0, min(im_y, im_h - 1))
+                rw = max(1, min(rw, im_w - im_x))
+                rh = max(1, min(rh, im_h - im_y))
+                blkitem.setRect([im_x, im_y, rw, rh], padding=False, repaint=True)
+                if blkitem.blk is not None:
+                    blkitem.blk._bounding_rect = blkitem.absBoundingRect()
             if len(self.pairwidget_list) > blkitem.idx:
                 self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
             if restore_charfmts:
                 self.restore_charfmts(blkitem, text, new_text, char_fmts)
-            blkitem.squeezeBoundingRect()
+            if not constrain_to_bubble:
+                # Only squeeze when we don't have a bubble region; otherwise we keep the capped dimensions above
+                if region_rect is None or len(region_rect) < 4:
+                    blkitem.squeezeBoundingRect()
             # Clamp block to image bounds so text never draws outside the panel
             abr = blkitem.absBoundingRect(qrect=True)
             x, y, w, h = abr.x(), abr.y(), abr.width(), abr.height()
+            if constrain_to_bubble:
+                # Keep bubble size; only move position if needed so we don't resize the box
+                w, h = rw, rh
             if w > 0 and h > 0:
                 x2 = max(0, min(x, im_w - w))
                 y2 = max(0, min(y, im_h - h))
                 if x2 != x or y2 != y:
                     blkitem.setRect([x2, y2, w, h], repaint=True)
+                if constrain_to_bubble and blkitem.blk is not None:
+                    blkitem.blk._bounding_rect = blkitem.absBoundingRect()
             return True
         except Exception:
             if is_osb:

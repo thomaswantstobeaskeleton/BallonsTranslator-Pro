@@ -842,10 +842,35 @@ class ConfigPanel(Widget):
 
         global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 10, 0)
 
-        self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'), 
-                discription=self.tr('Split translation into multi-lines according to the extracted balloon region.'))
+        self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'),
+                discription=self.tr('When on: scale font size to fit the speech bubble and wrap lines to the balloon shape. When off: use global font size and still wrap to the balloon (text may overflow if too long). Works with "Text in box" = Auto fit to box.'))
 
         self.let_autolayout_checker.stateChanged.connect(self.on_autolayout_changed)
+
+        self.layout_constrain_to_bubble_checker, layout_sublock = generalConfigPanel.addCheckBox(
+            self.tr('Constrain text box to bubble'),
+            discription=self.tr('Keep the text box size within the detected bubble and do not move it. When on, the box will not grow past the bubble or shift position after layout.')
+        )
+        self.layout_constrain_to_bubble_checker.stateChanged.connect(self._on_layout_constrain_to_bubble_changed)
+
+        self.layout_optimal_breaks_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Optimal line breaks'),
+            discription=self.tr('Use dynamic programming to choose better line breaks (non-CJK). Reduces awkward mid-word wraps.')
+        )
+        self.layout_optimal_breaks_checker.stateChanged.connect(self._on_layout_optimal_breaks_changed)
+
+        self.layout_hyphenation_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Hyphenation'),
+            discription=self.tr('Allow hyphenation when breaking long words (non-CJK). Works with Optimal line breaks.')
+        )
+        self.layout_hyphenation_checker.stateChanged.connect(self._on_layout_hyphenation_changed)
+
+        self.optimize_line_breaks_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Optimize line breaks (fewer lines)'),
+            discription=self.tr('Try slightly larger font / fewer lines so text fits with fewer breaks. Experimental.')
+        )
+        self.optimize_line_breaks_checker.stateChanged.connect(self._on_optimize_line_breaks_changed)
+
         self.let_uppercase_checker, _ = generalConfigPanel.addCheckBox(self.tr('To uppercase'))
         self.let_uppercase_checker.stateChanged.connect(self.on_uppercase_changed)
 
@@ -1147,6 +1172,22 @@ class ConfigPanel(Widget):
     def on_autolayout_changed(self):
         pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
 
+    def _on_layout_constrain_to_bubble_changed(self):
+        pcfg.module.layout_constrain_to_bubble = self.layout_constrain_to_bubble_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_optimal_breaks_changed(self):
+        pcfg.module.layout_optimal_breaks = self.layout_optimal_breaks_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_hyphenation_changed(self):
+        pcfg.module.layout_hyphenation = self.layout_hyphenation_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_optimize_line_breaks_changed(self):
+        pcfg.module.optimize_line_breaks = self.optimize_line_breaks_checker.isChecked()
+        self.save_config.emit()
+
     def on_text_box_format_changed(self):
         """Sync Font Size and Auto layout from the Text in box dropdown (issue #1077)."""
         idx = self.text_box_format_combox.currentIndex()
@@ -1291,6 +1332,14 @@ class ConfigPanel(Widget):
         self.let_family_combox.setCurrentIndex(pcfg.let_family_flag)
         self.let_writing_mode_combox.setCurrentIndex(pcfg.let_writing_mode_flag)
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
+        if hasattr(self, 'layout_constrain_to_bubble_checker'):
+            self.layout_constrain_to_bubble_checker.setChecked(getattr(pcfg.module, 'layout_constrain_to_bubble', True))
+        if hasattr(self, 'layout_optimal_breaks_checker'):
+            self.layout_optimal_breaks_checker.setChecked(getattr(pcfg.module, 'layout_optimal_breaks', True))
+        if hasattr(self, 'layout_hyphenation_checker'):
+            self.layout_hyphenation_checker.setChecked(getattr(pcfg.module, 'layout_hyphenation', True))
+        if hasattr(self, 'optimize_line_breaks_checker'):
+            self.optimize_line_breaks_checker.setChecked(getattr(pcfg.module, 'optimize_line_breaks', False))
         # Keep Text in box dropdown in sync (Auto fit = decide by program + Auto layout)
         if pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:
             self.text_box_format_combox.setCurrentIndex(0)
