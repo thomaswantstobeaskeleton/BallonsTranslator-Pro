@@ -201,12 +201,12 @@ class LLM_API_Translator(BaseTranslator):
             "description": "After each translated batch, call the model once to extract terms (names, places, etc.) and append to series glossary (series_context_path). Uses one extra API call per batch.",
         },
         "max requests per minute": {
-            "value": 20,
-            "description": "Maximum requests per minute for EACH API key.",
+            "value": 10,
+            "description": "Max requests per minute per API key. OpenRouter free-tier limit is 20 RPM; use 6–10 to stay safe.",
         },
         "delay": {
-            "value": 0.3,
-            "description": "Global delay in seconds between requests.",
+            "value": 3.5,
+            "description": "Seconds between each API request. OpenRouter free tier allows 20 RPM (min 3s). Use 3.5–5 for :free models; paid keys can use 0.3–1.",
         },
         "max tokens": {
             "value": 4096,
@@ -229,8 +229,8 @@ class LLM_API_Translator(BaseTranslator):
             "description": "Timeout between retry attempts (seconds).",
         },
         "rate limit delay": {
-            "value": 45,
-            "description": "Extra wait (seconds) when API returns 429 rate limit, then retry. Increase if free-tier limits persist.",
+            "value": 60,
+            "description": "Seconds to wait when API returns 429 before retrying. Free models often hit upstream provider limits; 60–90s helps.",
         },
         "proxy": {
             "value": "",
@@ -515,7 +515,7 @@ class LLM_API_Translator(BaseTranslator):
 
     @property
     def rate_limit_delay(self) -> int:
-        return max(15, int(self.get_param_value("rate limit delay") or 45))
+        return max(30, int(self.get_param_value("rate limit delay") or 60))
 
     @property
     def proxy(self) -> str:
