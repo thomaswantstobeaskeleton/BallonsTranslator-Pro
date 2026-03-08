@@ -73,6 +73,20 @@ Ultralytics/settings.json
 
 # User / project-specific content (not part of core app)
 Rebirth_of_the_Urban_Immortal_Cultivator/
+# Project-specific glossary docs and Rebirth/NovelBin/Piaotia scripts (optional; keep local)
+docs/GLOSSARY_*.md
+scripts/align_glossary_novelbin.py
+scripts/discover_novelbin_phrasings.py
+scripts/extract_novelbin_from_corpus.py
+scripts/extract_novelbin_from_parallel.py
+scripts/fetch_novelbin_chapters.py
+scripts/fetch_piaotia_chapters.py
+scripts/fetch_piaotia_one.py
+scripts/find_novelbin_phrasings.py
+scripts/piaotia_chapter_ids.py
+scripts/piaotia_random100.py
+scripts/index_snippet.txt
+tools/
 
 # Cursor IDE
 .cursor
