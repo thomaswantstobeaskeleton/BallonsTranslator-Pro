@@ -75,6 +75,7 @@ Ultralytics/settings.json
 Rebirth_of_the_Urban_Immortal_Cultivator/
 # Project-specific glossary docs and Rebirth/NovelBin/Piaotia scripts (optional; keep local)
 docs/GLOSSARY_*.md
+docs/GLOSSARY_REBIRTH_URBAN_IMMORTAL_CULTIVATOR.md
 scripts/align_glossary_novelbin.py
 scripts/discover_novelbin_phrasings.py
 scripts/extract_novelbin_from_corpus.py
