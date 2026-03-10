@@ -64,6 +64,7 @@ class PageListView(QListWidget):
     run_ocr_images = Signal(list)
     run_translate_images = Signal(list)
     run_inpaint_images = Signal(list)
+    run_detect_images = Signal(list)
     toggle_ignore_requested = Signal(list, bool)  # (pagenames, ignored)
 
     def __init__(self, *args, **kwargs) -> None:
@@ -90,6 +91,7 @@ class PageListView(QListWidget):
         if selected_items:
             menu.addSeparator()
             translate_act = menu.addAction(self.tr('Translate Selected Images'))
+            run_detect_act = menu.addAction(self.tr('Run detection on selected pages'))
             run_ocr_act = menu.addAction(self.tr('Run OCR on selected pages'))
             run_translate_act = menu.addAction(self.tr('Run translation on selected pages'))
             run_inpaint_act = menu.addAction(self.tr('Run inpainting on selected pages'))
@@ -108,6 +110,8 @@ class PageListView(QListWidget):
             self.selectAll()
         elif selected_items and rst == translate_act:
             self.translate_images.emit([item.text() for item in selected_items])
+        elif selected_items and rst == run_detect_act:
+            self.run_detect_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == run_ocr_act:
             self.run_ocr_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == run_translate_act:
@@ -352,6 +356,7 @@ class MainWindow(mainwindow_cls):
         self.pageList.run_ocr_images.connect(self.on_run_ocr_images)
         self.pageList.run_translate_images.connect(self.on_run_translate_images)
         self.pageList.run_inpaint_images.connect(self.on_run_inpaint_images)
+        self.pageList.run_detect_images.connect(self.on_run_detect_images)
         self.pageList.setHidden(True)
         self.pageList.currentItemChanged.connect(self.pageListCurrentItemChanged)
 
@@ -3060,6 +3065,23 @@ class MainWindow(mainwindow_cls):
         )
         pcfg.module.enable_detect = False
         pcfg.module.enable_ocr = True
+        pcfg.module.enable_translate = False
+        pcfg.module.enable_inpaint = False
+        for idx, sa in enumerate(self.titleBar.stageActions):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        self.on_run_imgtrans(pages_to_process=image_names)
+
+    def on_run_detect_images(self, image_names: list):
+        if not image_names:
+            return
+        self._run_stages_restore = (
+            pcfg.module.enable_detect,
+            pcfg.module.enable_ocr,
+            pcfg.module.enable_translate,
+            pcfg.module.enable_inpaint,
+        )
+        pcfg.module.enable_detect = True
+        pcfg.module.enable_ocr = False
         pcfg.module.enable_translate = False
         pcfg.module.enable_inpaint = False
         for idx, sa in enumerate(self.titleBar.stageActions):
