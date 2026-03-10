@@ -124,6 +124,8 @@ docs/ANIMATIONS_AND_VISUAL_FEATURES_RESEARCH.md
 docs/ANIMATIONS_IMPLEMENTATION_PLAN.md
 docs/RELATED_PROJECTS_RESEARCH.md
 docs/BEST_MODELS_RESEARCH.md
+# Handoff / prompt design docs (local-only, not part of app)
+docs/PROMPT_LAYOUT_REDESIGN_HANDOFF.md
 # Catch-all: root-level and docs research/plan (do not commit)
 research.md
 plan.md
