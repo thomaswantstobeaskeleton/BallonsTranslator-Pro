@@ -968,7 +968,8 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
         
         option = doc.defaultTextOption()
         # maybe an option for it
-        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        # Use constant form compatible with both Qt5/Qt6 bindings.
+        option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         tl.setTextOption(option)
         font = block.charFormat().font()
         

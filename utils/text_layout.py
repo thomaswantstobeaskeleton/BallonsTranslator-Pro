@@ -3,6 +3,7 @@ import numpy as np
 
 from .imgproc_utils import rotate_image
 from .textblock import TextBlock, TextAlignment
+from utils.config import pcfg
 
 class Line:
 
@@ -38,6 +39,50 @@ class Line:
         self.length -= self.spacing * 2
         self.pos_x += self.spacing
         self.spacing = 0
+
+def _score_layout(lines: List[Line], target_width: float, line_height: int) -> float:
+    """
+    Score a layout: lower is better.
+    Penalizes: many lines, short last line, raggedness, narrow columns.
+    Rewards: filling available width.
+    """
+    if not lines:
+        return 1e18
+    n = len(lines)
+    lengths = [ln.length for ln in lines]
+    avg_len = sum(lengths) / n if n else 0
+    last_len = lengths[-1] if lengths else 0
+    # Penalty for too many lines (stronger when optimize_line_breaks is on)
+    base_line_penalty = 60.0
+    try:
+        if getattr(pcfg.module, 'optimize_line_breaks', False):
+            base_line_penalty = 90.0
+    except Exception:
+        pass
+    line_penalty = n * base_line_penalty
+    # Penalty for short last line (orphan)
+    orphan_penalty = 0.0
+    if target_width > 0 and last_len < target_width * 0.4:
+        orphan_penalty = 80.0
+    # Penalty for raggedness (variance in line lengths)
+    if n > 1:
+        variance = sum((l - avg_len) ** 2 for l in lengths) / n
+        ragged_penalty = min(variance * 0.01, 50.0)
+    else:
+        ragged_penalty = 0.0
+    # Extra penalty when earlier lines are very short compared to the rest
+    short_line_penalty = 0.0
+    if n > 1 and avg_len > 0:
+        # Any non-final line that is much shorter than average hurts score
+        pen = float(getattr(pcfg.module, 'layout_short_line_penalty', 80.0))
+        for i, L in enumerate(lengths[:-1]):
+            if L < avg_len * 0.6:
+                short_line_penalty += pen
+    # Reward width utilization: prefer layouts that use more of target_width
+    width_util = avg_len / target_width if target_width > 0 else 0
+    width_bonus = -100.0 * min(width_util, 1.0)  # negative = reward
+    return line_penalty + orphan_penalty + ragged_penalty + short_line_penalty + width_bonus
+
 
 def line_is_valid(line: Line, new_len: int, delimiter_len, max_width, words_length, srcline_wlist, line_no: int, line_height, ref_src_lines: bool = False):
     if ref_src_lines:
@@ -384,6 +429,8 @@ def layout_text(
     collision_check: bool = True,
     collision_min_mask_ratio: float = 0.85,
     collision_max_retries: int = 3,
+    target_box_height: int = None,
+    optimize_for_fewer_lines: bool = False,
 ) -> Tuple[str, List]:
 
     angle = blk.angle
@@ -447,6 +494,32 @@ def layout_text(
         new_origin = (new_w // 2, new_h // 2)
         new_cx, new_cy = new_origin[0] + new_rel_cx, new_origin[1] + new_rel_cy
         centroid = [int(new_cx), int(new_cy)]
+        centroid_x, centroid_y = centroid
+
+    # Special-case very short non-CJK text (1–2 words): prefer a single centered line
+    # BUT only when that single line actually fits inside the available width.
+    if (not tgt_is_cjk) and len(words) <= 2:
+        text = delimiter.join(words).strip()
+        total_len = int(sum(wl_list) + delimiter_len * max(0, len(wl_list) - 1))
+        # Available width for the central line: respect both mask width and max_central_width
+        maxw_mask = mask.shape[1] if mask is not None and mask.size > 0 else np.inf
+        maxw_allowed = float(min(max_central_width, maxw_mask))
+        if total_len > 0 and line_height > 0 and maxw_allowed > 0 and total_len <= maxw_allowed * 0.98:
+            pos_x = int(centroid_x - total_len / 2)
+            pos_y = int(centroid_y - line_height / 2)
+            single_line = Line(text, pos_x, pos_y, total_len, spacing)
+            concated_text = text
+            canvas_l, canvas_r = pos_x, pos_x + total_len
+            canvas_t, canvas_b = pos_y, pos_y + line_height
+            canvas_h = int(canvas_b - canvas_t)
+            canvas_w = int(canvas_r - canvas_l)
+            if alignment == 1:
+                abs_x = int(round(center_x - canvas_w / 2))
+                abs_y = int(round(center_y - canvas_h / 2))
+            else:
+                abs_x = shifted_x
+                abs_y = shifted_y
+            return concated_text, [abs_x, abs_y, canvas_w, canvas_h], start_from_top, (0, 0)
 
     def _layout_once(_max_width):
         if forced_lines and forced_wl_lines and len(forced_lines) == len(forced_wl_lines):
@@ -501,13 +574,24 @@ def layout_text(
             srcline_wlist=srcline_wlist,
         )
 
-    # Collision-aware retries by shrinking available width (gentle shrink so we don't squeeze horizontally too much)
-    retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
+    # Width-targeted scoring: try multiple candidate widths, pick best layout
     maxw = max_central_width
     if maxw == np.inf:
         maxw = mask.shape[1]
-    shrink_per_retry = 0.97  # was 0.92; gentler so layout stays closer to bubble width
+    retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
+    # Slightly more aggressive exploration when optimize_for_fewer_lines is on
+    shrink_per_retry = 0.97 if optimize_for_fewer_lines else 0.98
+    # layout_lines_alignside consumes words/wl_list; keep copies for retries
+    words_orig = list(words)
+    wl_list_orig = list(wl_list)
+
+    best_lines = None
+    best_adjust_xy = (0, 0)
+    best_score = 1e18
+
     for attempt in range(retries):
+        words[:] = words_orig[:]
+        wl_list[:] = wl_list_orig[:]
         cur_maxw = max(16, int(maxw * (shrink_per_retry ** attempt)))
         lines, adjust_xy = _layout_once(cur_maxw)
         if not lines:
@@ -524,16 +608,47 @@ def layout_text(
         canvas_t2 = max(0, min(canvas_t, bh - 1))
         canvas_b2 = max(1, min(canvas_b, bh))
 
+        passes_collision = True
         if collision_check:
             roi = mask[canvas_t2:canvas_b2, canvas_l2:canvas_r2]
             if roi.size > 0:
                 inside = float(np.mean(roi > 220))
                 if inside < float(collision_min_mask_ratio):
-                    continue
-        # success
-        break
+                    passes_collision = False
+
+        if not passes_collision:
+            continue
+
+        # Height penalty: avoid layouts that clearly exceed the target bubble height
+        height_penalty = 0.0
+        if target_box_height is not None and target_box_height > 0:
+            total_h = len(lines) * line_height
+            if total_h > target_box_height:
+                overflow = (total_h - target_box_height) / float(target_box_height)
+                # Penalize overflow very steeply so shorter, wider layouts win
+                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0))
+                height_penalty = overflow * height_factor
+
+        # Score layout (only when not using forced_lines; forced_lines already chosen by DP)
+        if forced_lines is None:
+            score = _score_layout(lines, float(cur_maxw), line_height) + height_penalty
+            if score < best_score:
+                best_score = score
+                best_lines = lines
+                best_adjust_xy = adjust_xy
+        else:
+            # Forced lines: use first valid layout
+            best_lines = lines
+            best_adjust_xy = adjust_xy
+            break
+
+    # Use best scored layout, or fallback without collision check
+    if best_lines is not None:
+        lines = best_lines
+        adjust_xy = best_adjust_xy
     else:
-        # last try: no collision check / fallback
+        words[:] = words_orig[:]
+        wl_list[:] = wl_list_orig[:]
         lines, adjust_xy = _layout_once(maxw)
         if not lines:
             return "", [0, 0, 0, 0], False, (0, 0)

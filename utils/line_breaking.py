@@ -8,6 +8,11 @@ def _badness(slack: float) -> float:
     return slack * slack * slack
 
 
+# Penalty per line break to prefer fewer, longer lines (avoids 1–2 words per line)
+# Make this strong but not so extreme that lines blow past bubble width.
+_LINE_BREAK_PENALTY = 110.0
+
+
 def find_optimal_breaks_dp(
     widths: List[int],
     max_width: int,
@@ -43,7 +48,9 @@ def find_optimal_breaks_dp(
             tokens = i - j
             line_w = (ps[i] - ps[j]) + delimiter_width * max(0, tokens - 1)
             slack = float(max_width - line_w)
-            cost = dp[j] + _badness(slack)
+            # Penalize each line break to prefer fewer, longer lines (avoids 1-2 words per line)
+            line_break_cost = _LINE_BREAK_PENALTY if j > 0 else 0.0
+            cost = dp[j] + _badness(slack) + line_break_cost
             if cost < best:
                 best = cost
                 best_j = j

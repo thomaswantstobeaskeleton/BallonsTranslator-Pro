@@ -412,6 +412,8 @@
         <translation>配置菜单...</translation>
     </message>
 </context>
+<context>
+    <name>ConfigPanel</name>
     <message>
         <location filename="../ui/configpanel.py" line="354"/>
         <source>Text Detection</source>
@@ -431,6 +433,11 @@
         <location filename="../ui/configpanel.py" line="357"/>
         <source>Translator</source>
         <translation>翻译器</translation>
+    </message>
+    <message>
+        <location filename="../ui/configpanel.py" line="427"/>
+        <source>Image upscaling</source>
+        <translation>图像放大</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="389"/>

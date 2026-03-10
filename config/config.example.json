@@ -57,6 +57,8 @@
     "layout_collision_check": true,
     "layout_collision_min_mask_ratio": 0.85,
     "layout_collision_max_retries": 3,
+    "layout_short_line_penalty": 80.0,
+    "layout_height_overflow_penalty": 700.0,
     "center_text_in_bubble": false,
     "optimize_line_breaks": false,
     "layout_constrain_to_bubble": true,

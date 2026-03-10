@@ -590,15 +590,18 @@ class TextBlkItem(QGraphicsTextItem):
         ch = self._display_rect.height()
         nw = size.width()
         nh = size.height()
-        # Cap width growth at 1.2x; never shrink
-        width_cap = cw * 1.2 if cw > 0 else nw
+        # Cap width growth at ~1.35x; never shrink (slightly wider lines to reduce vertical overflow)
+        width_cap = cw * 1.35 if cw > 0 else nw
         use_w = max(nw, cw)
         use_w = min(use_w, width_cap)
         # Cap height growth at 1.3x; when cut-off (nh > cap) only widen, don't allow full height
         height_cap = ch * 1.3 if ch > 0 else nh
         use_h = min(nh, height_cap)
         if use_w != cw or use_h != ch:
-            self.set_size(use_w, use_h, set_layout_maxsize=True, preserve_topleft=True)
+            # The layout has already enlarged its internal max size and emitted size_enlarged;
+            # avoid calling setMaxSize() again here to prevent recursive reLayout → size_enlarged loops.
+            # Grow symmetrically around the center so the text box stays visually centered in the bubble.
+            self.set_size(use_w, use_h, set_layout_maxsize=False, preserve_topleft=False)
 
     def get_scale(self) -> float:
         tl = self.topLevelItem()

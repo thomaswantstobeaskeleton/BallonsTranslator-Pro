@@ -871,6 +871,33 @@ class ConfigPanel(Widget):
         )
         self.optimize_line_breaks_checker.stateChanged.connect(self._on_optimize_line_breaks_changed)
 
+        # Layout penalty tuning (advanced): exposed so users can tweak behavior if needed.
+        self.layout_short_line_penalty_spin = QDoubleSpinBox()
+        self.layout_short_line_penalty_spin.setRange(0.0, 400.0)
+        self.layout_short_line_penalty_spin.setSingleStep(10.0)
+        self.layout_short_line_penalty_spin.setDecimals(1)
+        self.layout_short_line_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_short_line_penalty', 80.0)))
+        self.layout_short_line_penalty_spin.valueChanged.connect(self._on_layout_short_line_penalty_changed)
+        short_line_sublock = ConfigSubBlock(
+            self.layout_short_line_penalty_spin,
+            self.tr('Short line penalty'),
+            discription=self.tr('Penalty per very short non-final line in auto layout (higher = avoid 1–2 word stub lines).')
+        )
+        generalConfigPanel.addSublock(short_line_sublock)
+
+        self.layout_height_overflow_penalty_spin = QDoubleSpinBox()
+        self.layout_height_overflow_penalty_spin.setRange(0.0, 2000.0)
+        self.layout_height_overflow_penalty_spin.setSingleStep(50.0)
+        self.layout_height_overflow_penalty_spin.setDecimals(1)
+        self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0)))
+        self.layout_height_overflow_penalty_spin.valueChanged.connect(self._on_layout_height_overflow_penalty_changed)
+        height_penalty_sublock = ConfigSubBlock(
+            self.layout_height_overflow_penalty_spin,
+            self.tr('Height overflow penalty'),
+            discription=self.tr('Penalty factor when a candidate layout exceeds bubble height (higher = prefer shorter, wider layouts).')
+        )
+        generalConfigPanel.addSublock(height_penalty_sublock)
+
         self.let_uppercase_checker, _ = generalConfigPanel.addCheckBox(self.tr('To uppercase'))
         self.let_uppercase_checker.stateChanged.connect(self.on_uppercase_changed)
 
@@ -1188,6 +1215,14 @@ class ConfigPanel(Widget):
         pcfg.module.optimize_line_breaks = self.optimize_line_breaks_checker.isChecked()
         self.save_config.emit()
 
+    def _on_layout_short_line_penalty_changed(self, value: float):
+        pcfg.module.layout_short_line_penalty = float(value)
+        self.save_config.emit()
+
+    def _on_layout_height_overflow_penalty_changed(self, value: float):
+        pcfg.module.layout_height_overflow_penalty = float(value)
+        self.save_config.emit()
+
     def on_text_box_format_changed(self):
         """Sync Font Size and Auto layout from the Text in box dropdown (issue #1077)."""
         idx = self.text_box_format_combox.currentIndex()
@@ -1340,6 +1375,14 @@ class ConfigPanel(Widget):
             self.layout_hyphenation_checker.setChecked(getattr(pcfg.module, 'layout_hyphenation', True))
         if hasattr(self, 'optimize_line_breaks_checker'):
             self.optimize_line_breaks_checker.setChecked(getattr(pcfg.module, 'optimize_line_breaks', False))
+        if hasattr(self, 'layout_short_line_penalty_spin'):
+            self.layout_short_line_penalty_spin.blockSignals(True)
+            self.layout_short_line_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_short_line_penalty', 80.0)))
+            self.layout_short_line_penalty_spin.blockSignals(False)
+        if hasattr(self, 'layout_height_overflow_penalty_spin'):
+            self.layout_height_overflow_penalty_spin.blockSignals(True)
+            self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0)))
+            self.layout_height_overflow_penalty_spin.blockSignals(False)
         # Keep Text in box dropdown in sync (Auto fit = decide by program + Auto layout)
         if pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:
             self.text_box_format_combox.setCurrentIndex(0)

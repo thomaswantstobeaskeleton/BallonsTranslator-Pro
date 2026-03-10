@@ -22,14 +22,17 @@ from utils import shared
 from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
-from utils.line_breaking import find_optimal_breaks_dp, split_long_token_with_hyphenation
+from utils.line_breaking import split_long_token_with_hyphenation
 from modules.textdetector.outside_text_processor import OSB_LABELS
 
 # Layout tuning: keep text inside bubbles and avoid overflow/tiny text (see layout_textblk)
-LAYOUT_FIT_RATIO = 0.80  # fit text to this fraction of region (strict = no overflow)
-LAYOUT_FIT_RATIO_MIN = 0.50  # minimum scale when fitting (avoid illegible text; was 0.35)
-LAYOUT_MIN_FONT_PT = 10.0  # minimum font size in points (was 7; raise so text stays readable)
-LAYOUT_HEIGHT_PADDING = 1.06  # multiplier for block height (bottom margin)
+# Slightly bias toward fewer lines by:
+# - packing text a bit tighter horizontally
+# - allowing a bit more downscaling when needed
+LAYOUT_FIT_RATIO = 0.88  # fit text to this fraction of region (use more of bubble width/height)
+LAYOUT_FIT_RATIO_MIN = 0.35  # minimum scale when fitting (allow smaller text when bubble is crowded)
+LAYOUT_MIN_FONT_PT = 8.0  # minimum font size in points (still readable, but allows denser layouts)
+LAYOUT_HEIGHT_PADDING = 1.12  # multiplier for block height (bottom margin; prevent last-line cropping)
 LAYOUT_WIDTH_STROKE_FACTOR = 1.28  # width = max line width * this (stroke/outline clearance)
 LAYOUT_SCALE_UP_MAX = 1.4  # allow scaling font up to this when bubble is large and text is short
 LAYOUT_SCALE_UP_FILL = 0.78  # target fill ratio when scaling up in large bubbles
@@ -504,6 +507,9 @@ class SceneTextManager(QObject):
             blk_item = self.addTextBlock(textblock)
         if self.auto_textlayout_flag:
             self.updateTextBlkList()
+            # Auto layout on page (re)load changes text geometry; mark project as dirty
+            # so page switches / project close will persist the improved layout.
+            self.canvas.setProjSaveState(True)
 
     def addTextBlock(self, blk: Union[TextBlock, TextBlkItem] = None) -> TextBlkItem:
         if isinstance(blk, TextBlkItem):
@@ -521,9 +527,13 @@ class SceneTextManager(QObject):
             blk_item = TextBlkItem(blk, len(self.textblk_item_list), show_rect=self.canvas.textblock_mode)
             if translation:
                 blk.translation = translation
+                # First pass: initial auto layout
                 rst = self.layout_textblk(blk_item, text=translation)
                 if rst is None:
                     blk_item.setPlainText(translation)
+                else:
+                    # Second pass: re-layout using updated geometry (often yields better line grouping)
+                    self.layout_textblk(blk_item)
         self.addTextBlkItem(blk_item)
 
         pair_widget = TransPairWidget(blk, len(self.pairwidget_list), pcfg.fold_textarea)
@@ -855,6 +865,8 @@ class SceneTextManager(QObject):
                 old_html_lst.append(blkitem.toHtml())
                 old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
                 trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+                # Run auto layout twice: second pass uses the new box geometry to refine line breaks.
+                self.layout_textblk(blkitem)
                 self.layout_textblk(blkitem)
 
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
@@ -878,6 +890,8 @@ class SceneTextManager(QObject):
                 old_html_lst.append(blkitem.toHtml())
                 old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
                 trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+                # Run auto layout twice for consistent behaviour with normal auto-layout
+                self.layout_textblk(blkitem)
                 self.layout_textblk(blkitem)
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
         finally:
@@ -977,15 +991,16 @@ class SceneTextManager(QObject):
                 max_enlarge_ratio = 3
             enlarge_ratio = min(max(bounding_rect[2] / bounding_rect[3], bounding_rect[3] / bounding_rect[2]) * 1.5, max_enlarge_ratio)
             mask, ballon_area, mask_xyxy, region_rect = extract_ballon_region(img, bounding_rect, enlarge_ratio=enlarge_ratio, cal_region_rect=True)
-            # Shrink text region strictly so text stays well inside bubble (no overflow/clipping)
+            # Shrink text region moderately so text stays inside bubble with margin (avoid overflow)
+            # Use gentler inset (92–95%) so we get fewer, longer lines instead of narrow columns
             if region_rect is not None and len(region_rect) >= 4:
                 rw, rh = region_rect[2], region_rect[3]
                 if rw > 0 and rh > 0:
                     ar = min(rw, rh) / max(rw, rh)
-                    if ar >= 0.5:  # round or oval: strict inset so text stays inside curve
-                        inset = 0.72  # 28% shrink
-                    else:  # elongated: margin so text doesn't touch edges
-                        inset = 0.85  # 15% shrink
+                    if ar >= 0.5:  # round or oval
+                        inset = 0.92  # 8% shrink (was 0.72; keep more width for fuller lines)
+                    else:  # elongated
+                        inset = 0.95  # 5% shrink (was 0.85)
                     new_w, new_h = rw * inset, rh * inset
                     region_rect = [
                         region_rect[0] + (rw - new_w) / 2,
@@ -999,6 +1014,43 @@ class SceneTextManager(QObject):
         words, delimiter = seg_text(text, pcfg.module.translate_target)
         if len(words) < 1:
             return
+
+        # Special-case very short English bubbles so they stay on a single line and expand horizontally.
+        # Examples: "Mom", "Sing", "remind", "Short message", "TSK,".
+        if not tgt_is_cjk:
+            clean_chars = ''.join(ch for ch in text if ch.isalnum())
+            if 1 <= len(clean_chars) <= 16 and len(words) <= 4:
+                single = text.replace('\n', ' ').strip()
+                if single:
+                    fshort = QFontMetricsF(blk_font)
+                    base_w = fshort.horizontalAdvance(single)
+                    base_h = int(round(fmt.line_spacing * fshort.height()))
+                    if base_w > 0 and base_h > 0:
+                        # Prefer to fit inside bubble horizontally/vertically if region is known.
+                        if region_rect is not None and len(region_rect) >= 4:
+                            avail_w = max(8, region_rect[2] * 0.9)
+                            avail_h = max(8, region_rect[3] * 0.9)
+                        else:
+                            avail_w = max(8, bounding_rect[2] * 0.9)
+                            avail_h = max(8, bounding_rect[3] * 0.9)
+                        scale = min(avail_w / base_w, avail_h / base_h, 1.0)
+                        # Allow fairly small text for tiny bubbles, but not invisible.
+                        scale = max(scale, 0.25)
+                        new_size = max(1.0, blk_font.pointSizeF() * scale)
+                        blkitem.setFontSize(new_size)
+                        blk_font.setPointSizeF(new_size)
+                        fshort = QFontMetricsF(blk_font)
+                        base_w = fshort.horizontalAdvance(single)
+                        base_h = int(round(fmt.line_spacing * fshort.height()))
+                        layout_w = base_w * LAYOUT_WIDTH_STROKE_FACTOR
+                        layout_h = int(base_h * LAYOUT_HEIGHT_PADDING)
+                        blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
+                        blkitem.setPlainText(single)
+                        blkitem._ensure_transparent_document_background()
+                        # Let the existing clamp logic handle bubble/image bounds and syncing widgets.
+                        if len(self.pairwidget_list) > blkitem.idx:
+                            self.pairwidget_list[blkitem.idx].e_trans.setPlainText(single)
+                        return True
 
         wl_list = get_words_length_list(QFontMetricsF(blk_font), words)
         text_w, text_h = text_size_func(text)
@@ -1040,8 +1092,19 @@ class SceneTextManager(QObject):
                     _, src_width = blkitem.blk.normalizd_width_list(normalize=False)
                     resize_ratio_src = src_width / (sum(wl_list) + max((len(wl_list) - 1 - len(blkitem.blk.lines_array())), 0) * delimiter_len)
                     resize_ratio = max(resize_ratio_src * 1.5, 0.4)
-                # Minimum scale so text fits but isn't too small; only cap for truly huge blocks
-                resize_ratio = min(max(resize_ratio, 0.5), 1.0)
+                # Minimum scale so text fits but isn't too small; allow smaller text
+                # for genuinely small bubbles, short translations, and very long sentences.
+                base_min = 0.5
+                char_count = sum(len(w) for w in words if w.strip())
+                if region_rect is not None and len(region_rect) >= 4:
+                    region_area = region_rect[2] * region_rect[3]
+                    # Small bubble (by area) or short text (<= 4 tokens) → permit smaller font
+                    if (len(words) <= 4) or (img_area > 0 and region_area < 0.025 * img_area):
+                        base_min = 0.35
+                    # Very long sentence: allow even smaller font so it stays inside bubbles.
+                    if len(words) >= 18 or char_count >= 80:
+                        base_min = min(base_min, 0.30)
+                resize_ratio = min(max(resize_ratio, base_min), 1.0)
                 area_for_cap = (original_block_area if original_block_area is not None else bounding_rect[2] * bounding_rect[3])
                 if img_area > 0 and area_for_cap > 0.5 * img_area:
                     resize_ratio = min(resize_ratio, 0.5)
@@ -1080,13 +1143,15 @@ class SceneTextManager(QObject):
                 abs_centroid = blkitem.blk.lines[0][0]
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
-        # Use full bubble width for line breaking when available so we get fewer lines and don't squeeze horizontally
+        # Use more than full bubble width for line breaking so we get fewer, longer lines
+        # Allow up to ~1.30x bubble width; collision check will still prevent text going far outside the mask.
         if region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0:
-            max_central_width = float(region_rect[2])
+            max_central_width = float(region_rect[2] * 1.30)
 
-        # Optional: DP optimal breaks + hyphenation for non-CJK text (improves ugly wraps)
-        forced_lines = None
-        forced_wl_lines = None
+        # Optional: hyphenation for non-CJK text (improves ugly wraps for long tokens).
+        # We no longer pre-force line breaks here; instead we let layout_text() score candidates.
+        # IMPORTANT: do NOT hyphenate very short texts (1–2 words), so they can stay on a single line.
+        ffmt = QFontMetricsF(blk_font)
         try:
             if (
                 not tgt_is_cjk
@@ -1094,38 +1159,31 @@ class SceneTextManager(QObject):
                 and region_rect is not None
                 and len(region_rect) >= 4
             ):
-                # Use full bubble width so we get fewer, longer lines (not squeezed)
-                maxw_px = int(max(32, region_rect[2]))
+                # Only hyphenate when the overall text is reasonably long; short bubbles should stay as simple lines.
+                char_count = sum(len(w) for w in words if w.strip())
+                if len(words) > 2 and char_count > 8:
+                    maxw_px = int(max(32, region_rect[2] * 1.05))
 
                 def measure_token(s: str) -> int:
                     return int(ffmt.horizontalAdvance(s))
 
-                expanded_words = []
-                expanded_wl = []
-                for w0 in words:
-                    parts = split_long_token_with_hyphenation(
-                        w0,
-                        measure=measure_token,
-                        max_width=maxw_px,
-                        hyphenate=bool(getattr(pcfg.module, "layout_hyphenation", True)),
-                    )
-                    for p, pw in parts:
-                        expanded_words.append(p)
-                        expanded_wl.append(int(pw))
-                if expanded_words:
-                    words = expanded_words
-                    wl_list = expanded_wl
-                ends = find_optimal_breaks_dp(wl_list, max_width=maxw_px, delimiter_width=int(delimiter_len))
-                forced_lines = []
-                forced_wl_lines = []
-                start = 0
-                for e in ends:
-                    forced_lines.append(words[start:e])
-                    forced_wl_lines.append(wl_list[start:e])
-                    start = e
+                    expanded_words = []
+                    expanded_wl = []
+                    for w0 in words:
+                        parts = split_long_token_with_hyphenation(
+                            w0,
+                            measure=measure_token,
+                            max_width=maxw_px,
+                            hyphenate=bool(getattr(pcfg.module, "layout_hyphenation", True)),
+                        )
+                        for p, pw in parts:
+                            expanded_words.append(p)
+                            expanded_wl.append(int(pw))
+                    if expanded_words:
+                        words = expanded_words
+                        wl_list = expanded_wl
         except Exception:
-            forced_lines = None
-            forced_wl_lines = None
+            pass
 
         try:
             new_text, xywh, start_from_top, adjust_xy = layout_text(
@@ -1143,14 +1201,28 @@ class SceneTextManager(QObject):
             src_is_cjk=src_is_cjk,
             tgt_is_cjk=tgt_is_cjk,
             ref_src_lines=ref_src_lines,
-            forced_lines=forced_lines,
-            forced_wl_lines=forced_wl_lines,
+            forced_lines=None,
+            forced_wl_lines=None,
             collision_check=bool(getattr(pcfg.module, "layout_collision_check", True)),
             collision_min_mask_ratio=float(getattr(pcfg.module, "layout_collision_min_mask_ratio", 0.85) or 0.85),
             collision_max_retries=int(getattr(pcfg.module, "layout_collision_max_retries", 3) or 3),
+            target_box_height=int(region_rect[3]) if region_rect is not None and len(region_rect) >= 4 and region_rect[3] > 0 else None,
+            optimize_for_fewer_lines=bool(getattr(pcfg.module, "optimize_line_breaks", False)),
         )
             if not (new_text and new_text.strip()):
                 return
+
+            # Anti-cropping: if content would overflow bubble height when constrained, scale font down
+            constrain_to_bubble = bool(getattr(pcfg.module, "layout_constrain_to_bubble", True)) and region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0
+            # Additional safety: if the bubble is very small, shrink font more aggressively so text fits vertically.
+            if region_rect is not None and len(region_rect) >= 4 and region_rect[3] > 0:
+                n_lines = len(new_text.split('\n'))
+                needed_h = n_lines * line_height * LAYOUT_HEIGHT_PADDING
+                if needed_h > region_rect[3] and needed_h > 0:
+                    scale_down = region_rect[3] / needed_h
+                    # Allow more aggressive shrink for tiny bubbles, but keep a lower bound so text is still readable.
+                    scale_down = max(scale_down, 0.35)
+                    resize_ratio *= scale_down
 
             # font size post adjustment: force text to stay inside bubble/region
             post_resize_ratio = 1
@@ -1182,18 +1254,16 @@ class SceneTextManager(QObject):
                 blkitem.textCursor().clearSelection()
                 blkitem.setFontSize(new_font_size)
                 blk_font.setPointSizeF(new_font_size)
+                ffmt = QFontMetricsF(blk_font)
 
             if restore_charfmts:
-                char_fmts = blkitem.get_char_fmts()        
-        
-            ffmt = QFontMetricsF(blk_font)
+                char_fmts = blkitem.get_char_fmts()
             maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
             # Height: ensure minimum (single-line/descenders) and add bottom padding so last line doesn't sit on edge
             layout_h = max(int(xywh[3]), line_height)
             layout_h = int(layout_h * LAYOUT_HEIGHT_PADDING)
             layout_w = maxw * LAYOUT_WIDTH_STROKE_FACTOR
             # Constrain text box to detected bubble: use bubble region as exact box (no size change, keep centered)
-            constrain_to_bubble = bool(getattr(pcfg.module, "layout_constrain_to_bubble", True)) and region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0
             if constrain_to_bubble:
                 # Use bubble region size and position so box stays fixed and centered in bubble
                 # region_rect from extract_ballon_region is in mask/crop coords; convert position to image coords
@@ -1239,6 +1309,33 @@ class SceneTextManager(QObject):
                 y2 = max(0, min(y, im_h - h))
                 if x2 != x or y2 != y:
                     blkitem.setRect([x2, y2, w, h], repaint=True)
+                # For non-constrained layout with a known bubble region, gently clamp the box horizontally
+                # (and vertically) so it stays mostly inside the bubble instead of drifting far away.
+                if (not constrain_to_bubble
+                        and region_rect is not None and len(region_rect) >= 4
+                        and region_rect[2] > 0 and region_rect[3] > 0
+                        and not is_osb):
+                    bubble_x = mask_xyxy[0] + region_rect[0]
+                    bubble_y = mask_xyxy[1] + region_rect[1]
+                    bubble_w = region_rect[2]
+                    bubble_h = region_rect[3]
+                    # Re-read after potential image clamp
+                    abr2 = blkitem.absBoundingRect(qrect=True)
+                    bx, by, bw, bh = abr2.x(), abr2.y(), abr2.width(), abr2.height()
+                    # Only adjust if the box isn't dramatically larger than the bubble
+                    if bw > 0 and bh > 0 and bw <= bubble_w * 1.05 and bh <= bubble_h * 1.05:
+                        min_x = bubble_x
+                        max_x = bubble_x + bubble_w - bw
+                        min_y = bubble_y
+                        max_y = bubble_y + bubble_h - bh
+                        new_x = bx
+                        new_y = by
+                        if max_x >= min_x:
+                            new_x = min(max(bx, min_x), max_x)
+                        if max_y >= min_y:
+                            new_y = min(max(by, min_y), max_y)
+                        if abs(new_x - bx) > 0.5 or abs(new_y - by) > 0.5:
+                            blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
                 if constrain_to_bubble and blkitem.blk is not None:
                     blkitem.blk._bounding_rect = blkitem.absBoundingRect()
             return True

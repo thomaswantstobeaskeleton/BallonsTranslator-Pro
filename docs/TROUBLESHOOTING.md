@@ -152,9 +152,9 @@ See [COMIC_TRANSLATE_RESEARCH.md](COMIC_TRANSLATE_RESEARCH.md) for more detector
 
 ## 9. Translation text overflows bubble or formats badly
 
-**Symptoms:** After translation, the text box resizes and extends outside the speech bubble, or text is poorly formatted (wrong line breaks, too big/small).
+**Symptoms:** After translation, the text box resizes and extends outside the speech bubble, or text is poorly formatted (wrong line breaks, too big/small). Text may also be cropped at the bottom or form a narrow vertical column.
 
-**What helps:** Use **Auto layout** and **Text in box** = **Auto fit to box** so layout uses the balloon region for line breaks and font scaling.
+**What helps:** Use **Auto layout** and **Text in box** = **Auto fit to box** so layout uses the balloon region for line breaks and font scaling. The layout system prefers fewer, longer lines and fuller width usage; when **Constrain text box to bubble** is on, it scales font down if needed so text fits without cropping.
 
 **Settings that help:**
 
@@ -163,7 +163,8 @@ See [COMIC_TRANSLATE_RESEARCH.md](COMIC_TRANSLATE_RESEARCH.md) for more detector
 | **Config → General → Typesetting** | **Text in box** | Set to **Auto fit to box** so the program scales font size to fit the balloon. |
 | **Config → General → Typesetting** | **Auto layout** | Leave **on** so translation is split into lines according to the balloon region. |
 | **Config → General → Typesetting** | **Font Size** | **Decide by program** lets layout choose font size; use **use global setting** only if you want a fixed size. |
-| **config.json** (optional) | `module.layout_optimal_breaks` | Keep `true` (default) for better line breaks. |
+| **Config → General → Typesetting** | **Constrain text box to bubble** | Keep **on** so the box stays inside the bubble; layout will scale font down if content would overflow. |
+| **config.json** (optional) | `module.layout_optimal_breaks` | Keep `true` (default) for better line breaks (fewer, longer lines). |
 | **config.json** (optional) | `module.layout_collision_check` | Keep `true` (default) so layout retries when text would overflow. |
 
 **Per-block:** Select one or more text blocks → right-click → **Format → Auto fit font size to box** to scale font so text fits the current box.

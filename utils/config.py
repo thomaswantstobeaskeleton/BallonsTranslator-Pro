@@ -112,6 +112,9 @@ class ModuleConfig(Config):
     layout_collision_check: bool = True
     layout_collision_min_mask_ratio: float = 0.85
     layout_collision_max_retries: int = 3
+    # Scoring/penalty weights for auto layout (non-CJK)
+    layout_short_line_penalty: float = 80.0   # penalty per very short non-final line
+    layout_height_overflow_penalty: float = 700.0  # factor for height overflow penalty
     # Center text vertically (and horizontally as needed) inside each bubble/block (manga-translator-ui style).
     center_text_in_bubble: bool = False
     # Try larger font / fewer lines so text fits with fewer line breaks (test combinations; manga-translator-ui style).
