@@ -4,6 +4,8 @@
 
 Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
 
+**Recent Changes Highlights** I reworked the whole auto layout feature, added some customizable options for it, and fixed text sizing, lines, constraints, clamping to and only moving the text box geometrically.
+
 **中文说明：** [README_zh_CN.md](README_zh_CN.md)
 
 ---
