@@ -268,6 +268,7 @@ def main():
     import qtpy
     from qtpy.QtWidgets import QApplication
     from qtpy.QtGui import QIcon, QFontDatabase, QGuiApplication, QFont
+    from qtpy.QtCore import qInstallMessageHandler, QtMsgType
     from qtpy import API, QT_VERSION
 
     LOGGER.info(f'QT_API: {API}, QT Version: {QT_VERSION}')
@@ -293,6 +294,30 @@ def main():
     if args.headless or getattr(args, 'headless_continuous', False):
         app_args = sys.argv + ['-platform', 'offscreen']
     app = QApplication(app_args)
+    # Filter noisy Qt warnings (QPainter / QFont spam) so the console stays readable.
+    # This does NOT change behavior, only hides repeated benign messages.
+    def _qt_message_filter(msg_type, context, message):
+        try:
+            text = str(message)
+        except Exception:
+            text = message if isinstance(message, str) else repr(message)
+        # Known noisy-but-benign messages we want to hide
+        _suppress_substrings = (
+            "QPainter::begin: A paint device can only be painted by one painter at a time.",
+            "Painter not active",
+            "Unbalanced save/restore",
+            "QWidgetEffectSourcePrivate::pixmap",
+            "QFont::setPointSize: Point size <= 0",
+        )
+        for sub in _suppress_substrings:
+            if sub in text:
+                return
+        # Otherwise, forward to stderr (approximate default handler)
+        try:
+            sys.__stderr__.write(text + "\n")
+        except Exception:
+            pass
+    qInstallMessageHandler(_qt_message_filter)
     app.setApplicationName('BallonsTranslatorPro')
     app.setApplicationVersion(VERSION)
 

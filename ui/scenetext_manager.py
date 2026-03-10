@@ -949,6 +949,15 @@ class SceneTextManager(QObject):
         if blk_font.pointSizeF() <= 0 or blk_font.pointSize() <= 0:
             blk_font.setPointSizeF(10.0)
             blk_font.setPointSize(10)
+        # Enforce a minimum readable font size whenever auto layout / auto-fit is driving font changes.
+        # This prevents tiny (e.g. 3–4 pt) text for short lines like "That is also good.".
+        if (
+            ((self.auto_textlayout_flag and pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag)
+             or getattr(blkitem.fontformat, 'auto_fit_font_size', False))
+            and blk_font.pointSizeF() < LAYOUT_MIN_FONT_PT
+        ):
+            blk_font.setPointSizeF(LAYOUT_MIN_FONT_PT)
+            blk_font.setPointSize(int(max(LAYOUT_MIN_FONT_PT, blk_font.pointSize() or 0)))
         fmt = blkitem.get_fontformat()
         blk_font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, fmt.letter_spacing * 100)
         text_size_func = lambda text: get_text_size(QFontMetricsF(blk_font), text)
