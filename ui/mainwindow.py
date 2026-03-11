@@ -54,6 +54,7 @@ from .batch_queue_dialog import BatchQueueDialog
 from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
 from .image_edit import ImageEditMode
+from utils.image_colorization import apply_colorization
 
 
 class PageListView(QListWidget):
@@ -2302,6 +2303,15 @@ class MainWindow(mainwindow_cls):
                         img = apply_upscale_final(img, factor=factor, policy=policy)
                 except Exception as e:
                     LOGGER.warning("Final upscale failed: %s", e)
+            # Optional: lightweight colorization for grayscale pages (Section 6+Colorization).
+            if getattr(pcfg.module, 'enable_colorization', False):
+                try:
+                    if hasattr(img, 'bits'):
+                        img = pixmap2ndarray(img, keep_alpha=self.imgtrans_proj.current_has_alpha())
+                    strength = float(getattr(pcfg.module, 'colorization_strength', 0.6) or 0.6)
+                    img = apply_colorization(img, strength=strength)
+                except Exception as e:
+                    LOGGER.warning("Colorization failed: %s", e)
             imsave_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)
             save_params = {'ext': pcfg.imgsave_ext, 'quality': pcfg.imgsave_quality}
             if pcfg.imgsave_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):

@@ -195,7 +195,7 @@ if _HF_DET_AVAILABLE:
         params = {
             "model_id": {
                 "type": "line_editor",
-                "value": "data/models/ysgyolo_comic_text_segmenter_v8m.pt",
+                "value": "ogkalu/comic-text-and-bubble-detector",
                 "description": "Hugging Face model id (e.g. ogkalu/comic-text-and-bubble-detector) OR path to YOLO .pt to use YOLO as primary (no HF). E.g. data/models/ysgyolo_comic_text_segmenter_v8m.pt",
             },
             "score_threshold": {
@@ -549,7 +549,7 @@ if _HF_DET_AVAILABLE:
             return out
 
         def _load_model(self):
-            model_id = (self.params.get("model_id") or {}).get("value", "data/models/ysgyolo_comic_text_segmenter_v8m.pt") or "data/models/ysgyolo_comic_text_segmenter_v8m.pt"
+            model_id = (self.params.get("model_id") or {}).get("value", "ogkalu/comic-text-and-bubble-detector") or "ogkalu/comic-text-and-bubble-detector"
             model_id = (model_id or "").strip()
             model_id = self._normalize_model_id(model_id) or model_id
             if not model_id:
@@ -594,7 +594,10 @@ if _HF_DET_AVAILABLE:
                     self._device = device
                     self.model_primary = None
                     resolved = self._resolve_model_path(model_id)
-                    looks_like_path = resolved.endswith(".pt") or "/" in resolved or "\\" in resolved
+                    # Treat as a local path only when it clearly looks like one (extension or backslash),
+                    # so HF ids with "/" such as "ogkalu/comic-text-and-bubble-detector" are passed
+                    # directly to transformers.pipeline.
+                    looks_like_path = resolved.endswith((".pt", ".pth")) or "\\" in resolved
                     if looks_like_path and not osp.isfile(resolved):
                         self.logger.warning("model_id looks like a path but file not found; primary disabled. Set model_id to an HF id or a valid .pt path.")
                         self.pipe = None

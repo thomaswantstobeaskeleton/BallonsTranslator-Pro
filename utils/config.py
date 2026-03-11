@@ -141,6 +141,9 @@ class ModuleConfig(Config):
     # Per-stage resize policy: none | lanczos (model/model_lite reserved for future).
     upscale_policy_initial: str = "lanczos"
     upscale_policy_final: str = "lanczos"
+    # Optional: lightweight colorization of grayscale pages when saving final result.
+    enable_colorization: bool = False
+    colorization_strength: float = 0.6  # 0–1; blend between grayscale and colorized
     # Section 7: Caching + memory / stability
     pipeline_cache_enabled: bool = False  # When True, in-memory pipeline cache can be used (get_pipeline_cache(True))
     inpaint_spill_to_disk_after_blocks: int = 0  # When >0, write intermediate inpainted image to temp file every N blocks to reduce peak RAM/VRAM (e.g. 8 or 12)

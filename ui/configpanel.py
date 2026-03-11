@@ -559,6 +559,25 @@ class ConfigPanel(Widget):
         )
         self.processing_scale_checker.stateChanged.connect(self._on_processing_scale_changed)
         dlConfigPanel.vlayout.addWidget(_)
+        # Optional: lightweight colorization when saving final result (experimental).
+        self.colorization_checker, _ = checkbox_with_label(
+            self.tr('Colorize final result (experimental)'),
+            discription=self.tr('Apply a light colorization to grayscale pages when saving the final result. Does not affect original or inpainted layers.')
+        )
+        self.colorization_checker.stateChanged.connect(self._on_colorization_changed)
+        dlConfigPanel.vlayout.addWidget(_)
+        self.colorization_strength_spin = QDoubleSpinBox()
+        self.colorization_strength_spin.setRange(0.1, 1.0)
+        self.colorization_strength_spin.setSingleStep(0.1)
+        self.colorization_strength_spin.setDecimals(2)
+        self.colorization_strength_spin.setValue(float(getattr(pcfg.module, 'colorization_strength', 0.6)))
+        self.colorization_strength_spin.valueChanged.connect(self._on_colorization_strength_changed)
+        sublock_color = ConfigSubBlock(
+            self.colorization_strength_spin,
+            self.tr('Colorization strength'),
+            discription=self.tr('Blend between grayscale (0) and fully colorized (1). Recommended 0.5–0.8.')
+        )
+        dlConfigPanel.vlayout.addWidget(sublock_color)
         self.ocr_upscale_min_side_spin = QSpinBox()
         self.ocr_upscale_min_side_spin.setRange(0, 2048)
         self.ocr_upscale_min_side_spin.setSpecialValueText(self.tr('Off'))
@@ -1164,6 +1183,12 @@ class ConfigPanel(Widget):
     def _on_processing_scale_changed(self):
         pcfg.module.processing_scale_enabled = self.processing_scale_checker.isChecked()
 
+    def _on_colorization_changed(self):
+        pcfg.module.enable_colorization = self.colorization_checker.isChecked()
+
+    def _on_colorization_strength_changed(self, value: float):
+        pcfg.module.colorization_strength = float(value)
+
     def _on_ocr_upscale_min_side_changed(self, value: int):
         pcfg.module.ocr_upscale_min_side = value
 
@@ -1446,6 +1471,10 @@ class ConfigPanel(Widget):
             self.image_upscale_final_factor_spin.setValue(float(getattr(pcfg.module, 'image_upscale_final_factor', 2.0)))
         if hasattr(self, 'processing_scale_checker'):
             self.processing_scale_checker.setChecked(getattr(pcfg.module, 'processing_scale_enabled', True))
+        if hasattr(self, 'colorization_checker'):
+            self.colorization_checker.setChecked(getattr(pcfg.module, 'enable_colorization', False))
+        if hasattr(self, 'colorization_strength_spin'):
+            self.colorization_strength_spin.setValue(float(getattr(pcfg.module, 'colorization_strength', 0.6)))
         if hasattr(self, 'ocr_upscale_min_side_spin'):
             self.ocr_upscale_min_side_spin.setValue(int(getattr(pcfg.module, 'ocr_upscale_min_side', 0)))
         if hasattr(self, 'inpaint_spill_after_spin'):
