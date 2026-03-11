@@ -801,6 +801,7 @@ class MainWindow(mainwindow_cls):
             self.st_manager.clearSceneTextitems()
             self.titleBar.setTitleContent(osp.basename(directory))
             self.updatePageList()
+            self._ensure_first_page_loaded_and_autolayout()
             self.opening_dir = False
             self._show_main_content()
         except Exception as e:
@@ -893,6 +894,7 @@ class MainWindow(mainwindow_cls):
             self.leftBar.updateRecentProjList(self.imgtrans_proj.proj_path)
             self.updatePageList()
             self.titleBar.setTitleContent(osp.basename(self.imgtrans_proj.proj_path))
+            self._ensure_first_page_loaded_and_autolayout()
             self.opening_dir = False
             self._show_main_content()
         except Exception as e:
@@ -913,6 +915,14 @@ class MainWindow(mainwindow_cls):
             if imgname == self.imgtrans_proj.current_img:
                 self.pageList.setCurrentItem(lstitem)
         self._update_page_list_ignored_style()
+
+    def _ensure_first_page_loaded_and_autolayout(self):
+        """After opening a project, ensure the first page is displayed and auto layout is applied once."""
+        if not self.imgtrans_proj.current_img:
+            return
+        self.canvas.updateCanvas()
+        self.st_manager.updateSceneTextitems()
+        self.st_manager.run_auto_layout_on_current_page_once()
 
     def pageLabelStateChanged(self):
         setup = self.leftBar.showPageListLabel.isChecked()
@@ -959,6 +969,13 @@ class MainWindow(mainwindow_cls):
             return
         if not self.imgtrans_proj.is_empty:
             self.conditional_save(keep_exist_as_backup=True)
+            # Always sync current page scene to blocks and save so text boxes (e.g. after auto layout) are persisted
+            if self.imgtrans_proj.current_img and self.st_manager.textblk_item_list:
+                self.st_manager.updateTextBlkList()
+                try:
+                    self.imgtrans_proj.save(keep_exist_as_backup=True)
+                except Exception:
+                    pass
         while True:
             if not self.imsave_thread.isRunning():
                 break
@@ -2309,7 +2326,8 @@ class MainWindow(mainwindow_cls):
                     if hasattr(img, 'bits'):
                         img = pixmap2ndarray(img, keep_alpha=self.imgtrans_proj.current_has_alpha())
                     strength = float(getattr(pcfg.module, 'colorization_strength', 0.6) or 0.6)
-                    img = apply_colorization(img, strength=strength)
+                    backend = getattr(pcfg.module, 'colorization_backend', 'simple') or 'simple'
+                    img = apply_colorization(img, strength=strength, backend=backend)
                 except Exception as e:
                     LOGGER.warning("Colorization failed: %s", e)
             imsave_path = self.imgtrans_proj.get_result_path(self.imgtrans_proj.current_img)

@@ -29,17 +29,17 @@ from modules.textdetector.outside_text_processor import OSB_LABELS
 # Slightly bias toward fewer lines by:
 # - packing text a bit tighter horizontally
 # - allowing a bit more downscaling when needed
-LAYOUT_FIT_RATIO = 0.88  # fit text to this fraction of region (use more of bubble width/height)
-LAYOUT_FIT_RATIO_MIN = 0.35  # minimum scale when fitting (allow smaller text when bubble is crowded)
+LAYOUT_FIT_RATIO = 0.50  # fit text to this fraction of region (use more of bubble width/height)
+LAYOUT_FIT_RATIO_MIN = 0.15  # minimum scale when fitting (allow smaller text when bubble is crowded)
 LAYOUT_MIN_FONT_PT = 11.0  # minimum font size in points (readable; avoids tiny text like "Sit down.")
 LAYOUT_HEIGHT_PADDING = 1.12  # multiplier for block height (bottom margin; prevent last-line cropping)
 LAYOUT_WIDTH_STROKE_FACTOR = 1.28  # width = max line width * this (stroke/outline clearance)
 LAYOUT_SCALE_UP_MAX = 1  # cap scale-up when bubble is large and text is short (was 1.4; reduce so base font stays a bit smaller)
-LAYOUT_SCALE_UP_FILL = 0.72  # target fill ratio when scaling up in large bubbles (was 0.78)
+LAYOUT_SCALE_UP_FILL = 0.68  # target fill ratio when scaling up in large bubbles (was 0.78)
 # Scale down only the text inside the layout (same box, same line breaks). Layout/box unchanged.
-LAYOUT_TEXT_SCALE = 0.85  # multiply final font size by this so text is a bit smaller in the same box
+LAYOUT_TEXT_SCALE = 0.78  # multiply final font size by this so text is a bit smaller in the same box
 # Stronger scale-down for long paragraphs (many lines) so large blocks don't look oversized.
-LAYOUT_TEXT_SCALE_LONG = 0.75  # use this when text is long (more lines or more chars)
+LAYOUT_TEXT_SCALE_LONG = 0.68  # use this when text is long (more lines or more chars)
 LAYOUT_TEXT_SCALE_LONG_MIN_LINES = 3  # use LAYOUT_TEXT_SCALE_LONG when at least this many lines
 LAYOUT_TEXT_SCALE_LONG_MIN_CHARS = 80  # or when at least this many characters
 
@@ -872,6 +872,28 @@ class SceneTextManager(QObject):
             fmt = self.formatpanel.global_format
         self.apply_fontformat(fmt)
 
+    def run_auto_layout_on_current_page_once(self):
+        """Run auto layout on all blocks of the current page (e.g. after opening project so first page is formatted)."""
+        from utils.config import pcfg
+        all_blks = [b for b in self.textblk_item_list if not getattr(b.fontformat, 'vertical', False)]
+        if not all_blks:
+            return
+        old_autolayout = getattr(pcfg, 'let_autolayout_flag', True)
+        old_flag = self.auto_textlayout_flag
+        try:
+            pcfg.let_autolayout_flag = True
+            self.auto_textlayout_flag = True
+            for blkitem in all_blks:
+                self.layout_textblk(blkitem)
+                self.layout_textblk(blkitem)
+            for blkitem in all_blks:
+                if blkitem.idx < len(self.pairwidget_list):
+                    self.pairwidget_list[blkitem.idx].e_trans.setPlainText(blkitem.toPlainText())
+            self.canvas.setProjSaveState(True)
+        finally:
+            pcfg.let_autolayout_flag = old_autolayout
+            self.auto_textlayout_flag = old_flag
+
     def onAutoLayoutTextblks(self):
         selected_blks = self.canvas.selected_text_items()
         old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
@@ -888,32 +910,50 @@ class SceneTextManager(QObject):
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
 
     def onAutoFitFontToBox(self):
-        """Re-run auto fit font size for selected blocks (e.g. after changing font). Forces fit-to-box for selection."""
-        from utils.config import pcfg
+        """Scale font size so current text fits the selected text box(es) without changing box geometry."""
         selected_blks = self.canvas.selected_text_items()
         selected_blks = [blk for blk in selected_blks if not blk.fontformat.vertical]
         if not selected_blks:
             return
-        old_fntsize = getattr(pcfg, 'let_fntsize_flag', 0)
-        old_autolayout = getattr(pcfg, 'let_autolayout_flag', True)
-        old_auto_flag = self.auto_textlayout_flag
-        try:
-            pcfg.let_fntsize_flag = 0
-            pcfg.let_autolayout_flag = True
-            self.auto_textlayout_flag = True
-            old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
-            for blkitem in selected_blks:
-                old_html_lst.append(blkitem.toHtml())
-                old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
-                trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
-                # Run auto layout twice for consistent behaviour with normal auto-layout
-                self.layout_textblk(blkitem)
-                self.layout_textblk(blkitem)
-            self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
-        finally:
-            pcfg.let_fntsize_flag = old_fntsize
-            pcfg.let_autolayout_flag = old_autolayout
-            self.auto_textlayout_flag = old_auto_flag
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        for blkitem in selected_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            self._scale_font_to_fit_box(blkitem)
+        self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+
+    def _scale_font_to_fit_box(self, blkitem: TextBlkItem):
+        """Scale this block's font so its text fits inside the current box (no layout/box change)."""
+        br = blkitem.absBoundingRect(qrect=True)
+        box_w = br.width()
+        box_h = br.height()
+        if box_w < 1 or box_h < 1:
+            return
+        doc = blkitem.document()
+        if doc is None:
+            return
+        doc_w = doc.size().width()
+        doc_h = doc.size().height()
+        if doc_w < 1 and doc_h < 1:
+            return
+        if doc_w < 1:
+            doc_w = 1
+        if doc_h < 1:
+            doc_h = 1
+        scale = min(box_w / doc_w, box_h / doc_h)
+        scale = max(0.25, min(scale, 2.0))
+        if abs(scale - 1.0) < 0.01:
+            return
+        blkitem.setRelFontSize(scale, repaint_background=True)
+        if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+            try:
+                new_pt = blkitem.font().pointSizeF()
+                if new_pt > 0:
+                    blkitem.blk.fontformat.font_size = pt2px(new_pt)
+            except Exception:
+                pass
+        self.canvas.setProjSaveState(True)
 
     def onResetAngle(self):
         selected_blks = self.canvas.selected_text_items()
@@ -935,9 +975,12 @@ class SceneTextManager(QObject):
                 self.formatpanel.set_textblk_item(multi_select=bool(textitems))
 
     def layout_textblk(self, blkitem: TextBlkItem, text: str = None, mask: np.ndarray = None, bounding_rect: List = None, region_rect: List = None):
-        
         '''
-        auto text layout, vertical writing is not supported yet.
+        Auto text layout (vertical writing not supported).
+        Layout tuning is read from pcfg.module at runtime: layout_optimal_breaks, layout_hyphenation,
+        layout_short_line_penalty, layout_height_overflow_penalty, optimize_line_breaks,
+        layout_constrain_to_bubble, layout_collision_*. Font scaling runs when Auto layout is on
+        and Font size = "decide by program" (or block has auto_fit_font_size).
         '''
         is_osb = (getattr(blkitem.blk, "label", None) or "").strip().lower() in OSB_LABELS
         if is_osb:
@@ -1175,11 +1218,9 @@ class SceneTextManager(QObject):
                 abs_centroid = blkitem.blk.lines[0][0]
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
-        # Use more than full bubble width for line breaking so we get fewer, longer lines,
-        # but keep a margin so text does not hug the bubble edge.
-        # Allow up to ~1.10x bubble width; collision check will still prevent text going far outside the mask.
+        # Limit line width to ~88% of bubble so layout tries more, shorter lines by default.
         if region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0:
-            max_central_width = float(region_rect[2] * 1.10)
+            max_central_width = float(region_rect[2] * 0.88)
 
         # Optional: hyphenation for non-CJK text (improves ugly wraps for long tokens).
         # We no longer pre-force line breaks here; instead we let layout_text() score candidates.
@@ -1197,8 +1238,8 @@ class SceneTextManager(QObject):
                 if len(words) > 2 and char_count > 8:
                     maxw_px = int(max(32, region_rect[2] * 1.05))
 
-                def measure_token(s: str) -> int:
-                    return int(ffmt.horizontalAdvance(s))
+                    def measure_token(s: str) -> int:
+                        return int(ffmt.horizontalAdvance(s))
 
                     expanded_words = []
                     expanded_wl = []

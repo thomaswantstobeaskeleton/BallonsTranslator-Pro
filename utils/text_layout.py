@@ -81,7 +81,16 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int) -> f
     # Reward width utilization: prefer layouts that use more of target_width
     width_util = avg_len / target_width if target_width > 0 else 0
     width_bonus = -100.0 * min(width_util, 1.0)  # negative = reward
-    return line_penalty + orphan_penalty + ragged_penalty + short_line_penalty + width_bonus
+    # Penalty for a single long line so multi-line is preferred (avoids "Sigh, my old mom..." staying one line)
+    long_single_line_penalty = 0.0
+    if n == 1 and target_width > 0 and lengths and lengths[0] >= target_width * 0.75:
+        long_single_line_penalty = 80.0
+    # Penalty for long text in few lines (e.g. "I'd better go inside the car and turn on the air conditioning" in 3 lines)
+    # so layouts with more, shorter lines are preferred when lines are nearly full width
+    few_lines_long_text_penalty = 0.0
+    if 2 <= n <= 3 and target_width > 0 and avg_len >= target_width * 0.65:
+        few_lines_long_text_penalty = 120.0
+    return line_penalty + orphan_penalty + ragged_penalty + short_line_penalty + long_single_line_penalty + few_lines_long_text_penalty + width_bonus
 
 
 def line_is_valid(line: Line, new_len: int, delimiter_len, max_width, words_length, srcline_wlist, line_no: int, line_height, ref_src_lines: bool = False):
