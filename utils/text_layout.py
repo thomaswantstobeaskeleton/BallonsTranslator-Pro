@@ -53,10 +53,10 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int) -> f
     avg_len = sum(lengths) / n if n else 0
     last_len = lengths[-1] if lengths else 0
     # Penalty for too many lines (stronger when optimize_line_breaks is on)
-    base_line_penalty = 60.0
+    base_line_penalty = 72.0
     try:
         if getattr(pcfg.module, 'optimize_line_breaks', False):
-            base_line_penalty = 90.0
+            base_line_penalty = 105.0
     except Exception:
         pass
     line_penalty = n * base_line_penalty
@@ -626,7 +626,7 @@ def layout_text(
             if total_h > target_box_height:
                 overflow = (total_h - target_box_height) / float(target_box_height)
                 # Penalize overflow very steeply so shorter, wider layouts win
-                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0))
+                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0))
                 height_penalty = overflow * height_factor
 
         # Score layout (only when not using forced_lines; forced_lines already chosen by DP)

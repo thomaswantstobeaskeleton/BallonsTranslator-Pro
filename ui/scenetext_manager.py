@@ -14,7 +14,7 @@ except:
 from .textitem import TextBlkItem, TextBlock
 from .canvas import Canvas
 from .textedit_area import TransTextEdit, SourceTextEdit, TransPairWidget, SelectTextMiniMenu, TextEditListScrollArea, QVBoxLayout, Widget
-from utils.fontformat import FontFormat
+from utils.fontformat import FontFormat, pt2px
 from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, WarpItemCommand, TextItemEditCommand, TextEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
 from .text_panel import FontFormatPanel
 from utils.config import pcfg
@@ -31,11 +31,17 @@ from modules.textdetector.outside_text_processor import OSB_LABELS
 # - allowing a bit more downscaling when needed
 LAYOUT_FIT_RATIO = 0.88  # fit text to this fraction of region (use more of bubble width/height)
 LAYOUT_FIT_RATIO_MIN = 0.35  # minimum scale when fitting (allow smaller text when bubble is crowded)
-LAYOUT_MIN_FONT_PT = 8.0  # minimum font size in points (still readable, but allows denser layouts)
+LAYOUT_MIN_FONT_PT = 11.0  # minimum font size in points (readable; avoids tiny text like "Sit down.")
 LAYOUT_HEIGHT_PADDING = 1.12  # multiplier for block height (bottom margin; prevent last-line cropping)
 LAYOUT_WIDTH_STROKE_FACTOR = 1.28  # width = max line width * this (stroke/outline clearance)
-LAYOUT_SCALE_UP_MAX = 1.4  # allow scaling font up to this when bubble is large and text is short
-LAYOUT_SCALE_UP_FILL = 0.78  # target fill ratio when scaling up in large bubbles
+LAYOUT_SCALE_UP_MAX = 1  # cap scale-up when bubble is large and text is short (was 1.4; reduce so base font stays a bit smaller)
+LAYOUT_SCALE_UP_FILL = 0.72  # target fill ratio when scaling up in large bubbles (was 0.78)
+# Scale down only the text inside the layout (same box, same line breaks). Layout/box unchanged.
+LAYOUT_TEXT_SCALE = 0.85  # multiply final font size by this so text is a bit smaller in the same box
+# Stronger scale-down for long paragraphs (many lines) so large blocks don't look oversized.
+LAYOUT_TEXT_SCALE_LONG = 0.75  # use this when text is long (more lines or more chars)
+LAYOUT_TEXT_SCALE_LONG_MIN_LINES = 3  # use LAYOUT_TEXT_SCALE_LONG when at least this many lines
+LAYOUT_TEXT_SCALE_LONG_MIN_CHARS = 80  # or when at least this many characters
 
 
 class CreateItemCommand(QUndoCommand):
@@ -501,6 +507,12 @@ class SceneTextManager(QObject):
         self.hovering_transwidget = None
         self.txtblkShapeControl.setBlkItem(None)
         self.clearSceneTextitems()
+        # Apply auto layout when loading any page so layout persists after reopen (config-driven)
+        self.auto_textlayout_flag = (
+            pcfg.let_autolayout_flag
+            and (pcfg.let_fntsize_flag == 0)
+            and (pcfg.module.enable_detect or pcfg.module.enable_ocr or pcfg.module.enable_translate)
+        )
         for textblock in self.imgtrans_proj.current_block_list():
             if textblock.font_family is None or textblock.font_family.strip() == '':
                 textblock.font_family = self.formatpanel.familybox.currentText()
@@ -520,6 +532,10 @@ class SceneTextManager(QObject):
             if blk.fontformat.stroke_width == 0 and getattr(pcfg.global_fontformat, 'stroke_width', 0) > 0:
                 blk.fontformat.stroke_width = pcfg.global_fontformat.stroke_width
                 blk.fontformat.srgb = list(getattr(pcfg.global_fontformat, 'srgb', [0, 0, 0]))
+            # Apply global text box corner radius default (shape) when present: 0 = rectangle, >0 = rounded / circle-like.
+            gb_radius = float(getattr(pcfg.global_fontformat, "text_box_corner_radius", 0.0) or 0.0)
+            if gb_radius > 0 and getattr(blk.fontformat, "text_box_corner_radius", 0.0) == 0.0:
+                blk.fontformat.text_box_corner_radius = gb_radius
             translation = ''
             if self.auto_textlayout_flag and not blk.vertical:
                 translation = blk.translation
@@ -1043,9 +1059,11 @@ class SceneTextManager(QObject):
                             avail_w = max(8, bounding_rect[2] * 0.9)
                             avail_h = max(8, bounding_rect[3] * 0.9)
                         scale = min(avail_w / base_w, avail_h / base_h, 1.0)
-                        # Allow fairly small text for tiny bubbles, but not invisible.
+                        # Allow fairly small text for tiny bubbles, but not below minimum readable size.
                         scale = max(scale, 0.25)
-                        new_size = max(1.0, blk_font.pointSizeF() * scale)
+                        new_size = max(LAYOUT_MIN_FONT_PT, blk_font.pointSizeF() * scale)
+                        if LAYOUT_TEXT_SCALE != 1.0:
+                            new_size = max(LAYOUT_MIN_FONT_PT, new_size * LAYOUT_TEXT_SCALE)
                         blkitem.setFontSize(new_size)
                         blk_font.setPointSizeF(new_size)
                         fshort = QFontMetricsF(blk_font)
@@ -1103,22 +1121,27 @@ class SceneTextManager(QObject):
                     resize_ratio = max(resize_ratio_src * 1.5, 0.4)
                 # Minimum scale so text fits but isn't too small; allow smaller text
                 # for genuinely small bubbles, short translations, and very long sentences.
-                base_min = 0.5
+                base_min = 0.55
                 char_count = sum(len(w) for w in words if w.strip())
                 if region_rect is not None and len(region_rect) >= 4:
                     region_area = region_rect[2] * region_rect[3]
-                    # Small bubble (by area) or short text (<= 4 tokens) → permit smaller font
-                    if (len(words) <= 4) or (img_area > 0 and region_area < 0.025 * img_area):
+                    # Small bubble (by area) → permit smaller font
+                    if img_area > 0 and region_area < 0.025 * img_area:
                         base_min = 0.35
                     # Very long sentence: allow even smaller font so it stays inside bubbles.
                     if len(words) >= 18 or char_count >= 80:
                         base_min = min(base_min, 0.30)
+                    # Extremely long sentence: permit more shrink so it doesn't overflow tall/narrow bubbles.
+                    if char_count >= 120:
+                        base_min = min(base_min, 0.25)
                 resize_ratio = min(max(resize_ratio, base_min), 1.0)
                 area_for_cap = (original_block_area if original_block_area is not None else bounding_rect[2] * bounding_rect[3])
                 if img_area > 0 and area_for_cap > 0.5 * img_area:
                     resize_ratio = min(resize_ratio, 0.5)
-                # When region is much larger than text: scale UP so short text in big bubbles is readable (was: cap only)
-                if region_rect is not None and len(region_rect) >= 4 and text_area > 0:
+                # When region is much larger than text: scale UP so short text in big bubbles is readable.
+                # Skip scale-up for long text so our scale-down (LAYOUT_TEXT_SCALE_LONG) can actually shrink it.
+                is_long_text = (len(words) >= 12 or char_count >= LAYOUT_TEXT_SCALE_LONG_MIN_CHARS)
+                if not is_long_text and region_rect is not None and len(region_rect) >= 4 and text_area > 0:
                     region_area = region_rect[2] * region_rect[3]
                     if region_area > 2.5 * text_area:
                         scale_up = np.sqrt(LAYOUT_SCALE_UP_FILL * region_area / text_area)
@@ -1152,10 +1175,11 @@ class SceneTextManager(QObject):
                 abs_centroid = blkitem.blk.lines[0][0]
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
-        # Use more than full bubble width for line breaking so we get fewer, longer lines
-        # Allow up to ~1.30x bubble width; collision check will still prevent text going far outside the mask.
+        # Use more than full bubble width for line breaking so we get fewer, longer lines,
+        # but keep a margin so text does not hug the bubble edge.
+        # Allow up to ~1.10x bubble width; collision check will still prevent text going far outside the mask.
         if region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0:
-            max_central_width = float(region_rect[2] * 1.30)
+            max_central_width = float(region_rect[2] * 1.10)
 
         # Optional: hyphenation for non-CJK text (improves ugly wraps for long tokens).
         # We no longer pre-force line breaks here; instead we let layout_text() score candidates.
@@ -1264,6 +1288,8 @@ class SceneTextManager(QObject):
                 blkitem.setFontSize(new_font_size)
                 blk_font.setPointSizeF(new_font_size)
                 ffmt = QFontMetricsF(blk_font)
+            # Font size we used for layout (for scale-down below); after setPlainText item font can be stale
+            layout_font_pt = blk_font.pointSizeF()
 
             if restore_charfmts:
                 char_fmts = blkitem.get_char_fmts()
@@ -1284,6 +1310,48 @@ class SceneTextManager(QObject):
                 layout_w = max(layout_w, region_rect[2])
             blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
             blkitem.setPlainText(new_text)
+            # Scale down only the text inside the box (same layout, same box size).
+            # Use layout_font_pt (font size we used for layout). Applied before restore_charfmts;
+            # restore_charfmts overwrites per-char formats with pre-scale size, so we re-apply after.
+            scale = 1.0
+            final_pt = 0.0
+            if layout_font_pt > 0:
+                n_lines = len(new_text.split('\n'))
+                char_count = len(new_text.replace('\n', ''))
+                is_long = (n_lines >= LAYOUT_TEXT_SCALE_LONG_MIN_LINES or
+                           char_count >= LAYOUT_TEXT_SCALE_LONG_MIN_CHARS)
+                scale = LAYOUT_TEXT_SCALE_LONG if is_long else LAYOUT_TEXT_SCALE
+                if scale != 1.0:
+                    final_pt = max(LAYOUT_MIN_FONT_PT, layout_font_pt * scale)
+                    blkitem.setFontSize(final_pt)
+                    doc = blkitem.document()
+                    if doc is not None:
+                        default_font = doc.defaultFont()
+                        if default_font.pointSizeF() != final_pt:
+                            default_font.setPointSizeF(final_pt)
+                            doc.setDefaultFont(default_font)
+                    # Persist scaled size to block so save/load and second pass use it
+                    if blkitem.blk is not None:
+                        blkitem.blk.fontformat.font_size = pt2px(final_pt)
+            if len(self.pairwidget_list) > blkitem.idx:
+                self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
+            if restore_charfmts:
+                self.restore_charfmts(blkitem, text, new_text, char_fmts)
+            # Re-apply scale-down after restore_charfmts; it overwrites char formats with pre-scale size.
+            if final_pt > 0:
+                blkitem.setFontSize(final_pt)
+                doc = blkitem.document()
+                if doc is not None:
+                    default_font = doc.defaultFont()
+                    if default_font.pointSizeF() != final_pt:
+                        default_font.setPointSizeF(final_pt)
+                        doc.setDefaultFont(default_font)
+                # Persist again so block and item stay in sync after restore_charfmts
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.font_size = pt2px(final_pt)
+                # Ensure layout/repaint uses the new size
+                blkitem.layout.reLayoutEverything()
+                blkitem.repaint_background()
             blkitem._ensure_transparent_document_background()
             rw, rh = layout_w, layout_h  # keep for final clamp when constrain is on
             if constrain_to_bubble:
@@ -1299,14 +1367,8 @@ class SceneTextManager(QObject):
                 blkitem.setRect([im_x, im_y, rw, rh], padding=False, repaint=True)
                 if blkitem.blk is not None:
                     blkitem.blk._bounding_rect = blkitem.absBoundingRect()
-            if len(self.pairwidget_list) > blkitem.idx:
-                self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
-            if restore_charfmts:
-                self.restore_charfmts(blkitem, text, new_text, char_fmts)
-            if not constrain_to_bubble:
-                # Only squeeze when we don't have a bubble region; otherwise we keep the capped dimensions above
-                if region_rect is None or len(region_rect) < 4:
-                    blkitem.squeezeBoundingRect()
+            elif region_rect is None or len(region_rect) < 4:
+                blkitem.squeezeBoundingRect()
             # Clamp block to image bounds so text never draws outside the panel
             abr = blkitem.absBoundingRect(qrect=True)
             x, y, w, h = abr.x(), abr.y(), abr.width(), abr.height()

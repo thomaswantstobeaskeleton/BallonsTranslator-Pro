@@ -8,9 +8,9 @@ def _badness(slack: float) -> float:
     return slack * slack * slack
 
 
-# Penalty per line break to prefer fewer, longer lines (avoids 1–2 words per line)
-# Make this strong but not so extreme that lines blow past bubble width.
-_LINE_BREAK_PENALTY = 110.0
+# Penalty per line break to strongly prefer fewer, longer lines (avoids 1–2 words per line)
+# Increase slightly so long sentences are less likely to be split into many very short lines.
+_LINE_BREAK_PENALTY = 130.0
 
 
 def find_optimal_breaks_dp(

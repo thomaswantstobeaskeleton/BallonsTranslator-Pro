@@ -424,6 +424,27 @@ class TextStylePresetPanel(PanelArea):
             self.clear_btn.hide()
             self.resizeToContent()
 
+    def set_active_style_by_name(self, style_name: str):
+        """Set the preset with the given name as active (blue border). Call after initStyles/setStyles."""
+        if not style_name or not str(style_name).strip():
+            return
+        for i in range(self.flayout.count()):
+            item = self.flayout.itemAt(i)
+            if item is None:
+                continue
+            w = item.widget()
+            if w is None:
+                continue
+            if isinstance(w, TextStyleLabel):
+                name = getattr(w.fontfmt, '_style_name', '') or ''
+                if name == style_name:
+                    if self.active_text_style_label is not None:
+                        self.active_text_style_label.setActive(False)
+                    self.active_text_style_label = w
+                    w.setActive(True)
+                    self.active_text_style_label_changed.emit()
+                    break
+
     def setStyles(self, styles: List[FontFormat], save_styles = False):
         self._clear_styles()
         for style in styles:
