@@ -104,7 +104,7 @@ class LeftBar(Widget):
         self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
         self.runBtn.clicked.connect(self.run_clicked.emit)
 
-        actionOpenFolder = QAction(self.tr("Open Folder ..."), self)
+        actionOpenFolder = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr("Open Folder ..."), self)
         actionOpenFolder.triggered.connect(self.onOpenFolder)
         actionOpenFolder.setShortcut(QKeySequence.fromString(get_shortcut("file.open_folder", getattr(pcfg, "shortcuts", None))))
 
@@ -122,7 +122,7 @@ class LeftBar(Widget):
         actionOpenCBR.setToolTip(self.tr("Open a comic book RAR archive (.cbr/.rar). Requires: pip install rarfile; WinRAR/7-Zip in PATH."))
         actionOpenCBR.triggered.connect(self.onOpenCBR)
 
-        actionSaveProj = QAction(self.tr("Save Project"), self)
+        actionSaveProj = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'save_activate.svg')), self.tr("Save Project"), self)
         self.save_proj = actionSaveProj.triggered
         actionSaveProj.setShortcut(QKeySequence.fromString(get_shortcut("file.save_proj", getattr(pcfg, "shortcuts", None))))
 
@@ -421,13 +421,13 @@ class TitleBar(Widget):
         self.editToolBtn = TitleBarToolBtn(self)
         self.editToolBtn.setText(self.tr('Edit'))
 
-        undoAction = QAction(self.tr('Undo'), self)
+        undoAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-left.svg')), self.tr('Undo'), self)
         self.undo_trigger = undoAction.triggered
         undoAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.undo", getattr(pcfg, "shortcuts", None))))
-        redoAction = QAction(self.tr('Redo'), self)
+        redoAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Redo'), self)
         self.redo_trigger = redoAction.triggered
         redoAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.redo", getattr(pcfg, "shortcuts", None))))
-        pageSearchAction = QAction(self.tr('Search'), self)
+        pageSearchAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Search'), self)
         self.page_search_trigger = pageSearchAction.triggered
         pageSearchAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.page_search", getattr(pcfg, "shortcuts", None))))
         globalSearchAction = QAction(self.tr('Global Search'), self)
@@ -476,19 +476,19 @@ class TitleBar(Widget):
             lang_actions.append(la)
         self.displayLanguageMenu.addActions(lang_actions)
 
-        drawBoardAction = QAction(self.tr('Drawing Board'), self)
+        drawBoardAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'drawingtools_pen.svg')), self.tr('Drawing Board'), self)
         drawBoardAction.setShortcut(QKeySequence.fromString(get_shortcut("view.draw_board", getattr(pcfg, "shortcuts", None))))
-        texteditAction = QAction(self.tr('Text Editor'), self)
+        texteditAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_textedit.svg')), self.tr('Text Editor'), self)
         texteditAction.setShortcut(QKeySequence.fromString(get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None))))
         importTextStyles = QAction(self.tr('Import Text Styles'), self)
         exportTextStyles = QAction(self.tr('Export Text Styles'), self)
-        spellCheckPanelAction = QAction(self.tr('Spell check panel'), self)
+        spellCheckPanelAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')), self.tr('Spell check panel'), self)
         spellCheckPanelAction.setToolTip(self.tr('Show spell check panel (PR #974).'))
         self.spellcheck_panel_trigger = spellCheckPanelAction.triggered
-        keyboardShortcutsAction = QAction(self.tr('Keyboard Shortcuts...'), self)
+        keyboardShortcutsAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')), self.tr('Keyboard Shortcuts...'), self)
         keyboardShortcutsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.keyboard_shortcuts", getattr(pcfg, "shortcuts", None))))
         self.keyboard_shortcuts_trigger = keyboardShortcutsAction.triggered
-        contextMenuOptionsAction = QAction(self.tr('Context menu options...'), self)
+        contextMenuOptionsAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')), self.tr('Context menu options...'), self)
         contextMenuOptionsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.context_menu_options", getattr(pcfg, "shortcuts", None))))
         contextMenuOptionsAction.setToolTip(self.tr('Show or hide canvas right-click menu actions by category.'))
         self.context_menu_options_trigger = contextMenuOptionsAction.triggered
@@ -515,11 +515,11 @@ class TitleBar(Widget):
         self.themeDarkAction = themeDarkAction
 
         helpMenu = QMenu(self.tr('Help'), self)
-        docAction = QAction(self.tr('Documentation'), self)
+        docAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Documentation'), self)
         docAction.setToolTip(self.tr('Open project README (installation and usage).'))
-        aboutAction = QAction(self.tr('About'), self)
+        aboutAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'icon-design-35.svg')), self.tr('About'), self)
         aboutAction.setToolTip(self.tr('Show application version and info.'))
-        updateFromGitHubAction = QAction(self.tr('Update from GitHub'), self)
+        updateFromGitHubAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-up.svg')), self.tr('Update from GitHub'), self)
         updateFromGitHubAction.setToolTip(self.tr('Pull latest changes from GitHub. Keeps your config and local files unchanged.'))
         helpMenu.addAction(docAction)
         helpMenu.addAction(aboutAction)

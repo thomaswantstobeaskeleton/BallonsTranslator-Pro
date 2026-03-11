@@ -425,6 +425,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.set_gradient_type_signal.connect(self.on_set_gradient_type)
         self.canvas.set_text_on_path_signal.connect(self.on_set_text_on_path)
         self.canvas.run_detect_region.connect(self.on_run_detect_region)
+        self.canvas.download_page_requested.connect(self.on_download_page_requested)
         self.canvas.merge_selected_blocks_signal.connect(self.on_merge_selected_blocks)
         self.canvas.split_selected_regions_signal.connect(self.on_split_selected_regions)
         self.canvas.move_blocks_up_signal.connect(self.on_move_blocks_up)
@@ -671,6 +672,9 @@ class MainWindow(mainwindow_cls):
             self.bottomBar.paintChecker.click()
 
         self.textPanel.formatpanel.textstyle_panel.initStyles(text_styles)
+        self.textPanel.formatpanel.textstyle_panel.set_active_style_by_name(
+            getattr(pcfg, 'default_text_style_name', '') or ''
+        )
 
         self.canvas.search_widget.whole_word_toggle.setChecked(pcfg.fsearch_whole_word)
         self.canvas.search_widget.case_sensitive_toggle.setChecked(pcfg.fsearch_case)
@@ -772,6 +776,9 @@ class MainWindow(mainwindow_cls):
         if osp.exists(text_style_path):
             load_textstyle_from(text_style_path)
             self.textPanel.formatpanel.textstyle_panel.setStyles(text_styles)
+            self.textPanel.formatpanel.textstyle_panel.set_active_style_by_name(
+                getattr(pcfg, 'default_text_style_name', '') or ''
+            )
         else:
             pcfg.text_styles_path = text_style_path
             save_text_styles()
@@ -989,6 +996,14 @@ class MainWindow(mainwindow_cls):
 
     def on_set_default_format_requested(self):
         """Save current global font format to config so it is used as default for new projects/sessions."""
+        # Persist which preset is selected so it shows as active (blue) on next launch
+        panel = self.st_manager.formatpanel.textstyle_panel
+        if panel.active_text_style_label is not None:
+            pcfg.default_text_style_name = getattr(
+                panel.active_text_style_label.fontfmt, '_style_name', ''
+            ) or ''
+        else:
+            pcfg.default_text_style_name = ''
         save_config()
 
     def onHideCanvas(self):
@@ -1380,11 +1395,13 @@ class MainWindow(mainwindow_cls):
             self.on_select_all_canvas()
 
     def eventFilter(self, obj, event):
-        """Intercept Ctrl+A when canvas (or its viewport) has focus; select all text blocks on canvas."""
+        """Intercept Ctrl+A when canvas (or its viewport) has focus; select all text blocks on canvas. Skip when editing a text block so Ctrl+A selects all text in that block."""
         if event.type() == QEvent.Type.KeyPress:
             e = event
             if e.key() == Qt.Key.Key_A and e.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
                 if self.centralStackWidget.currentIndex() == 1:
+                    if self.canvas.editing_textblkitem is not None:
+                        return super().eventFilter(obj, event)
                     if obj is self.canvas.gv or obj is self.canvas.gv.viewport():
                         self.on_select_all_canvas()
                         return True
@@ -2872,6 +2889,9 @@ class MainWindow(mainwindow_cls):
             load_textstyle_from(p, raise_exception=True)
             save_config()
             self.textPanel.formatpanel.textstyle_panel.setStyles(text_styles)
+            self.textPanel.formatpanel.textstyle_panel.set_active_style_by_name(
+                getattr(pcfg, 'default_text_style_name', '') or ''
+            )
         except Exception as e:
             create_error_dialog(e, self.tr(f'Failed to load from {p}'))
 
@@ -2916,6 +2936,14 @@ class MainWindow(mainwindow_cls):
 
     def on_export_current_page_as(self):
         """Export current page as image: result if available, else inpainted, else original (#1134)."""
+        self._export_or_download_page(mode=None)
+
+    def on_download_page_requested(self, mode: str):
+        """Handle canvas right-click Download image: result | inpainted | original."""
+        self._export_or_download_page(mode=mode)
+
+    def _export_or_download_page(self, mode: str = None):
+        """Export or download current page. mode: None = result→inpainted→original; 'result'|'inpainted'|'original' = canvas Download menu."""
         if self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
             QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
             return
@@ -2923,28 +2951,68 @@ class MainWindow(mainwindow_cls):
         current_img = self.imgtrans_proj.current_img
         result_path = self.imgtrans_proj.get_result_path(current_img)
         inpainted_path = self.imgtrans_proj.get_inpainted_path(current_img)
+        orig_path = osp.join(self.imgtrans_proj.directory, current_img)
         img = None
         source_kind = None
-        if osp.exists(result_path):
-            img = imread(result_path)
-            source_kind = self.tr('result')
-        elif self.imgtrans_proj.inpainted_valid and self.imgtrans_proj.inpainted_array is not None:
-            img = np.array(self.imgtrans_proj.inpainted_array)
-            if img.ndim == 2:
-                img = np.stack([img] * 3, axis=-1)
-            elif img.shape[-1] == 4:
-                img = img[:, :, :3].copy()
+
+        def get_inpainted():
+            if self.imgtrans_proj.inpainted_valid and self.imgtrans_proj.inpainted_array is not None:
+                arr = np.array(self.imgtrans_proj.inpainted_array)
+                if arr.ndim == 2:
+                    arr = np.stack([arr] * 3, axis=-1)
+                elif arr.shape[-1] == 4:
+                    arr = arr[:, :, :3].copy()
+                return arr
+            if inpainted_path and osp.exists(inpainted_path):
+                arr = imread(inpainted_path)
+                if arr is not None and arr.ndim == 3 and arr.shape[-1] == 4:
+                    arr = arr[:, :, :3].copy()
+                return arr
+            return None
+
+        def get_original():
+            if orig_path and osp.exists(orig_path):
+                return imread(orig_path)
+            return None
+
+        if mode == 'original':
+            img = get_original()
+            source_kind = self.tr('original')
+        elif mode == 'inpainted':
+            img = get_inpainted()
             source_kind = self.tr('inpainted')
-        elif inpainted_path and osp.exists(inpainted_path):
-            img = imread(inpainted_path)
-            if img is not None and img.ndim == 3 and img.shape[-1] == 4:
-                img = img[:, :, :3].copy()
-            source_kind = self.tr('inpainted')
-        if img is None:
-            orig_path = osp.join(self.imgtrans_proj.directory, current_img)
-            if osp.exists(orig_path):
-                img = imread(orig_path)
+        elif mode == 'result':
+            if osp.exists(result_path):
+                img = imread(result_path)
+                source_kind = self.tr('result')
+            elif self.imgtrans_proj.inpainted_valid and self.imgtrans_proj.inpainted_array is not None:
+                try:
+                    qimg = self.canvas.render_result_img()
+                    if qimg is not None and not qimg.isNull():
+                        img = pixmap2ndarray(qimg, keep_alpha=False)
+                        if img is not None and img.ndim == 3 and img.shape[-1] == 4:
+                            img = img[:, :, :3].copy()
+                        source_kind = self.tr('result')
+                except Exception as e:
+                    LOGGER.exception(e)
+            if img is None:
+                img = get_inpainted()
+                source_kind = self.tr('inpainted (no text yet)')
+            if img is None:
+                img = get_original()
                 source_kind = self.tr('original')
+        else:
+            # mode is None: result → inpainted → original
+            if osp.exists(result_path):
+                img = imread(result_path)
+                source_kind = self.tr('result')
+            if img is None:
+                img = get_inpainted()
+                source_kind = self.tr('inpainted')
+            if img is None:
+                img = get_original()
+                source_kind = self.tr('original')
+
         if img is None:
             QMessageBox.information(self, self.tr('Export'), self.tr('No image available for current page.'))
             return

@@ -86,7 +86,12 @@ if _PADDLEOCR_VL_AVAILABLE:
             if self.processor is not None and self._model_name == model_name:
                 return
             self._model_name = model_name
-            self.processor = AutoProcessor.from_pretrained(model_name)
+            # Use the fast processor (default in recent transformers) for speed.
+            # If fast is unavailable, fall back to the standard processor.
+            try:
+                self.processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
+            except TypeError:
+                self.processor = AutoProcessor.from_pretrained(model_name)
             use_bf16 = self.params.get("use_bf16", {}).get("value", True)
             dtype = torch.bfloat16 if (use_bf16 and torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()) else torch.float16
             try:

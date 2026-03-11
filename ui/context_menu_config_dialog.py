@@ -81,6 +81,9 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("run_ocr_translate_inpaint", "OCR, translate and inpaint"),
         ("run_inpaint", "Inpaint"),
     ]),
+    ("Download image", [
+        ("download_image", "Download image (submenu)"),
+    ]),
 ]
 
 

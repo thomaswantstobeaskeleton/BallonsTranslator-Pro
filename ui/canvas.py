@@ -111,6 +111,9 @@ class CustomGV(QGraphicsView):
         modifiers = e.modifiers()
         if modifiers in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
             if key == QKEY.Key_A:
+                # When editing a text block in-scene, let the text item handle Ctrl+A (select all text in block).
+                if self.canvas is not None and self.canvas.editing_textblkitem is not None:
+                    return super().keyPressEvent(e)
                 self.canvas.select_all_signal.emit()
                 e.accept()
                 return
@@ -209,6 +212,8 @@ class Canvas(QGraphicsScene):
 
     run_blktrans = Signal(int)
     run_detect_region = Signal(QRectF, bool)  # rect, replace_page (True = "Detect text on page" -> replace blocks)
+
+    download_page_requested = Signal(str)  # "result" | "inpainted" | "original"
 
 
     begin_scale_tool = Signal(QPointF)
@@ -1260,6 +1265,17 @@ class Canvas(QGraphicsScene):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 inpaint_act = run_menu.addAction(self.tr("Inpaint"))
 
+            download_menu = None
+            download_result_act = download_inpainted_act = download_original_act = None
+            if context_menu_visible('download_image'):
+                download_menu = menu.addMenu(self.tr("Download image"))
+                download_result_act = download_menu.addAction(self.tr("With text (result)"))
+                download_result_act.setToolTip(self.tr("Save current page as image with translated text rendered (inpainted + text layer)."))
+                download_inpainted_act = download_menu.addAction(self.tr("Inpainted only (no text)"))
+                download_inpainted_act.setToolTip(self.tr("Save inpainted image only (text regions filled, no text overlay)."))
+                download_original_act = download_menu.addAction(self.tr("Original"))
+                download_original_act.setToolTip(self.tr("Save original image without translation or inpainting."))
+
             menu.addSeparator()
             configure_menu_act = menu.addAction(self.tr("Configure menu..."))
 
@@ -1430,6 +1446,12 @@ class Canvas(QGraphicsScene):
                 self.run_blktrans.emit(2)
             elif rst == inpaint_act:
                 self.run_blktrans.emit(3)
+            elif download_result_act is not None and rst == download_result_act:
+                self.download_page_requested.emit("result")
+            elif download_inpainted_act is not None and rst == download_inpainted_act:
+                self.download_page_requested.emit("inpainted")
+            elif download_original_act is not None and rst == download_original_act:
+                self.download_page_requested.emit("original")
 
     @property
     def have_selected_blkitem(self):
