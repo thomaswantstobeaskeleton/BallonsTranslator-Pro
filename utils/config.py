@@ -144,6 +144,8 @@ class ModuleConfig(Config):
     # Optional: lightweight colorization of grayscale pages when saving final result.
     enable_colorization: bool = False
     colorization_strength: float = 0.6  # 0–1; blend between grayscale and colorized
+    # Colorization backend: 'simple' (soft twilight), 'manga_vibrant', 'cool', etc.
+    colorization_backend: str = "simple"
     # Section 7: Caching + memory / stability
     pipeline_cache_enabled: bool = False  # When True, in-memory pipeline cache can be used (get_pipeline_cache(True))
     inpaint_spill_to_disk_after_blocks: int = 0  # When >0, write intermediate inpainted image to temp file every N blocks to reduce peak RAM/VRAM (e.g. 8 or 12)
@@ -513,6 +515,15 @@ def load_config(config_path: str = shared.CONFIG_PATH):
         op = getattr(pcfg.module, 'ocr_params', None)
         if isinstance(op, dict):
             op.pop('surya_ocr', None)
+    # Migrate legacy nemotron_ocr → nemotron_parse (Parse 1.1)
+    if getattr(pcfg.module, 'ocr', None) == 'nemotron_ocr':
+        pcfg.module.ocr = 'nemotron_parse'
+        op = getattr(pcfg.module, 'ocr_params', None)
+        if isinstance(op, dict) and 'nemotron_ocr' in op:
+            if 'nemotron_parse' not in op:
+                op['nemotron_parse'] = op.pop('nemotron_ocr')
+            else:
+                op.pop('nemotron_ocr', None)
     # Section 9: clamp numeric settings
     try:
         from utils.validation import clamp_settings

@@ -566,6 +566,20 @@ class ConfigPanel(Widget):
         )
         self.colorization_checker.stateChanged.connect(self._on_colorization_changed)
         dlConfigPanel.vlayout.addWidget(_)
+        # Backend selection for colorization (different “models” / palettes).
+        self.colorization_backend_combobox = QComboBox()
+        self.colorization_backend_combobox.addItems([
+            self.tr('Soft (Twilight, manga-friendly)'),
+            self.tr('Vibrant (Magma)'),
+            self.tr('Cool (Ocean)'),
+        ])
+        sublock_color_backend = ConfigSubBlock(
+            self.colorization_backend_combobox,
+            self.tr('Colorization style'),
+            discription=self.tr('Choose the colorization palette: softer vs more vibrant or cool-toned.')
+        )
+        self.colorization_backend_combobox.currentIndexChanged.connect(self._on_colorization_backend_changed)
+        dlConfigPanel.vlayout.addWidget(sublock_color_backend)
         self.colorization_strength_spin = QDoubleSpinBox()
         self.colorization_strength_spin.setRange(0.1, 1.0)
         self.colorization_strength_spin.setSingleStep(0.1)
@@ -1189,6 +1203,16 @@ class ConfigPanel(Widget):
     def _on_colorization_strength_changed(self, value: float):
         pcfg.module.colorization_strength = float(value)
 
+    def _on_colorization_backend_changed(self, index: int):
+        # Map combo index to backend key
+        if index == 0:
+            backend = "simple"          # Twilight
+        elif index == 1:
+            backend = "manga_vibrant"   # Magma
+        else:
+            backend = "cool"            # Ocean
+        pcfg.module.colorization_backend = backend
+
     def _on_ocr_upscale_min_side_changed(self, value: int):
         pcfg.module.ocr_upscale_min_side = value
 
@@ -1475,6 +1499,17 @@ class ConfigPanel(Widget):
             self.colorization_checker.setChecked(getattr(pcfg.module, 'enable_colorization', False))
         if hasattr(self, 'colorization_strength_spin'):
             self.colorization_strength_spin.setValue(float(getattr(pcfg.module, 'colorization_strength', 0.6)))
+        if hasattr(self, 'colorization_backend_combobox'):
+            backend = getattr(pcfg.module, 'colorization_backend', 'simple')
+            if backend in ('simple', 'twilight', 'manga_soft'):
+                idx = 0
+            elif backend in ('manga_vibrant', 'magma', 'warm'):
+                idx = 1
+            else:
+                idx = 2
+            self.colorization_backend_combobox.blockSignals(True)
+            self.colorization_backend_combobox.setCurrentIndex(idx)
+            self.colorization_backend_combobox.blockSignals(False)
         if hasattr(self, 'ocr_upscale_min_side_spin'):
             self.ocr_upscale_min_side_spin.setValue(int(getattr(pcfg.module, 'ocr_upscale_min_side', 0)))
         if hasattr(self, 'inpaint_spill_after_spin'):

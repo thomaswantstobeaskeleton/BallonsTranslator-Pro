@@ -14,7 +14,7 @@ def _is_grayscale_like(img: np.ndarray, atol: int = 2) -> bool:
     )
 
 
-def apply_colorization(img: np.ndarray, strength: float = 0.6) -> np.ndarray:
+def apply_colorization(img: np.ndarray, strength: float = 0.6, backend: str = "simple") -> np.ndarray:
     """
     Lightweight page colorization for grayscale manga pages.
 
@@ -42,8 +42,20 @@ def apply_colorization(img: np.ndarray, strength: float = 0.6) -> np.ndarray:
     else:
         return img
 
-    # Use a relatively gentle colormap to avoid neon artifacts.
-    color_bgr = cv2.applyColorMap(gray, cv2.COLORMAP_TWILIGHT)
+    # Choose a colormap backend. All are relatively manga-friendly palettes; TWILIGHT is softer,
+    # while MAGMA is more vibrant.
+    backend = (backend or "simple").strip().lower()
+    if backend in ("simple", "twilight", "manga_soft"):
+        cmap = cv2.COLORMAP_TWILIGHT
+    elif backend in ("manga_vibrant", "magma", "warm"):
+        cmap = cv2.COLORMAP_MAGMA
+    elif backend in ("cool", "ocean"):
+        cmap = cv2.COLORMAP_OCEAN
+    else:
+        # Fallback to the original gentle default.
+        cmap = cv2.COLORMAP_TWILIGHT
+
+    color_bgr = cv2.applyColorMap(gray, cmap)
     color_rgb = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)
 
     # Blend between original (grayscale as RGB) and colorized version.

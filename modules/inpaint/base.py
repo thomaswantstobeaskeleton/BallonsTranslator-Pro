@@ -398,7 +398,7 @@ class InpainterBase(BaseModule):
         dilate_iter = getattr(self, 'mask_dilation_iterations', 0)
         if dilate_iter > 0:
             k = getattr(self, 'mask_dilation_kernel_size', 2)
-            k = max(2, min(5, int(k)))
+            k = max(1, min(5, int(k)))
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
             mask = cv2.dilate(mask, kernel, iterations=dilate_iter)
         mask = np.ascontiguousarray(mask)
@@ -471,8 +471,8 @@ class InpainterBase(BaseModule):
                     excluded_labels = {s.strip().lower() for s in exclude_str.split(',') if s.strip()}
                     textblock_list = [b for b in textblock_list if (getattr(b, 'label', None) or '').strip().lower() not in excluded_labels]
             
-            # Crop enlargement: use ratio 1.7 to match upstream (more context = better inpainting)
-            enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 1.7)
+            # Crop enlargement: larger ratio = more context, helps cover small missed detections (e.g. punctuation)
+            enlarge_ratio = getattr(self, 'inpaint_enlarge_ratio', 2.0)
             spill_after_blocks = int(getattr(pcfg.module, 'inpaint_spill_to_disk_after_blocks', 0) or 0)
             temp_spill_path = None
             if spill_after_blocks > 0 and len(textblock_list) > spill_after_blocks:
@@ -954,7 +954,7 @@ class LamaInpainterMPE(InpainterBase):
 @register_inpainter('lama_large_512px')
 class LamaLarge(LamaInpainterMPE):
 
-    mask_dilation_iterations = 1
+    mask_dilation_iterations = 2
     mask_dilation_kernel_size = 2  # 2×2 = gentler expansion per iteration; 3×3 = stronger
     # Always run LaMa; skip median fill to avoid "weird box of a certain color" in speech bubbles
     check_need_inpaint = False
@@ -976,20 +976,20 @@ class LamaLarge(LamaInpainterMPE):
         'mask_dilation': {
             'type': 'selector',
             'options': [0, 1, 2, 3, 4, 5],
-            'value': 1,
-            'description': 'Mask dilation iterations (0–5). 0 = no expansion, keeps bubble edges. 1 = minimal. Higher values expand the mask more and can erase bubble shape.',
+            'value': 2,
+            'description': 'Mask dilation iterations (0–5). Expands the inpainting mask to cover small missed detections (e.g. punctuation). 0 = no expansion. 2 = default, good for dots/punctuation near text. Higher = more coverage, may soften bubble edges.',
         },
         'mask_dilation_kernel': {
             'type': 'selector',
-            'options': [2, 3],
+            'options': [1, 2, 3, 4, 5],
             'value': 2,
-            'description': 'Dilation kernel size (2 or 3). 2 = gentler expansion per iteration; 3 = stronger. Use 2 if inpainting is too strong.',
+            'description': 'Dilation kernel size (1–5). 1 = minimal expansion; 2 = gentle; 5 = strongest per iteration. Use with mask_dilation iterations.',
         },
         'inpaint_enlarge_ratio': {
             'type': 'selector',
-            'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7],
-            'value': 1.7,
-            'description': 'Crop margin ratio (1.1–1.7). 1.7 = upstream default, more context for inpainting. Lower = tighter crop.',
+            'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7, 2.0, 2.2, 2.5],
+            'value': 2.0,
+            'description': 'Crop margin ratio (1.1–2.5). Larger = more context around each block; helps cover small missed detections (e.g. punctuation) when combined with mask dilation. 2.0 = default.',
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone']),
         'precision': {
@@ -1013,12 +1013,17 @@ class LamaLarge(LamaInpainterMPE):
         self.precision = self.params['precision']['value']
         self._update_mask_dilation()
         self._update_mask_dilation_kernel()
+        self._update_inpaint_enlarge_ratio()
 
     def _update_mask_dilation(self):
-        self.mask_dilation_iterations = int(self.params.get('mask_dilation', {}).get('value', 1))
+        self.mask_dilation_iterations = int(self.params.get('mask_dilation', {}).get('value', 2))
 
     def _update_mask_dilation_kernel(self):
         self.mask_dilation_kernel_size = int(self.params.get('mask_dilation_kernel', {}).get('value', 2))
+
+    def _update_inpaint_enlarge_ratio(self):
+        val = self.params.get('inpaint_enlarge_ratio', {}).get('value', 2.0)
+        self.inpaint_enlarge_ratio = float(val) if val is not None else 2.0
 
     def _load_model(self):
         device = self.params['device']['value']
@@ -1036,6 +1041,8 @@ class LamaLarge(LamaInpainterMPE):
             self._update_mask_dilation()
         elif param_key == 'mask_dilation_kernel':
             self._update_mask_dilation_kernel()
+        elif param_key == 'inpaint_enlarge_ratio':
+            self._update_inpaint_enlarge_ratio()
 
 
 # LAMA_ORI: LamaFourier = None

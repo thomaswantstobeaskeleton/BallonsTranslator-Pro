@@ -584,14 +584,14 @@ class TextBlkItem(QGraphicsTextItem):
         self.old_undo_steps = self.document().availableUndoSteps()
 
     def on_document_enlarged(self):
-        """Layout wants to change size. Cap width at 1.2x and height at 1.3x; when cut-off, only allow width to grow (no full height)."""
+        """Layout wants to change size. Cap width at 1.4x and height at 1.3x; when cut-off, only allow width to grow (no full height)."""
         size = self.documentSize()
         cw = self._display_rect.width()
         ch = self._display_rect.height()
         nw = size.width()
         nh = size.height()
-        # Cap width growth at ~1.35x; never shrink (slightly wider lines to reduce vertical overflow)
-        width_cap = cw * 1.35 if cw > 0 else nw
+        # Cap width growth at 1.4x; never shrink (slightly wider lines to reduce vertical overflow)
+        width_cap = cw * 1.4 if cw > 0 else nw
         use_w = max(nw, cw)
         use_w = min(use_w, width_cap)
         # Cap height growth at 1.3x; when cut-off (nh > cap) only widen, don't allow full height

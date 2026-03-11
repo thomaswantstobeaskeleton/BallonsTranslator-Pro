@@ -232,6 +232,8 @@ class ModelManagerDialog(QDialog):
             self.resultTable.setItem(row, 1, QTableWidgetItem(mod['display_name']))
             st = r['status']
             status_str = status_text.get(st, st)
+            if st == 'no_download_list' and r.get('details') and any(r['details']):
+                status_str = self.tr('Optional')
             if r.get('import_error'):
                 status_str = self.tr('Incompatible')
             self.resultTable.setItem(row, 2, QTableWidgetItem(status_str))

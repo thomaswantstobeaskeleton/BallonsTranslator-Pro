@@ -281,7 +281,12 @@ class BaseModule:
             if not hasattr(self, k) or getattr(self, k) is None:
                 return False
         return True
-    
+
+    @classmethod
+    def is_environment_compatible(cls) -> bool:
+        """Override in subclasses to hide module from non-dev dropdown when env is incompatible (e.g. Python version). Default True."""
+        return True
+
     def __del__(self):
         self.unload_model()
 

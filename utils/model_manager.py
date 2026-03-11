@@ -169,8 +169,10 @@ def enable_hf_xet_if_token_in_env() -> None:
 
 def get_all_downloadable_modules() -> List[Dict[str, Any]]:
     """
-    Collect all registered modules (detectors, OCR, inpainters, translators) that have
-    a download_file_list. Used by the Manage models dialog.
+    Collect all registered modules (detectors, OCR, inpainters, translators) for the
+    Manage models dialog. Includes every module so optional/pip-only modules (e.g.
+    Nemotron) appear in the check table. can_download is True only when the module
+    has a download_file_list and not download_file_on_load.
     Returns a list of dicts: category_label, display_name, module_class, can_download.
     """
     from modules import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
@@ -204,13 +206,17 @@ def get_available_module_keys(registry) -> List[str]:
     """
     Return module keys that are ready to use: either no file list / download-on-load,
     or all required files are present with valid hash. Used to hide not-downloaded or
-    incomplete modules from dropdowns when dev_mode is False.
+    incomplete modules from dropdowns when dev_mode is False. Also excludes modules
+    that report is_environment_compatible() False (e.g. Python version requirements).
     """
     program_path = getattr(shared, "PROGRAM_PATH", "") or os.getcwd()
     result = []
     for module_key in registry.module_dict.keys():
         module_class = registry.get(module_key)
         if module_class is None:
+            continue
+        compat = getattr(module_class, "is_environment_compatible", None)
+        if callable(compat) and not compat():
             continue
         mod_info = {
             "display_name": module_key,
@@ -239,10 +245,12 @@ def _check_one_module(module_info: Dict[str, Any], include_import_check: bool) -
         }
     download_file_list = getattr(module_class, "download_file_list", None)
     if not download_file_list:
+        hint = getattr(module_class, "optional_install_hint", None)
+        details_msg = [hint] if isinstance(hint, str) and hint.strip() else [""]
         return {
             "module_info": module_info,
             "status": "no_download_list",
-            "details": [""],
+            "details": details_msg,
         }
 
     program_path = getattr(shared, "PROGRAM_PATH", "") or os.getcwd()

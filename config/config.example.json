@@ -76,6 +76,7 @@
     "upscale_policy_final": "lanczos",
     "enable_colorization": false,
     "colorization_strength": 0.6,
+    "colorization_backend": "simple",
     "pipeline_cache_enabled": false,
     "inpaint_spill_to_disk_after_blocks": 0
   },
