@@ -819,28 +819,42 @@ class ConfigPanel(Widget):
         sublock_sw = ConfigSubBlock(self.default_stroke_width_spin, self.tr('Default stroke width'), discription=self.tr('Global default when "use global setting" is selected for Stroke Size. 0 = no stroke.'))
         global_fntfmt_layout.addWidget(sublock_sw, 4, 0)
 
+        # Default text box corner radius / shape: 0 = rectangle, >0 = rounded (large values → circle-like for square boxes).
+        self.default_box_corner_radius_spin = QDoubleSpinBox(self)
+        self.default_box_corner_radius_spin.setRange(0, 999)
+        self.default_box_corner_radius_spin.setSingleStep(1.0)
+        self.default_box_corner_radius_spin.setDecimals(1)
+        self.default_box_corner_radius_spin.setValue(float(getattr(pcfg.global_fontformat, 'text_box_corner_radius', 0.0) or 0.0))
+        self.default_box_corner_radius_spin.valueChanged.connect(self.on_default_box_corner_radius_changed)
+        sublock_br = ConfigSubBlock(
+            self.default_box_corner_radius_spin,
+            self.tr('Default box corner radius'),
+            discription=self.tr('0 = square/rectangle. >0 = rounded rectangle; for circle-like boxes use a large value (radius ≈ half of box size). Applies to newly created text boxes.')
+        )
+        global_fntfmt_layout.addWidget(sublock_br, 5, 0)
+
         self.default_stroke_color_btn = QPushButton(self)
         self.default_stroke_color_btn.setFixedWidth(80)
         self._update_default_stroke_color_button()
         self.default_stroke_color_btn.clicked.connect(self.on_default_stroke_color_clicked)
         sublock_sc = ConfigSubBlock(self.default_stroke_color_btn, self.tr('Default stroke color'), discription=self.tr('Global default when "use global setting" is selected for Stroke Color.'))
-        global_fntfmt_layout.addWidget(sublock_sc, 5, 0)
+        global_fntfmt_layout.addWidget(sublock_sc, 6, 0)
 
         self.let_effect_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Effect'), parent=self, insert_stretch=True)
         self.let_effect_combox.activated.connect(self.on_effect_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 6, 0)
+        global_fntfmt_layout.addWidget(sublock, 7, 0)
         self.let_alignment_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Alignment'), parent=self, insert_stretch=True)
         self.let_alignment_combox.activated.connect(self.on_alignment_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 7, 0)
+        global_fntfmt_layout.addWidget(sublock, 8, 0)
 
         self.let_writing_mode_combox, sublock = combobox_with_label([dec_program_str, use_global_str], self.tr('Writing-mode'), parent=self, insert_stretch=True)
         self.let_writing_mode_combox.activated.connect(self.on_writing_mode_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 8, 0)
+        global_fntfmt_layout.addWidget(sublock, 9, 0)
         self.let_family_combox, sublock = combobox_with_label([self.tr('Keep existing'), self.tr('Always use global setting')], self.tr('Font Family'), parent=self, insert_stretch=True)
         self.let_family_combox.activated.connect(self.on_family_flag_changed)
-        global_fntfmt_layout.addWidget(sublock, 9, 0)
+        global_fntfmt_layout.addWidget(sublock, 10, 0)
 
-        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 10, 0)
+        global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 11, 0)
 
         self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'),
                 discription=self.tr('When on: scale font size to fit the speech bubble and wrap lines to the balloon shape. When off: use global font size and still wrap to the balloon (text may overflow if too long). Works with "Text in box" = Auto fit to box.'))
@@ -889,12 +903,12 @@ class ConfigPanel(Widget):
         self.layout_height_overflow_penalty_spin.setRange(0.0, 2000.0)
         self.layout_height_overflow_penalty_spin.setSingleStep(50.0)
         self.layout_height_overflow_penalty_spin.setDecimals(1)
-        self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0)))
+        self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0)))
         self.layout_height_overflow_penalty_spin.valueChanged.connect(self._on_layout_height_overflow_penalty_changed)
         height_penalty_sublock = ConfigSubBlock(
             self.layout_height_overflow_penalty_spin,
             self.tr('Height overflow penalty'),
-            discription=self.tr('Penalty factor when a candidate layout exceeds bubble height (higher = prefer shorter, wider layouts).')
+            discription=self.tr('When a layout would exceed bubble height, this penalty is applied. Lower (e.g. 400–500) = fewer lines, larger font, allow some overflow. Higher (e.g. 1000+) = strict fit, more lines, smaller font.')
         )
         generalConfigPanel.addSublock(height_penalty_sublock)
 
@@ -1187,6 +1201,9 @@ class ConfigPanel(Widget):
     def on_default_stroke_width_changed(self, value: float):
         pcfg.global_fontformat.stroke_width = value
 
+    def on_default_box_corner_radius_changed(self, value: float):
+        pcfg.global_fontformat.text_box_corner_radius = float(max(0.0, value))
+
     def on_default_stroke_color_clicked(self):
         gf = pcfg.global_fontformat
         srgb = getattr(gf, 'srgb', [0, 0, 0]) or [0, 0, 0]
@@ -1335,6 +1352,10 @@ class ConfigPanel(Widget):
             self.detect_config_panel.tertiary_detect_checker.setChecked(getattr(pcfg.module, 'enable_tertiary_detect', False))
         if hasattr(self.detect_config_panel, 'tertiary_detector_combobox'):
             self.detect_config_panel.tertiary_detector_combobox.setCurrentText(getattr(pcfg.module, 'textdetector_tertiary', '') or '')
+        if hasattr(self.detect_config_panel, 'allow_detection_box_rotation_checker'):
+            self.detect_config_panel.allow_detection_box_rotation_checker.setChecked(getattr(pcfg.module, 'allow_detection_box_rotation', False))
+        if hasattr(self.detect_config_panel, 'detection_rotation_threshold_spinbox'):
+            self.detect_config_panel.detection_rotation_threshold_spinbox.setValue(int(getattr(pcfg.module, 'detection_rotation_threshold_degrees', 10.0)))
         if hasattr(self.inpaint_config_panel, 'inpaint_tile_size_spin'):
             self.inpaint_config_panel.inpaint_tile_size_spin.blockSignals(True)
             self.inpaint_config_panel.inpaint_tile_size_spin.setValue(getattr(pcfg.module, 'inpaint_tile_size', 0))
@@ -1381,7 +1402,7 @@ class ConfigPanel(Widget):
             self.layout_short_line_penalty_spin.blockSignals(False)
         if hasattr(self, 'layout_height_overflow_penalty_spin'):
             self.layout_height_overflow_penalty_spin.blockSignals(True)
-            self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 700.0)))
+            self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0)))
             self.layout_height_overflow_penalty_spin.blockSignals(False)
         # Keep Text in box dropdown in sync (Auto fit = decide by program + Auto layout)
         if pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:

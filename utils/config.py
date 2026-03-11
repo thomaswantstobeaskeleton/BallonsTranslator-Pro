@@ -37,6 +37,10 @@ class ModuleConfig(Config):
     # 是否在 OCR 后进行字体检测（默认不启用）
     ocr_font_detect: bool = False
     textdetector_params: Dict = field(default_factory=lambda: dict())
+    # Allow text detection to set box rotation when text is slanted (horizontal only). When off, horizontal boxes stay 0°.
+    allow_detection_box_rotation: bool = False
+    # Only apply rotation when angle is at least this many degrees from horizontal (e.g. 10 = ignore tiny slants).
+    detection_rotation_threshold_degrees: float = 10.0
     ocr_params: Dict = field(default_factory=lambda: dict())
     translator_params: Dict = field(default_factory=lambda: dict())
     inpainter_params: Dict = field(default_factory=lambda: dict())
@@ -114,7 +118,7 @@ class ModuleConfig(Config):
     layout_collision_max_retries: int = 3
     # Scoring/penalty weights for auto layout (non-CJK)
     layout_short_line_penalty: float = 80.0   # penalty per very short non-final line
-    layout_height_overflow_penalty: float = 700.0  # factor for height overflow penalty
+    layout_height_overflow_penalty: float = 580.0  # lower = fewer lines, larger font; higher = slightly smaller font to fit height
     # Center text vertically (and horizontally as needed) inside each bubble/block (manga-translator-ui style).
     center_text_in_bubble: bool = False
     # Try larger font / fewer lines so text fits with fewer line breaks (test combinations; manga-translator-ui style).
@@ -252,6 +256,7 @@ class ProgramConfig(Config):
     let_show_only_custom_fonts_flag: bool = False
     let_textstyle_indep_flag: bool = False
     text_styles_path: str = osp.join(shared.DEFAULT_TEXTSTYLE_DIR, 'default.json')
+    default_text_style_name: str = ''  # Preset name to show as selected (blue) on startup when using Save as default
     fsearch_case: bool = False
     fsearch_whole_word: bool = False
     fsearch_regex: bool = False
@@ -397,6 +402,7 @@ CONTEXT_MENU_DEFAULT = {
     'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_angle': True, 'format_squeeze': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
+    'download_image': True,
 }
 
 # Section 9: canonical key order when saving config (clean diffs, easier debugging)
@@ -406,7 +412,7 @@ CONFIG_KEY_ORDER = (
     "open_recent_on_startup", "recent_proj_list_max", "show_welcome_screen", "auto_update_from_github", "logical_dpi", "confirm_before_run",
     "let_fntsize_flag", "let_fntstroke_flag", "let_fntcolor_flag", "let_fnt_scolor_flag", "let_fnteffect_flag",
     "let_alignment_flag", "let_writing_mode_flag", "let_family_flag", "let_autolayout_flag", "let_uppercase_flag",
-    "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path",
+    "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path", "default_text_style_name",
     "fsearch_case", "fsearch_whole_word", "fsearch_regex", "fsearch_range",
     "gsearch_case", "gsearch_whole_word", "gsearch_regex", "gsearch_range",
     "darkmode", "bubbly_ui", "accent_color_hex", "app_font_family", "app_font_size", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",

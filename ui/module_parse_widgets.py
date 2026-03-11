@@ -645,6 +645,24 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         self.osb_layout_fallbacks_checker.setChecked(getattr(pcfg.module, "osb_layout_fallbacks_enabled", True))
         self.osb_layout_fallbacks_checker.clicked.connect(self._on_osb_layout_fallbacks_changed)
         self.vlayout.addWidget(self.osb_layout_fallbacks_checker)
+        # Allow detection to set box rotation for slanted (horizontal) text; threshold = min degrees to apply.
+        self.allow_detection_box_rotation_checker = QCheckBox(self.tr('Allow box rotation for slanted text'))
+        self.allow_detection_box_rotation_checker.setToolTip(self.tr(
+            'When enabled, text detection can set the rotation angle of horizontal boxes for slanted text. '
+            'Only angles at or above the threshold are applied; smaller slants stay 0°.'))
+        self.allow_detection_box_rotation_checker.setChecked(getattr(pcfg.module, 'allow_detection_box_rotation', False))
+        self.allow_detection_box_rotation_checker.clicked.connect(self._on_allow_detection_box_rotation_changed)
+        rot_hl = QHBoxLayout()
+        rot_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        rot_hl.addWidget(self.allow_detection_box_rotation_checker)
+        rot_hl.addWidget(QLabel(self.tr('Min angle (degrees):')))
+        self.detection_rotation_threshold_spinbox = QSpinBox()
+        self.detection_rotation_threshold_spinbox.setRange(1, 45)
+        self.detection_rotation_threshold_spinbox.setValue(int(getattr(pcfg.module, 'detection_rotation_threshold_degrees', 10.0)))
+        self.detection_rotation_threshold_spinbox.setSuffix('°')
+        self.detection_rotation_threshold_spinbox.valueChanged.connect(self._on_detection_rotation_threshold_changed)
+        rot_hl.addWidget(self.detection_rotation_threshold_spinbox)
+        self.vlayout.addLayout(rot_hl)
         # Secondary detector params (shown when dual detect is on and a secondary is selected)
         self.secondary_params_container = QWidget(self)
         secondary_params_outer = QVBoxLayout(self.secondary_params_container)
@@ -676,6 +694,12 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
 
     def _on_osb_layout_fallbacks_changed(self):
         pcfg.module.osb_layout_fallbacks_enabled = self.osb_layout_fallbacks_checker.isChecked()
+
+    def _on_allow_detection_box_rotation_changed(self):
+        pcfg.module.allow_detection_box_rotation = self.allow_detection_box_rotation_checker.isChecked()
+
+    def _on_detection_rotation_threshold_changed(self, value: int):
+        pcfg.module.detection_rotation_threshold_degrees = float(value)
 
     def _on_secondary_detector_changed(self, name: str):
         pcfg.module.textdetector_secondary = (name or '').strip()

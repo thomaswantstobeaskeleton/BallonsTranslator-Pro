@@ -8,6 +8,7 @@ import re
 
 from .imgproc_utils import union_area, xywh2xyxypoly, rotate_polygons, color_difference
 from .structures import Union, List, Dict, field, nested_dataclass
+from .config import pcfg
 from .split_text_region import split_textblock as split_text_region
 from .fontformat import FontFormat, LineSpacingType, TextAlignment, fix_fontweight_qt
 from .textblock_mask import canny_flood
@@ -737,9 +738,13 @@ def examine_textblk(blk: TextBlock, im_w: int, im_h: int, sort: bool = False) ->
     blk.angle = rotation_angle
     if vertical:
         blk.angle -= 90
-    # Force horizontal text to 0° so it never renders slanted/sideways
+    allow_rot = getattr(pcfg.module, 'allow_detection_box_rotation', False)
+    threshold = getattr(pcfg.module, 'detection_rotation_threshold_degrees', 10.0)
     if not vertical:
-        blk.angle = 0
+        if allow_rot and abs(blk.angle) >= threshold:
+            pass  # keep computed angle for slanted horizontal text
+        else:
+            blk.angle = 0
     elif abs(blk.angle) < 3:
         blk.angle = 0
     # Normalize font_size so text fits inside bubbles and rarely overflows.
