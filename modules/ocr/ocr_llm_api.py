@@ -165,6 +165,7 @@ class LLM_OCR(OCRBase):
         "OpenRouter: qwen/qwen3.5-flash-02-23",
         "OpenRouter: anthropic/claude-sonnet-4",
         "OpenRouter: anthropic/claude-3-5-sonnet",
+        "OpenRouter: meta-llama/llama-3.2-11b-vision-instruct",
     ]
 
     params = {
