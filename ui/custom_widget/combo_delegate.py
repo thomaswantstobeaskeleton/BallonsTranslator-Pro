@@ -79,6 +79,13 @@ class _LeaveFilter(QObject):
         self._on_leave = on_leave
 
     def eventFilter(self, obj, event):
-        if obj is self._view.viewport() and event.type() == QEvent.Type.Leave:
-            self._on_leave(event)
+        try:
+            if self._view is None:
+                return False
+            vp = self._view.viewport()
+            if obj is vp and event.type() == QEvent.Type.Leave:
+                self._on_leave(event)
+        except RuntimeError:
+            # View or viewport was deleted (e.g. config panel rebuilt when dev mode toggled)
+            return False
         return False
