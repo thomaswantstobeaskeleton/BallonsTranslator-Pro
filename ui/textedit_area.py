@@ -106,7 +106,11 @@ class SourceTextEdit(QTextEdit):
             self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         else:
             self.min_height = 45
-            self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            # Rendering parity (section 3): when on, preserve line breaks so panel matches canvas (no extra wrap).
+            if getattr(pcfg.module, 'layout_panel_preserve_line_breaks', False):
+                self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+            else:
+                self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
             
 
     def contextMenuEvent(self, event):

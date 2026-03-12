@@ -11,6 +11,7 @@ from qtpy.QtGui import (QGradient, QKeyEvent, QFont, QTextCursor, QPixmap, QPain
                        QBrush, QPalette, QAbstractTextDocumentLayout, QTextFrameFormat, QImage, QBitmap, QRegion, QTransform, QPolygonF)
 
 from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingType
+from utils.text_layout import _merge_stub_lines_in_string
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
 from utils.fontformat import FontFormat, px2pt, pt2px
 from .misc import td_pattern, table_pattern, pixmap2ndarray, ndarray2pixmap
@@ -357,7 +358,7 @@ class TextBlkItem(QGraphicsTextItem):
 
         if not blk.rich_text:
             if blk.translation:
-                self.setPlainText(blk.translation)
+                self.setPlainText(_merge_stub_lines_in_string(blk.translation))
         else:
             self.setHtml(blk.rich_text)
             self.setLetterSpacing(font_fmt.letter_spacing, repaint_background=False)

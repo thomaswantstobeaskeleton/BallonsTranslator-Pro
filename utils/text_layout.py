@@ -40,11 +40,180 @@ class Line:
         self.pos_x += self.spacing
         self.spacing = 0
 
-def _score_layout(lines: List[Line], target_width: float, line_height: int) -> float:
+    def merge_next(self, next_line: 'Line', delimiter: str = ' ', delimiter_len: int = 1) -> None:
+        """Merge next_line into this line (this line gets: self.text + delimiter + next_line.text)."""
+        self.text = self.text + delimiter + next_line.text
+        self.length += delimiter_len + next_line.length
+        self.num_words += next_line.num_words
+        # Keep this line's pos_x/pos_y; bbox will still be correct from min(pos_x) to max(pos_x+length)
+
+
+def _merge_stub_lines(lines: List[Line], delimiter: str, delimiter_len: int) -> None:
     """
-    Score a layout: lower is better.
-    Penalizes: many lines, short last line, raggedness, narrow columns.
-    Rewards: filling available width.
+    Merge stubs so "the", "and", "Realm." never sit alone. First all 1-word lines, then 2-5 word stubs if they fit.
+    """
+    if not lines or len(lines) <= 1:
+        return
+    max_len = max(ln.length for ln in lines) * 2.0
+    # First: merge every 1-word line until none left
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(lines):
+            if len(lines) <= 1:
+                break
+            if lines[i].num_words == 1 and i + 1 < len(lines):
+                lines[i].merge_next(lines[i + 1], delimiter, delimiter_len)
+                lines.pop(i + 1)
+                changed = True
+                continue
+            if lines[i].num_words == 1 and i == len(lines) - 1 and len(lines) >= 2:
+                prev = len(lines) - 2
+                lines[prev].merge_next(lines[-1], delimiter, delimiter_len)
+                lines.pop(-1)
+                changed = True
+                break
+            i += 1
+    # Then: merge 2-5 word stubs if merged length fits
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(lines):
+            if len(lines) <= 1:
+                break
+            if lines[i].num_words <= 5 and i + 1 < len(lines):
+                merged_len = lines[i].length + delimiter_len + lines[i + 1].length
+                if merged_len <= max_len:
+                    lines[i].merge_next(lines[i + 1], delimiter, delimiter_len)
+                    lines.pop(i + 1)
+                    changed = True
+                    continue
+            if i == len(lines) - 1 and lines[i].num_words <= 5 and len(lines) >= 2:
+                prev = len(lines) - 2
+                merged_len = lines[prev].length + delimiter_len + lines[-1].length
+                if merged_len <= max_len:
+                    lines[prev].merge_next(lines[-1], delimiter, delimiter_len)
+                    lines.pop(-1)
+                    changed = True
+                    break
+            i += 1
+
+
+def _word_count_str(line: str) -> int:
+    return len([w for w in line.split() if w.strip()])
+
+
+def _merge_stub_lines_in_string(text: str) -> str:
+    """Merge so layout never returns 'the', 'and', 'Realm.' alone. First 0-1 word lines, then 2-5 stubs, then final pass."""
+    if not text or not text.strip():
+        return text
+    lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
+    if len(lines) <= 1:
+        return text
+    # Eliminate every 0- or 1-word line until none left
+    while True:
+        merged = []
+        i = 0
+        any_one = False
+        while i < len(lines):
+            line = lines[i]
+            nw = _word_count_str(line)
+            if nw <= 1 and i + 1 < len(lines):
+                merged.append((line + " " + lines[i + 1]).strip())
+                i += 2
+                any_one = True
+                continue
+            if nw <= 1 and i == len(lines) - 1 and merged:
+                merged[-1] = (merged[-1] + " " + line).strip()
+                i += 1
+                any_one = True
+                continue
+            merged.append(line)
+            i += 1
+        if not any_one:
+            break
+        lines = merged
+        if len(lines) <= 1:
+            break
+    # Merge 2-5 word stubs
+    merged = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        nw = _word_count_str(line)
+        if nw <= 5 and i + 1 < len(lines):
+            merged.append((line + " " + lines[i + 1]).strip())
+            i += 2
+            continue
+        if nw <= 5 and i == len(lines) - 1 and merged:
+            merged[-1] = (merged[-1] + " " + line).strip()
+            i += 1
+            continue
+        merged.append(line)
+        i += 1
+    text = "\n".join(merged)
+    # Final pass: merge any remaining 0-4 word line until none left
+    while True:
+        lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
+        if len(lines) <= 1:
+            break
+        out = []
+        i = 0
+        any_stub = False
+        while i < len(lines):
+            line = lines[i]
+            nw = _word_count_str(line)
+            if nw <= 4 and i + 1 < len(lines):
+                out.append((line + " " + lines[i + 1]).strip())
+                i += 2
+                any_stub = True
+                continue
+            if nw <= 4 and i == len(lines) - 1 and out:
+                out[-1] = (out[-1] + " " + line).strip()
+                i += 1
+                any_stub = True
+                continue
+            out.append(line)
+            i += 1
+        if not any_stub:
+            break
+        text = "\n".join(out)
+    # Last resort: merge any remaining 0-1 word line until none
+    while True:
+        lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
+        if len(lines) <= 1:
+            break
+        out = []
+        i = 0
+        any_one = False
+        while i < len(lines):
+            line = lines[i]
+            nw = _word_count_str(line)
+            if nw <= 1 and i + 1 < len(lines):
+                out.append((line + " " + lines[i + 1]).strip())
+                i += 2
+                any_one = True
+                continue
+            if nw <= 1 and i == len(lines) - 1 and out:
+                out[-1] = (out[-1] + " " + line).strip()
+                i += 1
+                any_one = True
+                continue
+            out.append(line)
+            i += 1
+        if not any_one:
+            break
+        text = "\n".join(out)
+    return text
+
+
+def _score_layout(lines: List[Line], target_width: float, line_height: int, balloon_shape: str = "auto") -> float:
+    """
+    Score a layout: lower is better. (2.2 Optimal line breaking, 2.3 Stub avoidance.)
+    Penalizes: many lines, short last line, raggedness, stub lines (1–5 words; 1-word very strong), narrow columns.
+    Rewards: filling available width. For balloon_shape "round" (Diamond-Text), penalizes uneven line lengths more.
     """
     if not lines:
         return 1e18
@@ -60,24 +229,60 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int) -> f
     except Exception:
         pass
     line_penalty = n * base_line_penalty
-    # Penalty for short last line (orphan)
+    # Penalty for short last line (orphan by length)
     orphan_penalty = 0.0
     if target_width > 0 and last_len < target_width * 0.4:
         orphan_penalty = 80.0
-    # Penalty for raggedness (variance in line lengths)
+    # Penalty for last line having only 1-5 words (orphan at end). 1-word uses configurable penalty (2.3).
+    last_line_stub_penalty = 0.0
+    if n > 1:
+        w = lines[-1].num_words
+        stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0))
+        if w <= 1:
+            last_line_stub_penalty = stub_1word
+        elif w <= 2:
+            last_line_stub_penalty = 500.0
+        elif w <= 3:
+            last_line_stub_penalty = 280.0
+        elif w <= 4:
+            last_line_stub_penalty = 150.0
+        elif w <= 5:
+            last_line_stub_penalty = 80.0
+    # Penalty for raggedness (variance in line lengths). Diamond-Text round/square/bevel: prefer uniform line lengths.
+    ragged_weight = 0.01
+    try:
+        if (balloon_shape or "auto") in ("round", "square", "bevel", "pentagon"):
+            ragged_weight = 0.04  # stronger penalty for uneven lines in these shapes
+    except Exception:
+        pass
+    _uniform_shape = (balloon_shape or "auto") in ("round", "square", "bevel", "pentagon")
     if n > 1:
         variance = sum((l - avg_len) ** 2 for l in lengths) / n
-        ragged_penalty = min(variance * 0.01, 50.0)
+        ragged_penalty = min(variance * ragged_weight, 80.0 if _uniform_shape else 50.0)
     else:
         ragged_penalty = 0.0
     # Extra penalty when earlier lines are very short compared to the rest
     short_line_penalty = 0.0
     if n > 1 and avg_len > 0:
-        # Any non-final line that is much shorter than average hurts score
         pen = float(getattr(pcfg.module, 'layout_short_line_penalty', 80.0))
         for i, L in enumerate(lengths[:-1]):
-            if L < avg_len * 0.6:
+            if L < avg_len * 0.78:
                 short_line_penalty += pen
+    # 2.3 Strong penalty for stub lines; 1-word lines get extra-high penalty from config.
+    stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0))
+    stub_line_penalty = 0.0
+    if n > 1:
+        for i, ln in enumerate(lines[:-1]):
+            if ln.num_words <= 1:
+                stub_line_penalty += stub_1word
+            elif ln.num_words <= 2:
+                stub_line_penalty += 750.0
+            elif ln.num_words <= 3:
+                stub_line_penalty += 320.0
+            elif ln.num_words <= 4:
+                stub_line_penalty += 160.0
+            elif ln.num_words <= 5:
+                stub_line_penalty += 85.0
     # Reward width utilization: prefer layouts that use more of target_width
     width_util = avg_len / target_width if target_width > 0 else 0
     width_bonus = -100.0 * min(width_util, 1.0)  # negative = reward
@@ -90,7 +295,7 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int) -> f
     few_lines_long_text_penalty = 0.0
     if 2 <= n <= 3 and target_width > 0 and avg_len >= target_width * 0.65:
         few_lines_long_text_penalty = 120.0
-    return line_penalty + orphan_penalty + ragged_penalty + short_line_penalty + long_single_line_penalty + few_lines_long_text_penalty + width_bonus
+    return line_penalty + orphan_penalty + last_line_stub_penalty + ragged_penalty + short_line_penalty + stub_line_penalty + long_single_line_penalty + few_lines_long_text_penalty + width_bonus
 
 
 def line_is_valid(line: Line, new_len: int, delimiter_len, max_width, words_length, srcline_wlist, line_no: int, line_height, ref_src_lines: bool = False):
@@ -440,6 +645,7 @@ def layout_text(
     collision_max_retries: int = 3,
     target_box_height: int = None,
     optimize_for_fewer_lines: bool = False,
+    balloon_shape: str = "auto",
 ) -> Tuple[str, List]:
 
     angle = blk.angle
@@ -583,13 +789,13 @@ def layout_text(
             srcline_wlist=srcline_wlist,
         )
 
-    # Width-targeted scoring: try multiple candidate widths, pick best layout
+    # 2.2 Width-targeted scoring: try multiple candidate widths, pick best layout (Knuth–Plass-style: score many, pick best).
     maxw = max_central_width
     if maxw == np.inf:
         maxw = mask.shape[1]
     retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
-    # Slightly more aggressive exploration when optimize_for_fewer_lines is on
-    shrink_per_retry = 0.97 if optimize_for_fewer_lines else 0.98
+    num_width_attempts = max(retries, 20)  # more candidates for better optimal line breaking
+    shrink_per_retry = 0.96 if optimize_for_fewer_lines else 0.97
     # layout_lines_alignside consumes words/wl_list; keep copies for retries
     words_orig = list(words)
     wl_list_orig = list(wl_list)
@@ -598,7 +804,7 @@ def layout_text(
     best_adjust_xy = (0, 0)
     best_score = 1e18
 
-    for attempt in range(retries):
+    for attempt in range(num_width_attempts):
         words[:] = words_orig[:]
         wl_list[:] = wl_list_orig[:]
         cur_maxw = max(16, int(maxw * (shrink_per_retry ** attempt)))
@@ -640,7 +846,7 @@ def layout_text(
 
         # Score layout (only when not using forced_lines; forced_lines already chosen by DP)
         if forced_lines is None:
-            score = _score_layout(lines, float(cur_maxw), line_height) + height_penalty
+            score = _score_layout(lines, float(cur_maxw), line_height, balloon_shape=balloon_shape) + height_penalty
             if score < best_score:
                 best_score = score
                 best_lines = lines
@@ -661,7 +867,10 @@ def layout_text(
         lines, adjust_xy = _layout_once(maxw)
         if not lines:
             return "", [0, 0, 0, 0], False, (0, 0)
-    
+
+    # Post-pass: merge stub lines (e.g. "fell", "heart" alone) into next/prev so they share a line
+    _merge_stub_lines(lines, delimiter, delimiter_len)
+
     concated_text = []
     pos_x_lst, pos_right_lst = [], []
     for line in lines:
@@ -669,6 +878,8 @@ def layout_text(
         pos_right_lst.append(max(line.pos_x, 0) + line.length)
         concated_text.append(line.text)
     concated_text = '\n'.join(concated_text)
+    # Defensive string-level merge so single-word lines are never returned (in case Line merge missed any)
+    concated_text = _merge_stub_lines_in_string(concated_text)
 
     pos_x_lst = np.array(pos_x_lst)
     pos_right_lst = np.array(pos_right_lst)

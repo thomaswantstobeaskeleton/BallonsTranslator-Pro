@@ -1,4 +1,4 @@
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional, Callable
 
 from qtpy.QtGui import QTextCursor
 from qtpy.QtCore import QPointF
@@ -68,7 +68,7 @@ class MoveBlkItemsCommand(QUndoCommand):
 
 
 class ApplyFontformatCommand(QUndoCommand):
-    def __init__(self, items: List[TextBlkItem], trans_widget_lst: List[TransTextEdit], fontformat: FontFormat):
+    def __init__(self, items: List[TextBlkItem], trans_widget_lst: List[TransTextEdit], fontformat: FontFormat, layout_after: Optional[Callable[[List[TextBlkItem]], None]] = None):
         super(ApplyFontformatCommand, self).__init__()
         self.items = items
         self.old_html_lst = []
@@ -76,6 +76,7 @@ class ApplyFontformatCommand(QUndoCommand):
         self.old_fmt_lst = []
         self.new_fmt = fontformat
         self.trans_widget_lst = trans_widget_lst
+        self.layout_after = layout_after
         for item in items:
             self.old_html_lst.append(item.toHtml())
             self.old_fmt_lst.append(item.get_fontformat())
@@ -85,6 +86,8 @@ class ApplyFontformatCommand(QUndoCommand):
         for item, edit in zip(self.items, self.trans_widget_lst):
             item.set_fontformat(self.new_fmt, set_char_format=True)
             edit.document().clearUndoRedoStacks()
+        if self.layout_after is not None:
+            self.layout_after(self.items)
 
     def undo(self):
         for rect, item, html, fmt, edit in zip(self.old_rect_lst, self.items, self.old_html_lst, self.old_fmt_lst, self.trans_widget_lst):

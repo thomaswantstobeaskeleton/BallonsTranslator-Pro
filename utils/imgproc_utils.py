@@ -328,6 +328,66 @@ def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False
         return ballon_mask, (ballon_mask > 0).sum(), [x1, y1, x2, y2], cv2.boundingRect(ballon_mask)
     return ballon_mask, (ballon_mask > 0).sum(), [x1, y1, x2, y2]
 
+
+def classify_bubble_shape_from_mask(mask: np.ndarray) -> str:
+    """
+    Classify bubble shape from its binary mask using contour analysis (no neural net).
+    Returns one of: round, elongated, narrow, square, diamond, pentagon.
+    Used when layout_balloon_shape == 'auto': after optional model (if enabled), then
+    contour is used; fallback is the aspect-ratio heuristic.
+    """
+    if mask is None or mask.size == 0:
+        return "round"
+    h, w = mask.shape[:2]
+    if w < 3 or h < 3:
+        return "round"
+    # Ensure binary
+    if len(mask.shape) > 2:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return "round"
+    # Largest contour by area
+    main = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(main)
+    if area < 10:
+        return "round"
+    rect = cv2.boundingRect(main)
+    rw, rh = rect[2], rect[3]
+    if rw <= 0 or rh <= 0:
+        return "round"
+    ar = min(rw, rh) / max(rw, rh)
+    # Tall and thin -> narrow
+    if rh > rw * 1.4:
+        return "narrow"
+    if rw > rh * 1.4:
+        pass  # wide -> possibly elongated
+    # Approximate polygon to get vertex count
+    peri = cv2.arcLength(main, True)
+    eps = max(0.02 * peri, 1.0)
+    approx = cv2.approxPolyDP(main, eps, True)
+    n_verts = len(approx)
+    if n_verts == 4:
+        # Square vs diamond: use minAreaRect to get oriented bbox; if angle is ~45 deg and ar~1, diamond-like
+        (cx, cy), (mw, mh), angle = cv2.minAreaRect(main)
+        if mw > 0 and mh > 0:
+            mar = min(mw, mh) / max(mw, mh)
+            if mar > 0.85 and (abs(angle) > 20 and abs(angle) < 70 or abs(angle) > 110 and abs(angle) < 160):
+                return "diamond"
+        if ar >= 0.85:
+            return "square"
+        return "elongated"
+    if n_verts == 5:
+        return "pentagon"
+    if n_verts >= 6 or n_verts <= 3:
+        # Smooth / many vertices -> round or oval
+        if ar >= 0.65:
+            return "round"
+        return "elongated"
+    return "round"
+
+
 def square_pad_resize(img: np.ndarray, tgt_size: int):
     h, w = img.shape[:2]
     pad_h, pad_w = 0, 0

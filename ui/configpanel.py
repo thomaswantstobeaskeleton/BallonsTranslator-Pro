@@ -945,6 +945,90 @@ class ConfigPanel(Widget):
         )
         generalConfigPanel.addSublock(height_penalty_sublock)
 
+        # 2.1 Font scaling to fit bubble: min/max font size (pt), fit-to-bubble toggle
+        self.layout_font_size_min_spin = QDoubleSpinBox()
+        self.layout_font_size_min_spin.setRange(4.0, 48.0)
+        self.layout_font_size_min_spin.setSingleStep(1.0)
+        self.layout_font_size_min_spin.setDecimals(1)
+        self.layout_font_size_min_spin.setValue(float(getattr(pcfg.module, 'layout_font_size_min', 8.0)))
+        self.layout_font_size_min_spin.valueChanged.connect(self._on_layout_font_size_min_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_font_size_min_spin,
+            self.tr('Layout font size min (pt)'),
+            discription=self.tr('Minimum font size (points) for auto layout. Text will not be scaled below this.')
+        ))
+        self.layout_font_size_max_spin = QDoubleSpinBox()
+        self.layout_font_size_max_spin.setRange(12.0, 120.0)
+        self.layout_font_size_max_spin.setSingleStep(2.0)
+        self.layout_font_size_max_spin.setDecimals(1)
+        self.layout_font_size_max_spin.setValue(float(getattr(pcfg.module, 'layout_font_size_max', 72.0)))
+        self.layout_font_size_max_spin.valueChanged.connect(self._on_layout_font_size_max_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_font_size_max_spin,
+            self.tr('Layout font size max (pt)'),
+            discription=self.tr('Maximum font size (points) for auto layout. Prevents text from growing too large.')
+        ))
+        self.layout_font_fit_bubble_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Scale font to fit bubble'),
+            discription=self.tr('When on, scale laid-out text to fit inside the bubble (ratio-based); when off, only apply line-break scaling. Font size is always clamped to min/max above.')
+        )
+        self.layout_font_fit_bubble_checker.stateChanged.connect(self._on_layout_font_fit_bubble_changed)
+        self.layout_font_binary_search_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Binary search font size'),
+            discription=self.tr('Find the largest font size that fits the bubble by trying multiple sizes (more accurate, slower). Only when "Scale font to fit bubble" is on and non-CJK.')
+        )
+        self.layout_font_binary_search_checker.stateChanged.connect(self._on_layout_font_binary_search_changed)
+        # Diamond-Text: balloon shape (auto, round, elongated, narrow, diamond, square, bevel, pentagon, point)
+        self.layout_balloon_shape_combo, _ = generalConfigPanel.addCombobox(
+            [
+                self.tr('Auto'), self.tr('Round'), self.tr('Elongated'), self.tr('Narrow'),
+                self.tr('Diamond'), self.tr('Square'), self.tr('Bevel'), self.tr('Pentagon'), self.tr('Point'),
+            ],
+            self.tr('Balloon shape (Diamond-Text)'),
+            discription=self.tr('Hint for bubble shape: Auto detects from aspect ratio; other options set insets and line-length scoring (e.g. round/square/bevel = more uniform line lengths).')
+        )
+        self.layout_balloon_shape_combo.activated.connect(self._on_layout_balloon_shape_changed)
+        # When Auto: pick which method(s) to use and in what order
+        self.layout_balloon_shape_auto_method_combo, _ = generalConfigPanel.addCombobox(
+            [
+                self.tr('Aspect ratio only'),
+                self.tr('Contour only'),
+                self.tr('Model only'),
+                self.tr('Model, then contour'),
+                self.tr('Model, then aspect ratio'),
+                self.tr('Contour, then aspect ratio'),
+                self.tr('Model, then contour, then aspect ratio'),
+            ],
+            self.tr('Auto shape method'),
+            discription=self.tr('When balloon shape is Auto, which method(s) to use. Contour = mask-based (OpenCV). Model = HF image-classification (set model ID below).')
+        )
+        self.layout_balloon_shape_auto_method_combo.activated.connect(self._on_layout_balloon_shape_auto_method_changed)
+        self.layout_balloon_shape_model_id_edit = QLineEdit()
+        self.layout_balloon_shape_model_id_edit.setPlaceholderText(self.tr('e.g. prithivMLmods/Geometric-Shapes-Classification'))
+        self.layout_balloon_shape_model_id_edit.textChanged.connect(self._on_layout_balloon_shape_model_id_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_balloon_shape_model_id_edit,
+            self.tr('Balloon shape model ID'),
+            discription=self.tr('Required when Auto shape method includes "Model". Hugging Face image-classification model (circle, diamond, square, etc.).')
+        ))
+        # 2.3 Stub penalty for 1-word lines
+        self.layout_stub_penalty_1word_spin = QDoubleSpinBox()
+        self.layout_stub_penalty_1word_spin.setRange(200.0, 3000.0)
+        self.layout_stub_penalty_1word_spin.setSingleStep(100.0)
+        self.layout_stub_penalty_1word_spin.setDecimals(0)
+        self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0)))
+        self.layout_stub_penalty_1word_spin.valueChanged.connect(self._on_layout_stub_penalty_1word_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_stub_penalty_1word_spin,
+            self.tr('1-word line penalty'),
+            discription=self.tr('Penalty for a single word on its own line in layout scoring (higher = strongly avoid e.g. "the" alone).')
+        ))
+        self.layout_panel_preserve_line_breaks_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Translation panel: preserve line breaks'),
+            discription=self.tr('When on, the translation panel does not wrap by width so line breaks match the canvas bubble (rendering parity).')
+        )
+        self.layout_panel_preserve_line_breaks_checker.stateChanged.connect(self._on_layout_panel_preserve_line_breaks_changed)
+
         self.let_uppercase_checker, _ = generalConfigPanel.addCheckBox(self.tr('To uppercase'))
         self.let_uppercase_checker.stateChanged.connect(self.on_uppercase_changed)
 
@@ -1287,6 +1371,35 @@ class ConfigPanel(Widget):
 
     def _on_layout_height_overflow_penalty_changed(self, value: float):
         pcfg.module.layout_height_overflow_penalty = float(value)
+
+    def _on_layout_font_size_min_changed(self, value: float):
+        pcfg.module.layout_font_size_min = float(value)
+
+    def _on_layout_font_size_max_changed(self, value: float):
+        pcfg.module.layout_font_size_max = float(value)
+
+    def _on_layout_font_fit_bubble_changed(self):
+        pcfg.module.layout_font_fit_bubble = self.layout_font_fit_bubble_checker.isChecked()
+
+    def _on_layout_font_binary_search_changed(self):
+        pcfg.module.layout_font_binary_search = self.layout_font_binary_search_checker.isChecked()
+
+    def _on_layout_balloon_shape_changed(self, index: int):
+        pcfg.module.layout_balloon_shape = ("auto", "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point")[index]
+
+    def _on_layout_balloon_shape_auto_method_changed(self, index: int):
+        pcfg.module.layout_balloon_shape_auto_method = (
+            "aspect_ratio", "contour", "model", "model_contour", "model_ratio", "contour_ratio", "model_contour_ratio"
+        )[index]
+
+    def _on_layout_balloon_shape_model_id_changed(self, text: str):
+        pcfg.module.layout_balloon_shape_model_id = (text or "").strip()
+
+    def _on_layout_stub_penalty_1word_changed(self, value: float):
+        pcfg.module.layout_stub_penalty_1word = float(value)
+
+    def _on_layout_panel_preserve_line_breaks_changed(self):
+        pcfg.module.layout_panel_preserve_line_breaks = self.layout_panel_preserve_line_breaks_checker.isChecked()
         self.save_config.emit()
 
     def on_text_box_format_changed(self):
@@ -1453,6 +1566,40 @@ class ConfigPanel(Widget):
             self.layout_height_overflow_penalty_spin.blockSignals(True)
             self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0)))
             self.layout_height_overflow_penalty_spin.blockSignals(False)
+        if hasattr(self, 'layout_font_size_min_spin'):
+            self.layout_font_size_min_spin.blockSignals(True)
+            self.layout_font_size_min_spin.setValue(float(getattr(pcfg.module, 'layout_font_size_min', 8.0)))
+            self.layout_font_size_min_spin.blockSignals(False)
+        if hasattr(self, 'layout_font_size_max_spin'):
+            self.layout_font_size_max_spin.blockSignals(True)
+            self.layout_font_size_max_spin.setValue(float(getattr(pcfg.module, 'layout_font_size_max', 72.0)))
+            self.layout_font_size_max_spin.blockSignals(False)
+        if hasattr(self, 'layout_font_fit_bubble_checker'):
+            self.layout_font_fit_bubble_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_fit_bubble', True)))
+        if hasattr(self, 'layout_font_binary_search_checker'):
+            self.layout_font_binary_search_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_binary_search', False)))
+        if hasattr(self, 'layout_balloon_shape_combo'):
+            shape = (getattr(pcfg.module, 'layout_balloon_shape', 'auto') or 'auto').lower()
+            idx = {"auto": 0, "round": 1, "elongated": 2, "narrow": 3, "diamond": 4, "square": 5, "bevel": 6, "pentagon": 7, "point": 8}.get(shape, 0)
+            self.layout_balloon_shape_combo.blockSignals(True)
+            self.layout_balloon_shape_combo.setCurrentIndex(idx)
+            self.layout_balloon_shape_combo.blockSignals(False)
+        if hasattr(self, 'layout_balloon_shape_auto_method_combo'):
+            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'contour_ratio') or 'contour_ratio').lower()
+            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 5)
+            self.layout_balloon_shape_auto_method_combo.blockSignals(True)
+            self.layout_balloon_shape_auto_method_combo.setCurrentIndex(idx)
+            self.layout_balloon_shape_auto_method_combo.blockSignals(False)
+        if hasattr(self, 'layout_balloon_shape_model_id_edit'):
+            self.layout_balloon_shape_model_id_edit.blockSignals(True)
+            self.layout_balloon_shape_model_id_edit.setText(getattr(pcfg.module, 'layout_balloon_shape_model_id', '') or '')
+            self.layout_balloon_shape_model_id_edit.blockSignals(False)
+        if hasattr(self, 'layout_stub_penalty_1word_spin'):
+            self.layout_stub_penalty_1word_spin.blockSignals(True)
+            self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0)))
+            self.layout_stub_penalty_1word_spin.blockSignals(False)
+        if hasattr(self, 'layout_panel_preserve_line_breaks_checker'):
+            self.layout_panel_preserve_line_breaks_checker.setChecked(bool(getattr(pcfg.module, 'layout_panel_preserve_line_breaks', False)))
         # Keep Text in box dropdown in sync (Auto fit = decide by program + Auto layout)
         if pcfg.let_fntsize_flag == 0 and pcfg.let_autolayout_flag:
             self.text_box_format_combox.setCurrentIndex(0)

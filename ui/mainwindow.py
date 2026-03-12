@@ -17,6 +17,7 @@ from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, Q
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
+from utils.text_layout import _merge_stub_lines_in_string
 from utils.textblock import TextBlock, TextAlignment, examine_textblk
 from utils.split_text_region import split_textblock
 from utils import shared
@@ -1276,7 +1277,7 @@ class MainWindow(mainwindow_cls):
             lines = (blk.translation or '').split('\n')
             if line_idx < len(lines):
                 lines[line_idx] = new_line
-                blk.translation = '\n'.join(lines)
+                blk.translation = _merge_stub_lines_in_string('\n'.join(lines))
                 if block_idx < len(self.st_manager.pairwidget_list):
                     self.st_manager.pairwidget_list[block_idx].e_trans.setPlainText(blk.translation)
         else:

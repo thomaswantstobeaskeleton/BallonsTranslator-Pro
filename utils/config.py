@@ -125,6 +125,22 @@ class ModuleConfig(Config):
     optimize_line_breaks: bool = False
     # When True, clamp text box size to the detected balloon and keep position fixed (no growing/moving after layout).
     layout_constrain_to_bubble: bool = True
+    # Font scaling to fit bubble (2.1): min/max font size (pt) for auto layout; fit step clamps to this range.
+    layout_font_size_min: float = 8.0
+    layout_font_size_max: float = 72.0
+    # When True, scale font so laid-out text fits inside bubble (ratio-based, then clamp to min/max). When False, only apply LAYOUT_* scale factors.
+    layout_font_fit_bubble: bool = True
+    # When True, use binary search to find the largest font size in [min,max] that fits the bubble (re-runs layout per trial; more accurate, slower).
+    layout_font_binary_search: bool = False
+    # Balloon shape for Diamond-Text style layout: "auto" (detect from aspect ratio), "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point". Affects insets and line-length scoring.
+    layout_balloon_shape: str = "auto"
+    # When "auto": which method(s) to use and in what order. One of: aspect_ratio, contour, model, model_contour, model_ratio, contour_ratio, model_contour_ratio.
+    layout_balloon_shape_auto_method: str = "contour_ratio"
+    layout_balloon_shape_model_id: str = ""  # Required when method includes "model". e.g. prithivMLmods/Geometric-Shapes-Classification
+    # Extra penalty for 1-word lines in layout scorer (2.3); higher = engine strongly avoids single-word lines.
+    layout_stub_penalty_1word: float = 1200.0
+    # Rendering parity: when True, translation panel uses NoWrap so line breaks match the canvas bubble (no extra wrap).
+    layout_panel_preserve_line_breaks: bool = False
     finish_code: int = 15
     run_preset_name: str = 'Full'
     # --- Section 6 / 6.1: Image upscaling & per-stage resizing ---
