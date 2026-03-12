@@ -131,6 +131,7 @@ research.md
 plan.md
 /docs/*RESEARCH*.md
 /docs/**PLAN*.md
+docs/LINE_FITTING_RESEARCH.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db
