@@ -13,6 +13,8 @@ Comparison with PaddleOCRVLManga:
 from typing import List
 import os
 import tempfile
+import warnings
+import logging
 import numpy as np
 import cv2
 from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBlock
@@ -83,25 +85,85 @@ if _PADDLEOCR_VL_AVAILABLE:
 
         def _load_model(self):
             model_name = (self.params.get("model_name") or {}).get("value", "PaddlePaddle/PaddleOCR-VL") or "PaddlePaddle/PaddleOCR-VL"
-            if self.processor is not None and self._model_name == model_name:
+            if self.processor is not None and self.model is not None and self._model_name == model_name:
                 return
             self._model_name = model_name
-            # Use the fast processor (default in recent transformers) for speed.
-            # If fast is unavailable, fall back to the standard processor.
+            self.processor = None
+            self.model = None
+            # Offline mode: use cache only when HF_HUB_OFFLINE=1 or network is unavailable
+            use_offline = os.environ.get("HF_HUB_OFFLINE", "").strip().lower() in ("1", "true", "yes")
+            # Suppress noisy HF warnings during load (rope_parameters, tensor_parallel, torch_dtype)
+            loggers_to_suppress = [
+                "transformers.modeling_rope_utils",
+                "transformers.modeling_utils",
+                "megatron.tensor_parallel",
+                "tensor_parallel",
+            ]
+            old_levels = {}
+            for name in loggers_to_suppress:
+                log = logging.getLogger(name)
+                old_levels[name] = log.level
+                log.setLevel(logging.ERROR)
             try:
-                self.processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
-            except TypeError:
-                self.processor = AutoProcessor.from_pretrained(model_name)
-            use_bf16 = self.params.get("use_bf16", {}).get("value", True)
-            dtype = torch.bfloat16 if (use_bf16 and torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()) else torch.float16
-            try:
-                self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype)
-            except Exception as e:
-                self.logger.warning(f"PaddleOCR-VL load with dtype failed: {e}; trying default dtype.")
-                self.model = AutoModelForImageTextToText.from_pretrained(model_name)
-            self.model.to(self.device)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Unrecognized keys in.*rope_parameters")
+                    warnings.filterwarnings("ignore", message=".*layers were not sharded")
+                    warnings.filterwarnings("ignore", message=".*deprecated.*dtype")
+                    warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated", category=UserWarning)
+                    kwargs = {"local_files_only": use_offline}
+                    try:
+                        try:
+                            self.processor = AutoProcessor.from_pretrained(model_name, use_fast=True, **kwargs)
+                        except TypeError:
+                            self.processor = AutoProcessor.from_pretrained(model_name, **kwargs)
+                    except (OSError, RuntimeError) as e:
+                        if use_offline:
+                            raise
+                        self.logger.warning("PaddleOCR-VL: online load failed (%s); retrying with local cache only.", e)
+                        kwargs["local_files_only"] = True
+                        try:
+                            try:
+                                self.processor = AutoProcessor.from_pretrained(model_name, use_fast=True, **kwargs)
+                            except TypeError:
+                                self.processor = AutoProcessor.from_pretrained(model_name, **kwargs)
+                        except Exception as e2:
+                            raise RuntimeError(
+                                f"PaddleOCR-VL could not be loaded: no network and model not in cache ({e2}). "
+                                "Connect to the internet once to download, or switch OCR to another module (e.g. mit48px, manga_ocr)."
+                            ) from e2
+                    use_bf16 = self.params.get("use_bf16", {}).get("value", True)
+                    dtype = torch.bfloat16 if (use_bf16 and torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()) else torch.float16
+                    try:
+                        self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype, **kwargs)
+                    except (OSError, RuntimeError) as e:
+                        if use_offline:
+                            raise
+                        self.logger.warning("PaddleOCR-VL: online model load failed (%s); retrying with local cache only.", e)
+                        kwargs["local_files_only"] = True
+                        try:
+                            self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype, **kwargs)
+                        except Exception:
+                            try:
+                                self.model = AutoModelForImageTextToText.from_pretrained(model_name, **kwargs)
+                            except Exception as e2:
+                                raise RuntimeError(
+                                    f"Can't load PaddleOCR-VL: no network and model not in cache, or {e2}. "
+                                    "Connect to the internet to download once, or set OCR to another module (e.g. mit48px, manga_ocr)."
+                                ) from e2
+                    except Exception as e:
+                        self.logger.warning(f"PaddleOCR-VL load with dtype failed: {e}; trying default dtype.")
+                        self.model = AutoModelForImageTextToText.from_pretrained(model_name, **kwargs)
+            finally:
+                for name, level in old_levels.items():
+                    logging.getLogger(name).setLevel(level)
+            if self.model is not None:
+                self.model.to(self.device)
 
         def _run_one(self, pil_img: "Image.Image") -> str:
+            self._load_model()
+            if self.processor is None or self.model is None:
+                self.logger.warning("PaddleOCR-VL HF: processor or model not loaded; skipping OCR.")
+                return ""
             tmp_path = None
             try:
                 fd, tmp_path = tempfile.mkstemp(suffix=".png")

@@ -33,6 +33,18 @@ This document covers common issues: **GPU OOM**, **HuggingFace gated models**, *
 | **Faster downloads (Xet)** | If `HF_TOKEN` is set, `launch.py` can enable `HF_XET_HIGH_PERFORMANCE=1` for faster first-time downloads. See `utils/model_manager.py`. |
 | **Gated model in optional module** | Some detectors/OCRs (e.g. HF object detection, certain VLMs) pull gated models. Same steps: accept terms, set token, then run again. |
 
+### 2.1. PaddleOCR-VL: no network or "model not in cache"
+
+**Symptoms:** OCR fails with "getaddrinfo failed", "No model hoster is available", or "Can't load processor for 'PaddlePaddle/PaddleOCR-VL'" when using **paddleocr_vl_hf** and HuggingFace is unreachable (offline, firewall, or no DNS).
+
+The app will retry using the local HuggingFace cache only. If the model was never downloaded, you get a clear error.
+
+| What to do | Notes |
+|------------|--------|
+| **Download once when online** | Connect to the internet, run a page with OCR so the app can download PaddleOCR-VL, then you can run offline later. |
+| **Use another OCR** | Config → DL Module → **OCR** → choose e.g. **mit48px**, **manga_ocr**, or **easyocr** if you need to work offline without the HF model cached. |
+| **Force offline (cache only)** | Set env var `HF_HUB_OFFLINE=1` so the app never tries the network; useful if you already have the model cached. |
+
 ---
 
 ## 3. Provider API keys and translator/OCR
