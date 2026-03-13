@@ -118,7 +118,9 @@ class ModuleConfig(Config):
     layout_collision_max_retries: int = 3
     # Scoring/penalty weights for auto layout (non-CJK)
     layout_short_line_penalty: float = 80.0   # penalty per very short non-final line
-    layout_height_overflow_penalty: float = 580.0  # lower = fewer lines, larger font; higher = slightly smaller font to fit height
+    # Softer height overflow penalty so long English paragraphs can prefer fewer lines / better line quality
+    # even if the block is slightly taller relative to the bubble.
+    layout_height_overflow_penalty: float = 360.0  # lower = fewer lines, larger font; higher = slightly smaller font to fit height
     # Center text vertically (and horizontally as needed) inside each bubble/block (manga-translator-ui style).
     center_text_in_bubble: bool = False
     # Try larger font / fewer lines so text fits with fewer line breaks (test combinations; manga-translator-ui style).
@@ -146,7 +148,7 @@ class ModuleConfig(Config):
     layout_balloon_shape_auto_method: str = "contour_ratio"
     layout_balloon_shape_model_id: str = ""  # Required when method includes "model". e.g. prithivMLmods/Geometric-Shapes-Classification
     # Extra penalty for 1-word lines in layout scorer (2.3); higher = engine strongly avoids single-word lines.
-    layout_stub_penalty_1word: float = 1200.0
+    layout_stub_penalty_1word: float = 2000.0
     # Rendering parity: when True, translation panel uses NoWrap so line breaks match the canvas bubble (no extra wrap).
     layout_panel_preserve_line_breaks: bool = False
     finish_code: int = 15
@@ -429,7 +431,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_judge': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_angle': True, 'format_squeeze': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
     'download_image': True,

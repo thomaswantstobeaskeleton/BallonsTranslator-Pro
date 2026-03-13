@@ -206,6 +206,7 @@ class Canvas(QGraphicsScene):
 
     format_textblks = Signal()
     layout_textblks = Signal()
+    layout_judge_textblks = Signal()
     auto_fit_font_signal = Signal()
     auto_fit_binary_signal = Signal()
     set_balloon_shape_signal = Signal(str)
@@ -1258,6 +1259,7 @@ class Canvas(QGraphicsScene):
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
+            judge_act = None
             if context_menu_visible('format_apply'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 format_act = format_menu.addAction(self.tr("Apply font formatting"))
@@ -1266,6 +1268,12 @@ class Canvas(QGraphicsScene):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 layout_act = format_menu.addAction(self.tr("Auto layout"))
                 actions_map['format_layout'] = layout_act
+            if context_menu_visible('format_judge') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                judge_act = format_menu.addAction(self.tr("Judge (center in bubble)"))
+                if judge_act is not None:
+                    judge_act.setToolTip(self.tr("Move selected text box(es) toward the center of each bubble (position only, no size change)."))
+                actions_map['format_judge'] = judge_act
             if context_menu_visible('format_fit_to_bubble') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 fit_to_bubble_act = format_menu.addAction(self.tr("Fit to bubble"))
@@ -1529,6 +1537,8 @@ class Canvas(QGraphicsScene):
                 self.format_textblks.emit()
             elif rst == layout_act:
                 self.layout_textblks.emit()
+            elif judge_act is not None and rst == judge_act:
+                self.layout_judge_textblks.emit()
             elif rst == fit_to_bubble_act:
                 self.layout_textblks.emit()
             elif rst == auto_fit_act:
