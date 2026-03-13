@@ -2,7 +2,7 @@ import re
 import time
 import json
 import traceback
-from typing import List, Dict, Optional, Type
+from typing import List, Dict, Optional, Type, Tuple
 
 import httpx
 import openai
@@ -347,11 +347,16 @@ class LLM_API_Translator(BaseTranslator):
         ]
         series_path = self._get_series_context_path()
         series_glossary = load_series_glossary(series_path) if series_path else []
+        # Series glossary first so path-based glossary (e.g. urban_immortal_cultivator) wins over translator param.
         glossary_entries = merge_glossary_no_dupes(
-            translator_glossary,
-            proj_as_tuples,
             series_glossary,
+            proj_as_tuples,
+            translator_glossary,
         )
+        # Log when series context path is active (count only; actual used/corrected terms are logged in _check_glossary_terms_in_translations).
+        series_id = (getattr(self, "_translation_series_context_path", None) or "").strip() or (self.get_param_value("series_context_path") or "").strip()
+        if series_id and series_glossary:
+            self.logger.info("Translation series context (path=%s): %d glossary terms loaded", series_id, len(series_glossary))
         if glossary_entries:
             # Section 18: Rosetta-style models get glossary as JSON list for systematic injection
             model_name = (self.override_model or self.model or "").strip()
@@ -367,6 +372,168 @@ class LLM_API_Translator(BaseTranslator):
         if series:
             parts.append(f"\n\nContext: {series}")
         return "\n".join(parts)
+
+    def _get_effective_glossary_entries(self) -> List[Tuple[str, str]]:
+        """Return merged glossary (series + project + translator) for checks."""
+        translator_glossary = self._get_glossary_entries()
+        proj_glossary = getattr(self, "_translation_project_glossary", None) or []
+        proj_as_tuples = [
+            (g["source"], g["target"])
+            for g in proj_glossary
+            if isinstance(g, dict) and g.get("source") and g.get("target")
+        ]
+        series_path = self._get_series_context_path()
+        series_glossary = load_series_glossary(series_path) if series_path else []
+        return merge_glossary_no_dupes(
+            series_glossary,
+            proj_as_tuples,
+            translator_glossary,
+        )
+
+    def _wrong_alternatives_for_glossary_term(self, term_tgt: str) -> List[str]:
+        """Return possible wrong translations to replace with term_tgt (heuristics only; no manual list)."""
+        t = (term_tgt or "").strip()
+        if not t:
+            return []
+        # Heuristic: single-word proper noun often mistranslated as "x province" (e.g. Chuzhou -> chu province)
+        if " " not in t and len(t) > 1:
+            low = t[0].lower() + t[1:]
+            return [low + " province", t[0] + t[1:].lower() + " province"]
+        return []
+
+    # Common 2-word phrases we must not replace (would break the sentence).
+    _STOPLIST_2W = frozenset(
+        s.lower() for s in (
+            "this is", "is not", "it is", "it was", "that is", "that was", "there is", "there was",
+            "to be", "of the", "in the", "on the", "at the", "for the", "with the", "as a", "can be",
+            "will be", "would be", "could be", "have been", "has been", "we are", "they are",
+            "you are", "i am", "he is", "she is", "what is", "who is", "how is", "not a", "is a",
+            "was a", "are a", "were a", "has a", "have a", "had a", "been a", "into the", "from the",
+        )
+    )
+
+    def _find_auto_wrong_phrase(self, trans_text: str, target: str) -> Optional[str]:
+        """Find a phrase in trans_text that looks like a wrong variant of target (same last word).
+        E.g. target 'mental demons' -> find 'heart demon' or 'inner demons' and return that substring."""
+        t = (target or "").strip()
+        if not t or not trans_text:
+            return None
+        words = t.split()
+        if len(words) < 2:
+            return None
+        last_word = words[-1]
+        # Match "X lastword" or "X lastword_without_s" (e.g. demon when target is demons)
+        last_esc = re.escape(last_word)
+        if len(last_word) > 1 and last_word.endswith("s"):
+            alt = last_word[:-1]
+            pattern = r"\b\w+\s+(?:" + last_esc + r"|" + re.escape(alt) + r")\b"
+        else:
+            pattern = r"\b\w+\s+" + last_esc + r"\b"
+        m = re.search(pattern, trans_text, re.IGNORECASE)
+        return m.group(0) if m else None
+
+    def _find_any_n_word_phrase_to_replace(
+        self, trans_text: str, target: str, n: int
+    ) -> Optional[str]:
+        """When source had the glossary term but translation used something else (e.g. 'bird dog'
+        instead of 'mental demons'), find any n-word phrase in trans_text to replace with target.
+        Skips stoplist phrases. Used as fallback when _find_auto_wrong_phrase finds nothing."""
+        if not trans_text or not target or n < 1:
+            return None
+        t = (target or "").strip()
+        if t.lower() in trans_text.lower():
+            return None
+        # Build regex for exactly n words: \b\w+(\s+\w+){n-1}\b
+        pattern = r"\b\w+" + (r"\s+\w+" * (n - 1)) + r"\b" if n > 1 else r"\b\w+\b"
+        stoplist = self._STOPLIST_2W if n == 2 else frozenset()
+        for m in re.finditer(pattern, trans_text, re.IGNORECASE):
+            phrase = m.group(0)
+            if phrase.lower() == t.lower():
+                continue
+            if n == 2 and phrase.lower() in stoplist:
+                continue
+            # Skip article + noun (e.g. "a bird") so we replace content phrases like "bird dog"
+            if n == 2 and (phrase.lower().startswith("a ") or phrase.lower().startswith("the ")):
+                continue
+            return phrase
+        return None
+
+    def _check_glossary_terms_in_translations(
+        self, src_list: List[str], trans_list: List[str]
+    ) -> None:
+        """Check and correct: when a glossary term was in source but translation doesn't use the expected target,
+        try to replace wrong alternatives so layout/auto-layout see the correct terms."""
+        glossary = self._get_effective_glossary_entries()
+        if not glossary:
+            return
+        for i, (src_text, trans_text) in enumerate(zip(src_list, trans_list)):
+            if not src_text or not isinstance(trans_text, str):
+                continue
+            trans_norm = trans_text.strip()
+            new_trans = trans_text
+            for term_src, term_tgt in glossary:
+                if not term_src or not term_tgt:
+                    continue
+                if term_src not in src_text:
+                    continue
+                tgt_stripped = term_tgt.strip()
+                if tgt_stripped in trans_norm:
+                    continue
+                if tgt_stripped.lower() in trans_norm.lower():
+                    continue
+                # Try to replace wrong forms: first heuristics (e.g. "x province"), then auto-detect phrase from target shape
+                replaced = False
+                for wrong in self._wrong_alternatives_for_glossary_term(tgt_stripped):
+                    if not wrong:
+                        continue
+                    if wrong.lower() in new_trans.lower():
+                        idx = new_trans.lower().find(wrong.lower())
+                        if idx >= 0:
+                            new_trans = new_trans[:idx] + tgt_stripped + new_trans[idx + len(wrong):]
+                            replaced = True
+                            self.logger.info(
+                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
+                                term_src, term_tgt, wrong,
+                            )
+                            break
+                if not replaced:
+                    # Auto-detect: find phrase that matches target's last word (e.g. "heart demon" for "mental demons")
+                    auto_phrase = self._find_auto_wrong_phrase(new_trans, tgt_stripped)
+                    if auto_phrase:
+                        pos = new_trans.lower().find(auto_phrase.lower())
+                        if pos >= 0:
+                            actual = new_trans[pos : pos + len(auto_phrase)]
+                            new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
+                            replaced = True
+                            self.logger.info(
+                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
+                                term_src, term_tgt, actual,
+                            )
+                if not replaced:
+                    # Fallback: source has the glossary term, so something in the translation is wrong.
+                    # Replace any n-word phrase (same word count as target) that isn't stoplist - catches "bird dog" etc.
+                    n = len(tgt_stripped.split())
+                    if 2 <= n <= 3:
+                        any_phrase = self._find_any_n_word_phrase_to_replace(new_trans, tgt_stripped, n)
+                        if any_phrase:
+                            pos = new_trans.lower().find(any_phrase.lower())
+                            if pos >= 0:
+                                actual = new_trans[pos : pos + len(any_phrase)]
+                                new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
+                                replaced = True
+                                self.logger.info(
+                                    "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
+                                    term_src, term_tgt, actual,
+                                )
+                if replaced:
+                    trans_list[i] = new_trans
+                    trans_norm = new_trans.strip()
+                else:
+                    snippet = (trans_norm[:80] + "…") if len(trans_norm) > 80 else trans_norm
+                    self.logger.warning(
+                        "Glossary term not applied: source '%s' expected '%s' in translation; got: %s",
+                        term_src, term_tgt, snippet,
+                    )
 
     @property
     def context_previous_pages_count(self) -> int:
@@ -1476,6 +1643,7 @@ class LLM_API_Translator(BaseTranslator):
                     ordered_translations = [
                         self._apply_keyword_substitutions(t) for t in ordered_translations
                     ]
+                    self._check_glossary_terms_in_translations(src_list[:num_src], ordered_translations)
                     translations.extend(ordered_translations)
                     if self.get_param_value("extract_glossary"):
                         self._extract_and_append_glossary(src_list[:num_src], ordered_translations)
