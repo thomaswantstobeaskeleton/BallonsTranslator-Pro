@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Union, Optional
 import os
 
-from qtpy.QtWidgets import QApplication, QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
+from qtpy.QtWidgets import QApplication, QSlider, QMenu, QAction, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
 from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSizeF, QEvent, QTimer
 from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent, QMouseEvent
 
@@ -22,7 +22,7 @@ from utils import shared as C
 from utils.config import pcfg
 from utils.config import context_menu_visible
 from utils.proj_imgtrans import ProjImgTrans
-from .context_menu_config_dialog import ContextMenuConfigDialog
+from .context_menu_config_dialog import ContextMenuConfigDialog, CONTEXT_MENU_ITEMS
 
 CANVAS_SCALE_MAX = 10.0
 CANVAS_SCALE_MIN = 0.01
@@ -40,7 +40,7 @@ class MoveByKeyCommand(QUndoCommand):
         self.direction = direction
         self.ori_pos_list = []
         self.end_pos_list = []
-        self.shape_ctrl = shape_ctrl
+        self.shape_up = shape_ctrl
         for blk in blkitems:
             pos = blk.pos()
             self.ori_pos_list.append(pos)
@@ -207,6 +207,8 @@ class Canvas(QGraphicsScene):
     format_textblks = Signal()
     layout_textblks = Signal()
     auto_fit_font_signal = Signal()
+    auto_fit_binary_signal = Signal()
+    set_balloon_shape_signal = Signal(str)
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1053,6 +1055,8 @@ class Canvas(QGraphicsScene):
             n_sel = len(sel)
             n_total = len(self.imgtrans_proj.pages[self.imgtrans_proj.current_img]) if (self.imgtrans_proj and self.imgtrans_proj.current_img and self.imgtrans_proj.current_img in self.imgtrans_proj.pages) else 0
             saved_rect = getattr(self, '_last_rubber_band_rect', None)
+            actions_map = {}
+            pinned = list(getattr(pcfg, 'context_menu_pinned', None) or [])
 
             # --- Edit ---
             copy_act = paste_act = copy_trans_act = paste_trans_act = None
@@ -1063,48 +1067,59 @@ class Canvas(QGraphicsScene):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 copy_act = edit_menu.addAction(self.tr("Copy"))
                 copy_act.setShortcut(QKeySequence.StandardKey.Copy)
+                actions_map['edit_copy'] = copy_act
             if context_menu_visible('edit_paste'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 paste_act = edit_menu.addAction(self.tr("Paste"))
                 paste_act.setShortcut(QKeySequence.StandardKey.Paste)
+                actions_map['edit_paste'] = paste_act
             if context_menu_visible('edit_copy_trans'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 copy_trans_act = edit_menu.addAction(self.tr("Copy translation"))
+                actions_map['edit_copy_trans'] = copy_trans_act
             if context_menu_visible('edit_paste_trans'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 paste_trans_act = edit_menu.addAction(self.tr("Paste translation"))
+                actions_map['edit_paste_trans'] = paste_trans_act
             if context_menu_visible('edit_copy_src'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 copy_src_act = edit_menu.addAction(self.tr("Copy source text"))
                 copy_src_act.setShortcut(QKeySequence("Ctrl+Shift+C"))
+                actions_map['edit_copy_src'] = copy_src_act
             if context_menu_visible('edit_paste_src'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 paste_src_act = edit_menu.addAction(self.tr("Paste source text"))
                 paste_src_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
+                actions_map['edit_paste_src'] = paste_src_act
             if edit_menu is not None and (copy_act or paste_act or copy_trans_act or paste_trans_act or copy_src_act or paste_src_act):
                 edit_menu.addSeparator()
             if context_menu_visible('edit_delete'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 delete_act = edit_menu.addAction(self.tr("Delete"))
                 delete_act.setShortcut(QKeySequence("Ctrl+D"))
+                actions_map['edit_delete'] = delete_act
             if context_menu_visible('edit_delete_recover'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 delete_recover_act = edit_menu.addAction(self.tr("Delete and Recover removed text"))
                 delete_recover_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
+                actions_map['edit_delete_recover'] = delete_recover_act
             if edit_menu is not None and (delete_act or delete_recover_act):
                 edit_menu.addSeparator()
             if context_menu_visible('edit_clear_src'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 clear_src_act = edit_menu.addAction(self.tr("Clear source text"))
+                actions_map['edit_clear_src'] = clear_src_act
             if context_menu_visible('edit_clear_trans'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 clear_trans_act = edit_menu.addAction(self.tr("Clear translation"))
+                actions_map['edit_clear_trans'] = clear_trans_act
             if edit_menu is not None and (clear_src_act or clear_trans_act):
                 edit_menu.addSeparator()
             if context_menu_visible('edit_select_all'):
                 if edit_menu is None: edit_menu = menu.addMenu(self.tr("Edit"))
                 select_all_act = edit_menu.addAction(self.tr("Select all text boxes"))
                 select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
+                actions_map['edit_select_all'] = select_all_act
 
             # --- Text (selection) ---
             spell_check_src_act = spell_check_trans_act = trim_whitespace_act = None
@@ -1116,32 +1131,40 @@ class Canvas(QGraphicsScene):
                 if context_menu_visible('text_spell_src'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     spell_check_src_act = text_menu.addAction(self.tr("Spell check source text"))
+                    actions_map['text_spell_src'] = spell_check_src_act
                 if context_menu_visible('text_spell_trans'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     spell_check_trans_act = text_menu.addAction(self.tr("Spell check translation"))
+                    actions_map['text_spell_trans'] = spell_check_trans_act
                 if context_menu_visible('text_trim'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     trim_whitespace_act = text_menu.addAction(self.tr("Trim whitespace"))
+                    actions_map['text_trim'] = trim_whitespace_act
                 if context_menu_visible('text_upper'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     to_uppercase_act = text_menu.addAction(self.tr("To uppercase"))
+                    actions_map['text_upper'] = to_uppercase_act
                 if context_menu_visible('text_lower'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     to_lowercase_act = text_menu.addAction(self.tr("To lowercase"))
+                    actions_map['text_lower'] = to_lowercase_act
                 if context_menu_visible('text_strikethrough'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     toggle_strikethrough_act = text_menu.addAction(self.tr("Toggle strikethrough"))
+                    actions_map['text_strikethrough'] = toggle_strikethrough_act
                 if context_menu_visible('text_gradient'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     gradient_sub = text_menu.addMenu(self.tr("Gradient type"))
                     gradient_linear_act = gradient_sub.addAction(self.tr("Linear"))
                     gradient_radial_act = gradient_sub.addAction(self.tr("Radial"))
+                    actions_map['text_gradient'] = gradient_sub
                 if context_menu_visible('text_on_path'):
                     if text_menu is None: text_menu = menu.addMenu(self.tr("Text"))
                     path_sub = text_menu.addMenu(self.tr("Text on path"))
                     text_on_path_none_act = path_sub.addAction(self.tr("None"))
                     text_on_path_circular_act = path_sub.addAction(self.tr("Circular"))
                     text_on_path_arc_act = path_sub.addAction(self.tr("Arc"))
+                    actions_map['text_on_path'] = path_sub
 
             # --- Block (selection) ---
             merge_blocks_act = split_regions_act = move_up_act = move_down_act = None
@@ -1151,22 +1174,27 @@ class Canvas(QGraphicsScene):
                 if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
                 create_textbox_act = block_menu.addAction(self.tr("Create text box"))
                 create_textbox_act.setToolTip(self.tr("Add a new text box at the right-click position (default size). Or right-click and drag to set size."))
+                actions_map['create_textbox'] = create_textbox_act
             if n_sel >= 1:
                 if context_menu_visible('block_merge'):
                     if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
                     merge_blocks_act = block_menu.addAction(self.tr("Merge selected blocks"))
                     merge_blocks_act.setEnabled(n_sel >= 2)
+                    actions_map['block_merge'] = merge_blocks_act
                 if context_menu_visible('block_split'):
                     if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
                     split_regions_act = block_menu.addAction(self.tr("Split selected region(s)"))
+                    actions_map['block_split'] = split_regions_act
                 if context_menu_visible('block_move_up'):
                     if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
                     move_up_act = block_menu.addAction(self.tr("Move block(s) up"))
                     move_up_act.setEnabled(n_sel == 1 and sel[0].idx > 0)
+                    actions_map['block_move_up'] = move_up_act
                 if context_menu_visible('block_move_down'):
                     if block_menu is None: block_menu = menu.addMenu(self.tr("Block"))
                     move_down_act = block_menu.addAction(self.tr("Move block(s) down"))
                     move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
+                    actions_map['block_move_down'] = move_down_act
 
             # --- Image / Overlay (selection) ---
             import_image_act = clear_overlay_act = None
@@ -1176,10 +1204,12 @@ class Canvas(QGraphicsScene):
                     if overlay_menu is None: overlay_menu = menu.addMenu(self.tr("Image / Overlay"))
                     import_image_act = overlay_menu.addAction(self.tr("Import Image"))
                     import_image_act.setEnabled(n_sel == 1 and sel[0].document().isEmpty())
+                    actions_map['overlay_import'] = import_image_act
                 if context_menu_visible('overlay_clear'):
                     if overlay_menu is None: overlay_menu = menu.addMenu(self.tr("Image / Overlay"))
                     clear_overlay_act = overlay_menu.addAction(self.tr("Clear overlay image"))
                     clear_overlay_act.setEnabled(bool(n_sel == 1 and getattr(getattr(sel[0], 'blk', None), 'foreground_image_path', None)))
+                    actions_map['overlay_clear'] = clear_overlay_act
 
             # --- Transform (selection) ---
             free_transform_act = reset_warp_act = None
@@ -1191,10 +1221,12 @@ class Canvas(QGraphicsScene):
                     free_transform_act = transform_menu.addAction(self.tr("Free Transform"))
                     free_transform_act.setCheckable(True)
                     free_transform_act.setChecked(getattr(self, 'warp_edit_mode', False))
+                    actions_map['transform_free'] = free_transform_act
                 if context_menu_visible('transform_reset_warp'):
                     if transform_menu is None: transform_menu = menu.addMenu(self.tr("Transform"))
                     reset_warp_act = transform_menu.addAction(self.tr("Reset warp"))
                     reset_warp_act.setEnabled(bool(n_sel == 1 and getattr(getattr(sel[0], 'blk', None), 'warp_mode', None) in ('quad', 'mesh')))
+                    actions_map['transform_reset_warp'] = reset_warp_act
                 if context_menu_visible('transform_warp_preset'):
                     if transform_menu is None: transform_menu = menu.addMenu(self.tr("Transform"))
                     warp_preset_sub = transform_menu.addMenu(self.tr("Warp preset"))
@@ -1202,6 +1234,7 @@ class Canvas(QGraphicsScene):
                     warp_arc_down_act = warp_preset_sub.addAction(self.tr("Arc Down"))
                     warp_arch_act = warp_preset_sub.addAction(self.tr("Arch"))
                     warp_flag_act = warp_preset_sub.addAction(self.tr("Flag"))
+                    actions_map['transform_warp_preset'] = warp_preset_sub
 
             # --- Order (selection) ---
             bring_front_act = send_back_act = None
@@ -1210,32 +1243,66 @@ class Canvas(QGraphicsScene):
                 if context_menu_visible('order_bring_front'):
                     if order_menu is None: order_menu = menu.addMenu(self.tr("Order"))
                     bring_front_act = order_menu.addAction(self.tr("Bring to front"))
+                    actions_map['order_bring_front'] = bring_front_act
                 if context_menu_visible('order_send_back'):
                     if order_menu is None: order_menu = menu.addMenu(self.tr("Order"))
                     send_back_act = order_menu.addAction(self.tr("Send to back"))
+                    actions_map['order_send_back'] = send_back_act
 
             menu.addSeparator()
 
             # --- Format ---
-            format_act = layout_act = auto_fit_act = angle_act = squeeze_act = None
+            format_act = layout_act = fit_to_bubble_act = auto_fit_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
+            balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
             if context_menu_visible('format_apply'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 format_act = format_menu.addAction(self.tr("Apply font formatting"))
+                actions_map['format_apply'] = format_act
             if context_menu_visible('format_layout'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 layout_act = format_menu.addAction(self.tr("Auto layout"))
+                actions_map['format_layout'] = layout_act
+            if context_menu_visible('format_fit_to_bubble') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                fit_to_bubble_act = format_menu.addAction(self.tr("Fit to bubble"))
+                if fit_to_bubble_act is not None:
+                    fit_to_bubble_act.setToolTip(self.tr("Run layout so text fits inside the bubble (constrain + line breaks)."))
+                actions_map['format_fit_to_bubble'] = fit_to_bubble_act
             if context_menu_visible('format_auto_fit') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 auto_fit_act = format_menu.addAction(self.tr("Auto fit font size to box"))
                 if auto_fit_act is not None:
                     auto_fit_act.setToolTip(self.tr("Scale font size so text fits the selected text box(es). Use after changing font."))
+                actions_map['format_auto_fit'] = auto_fit_act
+            if context_menu_visible('format_auto_fit_binary') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                auto_fit_binary_act = format_menu.addAction(self.tr("Auto fit font size (binary search)"))
+                if auto_fit_binary_act is not None:
+                    auto_fit_binary_act.setToolTip(self.tr("Find largest font size that fits the bubble (slower, more accurate)."))
+                actions_map['format_auto_fit_binary'] = auto_fit_binary_act
+            if context_menu_visible('format_balloon_shape') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                balloon_sub = format_menu.addMenu(self.tr("Balloon shape"))
+                balloon_shape_round_act = balloon_sub.addAction(self.tr("Round"))
+                balloon_shape_elongated_act = balloon_sub.addAction(self.tr("Elongated"))
+                balloon_shape_narrow_act = balloon_sub.addAction(self.tr("Narrow"))
+                balloon_shape_diamond_act = balloon_sub.addAction(self.tr("Diamond"))
+                balloon_shape_square_act = balloon_sub.addAction(self.tr("Square"))
+                balloon_shape_bevel_act = balloon_sub.addAction(self.tr("Bevel"))
+                balloon_shape_pentagon_act = balloon_sub.addAction(self.tr("Pentagon"))
+                balloon_shape_point_act = balloon_sub.addAction(self.tr("Point"))
+                balloon_shape_auto_act = balloon_sub.addAction(self.tr("Auto"))
+                actions_map['format_balloon_shape'] = balloon_sub
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
+                actions_map['format_angle'] = angle_act
             if context_menu_visible('format_squeeze'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 squeeze_act = format_menu.addAction(self.tr("Squeeze"))
+                actions_map['format_squeeze'] = squeeze_act
 
             menu.addSeparator()
 
@@ -1246,24 +1313,31 @@ class Canvas(QGraphicsScene):
             if context_menu_visible('run_detect_region') and saved_rect is not None:
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 detect_region_act = run_menu.addAction(self.tr("Detect text in region"))
+                actions_map['run_detect_region'] = detect_region_act
             if context_menu_visible('run_detect_page'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 detect_page_act = run_menu.addAction(self.tr("Detect text on page"))
+                actions_map['run_detect_page'] = detect_page_act
             if context_menu_visible('run_translate'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 translate_act = run_menu.addAction(self.tr("Translate"))
+                actions_map['run_translate'] = translate_act
             if context_menu_visible('run_ocr'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_act = run_menu.addAction(self.tr("OCR"))
+                actions_map['run_ocr'] = ocr_act
             if context_menu_visible('run_ocr_translate'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_act = run_menu.addAction(self.tr("OCR and translate"))
+                actions_map['run_ocr_translate'] = ocr_translate_act
             if context_menu_visible('run_ocr_translate_inpaint'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_inpaint_act = run_menu.addAction(self.tr("OCR, translate and inpaint"))
+                actions_map['run_ocr_translate_inpaint'] = ocr_translate_inpaint_act
             if context_menu_visible('run_inpaint'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 inpaint_act = run_menu.addAction(self.tr("Inpaint"))
+                actions_map['run_inpaint'] = inpaint_act
 
             download_menu = None
             download_result_act = download_inpainted_act = download_original_act = None
@@ -1275,11 +1349,34 @@ class Canvas(QGraphicsScene):
                 download_inpainted_act.setToolTip(self.tr("Save inpainted image only (text regions filled, no text overlay)."))
                 download_original_act = download_menu.addAction(self.tr("Original"))
                 download_original_act.setToolTip(self.tr("Save original image without translation or inpainting."))
+                actions_map['download_image'] = download_menu
 
-            menu.addSeparator()
-            configure_menu_act = menu.addAction(self.tr("Configure menu..."))
+            # Rebuild menu with pinned items at top
+            menu_new = QMenu(self.gv)
+            menu_new.setStyleSheet(menu.styleSheet())
+            for key in pinned:
+                if key in actions_map:
+                    o = actions_map[key]
+                    if isinstance(o, QMenu):
+                        menu_new.addMenu(o)
+                    else:
+                        menu_new.addAction(o)
+            if pinned:
+                menu_new.addSeparator()
+            for cat_title, items in CONTEXT_MENU_ITEMS:
+                sub_actions = [(key, actions_map[key]) for key, _label in items if key not in pinned and key in actions_map]
+                if not sub_actions:
+                    continue
+                sub = menu_new.addMenu(self.tr(cat_title))
+                for _key, o in sub_actions:
+                    if isinstance(o, QMenu):
+                        sub.addMenu(o)
+                    else:
+                        sub.addAction(o)
+            menu_new.addSeparator()
+            configure_menu_act = menu_new.addAction(self.tr("Configure menu..."))
 
-            rst = menu.exec(pos)
+            rst = menu_new.exec(pos)
             self._last_rubber_band_rect = None
 
             if rst == configure_menu_act:
@@ -1424,8 +1521,30 @@ class Canvas(QGraphicsScene):
                 self.format_textblks.emit()
             elif rst == layout_act:
                 self.layout_textblks.emit()
+            elif rst == fit_to_bubble_act:
+                self.layout_textblks.emit()
             elif rst == auto_fit_act:
                 self.auto_fit_font_signal.emit()
+            elif rst == auto_fit_binary_act:
+                self.auto_fit_binary_signal.emit()
+            elif rst == balloon_shape_round_act:
+                self.set_balloon_shape_signal.emit("round")
+            elif rst == balloon_shape_elongated_act:
+                self.set_balloon_shape_signal.emit("elongated")
+            elif rst == balloon_shape_narrow_act:
+                self.set_balloon_shape_signal.emit("narrow")
+            elif rst == balloon_shape_diamond_act:
+                self.set_balloon_shape_signal.emit("diamond")
+            elif rst == balloon_shape_square_act:
+                self.set_balloon_shape_signal.emit("square")
+            elif rst == balloon_shape_bevel_act:
+                self.set_balloon_shape_signal.emit("bevel")
+            elif rst == balloon_shape_pentagon_act:
+                self.set_balloon_shape_signal.emit("pentagon")
+            elif rst == balloon_shape_point_act:
+                self.set_balloon_shape_signal.emit("point")
+            elif rst == balloon_shape_auto_act:
+                self.set_balloon_shape_signal.emit("auto")
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

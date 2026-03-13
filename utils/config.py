@@ -338,6 +338,7 @@ class ProgramConfig(Config):
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
     context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
+    context_menu_pinned: List = field(default_factory=list)  # Action keys to show at top of right-click menu (order preserved)
     huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
     translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
     # Release detector/OCR/inpainter/translator caches and gc after pipeline finishes (all pages). Reduces RSS when idle.
@@ -420,7 +421,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_angle': True, 'format_squeeze': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
     'download_image': True,
@@ -449,7 +450,7 @@ CONFIG_KEY_ORDER = (
     "dev_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
-    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu",
+    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned",
     "huggingface_token", "translator_last_model_by_provider",
 )
 
@@ -553,6 +554,8 @@ def load_config(config_path: str = shared.CONFIG_PATH):
                 pcfg.context_menu[k] = v
     else:
         pcfg.context_menu = dict(CONTEXT_MENU_DEFAULT)
+    if not isinstance(getattr(pcfg, 'context_menu_pinned', None), list):
+        pcfg.context_menu_pinned = []
     # Ensure all shortcut keys exist (merge defaults for any new action)
     try:
         from utils.shortcuts import get_default_shortcuts

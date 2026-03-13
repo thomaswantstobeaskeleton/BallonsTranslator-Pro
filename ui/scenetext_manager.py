@@ -571,6 +571,8 @@ class SceneTextManager(QObject):
         self.canvas.format_textblks.connect(self.onFormatTextblks)
         self.canvas.layout_textblks.connect(self.onAutoLayoutTextblks)
         self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
+        self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
+        self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -1101,6 +1103,44 @@ class SceneTextManager(QObject):
             self.layout_textblk(blkitem)
             self._scale_font_to_fit_box(blkitem)
         self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+
+    def onSetBalloonShape(self, shape: str):
+        """Set global balloon shape and run layout on selected blocks."""
+        if shape not in ("auto", "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point"):
+            return
+        pcfg.module.layout_balloon_shape = shape
+        selected_blks = self.canvas.selected_text_items()
+        selected_blks = [blk for blk in selected_blks if not blk.fontformat.vertical]
+        if not selected_blks:
+            return
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        for blkitem in selected_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            self.layout_textblk(blkitem)
+            self.layout_textblk(blkitem)
+        self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+
+    def onAutoFitBinarySearch(self):
+        """Run layout with binary search for font size on selected blocks (temporarily enable layout_font_binary_search)."""
+        selected_blks = self.canvas.selected_text_items()
+        selected_blks = [blk for blk in selected_blks if not blk.fontformat.vertical]
+        if not selected_blks:
+            return
+        old_binary = getattr(pcfg.module, "layout_font_binary_search", False)
+        try:
+            pcfg.module.layout_font_binary_search = True
+            old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+            for blkitem in selected_blks:
+                old_html_lst.append(blkitem.toHtml())
+                old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+                trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+                self.layout_textblk(blkitem)
+                self.layout_textblk(blkitem)
+            self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+        finally:
+            pcfg.module.layout_font_binary_search = old_binary
 
     def _scale_font_to_fit_box(self, blkitem: TextBlkItem):
         """Scale this block's font so its text fits inside the current box (no layout/box change)."""
