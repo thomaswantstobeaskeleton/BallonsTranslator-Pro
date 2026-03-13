@@ -7,6 +7,8 @@ Optional small/fast image model can be used to adjust strength (default: geometr
 from typing import List, Tuple, Optional
 import numpy as np
 
+from .logger import logger as LOGGER
+
 # Default small, fast models for optional model-assisted judge (image classification).
 # These are lightweight and run quickly; leave empty to use geometric-only judge.
 DEFAULT_JUDGE_MODEL_IDS = [
@@ -109,19 +111,27 @@ def judge_with_model(
     Default models (fast, small): google/mobilenet_v2_1.0_224, qualcomm/MobileNet-v3-Small.
     """
     if not model_id or not crop_rgb.size or crop_rgb.ndim < 2:
+        LOGGER.debug("Layout judge model: skipped (no model_id or empty crop)")
         return None
     try:
         from PIL import Image
         from transformers import pipeline as hf_pipeline
-    except ImportError:
+    except ImportError as e:
+        LOGGER.warning(
+            "Layout judge model: PIL or transformers not available (%s). Use geometric judge only or install dependencies.",
+            e,
+        )
         return None
     # Module-level cache per model_id
     cache = getattr(judge_with_model, "_pipe_cache", None)
     if cache is None or cache[0] != model_id:
         try:
+            LOGGER.info("Layout judge model: loading %s ...", model_id)
             pipe = hf_pipeline("image-classification", model=model_id)
             judge_with_model._pipe_cache = (model_id, pipe)
-        except Exception:
+            LOGGER.info("Layout judge model: loaded %s", model_id)
+        except Exception as e:
+            LOGGER.warning("Layout judge model: failed to load %s: %s", model_id, e)
             return None
     _, pipe = judge_with_model._pipe_cache
     try:
@@ -133,8 +143,18 @@ def judge_with_model(
             pil_img = Image.fromarray(crop_rgb).convert("RGB")
         out = pipe(pil_img, top_k=1)
         if not out or not isinstance(out, list) or not out[0]:
+            LOGGER.debug("Layout judge model: empty or invalid output from %s", model_id)
             return None
         score = float(out[0].get("score", 0.5))
-        return max(0.0, min(1.0, score))
-    except Exception:
+        score = max(0.0, min(1.0, score))
+        label = out[0].get("label", "")
+        LOGGER.info(
+            "Layout judge model: %s -> score=%.3f label=%s (used to modulate nudge strength)",
+            model_id,
+            score,
+            label,
+        )
+        return score
+    except Exception as e:
+        LOGGER.warning("Layout judge model: inference failed for %s: %s", model_id, e)
         return None
