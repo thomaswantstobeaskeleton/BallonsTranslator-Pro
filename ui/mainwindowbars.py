@@ -573,6 +573,7 @@ class TitleBar(Widget):
             ("view.keyboard_shortcuts", "Ctrl+K", keyboardShortcutsAction),
             ("view.context_menu_options", "Ctrl+Shift+O", contextMenuOptionsAction),
             ("edit.merge_tool", "Ctrl+Shift+M", mergeToolAction),
+            ("file.export_all_pages", "Ctrl+Shift+S", batchExportAction),
         ]
 
         self.goToolBtn = TitleBarToolBtn(self)

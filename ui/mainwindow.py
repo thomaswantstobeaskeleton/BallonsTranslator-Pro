@@ -1137,6 +1137,12 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("canvas.delete_line", "Delete", self.shortcutDelete)
         _mk_shortcut("canvas.create_textbox", "Ctrl+Shift+N", self.shortcutCreateTextbox)
         _mk_shortcut("view.context_menu_options", "Ctrl+Shift+O", self.shortcutContextMenuOptions)
+        _mk_shortcut("format.apply", "", self.shortcutFormatApply)
+        _mk_shortcut("format.layout", "", self.shortcutFormatLayout)
+        _mk_shortcut("format.fit_to_bubble", "", self.shortcutFitToBubble)
+        _mk_shortcut("format.auto_fit", "", self.shortcutFormatAutoFit)
+        _mk_shortcut("format.auto_fit_binary", "", self.shortcutFormatAutoFitBinary)
+        _mk_shortcut("format.balloon_shape_auto", "", self.shortcutBalloonShapeAuto)
 
         drawpanel_shortcuts = [
             ("draw.hand", "H", "hand"),
@@ -1490,6 +1496,36 @@ class MainWindow(mainwindow_cls):
         """Open Context menu options dialog (View)."""
         dlg = ContextMenuConfigDialog(self)
         dlg.exec()
+
+    def shortcutFormatApply(self):
+        """Apply font formatting to selection (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible():
+            self.canvas.format_textblks.emit()
+
+    def shortcutFormatLayout(self):
+        """Auto layout selected text blocks (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.layout_textblks.emit()
+
+    def shortcutFitToBubble(self):
+        """Fit to bubble for selection (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.layout_textblks.emit()
+
+    def shortcutFormatAutoFit(self):
+        """Auto fit font size to box (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.auto_fit_font_signal.emit()
+
+    def shortcutFormatAutoFitBinary(self):
+        """Auto fit font size binary search (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.auto_fit_binary_signal.emit()
+
+    def shortcutBalloonShapeAuto(self):
+        """Set balloon shape to Auto (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.set_balloon_shape_signal.emit("auto")
 
     def on_redo(self):
         self.canvas.redo()
