@@ -76,8 +76,9 @@ class TranslationContextDialog(QDialog):
         layout.addWidget(group)
 
         hint = QLabel(
-            self.tr("Series path is used for cross-chapter consistency (data/translation_context/<id>/). "
-                    "Project glossary is merged with translator and series glossary.")
+            self.tr("Series path: glossary is loaded from data/translation_context/<path>/glossary.txt — you do not need to add those terms here or in Config → Translator. "
+                    "Project glossary above is for extra terms that apply only to this project (merged with series + translator). "
+                    "Optional: in Config → Translator set \"Series context prompt\" (e.g. \"This is a cultivation manhua. Keep place names and terms consistent.\") for style instructions.")
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: gray; font-size: 11px;")
