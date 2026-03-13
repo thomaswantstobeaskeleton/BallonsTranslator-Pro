@@ -24,6 +24,7 @@ from utils.bubble_shape_model import get_bubble_shape_from_model as _bubble_shap
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
 from utils.line_breaking import split_long_token_with_hyphenation
+from utils.layout_judge import judge_textbox_in_bubble, judge_with_model
 from modules.textdetector.outside_text_processor import OSB_LABELS
 
 # Layout tuning: keep text inside bubbles and avoid overflow/tiny text (see layout_textblk)
@@ -1755,6 +1756,15 @@ class SceneTextManager(QObject):
                 im_x = mask_xyxy[0] + region_rect[0]
                 im_y = mask_xyxy[1] + region_rect[1]
                 rw, rh = region_rect[2], region_rect[3]
+                # Layout judge: inset box so text stays away from bubble corners (when enabled)
+                if not is_osb and bool(getattr(pcfg.module, "layout_judge_enabled", True)):
+                    margin_ratio = float(getattr(pcfg.module, "layout_judge_margin_ratio", 0.06) or 0.06)
+                    margin = margin_ratio * min(rw, rh)
+                    if margin > 0 and rw > 2 * margin and rh > 2 * margin:
+                        im_x = im_x + margin
+                        im_y = im_y + margin
+                        rw = max(1, int(rw - 2 * margin))
+                        rh = max(1, int(rh - 2 * margin))
                 # Clamp to image bounds so box never goes outside the image (handles bad region_rect or upscale mismatch)
                 im_x = max(0, min(im_x, im_w - 1))
                 im_y = max(0, min(im_y, im_h - 1))
@@ -1789,20 +1799,47 @@ class SceneTextManager(QObject):
                     # Re-read after potential image clamp
                     abr2 = blkitem.absBoundingRect(qrect=True)
                     bx, by, bw, bh = abr2.x(), abr2.y(), abr2.width(), abr2.height()
-                    # Only adjust if the box isn't dramatically larger than the bubble
+                    new_x, new_y = bx, by
+                    # Gentle clamp when box already fits inside bubble
                     if bw > 0 and bh > 0 and bw <= bubble_w * 1.05 and bh <= bubble_h * 1.05:
                         min_x = bubble_x
                         max_x = bubble_x + bubble_w - bw
                         min_y = bubble_y
                         max_y = bubble_y + bubble_h - bh
-                        new_x = bx
-                        new_y = by
                         if max_x >= min_x:
                             new_x = min(max(bx, min_x), max_x)
                         if max_y >= min_y:
                             new_y = min(max(by, min_y), max_y)
-                        if abs(new_x - bx) > 0.5 or abs(new_y - by) > 0.5:
-                            blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
+                    # Layout judge: nudge toward center, keep away from corners, clamp so box/lines never go out of bubble
+                    if bw > 0 and bh > 0 and bool(getattr(pcfg.module, "layout_judge_enabled", True)):
+                        bubble_xyxy = (bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h)
+                        margin_r = float(getattr(pcfg.module, "layout_judge_margin_ratio", 0.06) or 0.06)
+                        center_str = float(getattr(pcfg.module, "layout_judge_center_strength", 0.7) or 0.7)
+                        clamp_overflow = bool(getattr(pcfg.module, "layout_judge_clamp_overflow", True))
+                        # Optional model: scale strength by model score on bubble crop (low score -> nudge more)
+                        if bool(getattr(pcfg.module, "layout_judge_use_model", False)):
+                            model_id = (getattr(pcfg.module, "layout_judge_model_id", "") or "").strip()
+                            if model_id and img is not None:
+                                x1, y1 = int(bubble_x), int(bubble_y)
+                                x2, y2 = int(bubble_x + bubble_w), int(bubble_y + bubble_h)
+                                x1, x2 = max(0, x1), min(img.shape[1], x2)
+                                y1, y2 = max(0, y1), min(img.shape[0], y2)
+                                if x2 > x1 and y2 > y1:
+                                    crop = img[y1:y2, x1:x2]
+                                    if crop.ndim == 2:
+                                        crop = np.stack([crop] * 3, axis=-1)
+                                    score = judge_with_model(crop, model_id)
+                                    if score is not None:
+                                        center_str = center_str * max(0.3, 1.2 - score)
+                                        center_str = min(1.0, max(0.0, center_str))
+                        new_x, new_y, new_w, new_h = judge_textbox_in_bubble(
+                            [new_x, new_y, bw, bh], bubble_xyxy,
+                            margin_ratio=margin_r, center_strength=center_str,
+                            clamp_overflow=clamp_overflow,
+                        )
+                        bw, bh = new_w, new_h
+                    if abs(new_x - bx) > 0.5 or abs(new_y - by) > 0.5 or (bw > 0 and bh > 0 and (abs(bw - abr2.width()) > 0.5 or abs(bh - abr2.height()) > 0.5)):
+                        blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
                 if constrain_to_bubble and blkitem.blk is not None:
                     blkitem.blk._bounding_rect = blkitem.absBoundingRect()
             return True

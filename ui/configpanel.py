@@ -900,6 +900,53 @@ class ConfigPanel(Widget):
         )
         self.layout_constrain_to_bubble_checker.stateChanged.connect(self._on_layout_constrain_to_bubble_changed)
 
+        self.layout_judge_enabled_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Layout judge (center + margin)'),
+            discription=self.tr('Nudge text boxes toward the center of the bubble and keep them away from bubble edges/corners. Uses margin and center strength below.')
+        )
+        self.layout_judge_enabled_checker.stateChanged.connect(self._on_layout_judge_enabled_changed)
+        self.layout_judge_margin_spin = QDoubleSpinBox()
+        self.layout_judge_margin_spin.setRange(0.01, 0.25)
+        self.layout_judge_margin_spin.setSingleStep(0.01)
+        self.layout_judge_margin_spin.setDecimals(2)
+        self.layout_judge_margin_spin.setValue(float(getattr(pcfg.module, 'layout_judge_margin_ratio', 0.06)))
+        self.layout_judge_margin_spin.valueChanged.connect(self._on_layout_judge_margin_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_judge_margin_spin,
+            self.tr('Judge margin (fraction of bubble)'),
+            discription=self.tr('Minimum distance from bubble edge (e.g. 0.06 = 6% of bubble size). Text box will not touch corners.')
+        ))
+        self.layout_judge_center_spin = QDoubleSpinBox()
+        self.layout_judge_center_spin.setRange(0.0, 1.0)
+        self.layout_judge_center_spin.setSingleStep(0.1)
+        self.layout_judge_center_spin.setDecimals(1)
+        self.layout_judge_center_spin.setValue(float(getattr(pcfg.module, 'layout_judge_center_strength', 0.7)))
+        self.layout_judge_center_spin.valueChanged.connect(self._on_layout_judge_center_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_judge_center_spin,
+            self.tr('Judge center strength'),
+            discription=self.tr('How much to nudge the text box toward the bubble center (0 = no nudge, 1 = full center).')
+        ))
+        self.layout_judge_clamp_overflow_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Clamp overflow (keep box inside bubble)'),
+            discription=self.tr('When on, shrink or move the text box so it never extends outside the bubble; fixes text/lines going out.')
+        )
+        self.layout_judge_clamp_overflow_checker.stateChanged.connect(self._on_layout_judge_clamp_overflow_changed)
+        self.layout_judge_use_model_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Use model for judge'),
+            discription=self.tr('Run a small image model on the bubble crop to modulate nudge strength. Uses the model ID below.')
+        )
+        self.layout_judge_use_model_checker.stateChanged.connect(self._on_layout_judge_use_model_changed)
+        self.layout_judge_model_id_edit = QLineEdit()
+        self.layout_judge_model_id_edit.setPlaceholderText("e.g. google/mobilenet_v2_1.0_224")
+        self.layout_judge_model_id_edit.setText(getattr(pcfg.module, "layout_judge_model_id", "google/mobilenet_v2_1.0_224") or "")
+        self.layout_judge_model_id_edit.textChanged.connect(self._on_layout_judge_model_id_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_judge_model_id_edit,
+            self.tr('Judge model (default: small/fast)'),
+            discription=self.tr('Hugging Face image-classification model ID. Default: google/mobilenet_v2_1.0_224 (~3.5M params). Leave empty = geometric only.')
+        ))
+
         self.layout_optimal_breaks_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Optimal line breaks'),
             discription=self.tr('Use dynamic programming to choose better line breaks (non-CJK). Reduces awkward mid-word wraps.')
@@ -1353,6 +1400,30 @@ class ConfigPanel(Widget):
         pcfg.module.layout_constrain_to_bubble = self.layout_constrain_to_bubble_checker.isChecked()
         self.save_config.emit()
 
+    def _on_layout_judge_enabled_changed(self):
+        pcfg.module.layout_judge_enabled = self.layout_judge_enabled_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_judge_margin_changed(self, value: float):
+        pcfg.module.layout_judge_margin_ratio = value
+        self.save_config.emit()
+
+    def _on_layout_judge_center_changed(self, value: float):
+        pcfg.module.layout_judge_center_strength = value
+        self.save_config.emit()
+
+    def _on_layout_judge_clamp_overflow_changed(self):
+        pcfg.module.layout_judge_clamp_overflow = self.layout_judge_clamp_overflow_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_judge_use_model_changed(self):
+        pcfg.module.layout_judge_use_model = self.layout_judge_use_model_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_judge_model_id_changed(self, value: str):
+        pcfg.module.layout_judge_model_id = (value or "").strip()
+        self.save_config.emit()
+
     def _on_layout_optimal_breaks_changed(self):
         pcfg.module.layout_optimal_breaks = self.layout_optimal_breaks_checker.isChecked()
         self.save_config.emit()
@@ -1552,6 +1623,18 @@ class ConfigPanel(Widget):
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
         if hasattr(self, 'layout_constrain_to_bubble_checker'):
             self.layout_constrain_to_bubble_checker.setChecked(getattr(pcfg.module, 'layout_constrain_to_bubble', True))
+        if hasattr(self, 'layout_judge_enabled_checker'):
+            self.layout_judge_enabled_checker.setChecked(getattr(pcfg.module, 'layout_judge_enabled', True))
+        if hasattr(self, 'layout_judge_margin_spin'):
+            self.layout_judge_margin_spin.setValue(float(getattr(pcfg.module, 'layout_judge_margin_ratio', 0.06)))
+        if hasattr(self, 'layout_judge_center_spin'):
+            self.layout_judge_center_spin.setValue(float(getattr(pcfg.module, 'layout_judge_center_strength', 0.7)))
+        if hasattr(self, 'layout_judge_clamp_overflow_checker'):
+            self.layout_judge_clamp_overflow_checker.setChecked(getattr(pcfg.module, 'layout_judge_clamp_overflow', True))
+        if hasattr(self, 'layout_judge_use_model_checker'):
+            self.layout_judge_use_model_checker.setChecked(getattr(pcfg.module, 'layout_judge_use_model', False))
+        if hasattr(self, 'layout_judge_model_id_edit'):
+            self.layout_judge_model_id_edit.setText(getattr(pcfg.module, 'layout_judge_model_id', 'google/mobilenet_v2_1.0_224') or '')
         if hasattr(self, 'layout_optimal_breaks_checker'):
             self.layout_optimal_breaks_checker.setChecked(getattr(pcfg.module, 'layout_optimal_breaks', True))
         if hasattr(self, 'layout_hyphenation_checker'):

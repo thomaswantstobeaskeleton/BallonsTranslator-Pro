@@ -125,6 +125,14 @@ class ModuleConfig(Config):
     optimize_line_breaks: bool = False
     # When True, clamp text box size to the detected balloon and keep position fixed (no growing/moving after layout).
     layout_constrain_to_bubble: bool = True
+    # Layout judge: nudge text box toward bubble center and keep it away from bubble edges (no corners). Off = 0.
+    layout_judge_enabled: bool = True
+    layout_judge_margin_ratio: float = 0.06  # min margin from bubble edge (fraction of min(bubble_w, bubble_h)); e.g. 0.06 = 6%
+    layout_judge_center_strength: float = 0.7  # 0 = no nudge, 1 = full nudge toward bubble center
+    layout_judge_clamp_overflow: bool = True  # shrink/clamp box so it never extends outside the bubble
+    # Optional small/fast model to assist judge (e.g. scale nudge by confidence). Empty = geometric only.
+    layout_judge_model_id: str = "google/mobilenet_v2_1.0_224"
+    layout_judge_use_model: bool = False  # when True, run model on bubble crop and use score to modulate strength
     # Font scaling to fit bubble (2.1): min/max font size (pt) for auto layout; fit step clamps to this range.
     layout_font_size_min: float = 8.0
     layout_font_size_max: float = 72.0
