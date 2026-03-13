@@ -959,6 +959,7 @@ Open **View → Keyboard Shortcuts...** (Ctrl+K) to view and customize. Stored i
 | | Next Page | PgDown |
 | | Previous (alt) | A |
 | | Next (alt) | D |
+| **File** | Export all pages | Ctrl+Shift+S |
 | **Canvas** | Text block mode | W |
 | | Zoom In | Ctrl++ |
 | | Zoom Out | Ctrl+- |
@@ -971,6 +972,14 @@ Open **View → Keyboard Shortcuts...** (Ctrl+K) to view and customize. Stored i
 | **Format** | Bold | Ctrl+B |
 | | Italic | Ctrl+I |
 | | Underline | Ctrl+U |
+| | Increase font size of selected text | Ctrl+Alt+Up |
+| | Decrease font size of selected text | Ctrl+Alt+Down |
+| | Apply font formatting | (assign in dialog) |
+| | Auto layout | (assign in dialog) |
+| | Fit to bubble | (assign in dialog) |
+| | Auto fit font size to box | (assign in dialog) |
+| | Auto fit font size (binary search) | (assign in dialog) |
+| | Set balloon shape to Auto | (assign in dialog) |
 | **Drawing** | Hand tool (pan) | H |
 | | Inpaint brush | J |
 | | Pen tool | B |
@@ -1167,6 +1176,10 @@ In **text edit mode**, right-clicking on the canvas (or after right-dragging a r
 | **Move block(s) up** | Move the selected block one position up in the block list (and in the right-hand text panel). Implemented by swapping the block with the one above. | **Only when exactly one block is selected and it is not the first block.** |
 | **Move block(s) down** | Move the selected block one position down. | **Only when exactly one block is selected and it is not the last block.** |
 | **Apply font formatting** / **Auto layout** / **Reset Angle** / **Squeeze** | Existing formatting and layout actions. | As before. |
+| **Fit to bubble** | Run layout so text fits inside the bubble (constrain + line breaks). | When at least one block is selected. |
+| **Auto fit font size to box** | Scale font size so text fits the selected text box(es). | When at least one block is selected. |
+| **Auto fit font size (binary search)** | Find largest font size that fits the bubble (slower, more accurate). | When at least one block is selected. |
+| **Balloon shape** (submenu) | Set selected text boxes to a shape: Round, Elongated, Narrow, Diamond, Square, Bevel, Pentagon, Point, or Auto. | When at least one block is selected. |
 | **Gradient type** / **Text on path** | **Gradient type** submenu: Linear or Radial. **Text on path** ([#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138)) submenu: None, Circular, or Arc — draws text along a circle or arc (for balloons and SFX). Arc span is set in the format panel (Arc degrees). | When at least one block is selected. |
 | **Detect text in region** | Run the current **text detector** only on the region you drew: right-drag a rectangle on the canvas, then right-click and choose this item. New text blocks are added in full-image coordinates and appended to the current page. No OCR or translation is run. Useful for adding bubbles in one area without re-running the full pipeline (addresses upstream #1137). | **Only when a rubber-band rectangle was drawn** (right-drag before right-click). |
 | **Detect text on page** | Run the text detector on the **entire page** (same as running the pipeline with only detection enabled). New blocks are appended. Convenience alternative to opening the Run menu. | Always (when in text edit mode). |
@@ -1174,6 +1187,7 @@ In **text edit mode**, right-clicking on the canvas (or after right-dragging a r
 
 **Implementation notes:**
 
+- **Configure menu...** (bottom of context menu) opens **Context menu options** (also **View → Context menu options**, Ctrl+Shift+O). You can show/hide actions by category and **pin items to the top** of the menu: drag actions into “Shown at top of menu” to keep them above the category submenus for quick access; drag to reorder. Pinned keys are stored in `context_menu_pinned` in config.
 - **Create text box:** If you right-drag a rectangle before opening the context menu, **Create text box** uses that rectangle’s size and position (mapped to base layer coordinates and clamped to the image bounds). Otherwise the box is created at the right-click position with the default size.
 - **Merge:** The first selected block (by index) keeps its position; source and translation strings of all selected blocks are joined with newlines. Other selected blocks are removed from `imgtrans_proj.pages[page_name]` in **descending index order** (to avoid index shift), then removed from the scene and text panel via `SceneTextManager.deleteTextblkItemList`.
 - **Move up/down:** Implemented in `SceneTextManager.swap_block_positions(i, j)`: the two blocks are swapped in the project page list, in `textblk_item_list`, and in `pairwidget_list`; `.idx` is updated on both blocks and their pair widgets; the two widgets are removed from and re-inserted into the text panel layout so the on-screen order matches the new block order.
@@ -1241,7 +1255,7 @@ A **Keyboard Shortcuts** dialog lets you view and customize keybinds for common 
 
 - **Opening the dialog:** **View → Keyboard Shortcuts...** or default shortcut **Ctrl+K** (configurable in the same dialog).
 - **Dialog features:** Filter by text or category; table of Category, Action, Shortcut (editable with **QKeySequenceEdit**); per-row **Reset** to default; **Reset all to default**; **Apply** (saves to config and updates all shortcuts immediately); **Cancel**.
-- **Actions covered:** File (Open folder, Save project); Edit (Undo, Redo, Page search, Global search, Merge tool); View (Drawing Board, Text Editor, Keyboard Shortcuts, Context menu options); Go (Prev/Next page, alternate keys); Canvas (Textblock mode, Zoom in/out, Delete, Space, Select all, Escape, Delete line, **Create text box**); Format (Bold, Italic, Underline); Drawing tools (Hand, Inpaint, Pen, Rect). Keys are stored in portable form (e.g. `Ctrl+S`) and applied via `QKeySequence.fromString()`.
+- **Actions covered:** File (Open folder, Save project, **Export all pages** Ctrl+Shift+S); Edit (Undo, Redo, Page search, Global search, Merge tool); View (Drawing Board, Text Editor, Keyboard Shortcuts, Context menu options); Go (Prev/Next page, alternate keys); Canvas (Textblock mode, Zoom in/out, Delete, Space, Select all, Escape, Delete line, **Create text box**); Format (Bold, Italic, Underline, Increase/Decrease font size, **Apply font formatting**, **Auto layout**, **Fit to bubble**, **Auto fit font size to box**, **Auto fit font size (binary search)**, **Set balloon shape to Auto** — the last six have no default key; assign in the dialog); Drawing tools (Hand, Inpaint, Pen, Rect). Keys are stored in portable form (e.g. `Ctrl+S`) and applied via `QKeySequence.fromString()`.
 - **Config:** `ProgramConfig.shortcuts` is a dict `action_id → key string`. On load, any missing action is filled from defaults so all schema actions always have a binding. **Apply** in the dialog writes to `pcfg.shortcuts`, calls `save_config()`, and emits `shortcuts_changed`; the main window’s `apply_shortcuts()` updates all QShortcuts, QActions (title bar, left bar), and drawing panel tool tips.
 
 **Files:** `utils/shortcuts.py` (schema, `get_default_shortcuts`, `get_shortcut_info`, `get_shortcut`), `utils/config.py` (`shortcuts` field, load_config shortcut merge), `ui/shortcuts_dialog.py` (ShortcutsDialog), `ui/mainwindowbars.py` (LeftBar and TitleBar `_shortcut_actions_*`, `apply_shortcuts`; View menu **Keyboard Shortcuts...**), `ui/mainwindow.py` (shortcut creation from config, `_shortcuts_list`, `_draw_shortcut_tools`, `apply_shortcuts`, `open_shortcuts_dialog`, connection to dialog’s `shortcuts_changed`).
