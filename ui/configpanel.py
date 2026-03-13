@@ -983,7 +983,7 @@ class ConfigPanel(Widget):
         self.layout_height_overflow_penalty_spin.setRange(0.0, 2000.0)
         self.layout_height_overflow_penalty_spin.setSingleStep(50.0)
         self.layout_height_overflow_penalty_spin.setDecimals(1)
-        self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0)))
+        self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 360.0)))
         self.layout_height_overflow_penalty_spin.valueChanged.connect(self._on_layout_height_overflow_penalty_changed)
         height_penalty_sublock = ConfigSubBlock(
             self.layout_height_overflow_penalty_spin,
@@ -1063,7 +1063,7 @@ class ConfigPanel(Widget):
         self.layout_stub_penalty_1word_spin.setRange(200.0, 3000.0)
         self.layout_stub_penalty_1word_spin.setSingleStep(100.0)
         self.layout_stub_penalty_1word_spin.setDecimals(0)
-        self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0)))
+        self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 2000.0)))
         self.layout_stub_penalty_1word_spin.valueChanged.connect(self._on_layout_stub_penalty_1word_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.layout_stub_penalty_1word_spin,
@@ -1647,7 +1647,7 @@ class ConfigPanel(Widget):
             self.layout_short_line_penalty_spin.blockSignals(False)
         if hasattr(self, 'layout_height_overflow_penalty_spin'):
             self.layout_height_overflow_penalty_spin.blockSignals(True)
-            self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0)))
+            self.layout_height_overflow_penalty_spin.setValue(float(getattr(pcfg.module, 'layout_height_overflow_penalty', 360.0)))
             self.layout_height_overflow_penalty_spin.blockSignals(False)
         if hasattr(self, 'layout_font_size_min_spin'):
             self.layout_font_size_min_spin.blockSignals(True)
@@ -1679,7 +1679,7 @@ class ConfigPanel(Widget):
             self.layout_balloon_shape_model_id_edit.blockSignals(False)
         if hasattr(self, 'layout_stub_penalty_1word_spin'):
             self.layout_stub_penalty_1word_spin.blockSignals(True)
-            self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0)))
+            self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 2000.0)))
             self.layout_stub_penalty_1word_spin.blockSignals(False)
         if hasattr(self, 'layout_panel_preserve_line_breaks_checker'):
             self.layout_panel_preserve_line_breaks_checker.setChecked(bool(getattr(pcfg.module, 'layout_panel_preserve_line_breaks', False)))
