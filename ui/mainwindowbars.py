@@ -573,7 +573,6 @@ class TitleBar(Widget):
             ("view.keyboard_shortcuts", "Ctrl+K", keyboardShortcutsAction),
             ("view.context_menu_options", "Ctrl+Shift+O", contextMenuOptionsAction),
             ("edit.merge_tool", "Ctrl+Shift+M", mergeToolAction),
-            ("file.export_all_pages", "Ctrl+Shift+S", batchExportAction),
         ]
 
         self.goToolBtn = TitleBarToolBtn(self)
@@ -603,6 +602,7 @@ class TitleBar(Widget):
         batchExportAction = QAction(self.tr('Export all pages'), self)
         batchExportAction.setShortcut(QKeySequence.fromString(get_shortcut("file.export_all_pages", getattr(pcfg, "shortcuts", None))))
         self.batch_export_trigger = batchExportAction.triggered
+        self._shortcut_actions_title.append(("file.export_all_pages", "Ctrl+Shift+S", batchExportAction))
         batchExportAsAction = QAction(self.tr('Export all pages as...'), self)
         batchExportAsAction.setToolTip(self.tr('Choose output folder and format (PNG, JPEG, WebP, JXL).'))
         self.batch_export_as_trigger = batchExportAsAction.triggered
