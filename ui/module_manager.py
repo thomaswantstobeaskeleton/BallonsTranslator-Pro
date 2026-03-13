@@ -354,7 +354,9 @@ class TranslateThread(ModuleThread):
                         trans_name = getattr(cfg_module, 'translator', '') or ''
                         src_lang = getattr(cfg_module, 'translate_source', '') or ''
                         tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
-                        ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                        ctx_dict = dict(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                        ctx_dict["_series_context_path"] = series_path
+                        ctx_hash = _settings_hash(ctx_dict)
                         trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
                         if cm.can_serve_all_blocks_from_translation_cache(trans_key, page):
                             cm.apply_cached_translation_to_blocks(trans_key, page)
@@ -395,7 +397,9 @@ class TranslateThread(ModuleThread):
                                 trans_name = getattr(cfg_module, 'translator', '') or ''
                                 src_lang = getattr(cfg_module, 'translate_source', '') or ''
                                 tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
-                                ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                ctx_dict = dict(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                ctx_dict["_series_context_path"] = series_path
+                                ctx_hash = _settings_hash(ctx_dict)
                                 trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
                                 cm.cache_translation_results(trans_key, page)
                         except Exception as _e:
@@ -1317,6 +1321,11 @@ class ImgtransThread(QThread):
                     self.translate_thread.push_pagekey_queue(imgname)
                 elif not low_vram_trans:
                     self._set_translation_context_for_page(imgname, pages_to_iterate)
+                    _series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
+                    if not _series_path and getattr(self.translator, "params", None) and "series_context_path" in self.translator.params:
+                        _series_path = (self.translator.get_param_value("series_context_path") or "").strip()
+                    if not _series_path:
+                        _series_path = DEFAULT_SERIES_ID
                     trans_from_cache = False
                     if getattr(cfg_module, 'translation_cache_enabled', False) and blk_list:
                         try:
@@ -1330,7 +1339,9 @@ class ImgtransThread(QThread):
                             trans_name = getattr(cfg_module, 'translator', '') or ''
                             src_lang = getattr(cfg_module, 'translate_source', '') or ''
                             tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
-                            ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                            ctx_dict = dict(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                            ctx_dict["_series_context_path"] = _series_path
+                            ctx_hash = _settings_hash(ctx_dict)
                             trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
                             if cm.can_serve_all_blocks_from_translation_cache(trans_key, blk_list):
                                 cm.apply_cached_translation_to_blocks(trans_key, blk_list)
@@ -1372,7 +1383,9 @@ class ImgtransThread(QThread):
                                 trans_name = getattr(cfg_module, 'translator', '') or ''
                                 src_lang = getattr(cfg_module, 'translate_source', '') or ''
                                 tgt_lang = getattr(cfg_module, 'translate_target', '') or ''
-                                ctx_hash = _settings_hash(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                ctx_dict = dict(getattr(cfg_module, 'translator_params', {}).get(trans_name, {}))
+                                ctx_dict["_series_context_path"] = _series_path
+                                ctx_hash = _settings_hash(ctx_dict)
                                 trans_key = cm.get_translation_cache_key(image_hash, trans_name, src_lang, tgt_lang, ctx_hash)
                                 cm.cache_translation_results(trans_key, blk_list)
                             except Exception as _e:
