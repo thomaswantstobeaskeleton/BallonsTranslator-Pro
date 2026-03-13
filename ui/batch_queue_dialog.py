@@ -81,7 +81,11 @@ class BatchQueueDialog(QDialog):
 
         self.skip_ignored_checker = QCheckBox(self.tr("Skip ignored pages"))
         self.skip_ignored_checker.setChecked(True)
-        self.skip_ignored_checker.setToolTip(self.tr("If checked, pages marked as \"Ignore in run\" in each project are not processed."))
+        self.skip_ignored_checker.setToolTip(
+            self.tr('If checked, pages marked as "Ignore in run" in each project are not processed.')
+            + " "
+            + self.tr("The first item's page selection (which pages to run) is applied to all queue items.")
+        )
         layout.addWidget(self.skip_ignored_checker)
 
         self.status_label = QLabel(self.tr("Queue: 0 items. Add folders and click Start."))

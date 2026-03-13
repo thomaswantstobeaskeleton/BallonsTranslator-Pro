@@ -3895,6 +3895,7 @@ class MainWindow(mainwindow_cls):
         self.exec_dirs = valid_dirs
         self._batch_cancelled = False
         self._batch_skip_ignored = kwargs.get('skip_ignored_pages', getattr(pcfg, 'skip_ignored_in_run', True))
+        self._batch_run_indices = None  # after first item, use same page indices for rest of batch
         self.run_next_dir()
 
     def run_next_dir(self):
@@ -3911,6 +3912,7 @@ class MainWindow(mainwindow_cls):
                 self._batch_cancelled = False
             else:
                 self.batch_queue_empty.emit()
+            self._batch_run_indices = None
             if shared.HEADLESS_CONTINUOUS:
                 LOGGER.info('Enter next dirs to translate (comma-separated), or "exit" to quit.')
                 try:
@@ -3931,12 +3933,20 @@ class MainWindow(mainwindow_cls):
         self.batch_queue_item_started.emit(d)
         LOGGER.info(f'translating {d} ...')
         self.openDir(d)
-        shared.pbar = {}
-        npages = len(self.imgtrans_proj.pages)
-        if npages > 0:
-            skip_ignored = getattr(self, '_batch_skip_ignored', True)
+        all_pages = list(self.imgtrans_proj.pages.keys())
+        skip_ignored = getattr(self, '_batch_skip_ignored', True)
+        if getattr(self, '_batch_run_indices', None) is not None:
+            # Use same page indices as first item (e.g. skip page 1 in every chapter)
+            pages_to_process = [all_pages[i] for i in self._batch_run_indices if i < len(all_pages)]
+        else:
+            # First item: compute from this project's ignore state, then store indices for rest of batch
             if skip_ignored:
-                npages = len([p for p in self.imgtrans_proj.pages if not self.imgtrans_proj.is_page_ignored(p)])
+                pages_to_process = [p for p in all_pages if not self.imgtrans_proj.is_page_ignored(p)]
+            else:
+                pages_to_process = list(all_pages)
+            self._batch_run_indices = [all_pages.index(p) for p in pages_to_process]
+        shared.pbar = {}
+        npages = len(pages_to_process)
         if npages > 0:
             if pcfg.module.enable_detect:
                 shared.pbar['detect'] = tqdm(range(npages), desc="Text Detection")
@@ -3946,7 +3956,10 @@ class MainWindow(mainwindow_cls):
                 shared.pbar['translate'] = tqdm(range(npages), desc="Translation")
             if pcfg.module.enable_inpaint:
                 shared.pbar['inpaint'] = tqdm(range(npages), desc="Inpaint")
-        self.on_run_imgtrans(skip_ignored_in_batch=getattr(self, '_batch_skip_ignored', True))
+            self.on_run_imgtrans(
+                skip_ignored_in_batch=skip_ignored,
+                pages_to_process=pages_to_process,
+            )
 
     def setupRegisterWidget(self):
         self.titleBar.viewMenu.addSeparator()
