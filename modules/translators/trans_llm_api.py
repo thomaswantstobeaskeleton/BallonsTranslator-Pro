@@ -469,8 +469,13 @@ class LLM_API_Translator(BaseTranslator):
         term_tgt: str,
         term_src: str,
         glossary: List[Tuple[str, str]],
+        trans_text: Optional[str] = None,
+        pos: Optional[int] = None,
     ) -> bool:
-        """Return False if we must not replace phrase with term_tgt (e.g. phrase is another glossary target or same-source alternate)."""
+        """Return False if we must not replace phrase with term_tgt (e.g. phrase is another glossary target or same-source alternate).
+        When trans_text and pos are given, only skip 'phrase is substring of other target' if the full other target
+        actually appears at pos (so we don't block e.g. 'heart demon' -> 'mental demons' when the text is just
+        'heart demon' and not 'heart demon tribulation')."""
         if not phrase or not term_tgt:
             return False
         pl = phrase.strip().lower()
@@ -481,9 +486,18 @@ class LLM_API_Translator(BaseTranslator):
         other_targets = {t.strip().lower() for s, t in glossary if s != term_src and t}
         if pl in other_targets:
             return False
-        # Phrase must not be a substring of another source's target (e.g. "Establishment realm" in "Foundation Establishment realm")
-        if any(pl in ot for ot in other_targets):
-            return False
+        # Phrase must not be a substring of another source's target *when that full target appears here*
+        # (e.g. don't replace "heart demon" with "mental demons" when text at pos is "heart demon tribulation")
+        # If we don't have pos/trans_text, keep conservative: skip whenever phrase is substring of any other target
+        if trans_text is not None and pos is not None:
+            for ot in other_targets:
+                if pl in ot and len(ot) > len(pl):
+                    end = pos + len(ot)
+                    if end <= len(trans_text) and trans_text[pos:end].lower() == ot:
+                        return False
+        else:
+            if any(pl in ot for ot in other_targets):
+                return False
         # Phrase must not be another accepted target for this same source (glossary can list multiple targets per term)
         same_src_targets = {t.strip().lower() for s, t in glossary if s == term_src and t}
         if pl in same_src_targets:
@@ -510,10 +524,38 @@ class LLM_API_Translator(BaseTranslator):
                     continue
                 if term_src not in src_text:
                     continue
+                # If this source term is part of a longer glossary source that also appears in src_text,
+                # and that longer term's target is already present in the translation, treat this term as satisfied.
+                # Example: source has both '心魔' -> 'mental demons' and '心魔劫' -> 'heart demon tribulation'.
+                # When the line actually contains '心魔劫' and the translation has 'heart demon tribulation',
+                # we should not warn that '心魔' is missing.
+                covered_by_longer = False
+                for other_src, other_tgt in glossary:
+                    if other_src == term_src or not other_src or not other_tgt:
+                        continue
+                    if term_src in other_src and other_src in src_text:
+                        other_tgt_stripped = other_tgt.strip()
+                        if not other_tgt_stripped:
+                            continue
+                        other_no_sp = other_tgt_stripped.lower().replace(" ", "")
+                        tn_lower = trans_norm.lower()
+                        if (
+                            other_tgt_stripped in trans_norm
+                            or other_tgt_stripped.lower() in tn_lower
+                            or (other_no_sp and other_no_sp in tn_lower.replace(" ", ""))
+                        ):
+                            covered_by_longer = True
+                            break
+                if covered_by_longer:
+                    continue
                 tgt_stripped = term_tgt.strip()
                 if tgt_stripped in trans_norm:
                     continue
                 if tgt_stripped.lower() in trans_norm.lower():
+                    continue
+                # Treat as present if translation has target with extra internal spaces (e.g. "Yun Wu Mountain Villa" vs "Yunwu Mountain Villa")
+                tgt_no_sp = tgt_stripped.lower().replace(" ", "")
+                if tgt_no_sp and tgt_no_sp in trans_norm.lower().replace(" ", ""):
                     continue
                 # Try to replace wrong forms: first heuristics (e.g. "x province"), then auto-detect phrase from target shape
                 replaced = False
@@ -521,9 +563,11 @@ class LLM_API_Translator(BaseTranslator):
                     if not wrong:
                         continue
                     if wrong.lower() in new_trans.lower():
-                        if not self._allow_glossary_replacement(wrong, tgt_stripped, term_src, glossary):
-                            continue
                         idx = new_trans.lower().find(wrong.lower())
+                        if idx >= 0 and not self._allow_glossary_replacement(
+                            wrong, tgt_stripped, term_src, glossary, new_trans, idx
+                        ):
+                            continue
                         if idx >= 0:
                             new_trans = new_trans[:idx] + tgt_stripped + new_trans[idx + len(wrong):]
                             replaced = True
@@ -541,10 +585,11 @@ class LLM_API_Translator(BaseTranslator):
                         aw = auto_phrase.strip().lower().split()
                         tw = tgt_stripped.strip().lower().split()
                         same_shape = len(aw) == len(tw) and aw and tw and aw[-1] == tw[-1]
-                    if auto_phrase and not same_shape and self._allow_glossary_replacement(
-                        auto_phrase, tgt_stripped, term_src, glossary
+                    pos_auto = new_trans.lower().find(auto_phrase.lower()) if auto_phrase else -1
+                    if auto_phrase and not same_shape and pos_auto >= 0 and self._allow_glossary_replacement(
+                        auto_phrase, tgt_stripped, term_src, glossary, new_trans, pos_auto
                     ):
-                        pos = new_trans.lower().find(auto_phrase.lower())
+                        pos = pos_auto
                         if pos >= 0:
                             actual = new_trans[pos : pos + len(auto_phrase)]
                             new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
@@ -558,10 +603,11 @@ class LLM_API_Translator(BaseTranslator):
                     n = len(tgt_stripped.split())
                     if 2 <= n <= 3:
                         any_phrase = self._find_any_n_word_phrase_to_replace(new_trans, tgt_stripped, n)
-                        if any_phrase and self._allow_glossary_replacement(
-                            any_phrase, tgt_stripped, term_src, glossary
+                        pos_fb = new_trans.lower().find(any_phrase.lower()) if any_phrase else -1
+                        if any_phrase and pos_fb >= 0 and self._allow_glossary_replacement(
+                            any_phrase, tgt_stripped, term_src, glossary, new_trans, pos_fb
                         ):
-                            pos = new_trans.lower().find(any_phrase.lower())
+                            pos = pos_fb
                             if pos >= 0:
                                 actual = new_trans[pos : pos + len(any_phrase)]
                                 new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
@@ -956,6 +1002,17 @@ class LLM_API_Translator(BaseTranslator):
 
         yield prompt, len(queries)
 
+    def _request_translation_plain_text(self, src: str, to_lang: str) -> Optional[str]:
+        """Request a single translation without JSON format; returns raw content. Used when JSON parsing fails."""
+        system = (
+            "You are a translator. Output only the translation, no JSON, no numbering, no explanation."
+        )
+        user = f"Translate the following to {to_lang}. Reply with only the translation:\n\n{src}"
+        try:
+            return self.request_custom_completion(system, user, max_tokens=1024)
+        except Exception:
+            return None
+
     def _translate_single_item_fallback(
         self, src_list: List[str], to_lang: str, error_placeholder: str
     ) -> List[str]:
@@ -980,7 +1037,17 @@ class LLM_API_Translator(BaseTranslator):
                         results.append(error_placeholder)
                     break
             except Exception:
-                results.append(error_placeholder)
+                # Last resort: request plain-text translation (no JSON) so we don't fill the page with [ERROR: ...]
+                try:
+                    plain = self._request_translation_plain_text(src, to_lang)
+                    if plain and plain.strip():
+                        results.append(
+                            self._apply_keyword_substitutions(plain.strip())
+                        )
+                    else:
+                        results.append(error_placeholder)
+                except Exception:
+                    results.append(error_placeholder)
             time.sleep(max(0, self.global_delay))
         return results
 
@@ -1208,6 +1275,52 @@ class LLM_API_Translator(BaseTranslator):
             {"id": i, "translation": found.get(i, placeholder)}
             for i in range(1, count + 1)
         ]
+
+    def _raw_content_to_fallback_translations(
+        self, raw_content: str, expected_count: int
+    ) -> Optional[TranslationResponse]:
+        """
+        Last resort: build a TranslationResponse from raw API content when JSON parsing failed.
+        Tries to strip markdown/code blocks, then use whole text (expected_count==1) or split by lines.
+        """
+        if not raw_content or not raw_content.strip() or expected_count < 1:
+            return None
+        text = raw_content.strip()
+        # Strip markdown code blocks so we don't keep ```json ... ```; keep the rest as possible translation
+        text_no_blocks = re.sub(r"```[\s\S]*?```", "", text).strip()
+        if text_no_blocks:
+            text = text_no_blocks
+        if not text:
+            # Model may have returned only a code block; use content inside first block as translation
+            m = re.search(r"```(?:\w*)\s*([\s\S]*?)```", raw_content)
+            if m and m.group(1).strip():
+                text = m.group(1).strip()
+        if not text:
+            return None
+        # Single item: use whole text (trim to reasonable length so we don't store huge garbage)
+        if expected_count == 1:
+            single = text[:8000].strip() if len(text) > 8000 else text
+            if single:
+                return TranslationResponse(translations=[
+                    TranslationElement(id=1, translation=single)
+                ])
+            return None
+        # Multiple: split by double newline or by lines; take first expected_count segments
+        segments = re.split(r"\n\s*\n", text)
+        if len(segments) <= 1:
+            segments = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        result = []
+        for i in range(expected_count):
+            if i < len(segments):
+                seg = (segments[i] or "").strip()
+                if len(seg) > 8000:
+                    seg = seg[:8000].strip()
+                result.append(TranslationElement(id=i + 1, translation=seg or "[missing]"))
+            else:
+                result.append(TranslationElement(id=i + 1, translation="[missing]"))
+        if result:
+            return TranslationResponse(translations=result)
+        return None
 
     def _request_raw_completion(
         self, messages: List[dict], max_tokens: int = 1024
@@ -1608,6 +1721,14 @@ class LLM_API_Translator(BaseTranslator):
                             )
                     except Exception:
                         pass
+                # 5) Last resort: use raw content as translation(s) when JSON is unusable (avoids full-page [ERROR: ValidationError])
+                if validated_response is None and expected_count is not None and expected_count >= 1 and raw_content and raw_content.strip():
+                    fallback = self._raw_content_to_fallback_translations(raw_content, expected_count)
+                    if fallback is not None:
+                        validated_response = fallback
+                        self.logger.info(
+                            "Used raw API content as fallback translations (JSON parsing failed)."
+                        )
                 if validated_response is None:
                     self.logger.error(
                         "Pydantic validation or JSON parsing failed even after attempting fix."
