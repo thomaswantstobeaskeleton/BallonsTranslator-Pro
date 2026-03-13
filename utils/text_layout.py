@@ -269,20 +269,20 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int, ball
             if L < avg_len * 0.78:
                 short_line_penalty += pen
     # 2.3 Strong penalty for stub lines; 1-word lines get extra-high penalty from config.
-    stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0))
+    stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 2000.0))
     stub_line_penalty = 0.0
     if n > 1:
         for i, ln in enumerate(lines[:-1]):
             if ln.num_words <= 1:
                 stub_line_penalty += stub_1word
             elif ln.num_words <= 2:
-                stub_line_penalty += 750.0
+                stub_line_penalty += 900.0
             elif ln.num_words <= 3:
-                stub_line_penalty += 320.0
+                stub_line_penalty += 380.0
             elif ln.num_words <= 4:
-                stub_line_penalty += 160.0
+                stub_line_penalty += 190.0
             elif ln.num_words <= 5:
-                stub_line_penalty += 85.0
+                stub_line_penalty += 110.0
     # Reward width utilization: prefer layouts that use more of target_width
     width_util = avg_len / target_width if target_width > 0 else 0
     width_bonus = -100.0 * min(width_util, 1.0)  # negative = reward
@@ -834,14 +834,20 @@ def layout_text(
         if not passes_collision:
             continue
 
-        # Height penalty: avoid layouts that clearly exceed the target bubble height
+        # Height penalty: avoid layouts that clearly exceed the target bubble height.
+        # Softer for long paragraphs so we can accept slightly taller blocks to avoid ugly 1-word stub lines.
         height_penalty = 0.0
         if target_box_height is not None and target_box_height > 0:
             total_h = len(lines) * line_height
             if total_h > target_box_height:
                 overflow = (total_h - target_box_height) / float(target_box_height)
-                # Penalize overflow very steeply so shorter, wider layouts win
-                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 580.0))
+                # Base factor comes from config; reduce it for longer texts (5+ lines) so line quality wins more often.
+                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 360.0))
+                n_lines = len(lines)
+                if n_lines >= 7:
+                    height_factor *= 0.55
+                elif n_lines >= 5:
+                    height_factor *= 0.7
                 height_penalty = overflow * height_factor
 
         # Score layout (only when not using forced_lines; forced_lines already chosen by DP)
