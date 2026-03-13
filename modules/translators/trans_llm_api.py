@@ -436,13 +436,14 @@ class LLM_API_Translator(BaseTranslator):
         self, trans_text: str, target: str, n: int
     ) -> Optional[str]:
         """When source had the glossary term but translation used something else (e.g. 'bird dog'
-        instead of 'mental demons'), find any n-word phrase in trans_text to replace with target.
+        instead of 'mental demons'), find an n-word phrase that shares at least one word with target.
         Skips stoplist phrases. Used as fallback when _find_auto_wrong_phrase finds nothing."""
         if not trans_text or not target or n < 1:
             return None
         t = (target or "").strip()
         if t.lower() in trans_text.lower():
             return None
+        target_words = set(t.lower().split())
         # Build regex for exactly n words: \b\w+(\s+\w+){n-1}\b
         pattern = r"\b\w+" + (r"\s+\w+" * (n - 1)) + r"\b" if n > 1 else r"\b\w+\b"
         stoplist = self._STOPLIST_2W if n == 2 else frozenset()
@@ -455,8 +456,39 @@ class LLM_API_Translator(BaseTranslator):
             # Skip article + noun (e.g. "a bird") so we replace content phrases like "bird dog"
             if n == 2 and (phrase.lower().startswith("a ") or phrase.lower().startswith("the ")):
                 continue
+            # Only replace if phrase shares at least one word with target (avoids "Having fought" -> "Immortal Realm")
+            phrase_words = set(re.findall(r"\w+", phrase.lower()))
+            if not (phrase_words & target_words):
+                continue
             return phrase
         return None
+
+    def _allow_glossary_replacement(
+        self,
+        phrase: str,
+        term_tgt: str,
+        term_src: str,
+        glossary: List[Tuple[str, str]],
+    ) -> bool:
+        """Return False if we must not replace phrase with term_tgt (e.g. phrase is another glossary target or same-source alternate)."""
+        if not phrase or not term_tgt:
+            return False
+        pl = phrase.strip().lower()
+        # Skip garbage/error phrases (e.g. "Heart no match", placeholders)
+        if "no match" in pl or (len(pl) <= 3 and not pl.replace("'", "").isalnum()):
+            return False
+        # Phrase must not be any other source's target (would overwrite a correct term, e.g. Heavenly Tribulation)
+        other_targets = {t.strip().lower() for s, t in glossary if s != term_src and t}
+        if pl in other_targets:
+            return False
+        # Phrase must not be a substring of another source's target (e.g. "Establishment realm" in "Foundation Establishment realm")
+        if any(pl in ot for ot in other_targets):
+            return False
+        # Phrase must not be another accepted target for this same source (glossary can list multiple targets per term)
+        same_src_targets = {t.strip().lower() for s, t in glossary if s == term_src and t}
+        if pl in same_src_targets:
+            return False
+        return True
 
     def _check_glossary_terms_in_translations(
         self, src_list: List[str], trans_list: List[str]
@@ -466,6 +498,8 @@ class LLM_API_Translator(BaseTranslator):
         glossary = self._get_effective_glossary_entries()
         if not glossary:
             return
+        page_key = getattr(self, "_current_page_key", None)
+        page_suffix = f" (page: {page_key})" if page_key else ""
         for i, (src_text, trans_text) in enumerate(zip(src_list, trans_list)):
             if not src_text or not isinstance(trans_text, str):
                 continue
@@ -487,43 +521,54 @@ class LLM_API_Translator(BaseTranslator):
                     if not wrong:
                         continue
                     if wrong.lower() in new_trans.lower():
+                        if not self._allow_glossary_replacement(wrong, tgt_stripped, term_src, glossary):
+                            continue
                         idx = new_trans.lower().find(wrong.lower())
                         if idx >= 0:
                             new_trans = new_trans[:idx] + tgt_stripped + new_trans[idx + len(wrong):]
                             replaced = True
                             self.logger.info(
-                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
-                                term_src, term_tgt, wrong,
+                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
+                                term_src, term_tgt, wrong, page_suffix,
                             )
                             break
                 if not replaced:
                     # Auto-detect: find phrase that matches target's last word (e.g. "heart demon" for "mental demons")
                     auto_phrase = self._find_auto_wrong_phrase(new_trans, tgt_stripped)
-                    if auto_phrase:
+                    # Skip when phrase and target have same word count and same last word (e.g. "true disciple" vs "official disciple") - treat as valid alternate
+                    same_shape = False
+                    if auto_phrase and tgt_stripped:
+                        aw = auto_phrase.strip().lower().split()
+                        tw = tgt_stripped.strip().lower().split()
+                        same_shape = len(aw) == len(tw) and aw and tw and aw[-1] == tw[-1]
+                    if auto_phrase and not same_shape and self._allow_glossary_replacement(
+                        auto_phrase, tgt_stripped, term_src, glossary
+                    ):
                         pos = new_trans.lower().find(auto_phrase.lower())
                         if pos >= 0:
                             actual = new_trans[pos : pos + len(auto_phrase)]
                             new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
                             replaced = True
                             self.logger.info(
-                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
-                                term_src, term_tgt, actual,
+                                "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
+                                term_src, term_tgt, actual, page_suffix,
                             )
                 if not replaced:
-                    # Fallback: source has the glossary term, so something in the translation is wrong.
-                    # Replace any n-word phrase (same word count as target) that isn't stoplist - catches "bird dog" etc.
+                    # Fallback: only replace n-word phrase that shares a word with target (avoids "Having fought" -> "Immortal Realm")
                     n = len(tgt_stripped.split())
                     if 2 <= n <= 3:
                         any_phrase = self._find_any_n_word_phrase_to_replace(new_trans, tgt_stripped, n)
-                        if any_phrase:
+                        if any_phrase and self._allow_glossary_replacement(
+                            any_phrase, tgt_stripped, term_src, glossary
+                        ):
                             pos = new_trans.lower().find(any_phrase.lower())
                             if pos >= 0:
                                 actual = new_trans[pos : pos + len(any_phrase)]
                                 new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
                                 replaced = True
                                 self.logger.info(
-                                    "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)",
-                                    term_src, term_tgt, actual,
+                                    "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
+                                    term_src, term_tgt, actual, page_suffix,
                                 )
                 if replaced:
                     trans_list[i] = new_trans
@@ -531,8 +576,8 @@ class LLM_API_Translator(BaseTranslator):
                 else:
                     snippet = (trans_norm[:80] + "…") if len(trans_norm) > 80 else trans_norm
                     self.logger.warning(
-                        "Glossary term not applied: source '%s' expected '%s' in translation; got: %s",
-                        term_src, term_tgt, snippet,
+                        "Glossary term not applied: source '%s' expected '%s' in translation; got: %s%s",
+                        term_src, term_tgt, snippet, page_suffix,
                     )
 
     @property
@@ -1073,6 +1118,15 @@ class LLM_API_Translator(BaseTranslator):
                     return s[start : i + 1]
         return s[start:]
 
+    def _repair_json_malformed_translations_key_and_unquoted(self, s: str) -> str:
+        """Repair common model mistakes: wrong key 'translations: [' and unquoted 'id:' / 'translation:' in objects."""
+        # Fix key: "translations: [" or "translations:[" -> "translations": [
+        s = re.sub(r'"translations\s*:\s*\[', '"translations": [', s, flags=re.IGNORECASE)
+        # Quote unquoted keys in object context (after { or ,): id: -> "id":, translation: -> "translation":
+        s = re.sub(r'([{,]\s*)id\s*:', r'\1"id":', s, flags=re.IGNORECASE)
+        s = re.sub(r'([{,]\s*)translation\s*:', r'\1"translation":', s, flags=re.IGNORECASE)
+        return s
+
     def _repair_json_unescaped_quotes(self, s: str) -> str:
         """Escape unescaped double-quotes inside \"translation\": \"...\" values so json.loads can parse."""
         out = []
@@ -1109,11 +1163,13 @@ class LLM_API_Translator(BaseTranslator):
         return "".join(out)
 
     def _extract_translations_from_broken_json(self, raw: str) -> List[dict]:
-        """Extract id/translation pairs when JSON is malformed (e.g. unescaped \" inside strings)."""
+        """Extract id/translation pairs when JSON is malformed (e.g. unescaped \" inside strings or unquoted keys)."""
         out = []
         patterns = [
-            (re.compile(r'"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"(.*?)"\s*}\s*(?:,\s*|\s*])', re.DOTALL), True),   # id first
-            (re.compile(r'"translation"\s*:\s*"(.*?)"\s*,\s*"id"\s*:\s*(\d+)\s*}\s*(?:,\s*|\s*])', re.DOTALL), False),  # translation first
+            (re.compile(r'"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"(.*?)"\s*}\s*(?:,\s*|\s*])', re.DOTALL), True),   # id first, quoted
+            (re.compile(r'"translation"\s*:\s*"(.*?)"\s*,\s*"id"\s*:\s*(\d+)\s*}\s*(?:,\s*|\s*])', re.DOTALL), False),  # translation first, quoted
+            (re.compile(r'\bid\s*:\s*(\d+)\s*,\s*translation\s*:\s*"(.*?)"\s*}\s*(?:,\s*|\s*])', re.DOTALL), True),   # unquoted id, translation value quoted
+            (re.compile(r'\btranslation\s*:\s*"(.*?)"\s*,\s*id\s*:\s*(\d+)\s*}\s*(?:,\s*|\s*])', re.DOTALL), False),  # unquoted translation key first
         ]
         for pattern, id_first in patterns:
             for m in pattern.finditer(raw):
@@ -1464,6 +1520,21 @@ class LLM_API_Translator(BaseTranslator):
                             )
                     except (ValidationError, json.JSONDecodeError):
                         pass
+                # 0b) Try repairing malformed key ("translations: [") and unquoted id/translation keys
+                if validated_response is None:
+                    try:
+                        repaired = self._repair_json_malformed_translations_key_and_unquoted(
+                            json_to_parse
+                        )
+                        data_to_validate = json.loads(repaired)
+                        validated_response = TranslationResponse.model_validate(
+                            data_to_validate
+                        )
+                        self.logger.info(
+                            "Successfully parsed after repairing malformed 'translations' key or unquoted id/translation keys."
+                        )
+                    except (ValidationError, json.JSONDecodeError):
+                        pass
                 # 1) Try repairing unescaped quotes inside "translation": " values
                 if validated_response is None:
                     try:
@@ -1690,8 +1761,9 @@ class LLM_API_Translator(BaseTranslator):
                         self.logger.warning(
                             "Malformed JSON after retries. Trying each snippet one-by-one (single-item fallback)."
                         )
+                        batch_src = src_list[len(translations) : len(translations) + num_src]
                         fallback = self._translate_single_item_fallback(
-                            src_list, to_lang, "[ERROR: Invalid JSON]"
+                            batch_src, to_lang, "[ERROR: Invalid JSON]"
                         )
                         translations.extend(fallback)
                         break
@@ -1732,14 +1804,29 @@ class LLM_API_Translator(BaseTranslator):
                             "Authentication or quota error; cannot continue.",
                             cause=e,
                         )
-                    page = getattr(self, '_current_page_key', None)
-                    self.logger.error(
-                        f"Fatal Error: An unrecoverable error occurred: {type(e).__name__} - {e}"
-                        + (f" (page: {page})" if page else "")
+                    # Retry on ValidationError / BadRequest (e.g. malformed API response) before giving up
+                    api_retry_attempt += 1
+                    page = getattr(self, "_current_page_key", None)
+                    self.logger.warning(
+                        "Validation/API error (retrying): %s - %s. Attempt %s/%s%s.",
+                        type(e).__name__,
+                        e,
+                        api_retry_attempt,
+                        self.retry_attempts,
+                        f" (page: {page})" if page else "",
                     )
-                    self.logger.debug(traceback.format_exc())
-                    translations.extend([f"[ERROR: {type(e).__name__}]"] * num_src)
-                    break
+                    if api_retry_attempt >= self.retry_attempts:
+                        self.logger.warning(
+                            "Validation error after retries. Trying each snippet one-by-one (single-item fallback)."
+                        )
+                        batch_src = src_list[len(translations) : len(translations) + num_src]
+                        fallback = self._translate_single_item_fallback(
+                            batch_src, to_lang, f"[ERROR: {type(e).__name__}]"
+                        )
+                        translations.extend(fallback)
+                        break
+                    time.sleep(self.retry_timeout)
+                    continue
 
         return translations
 
