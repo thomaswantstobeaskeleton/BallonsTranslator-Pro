@@ -573,6 +573,7 @@ class SceneTextManager(QObject):
         self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
         self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
         self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
+        self.canvas.resize_to_fit_content_signal.connect(self.onResizeToFitContent)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -1141,6 +1142,33 @@ class SceneTextManager(QObject):
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
         finally:
             pcfg.module.layout_font_binary_search = old_binary
+
+    def onResizeToFitContent(self):
+        """Resize selected text box(es) so the full text is visible (e.g. when box is too small and clips content)."""
+        selected_blks = self.canvas.selected_text_items()
+        if not selected_blks:
+            return
+        min_w, min_h = 24.0, 24.0
+        for blkitem in selected_blks:
+            text = blkitem.toPlainText().strip()
+            blkitem.oldRect = blkitem.absBoundingRect(qrect=True)
+            pad = blkitem.padding()
+            if not text:
+                new_w = max(min_w, blkitem.oldRect.width())
+                new_h = max(min_h, blkitem.oldRect.height())
+            else:
+                ff = blkitem.fontformat
+                font = QFont(ff.font_family or "Arial", max(1, int(round(ff.font_size))))
+                if getattr(ff, "bold", False):
+                    font.setBold(True)
+                if getattr(ff, "italic", False):
+                    font.setItalic(True)
+                fm = QFontMetricsF(font)
+                br = fm.boundingRect(text)
+                new_w = max(min_w, br.width() + 2 * pad)
+                new_h = max(min_h, br.height() + 2 * pad)
+            blkitem.set_size(new_w, new_h, set_layout_maxsize=True, set_blk_size=True, preserve_topleft=False)
+            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
 
     def _scale_font_to_fit_box(self, blkitem: TextBlkItem):
         """Scale this block's font so its text fits inside the current box (no layout/box change)."""
@@ -2000,6 +2028,10 @@ class SceneTextManager(QObject):
                     if not getattr(blk.fontformat, 'vertical', False):
                         self.layout_textblk(blk)
                         self.layout_textblk(blk)
+                        # For very short text (<=3 chars), scale font to fit box so full text is visible (e.g. "ah" not cut to "a").
+                        text_len = len(blk.toPlainText().strip())
+                        if text_len > 0 and text_len <= 3:
+                            self._scale_font_to_fit_box(blk)
                     if blk.idx < len(self.pairwidget_list):
                         self.pairwidget_list[blk.idx].e_trans.setPlainText(_merge_stub_lines_in_text(blk.toPlainText()))
             layout_after = layout_after_apply if getattr(pcfg, 'let_autolayout_flag', True) else None
@@ -2023,6 +2055,9 @@ class SceneTextManager(QObject):
                 if not getattr(blk.fontformat, 'vertical', False):
                     self.layout_textblk(blk)
                     self.layout_textblk(blk)
+                    text_len = len(blk.toPlainText().strip())
+                    if text_len > 0 and text_len <= 3:
+                        self._scale_font_to_fit_box(blk)
                 if blk.idx < len(self.pairwidget_list):
                     self.pairwidget_list[blk.idx].e_trans.setPlainText(_merge_stub_lines_in_text(blk.toPlainText()))
         layout_after = layout_after_apply if getattr(pcfg, 'let_autolayout_flag', True) else None

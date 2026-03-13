@@ -1143,6 +1143,7 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.auto_fit", "", self.shortcutFormatAutoFit)
         _mk_shortcut("format.auto_fit_binary", "", self.shortcutFormatAutoFitBinary)
         _mk_shortcut("format.balloon_shape_auto", "", self.shortcutBalloonShapeAuto)
+        _mk_shortcut("format.resize_to_fit_content", "", self.shortcutResizeToFitContent)
 
         drawpanel_shortcuts = [
             ("draw.hand", "H", "hand"),
@@ -1526,6 +1527,11 @@ class MainWindow(mainwindow_cls):
         """Set balloon shape to Auto (Format shortcut)."""
         if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.set_balloon_shape_signal.emit("auto")
+
+    def shortcutResizeToFitContent(self):
+        """Resize selected text box(es) to fit content (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            self.canvas.resize_to_fit_content_signal.emit()
 
     def on_redo(self):
         self.canvas.redo()

@@ -209,6 +209,7 @@ class Canvas(QGraphicsScene):
     auto_fit_font_signal = Signal()
     auto_fit_binary_signal = Signal()
     set_balloon_shape_signal = Signal(str)
+    resize_to_fit_content_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1253,6 +1254,7 @@ class Canvas(QGraphicsScene):
 
             # --- Format ---
             format_act = layout_act = fit_to_bubble_act = auto_fit_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            resize_to_fit_content_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
@@ -1295,6 +1297,12 @@ class Canvas(QGraphicsScene):
                 balloon_shape_point_act = balloon_sub.addAction(self.tr("Point"))
                 balloon_shape_auto_act = balloon_sub.addAction(self.tr("Auto"))
                 actions_map['format_balloon_shape'] = balloon_sub
+            if context_menu_visible('format_resize_to_fit_content') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                resize_to_fit_content_act = format_menu.addAction(self.tr("Resize to fit content"))
+                if resize_to_fit_content_act is not None:
+                    resize_to_fit_content_act.setToolTip(self.tr("Resize the text box so all text is visible (e.g. when the box is too small and clips content)."))
+                actions_map['format_resize_to_fit_content'] = resize_to_fit_content_act
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
@@ -1545,6 +1553,8 @@ class Canvas(QGraphicsScene):
                 self.set_balloon_shape_signal.emit("point")
             elif rst == balloon_shape_auto_act:
                 self.set_balloon_shape_signal.emit("auto")
+            elif rst == resize_to_fit_content_act:
+                self.resize_to_fit_content_signal.emit()
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

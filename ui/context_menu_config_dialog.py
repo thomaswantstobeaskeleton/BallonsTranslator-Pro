@@ -86,6 +86,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_auto_fit", "Auto fit font size to box"),
         ("format_auto_fit_binary", "Auto fit font size (binary search)"),
         ("format_balloon_shape", "Balloon shape (submenu)"),
+        ("format_resize_to_fit_content", "Resize to fit content"),
         ("format_angle", "Reset Angle"),
         ("format_squeeze", "Squeeze"),
     ]),

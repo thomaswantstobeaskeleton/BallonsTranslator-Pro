@@ -49,6 +49,7 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("format.auto_fit", "", "Format", "Auto fit font size to box"),
     ("format.auto_fit_binary", "", "Format", "Auto fit font size (binary search)"),
     ("format.balloon_shape_auto", "", "Format", "Set balloon shape to Auto"),
+    ("format.resize_to_fit_content", "", "Format", "Resize to fit content"),
     # Drawing panel tools
     ("draw.hand", "H", "Drawing", "Hand tool (pan)"),
     ("draw.inpaint", "J", "Drawing", "Inpaint brush"),
