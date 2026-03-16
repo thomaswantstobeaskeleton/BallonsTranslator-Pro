@@ -127,13 +127,20 @@ class ModuleConfig(Config):
     optimize_line_breaks: bool = False
     # When True, clamp text box size to the detected balloon and keep position fixed (no growing/moving after layout).
     layout_constrain_to_bubble: bool = True
+    # After layout: check if box or text lines extend outside the bubble; shrink box or scale font to fix (no model).
+    layout_check_overflow_after_layout: bool = True
+    # Optional HF image-classification model to check if detection box is too large/small for bubble. "builtin" = zero-shot CLIP. Custom: labels too_large, too_small, ok. Empty = skip.
+    layout_box_size_check_model_id: str = "builtin"
+    # After auto layout, center each text box in its bubble (centroid). Skip boxes that are close to another (combined/overlapping bubbles).
+    layout_center_in_bubble_after_autolayout: bool = True
+    layout_center_in_bubble_min_gap_px: float = 40.0  # skip centering if another block is within this many pixels (edge-to-edge)
     # Layout judge: nudge text box toward bubble center and keep it away from bubble edges (no corners). Off = 0.
     layout_judge_enabled: bool = True
     layout_judge_margin_ratio: float = 0.06  # min margin from bubble edge (fraction of min(bubble_w, bubble_h)); e.g. 0.06 = 6%
-    layout_judge_center_strength: float = 0.7  # 0 = no nudge, 1 = full nudge toward bubble center
+    layout_judge_center_strength: float = 1.0  # 0 = no nudge, 1 = full nudge toward bubble center (right-click Judge and auto-layout)
     layout_judge_clamp_overflow: bool = True  # shrink/clamp box so it never extends outside the bubble
     # Optional small/fast model to assist judge (e.g. scale nudge by confidence). Empty = geometric only.
-    layout_judge_model_id: str = "google/mobilenet_v2_1.0_224"
+    layout_judge_model_id: str = "microsoft/resnet-18"  # Larger but still lightweight (~11.7M). Lighter: google/mobilenet_v2_1.0_224
     layout_judge_use_model: bool = False  # when True, run model on bubble crop and use score to modulate strength
     # Font scaling to fit bubble (2.1): min/max font size (pt) for auto layout; fit step clamps to this range.
     layout_font_size_min: float = 8.0
@@ -144,9 +151,13 @@ class ModuleConfig(Config):
     layout_font_binary_search: bool = False
     # Balloon shape for Diamond-Text style layout: "auto" (detect from aspect ratio), "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point". Affects insets and line-length scoring.
     layout_balloon_shape: str = "auto"
-    # When "auto": which method(s) to use and in what order. One of: aspect_ratio, contour, model, model_contour, model_ratio, contour_ratio, model_contour_ratio.
-    layout_balloon_shape_auto_method: str = "contour_ratio"
-    layout_balloon_shape_model_id: str = ""  # Required when method includes "model". e.g. prithivMLmods/Geometric-Shapes-Classification
+    # When "auto": which method(s) to use and in what order. model_contour = try model first, then contour (recommended when using a model).
+    layout_balloon_shape_auto_method: str = "model_contour"
+    layout_balloon_shape_model_id: str = "prithivMLmods/Geometric-Shapes-Classification"  # SigLIP2-base 92.9M, 8 shapes, 99% acc. Lighter: 0-ma/vit-geometric-shapes-tiny (5.5M, 6 shapes)
+    # Minimum line width (px) so short text (e.g. "pluck!") is not forced into 2–3 char lines; layout never uses a narrower width.
+    layout_min_line_width_px: float = 80.0
+    # Max line width as fraction of box width for free-standing text (no bubble). Lower = more lines, shorter lines. Only used when region_rect is None.
+    layout_max_line_width_frac_no_bubble: float = 0.78
     # Extra penalty for 1-word lines in layout scorer (2.3); higher = engine strongly avoids single-word lines.
     layout_stub_penalty_1word: float = 2000.0
     # Rendering parity: when True, translation panel uses NoWrap so line breaks match the canvas bubble (no extra wrap).
@@ -175,6 +186,57 @@ class ModuleConfig(Config):
     # Section 7: Caching + memory / stability
     pipeline_cache_enabled: bool = False  # When True, in-memory pipeline cache can be used (get_pipeline_cache(True))
     inpaint_spill_to_disk_after_blocks: int = 0  # When >0, write intermediate inpainted image to temp file every N blocks to reduce peak RAM/VRAM (e.g. 8 or 12)
+    # --- Video translator (Pipeline → Video translator...) ---
+    video_translator_sample_every_frames: int = 30  # Process every N frames; in-between frames reuse last result (reduces flicker, faster).
+    video_translator_enable_detect: bool = True
+    video_translator_enable_ocr: bool = True
+    video_translator_enable_translate: bool = True
+    video_translator_enable_inpaint: bool = True
+    video_translator_last_input_path: str = ''   # Last used input path (persisted)
+    video_translator_last_output_path: str = '' # Last used output path (persisted)
+    video_translator_output_codec: str = 'mp4v' # OpenCV fourcc: mp4v, avc1, XVID, etc. Empty = try mp4v then avc1.
+    video_translator_region_preset: str = 'full'  # full | bottom_15 | bottom_20 | bottom_25 | bottom_30 — only process blocks in that region (faster, fewer false positives).
+    video_translator_use_scene_detection: bool = False  # Run pipeline only on scene-change frames (reuse result until next scene); saves work.
+    video_translator_scene_threshold: float = 30.0  # Histogram diff threshold for scene change (higher = fewer scene cuts).
+    video_translator_temporal_smoothing: bool = False  # Blend current result with previous in subtitle region to reduce flicker.
+    video_translator_temporal_alpha: float = 0.25  # Weight of previous frame in blend (0=no smoothing, 0.5=half previous).
+    video_translator_use_ffmpeg: bool = False  # Encode output with FFmpeg (libx264) for better compatibility than OpenCV.
+    video_translator_ffmpeg_path: str = ''  # Path to ffmpeg.exe if not on PATH (e.g. C:\ffmpeg\bin\ffmpeg.exe).
+    video_translator_ffmpeg_crf: int = 18  # FFmpeg CRF (0–51, lower=better quality); 18 = higher quality than 23, avoids very low bitrate.
+    video_translator_video_bitrate_kbps: int = 0  # Target bitrate in kbps when using FFmpeg; 0 = use CRF only. Set e.g. 9600 to match source.
+    video_translator_skip_detect: bool = False  # Use fixed subtitle region only (no detector); region_preset defines the band.
+    video_translator_export_srt: bool = False  # Write an SRT file alongside the output video with timed subtitles.
+    video_translator_subtitle_style: str = "default"  # Burn-in style: default | anime | documentary (VideoCaptioner-inspired).
+    video_translator_subtitle_font: str = ""  # Optional path to .ttf/.otf for burn-in subtitles; empty = Arial/DejaVu/fallback.
+    video_translator_soft_subs_only: bool = False  # When True, output original video + SRT only (no burn-in); fast, player-controlled subs.
+    video_translator_inpaint_only_soft_subs: bool = False  # When True, run pipeline (inpaint) but do not burn-in; output inpainted video + SRT/ASS/VTT (no double subs).
+    video_translator_mux_srt_into_video: bool = False  # When inpaint_only_soft_subs, mux SRT as subtitle stream into the output video file.
+    video_translator_source: str = "ocr"  # ocr = hardcoded subtitles (detect+OCR); asr = audio speech-to-text.
+    video_translator_asr_model: str = "base"  # faster-whisper model: tiny, base, small, medium, large-v2, large-v3.
+    video_translator_asr_device: str = "cuda"  # cuda or cpu for ASR.
+    video_translator_asr_language: str = ""  # Empty = auto-detect; e.g. ja, en, zh.
+    video_translator_asr_vad_filter: bool = True  # VAD filter to reduce ASR hallucinations (VideoCaptioner-style).
+    video_translator_export_ass: bool = False  # Export ASS subtitle file alongside video.
+    video_translator_export_vtt: bool = False  # Export WebVTT subtitle file alongside video.
+    video_translator_glossary: str = ""  # Optional glossary/script hint for LLM (OCR/ASR correction and translation).
+    video_translator_series_context_path: str = ""  # Optional series context path (folder or ID) for glossary/context; same as project series context.
+    video_translator_asr_sentence_break: bool = False  # LLM merges/splits ASR segments into natural sentences.
+    video_translator_asr_audio_separation: bool = False  # Separate vocals before ASR (demucs; reduces music noise).
+    video_translator_last_batch_output_dir: str = ""  # Last used output directory for batch video processing.
+    # Flow fixer: local model (Ollama/LM Studio) to improve subtitle flow without extra cloud API calls.
+    video_translator_flow_fixer_enabled: bool = False
+    video_translator_flow_fixer: str = "none"  # none | local_server | openrouter | openai
+    video_translator_flow_fixer_context_lines: int = 20  # Max previous subtitle lines sent to flow fixer (1–50). Revisions apply this far back.
+    video_translator_flow_fixer_server_url: str = "http://localhost:1234/v1"  # LM Studio default; Ollama: http://localhost:11434/v1
+    video_translator_flow_fixer_model: str = "local"  # Model name for local_server; ignored for openrouter
+    video_translator_flow_fixer_max_tokens: int = 256
+    video_translator_flow_fixer_timeout: float = 30.0
+    # OpenRouter flow fixer (when flow_fixer == "openrouter"): second model for flow only
+    video_translator_flow_fixer_openrouter_apikey: str = ""
+    video_translator_flow_fixer_openrouter_model: str = "google/gemma-3n-e2b-it:free"
+    # OpenAI / ChatGPT flow fixer (when flow_fixer == "openai"): use ChatGPT credits
+    video_translator_flow_fixer_openai_apikey: str = ""
+    video_translator_flow_fixer_openai_model: str = "gpt-4o-mini"
 
     def get_params(self, module_key: str, for_saving=False) -> dict:
         d = self[module_key + '_params']
@@ -351,6 +413,8 @@ class ProgramConfig(Config):
     context_menu_pinned: List = field(default_factory=list)  # Action keys to show at top of right-click menu (order preserved)
     huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
     translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
+    # When True, the "Add Open in BallonsTranslator to context menu?" dialog has been shown once (first launch); don't show again.
+    windows_context_menu_offered: bool = False
     # Release detector/OCR/inpainter/translator caches and gc after pipeline finishes (all pages). Reduces RSS when idle.
     release_caches_after_batch: bool = False
     # Manual mode: run pipeline on current page only (comic-translate style). Run button still works but processes one page.
@@ -431,7 +495,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_judge': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
     'download_image': True,
@@ -462,6 +526,7 @@ CONFIG_KEY_ORDER = (
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned",
     "huggingface_token", "translator_last_model_by_provider",
+    "windows_context_menu_offered",
 )
 
 def context_menu_visible(key: str) -> bool:

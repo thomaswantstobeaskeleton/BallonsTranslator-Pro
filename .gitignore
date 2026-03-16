@@ -1,5 +1,6 @@
 __pycache__
 local_*
+!modules/flow_fixer/local_server_flow_fixer.py
 inpainted
 mask
 result
@@ -132,6 +133,7 @@ plan.md
 /docs/*RESEARCH*.md
 /docs/**PLAN*.md
 docs/LINE_FITTING_RESEARCH.md
+docs/TYPESETTING_MODEL_RESEARCH.md
 
 # Local / OS cruft (keep repo clean for public clones)
 Thumbs.db

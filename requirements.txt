@@ -40,7 +40,7 @@ requests
 ultralytics>=8.4.14
 beautifulsoup4
 colorama
-openai>=2.8.1
+openai>=2.8.1  # LLM API translator + Video translator flow fixer (local/OpenRouter/OpenAI)
 pydantic
 pyyaml
 natsort
@@ -73,3 +73,7 @@ protobuf>=3.20.0
 playwright>=1.40.0
 # Optional: Open CBR/RAR comic archives (File → Open CBR). Requires WinRAR or 7-Zip (UnRAR) in PATH.
 rarfile
+# Optional: Video translator — Audio (ASR) source. Enables speech-to-text from video audio (pip install faster-whisper if not installed).
+faster-whisper
+# Optional: Video translator — ASR "Separate vocals" to reduce music noise before transcription (pip install demucs).
+demucs
