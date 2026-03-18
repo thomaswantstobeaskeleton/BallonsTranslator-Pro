@@ -856,6 +856,15 @@ class TitleBar(Widget):
         # If it does, it will overwrite the user's partially typed query with the first result.
         q_raw = text or ""
         q = q_raw.strip()
+        le0 = None
+        cursor_pos = None
+        try:
+            le0 = self.omniSearch.lineEdit()
+            if le0 is not None:
+                cursor_pos = le0.cursorPosition()
+        except Exception:
+            le0 = None
+            cursor_pos = None
         # Block signals while we rebuild the model so activated/currentIndexChanged can't fire.
         try:
             self.omniSearch.blockSignals(True)
@@ -863,15 +872,9 @@ class TitleBar(Widget):
             pass
         self._omni_model.clear()
         if not q:
+            # Keep typed text and cursor; just clear results and selection.
             try:
-                # Keep the user's text as-is and ensure no selection.
                 self.omniSearch.setCurrentIndex(-1)
-            except Exception:
-                pass
-            try:
-                le = self.omniSearch.lineEdit()
-                if le is not None and le.text() != q_raw:
-                    le.setText(q_raw)
             except Exception:
                 pass
             try:
@@ -949,31 +952,40 @@ class TitleBar(Widget):
             except Exception:
                 pass
 
-        # Do NOT auto-open the popup while typing.
-        # Some Qt styles steal focus from the line edit when the popup opens, which makes typing painful.
-        # Users can still open the dropdown with the mouse or keyboard (e.g. Alt+Down / Down).
-
-        # Restore the user's typed query and clear any implicit selection.
+        # Release signal block first, then (optionally) open popup.
         try:
             self.omniSearch.setCurrentIndex(-1)
         except Exception:
             pass
         try:
-            le = self.omniSearch.lineEdit()
-            if le is not None:
-                pos = le.cursorPosition()
-                if le.text() != q_raw:
-                    le.setText(q_raw)
-                    try:
-                        le.setCursorPosition(min(pos, len(q_raw)))
-                    except Exception:
-                        pass
-                # Ensure focus stays in the editor after rebuilding results
-                le.setFocus(Qt.FocusReason.OtherFocusReason)
+            self.omniSearch.blockSignals(False)
         except Exception:
             pass
+
+        # Show popup when we have results, but do it "queued" so we can restore focus/cursor after popup opens.
+        # This prevents the editor from losing focus and avoids the cursor jumping to the start (typing backwards).
         try:
-            self.omniSearch.blockSignals(False)
+            if self._omni_model.rowCount() > 0:
+                def _show_and_restore():
+                    try:
+                        self.omniSearch.showPopup()
+                    except Exception:
+                        pass
+                    try:
+                        le = self.omniSearch.lineEdit()
+                        if le is not None:
+                            le.setFocus(Qt.FocusReason.OtherFocusReason)
+                            if cursor_pos is not None:
+                                le.setCursorPosition(min(int(cursor_pos), len(le.text())))
+                    except Exception:
+                        pass
+                QTimer.singleShot(0, _show_and_restore)
+            else:
+                # Ensure focus remains in the editor even when no results.
+                if le0 is not None:
+                    le0.setFocus(Qt.FocusReason.OtherFocusReason)
+                    if cursor_pos is not None:
+                        le0.setCursorPosition(min(int(cursor_pos), len(le0.text())))
         except Exception:
             pass
 
