@@ -769,21 +769,44 @@ class TitleBar(Widget):
         self.omniSearch.setCompleter(self._omni_completer)
         self._omni_actions_cache = None  # lazily built list of (label, QAction)
         
-        # Center container: keep omni search + title aligned to the canvas area (between left/right panes).
+        # Center container: keep title + search aligned to the canvas area (between left/right panes).
+        # Use two rows so the title stays visually centered and the search doesn't "steal" its space.
         self._centerContainer = QWidget(self)
-        self._centerLayout = QHBoxLayout(self._centerContainer)
+        self._centerLayout = QVBoxLayout(self._centerContainer)
         self._centerLayout.setContentsMargins(0, 0, 0, 0)
-        self._centerLayout.setSpacing(10)
+        self._centerLayout.setSpacing(2)
+
+        # Row 1: title / project / page label
+        self._centerLayout.addWidget(self.titleLabel)
+
+        # Row 2: omni search + dropdown button
+        self._searchRow = QWidget(self._centerContainer)
+        self._searchRowLayout = QHBoxLayout(self._searchRow)
+        self._searchRowLayout.setContentsMargins(0, 0, 0, 0)
+        self._searchRowLayout.setSpacing(6)
+
         # Add a small dropdown button (QLineEdit has no built-in arrow).
-        self._omniDropBtn = QToolButton(self._centerContainer)
+        self._omniDropBtn = QToolButton(self._searchRow)
         self._omniDropBtn.setObjectName("OmniSearchDropBtn")
         self._omniDropBtn.setText("▾")
         self._omniDropBtn.setToolTip(self.tr("Show search results"))
         self._omniDropBtn.setCursor(Qt.CursorShape.ArrowCursor)
         self._omniDropBtn.clicked.connect(self._on_omni_drop_clicked)
-        self._centerLayout.addWidget(self.omniSearch, 0)
-        self._centerLayout.addWidget(self._omniDropBtn, 0)
-        self._centerLayout.addWidget(self.titleLabel, 1)
+
+        # Slightly shorter height so title + search fit cleanly.
+        try:
+            self.omniSearch.setFixedHeight(28)
+            self._omniDropBtn.setFixedHeight(28)
+            self._omniDropBtn.setFixedWidth(26)
+        except Exception:
+            pass
+
+        self._searchRowLayout.addStretch()
+        self._searchRowLayout.addWidget(self.omniSearch, 0)
+        self._searchRowLayout.addWidget(self._omniDropBtn, 0)
+        self._searchRowLayout.addStretch()
+
+        self._centerLayout.addWidget(self._searchRow)
         self._centerContainer.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         hlayout = QHBoxLayout(self)
