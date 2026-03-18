@@ -774,7 +774,7 @@ class TitleBar(Widget):
         self._centerContainer = QWidget(self)
         self._centerLayout = QVBoxLayout(self._centerContainer)
         self._centerLayout.setContentsMargins(0, 0, 0, 0)
-        self._centerLayout.setSpacing(2)
+        self._centerLayout.setSpacing(0)
 
         # Row 1: title / project / page label
         self._centerLayout.addWidget(self.titleLabel)
@@ -795,9 +795,10 @@ class TitleBar(Widget):
 
         # Slightly shorter height so title + search fit cleanly.
         try:
-            self.omniSearch.setFixedHeight(28)
-            self._omniDropBtn.setFixedHeight(28)
-            self._omniDropBtn.setFixedWidth(26)
+            # Keep small so it doesn't collide with title text.
+            self.omniSearch.setFixedHeight(24)
+            self._omniDropBtn.setFixedHeight(24)
+            self._omniDropBtn.setFixedWidth(24)
         except Exception:
             pass
 

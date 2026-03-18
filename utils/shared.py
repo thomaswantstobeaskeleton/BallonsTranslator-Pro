@@ -63,7 +63,8 @@ APP_DEFAULT_FONT = 'Microsoft YaHei UI'
 
 WINDOW_BORDER_WIDTH = 4
 BOTTOMBAR_HEIGHT = 32
-TITLEBAR_HEIGHT = 30
+# Title bar contains menus + (optional) stacked title + omni search; keep enough height to avoid font descender clipping.
+TITLEBAR_HEIGHT = 46
 
 PAGELIST_THUMBNAIL_MAXNUM = 100
 PAGELIST_THUMBNAIL_SIZE = 48
