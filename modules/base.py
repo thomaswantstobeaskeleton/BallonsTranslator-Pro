@@ -392,6 +392,7 @@ def init_module_registries(target_modules=None):
         _load_module(**MODULE_SCRIPTS[k])
     if target_modules is None or 'translator' in target_modules:
         _refresh_ensemble_translator_options()
+        _refresh_chimera_ensemble_options()
 
 
 def init_textdetector_registries():
@@ -409,6 +410,7 @@ def init_ocr_registries():
 def init_translator_registries():
     init_module_registries('translator')
     _refresh_ensemble_translator_options()
+    _refresh_chimera_ensemble_options()
 
 
 def _refresh_ensemble_translator_options():
@@ -424,4 +426,13 @@ def _refresh_ensemble_translator_options():
                     ensemble.params[key]['options'] = valid
     except Exception as e:
         LOGGER.warning('Could not refresh Ensemble translator options: %s', e)
+
+
+def _refresh_chimera_ensemble_options():
+    """Refresh Chimera (multi-source) candidate selector options so the full translator list is available."""
+    try:
+        from modules.translators.trans_chimera_ensemble import _refresh_chimera_ensemble_options as _do_refresh
+        _do_refresh()
+    except Exception as e:
+        LOGGER.warning('Could not refresh Chimera (multi-source) candidate options: %s', e)
 

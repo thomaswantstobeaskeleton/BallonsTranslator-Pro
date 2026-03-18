@@ -66,7 +66,8 @@ import utils.shared as shared # Earlier import of shared to use default for conf
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--reinstall-torch", action='store_true', help="launch.py argument: install the appropriate version of torch even if you have some version already installed")
-parser.add_argument("--proj-dir", default='', type=str, help='Open project directory on startup')
+parser.add_argument("--proj-dir", default='', type=str, help='Open project directory or .json project file on startup')
+parser.add_argument("path", nargs='?', default='', help='Optional: path to project folder or .json file (same as --proj-dir)')
 if IS_WIN7:
     parser.add_argument("--qt-api", default='pyqt5', choices=QT_APIS, help='Set qt api')
 else:
@@ -304,6 +305,7 @@ def main():
         # Known noisy-but-benign messages we want to hide
         _suppress_substrings = (
             "QPainter::begin: A paint device can only be painted by one painter at a time.",
+            "QPainter::begin: Painter already active",
             "Painter not active",
             "Unbalanced save/restore",
             "QWidgetEffectSourcePrivate::pixmap",
@@ -454,7 +456,8 @@ def main():
     setup_locks()
 
     from ui.mainwindow import MainWindow
-    ballontrans = MainWindow(app, config, open_dir=args.proj_dir, **vars(args))
+    open_path = (args.proj_dir or getattr(args, 'path', '') or '').strip()
+    ballontrans = MainWindow(app, config, open_dir=open_path, **vars(args))
     global BT
     BT = ballontrans
     BT.restart_signal.connect(restart)
@@ -467,6 +470,36 @@ def main():
         ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
         ballontrans.show()
         ballontrans.resetStyleSheet()
+
+        # Optional: offer Windows context menu on first launch (once per config)
+        if sys.platform == 'win32' and not getattr(config, 'windows_context_menu_offered', False):
+            from qtpy.QtCore import QTimer
+            from qtpy.QtWidgets import QMessageBox
+
+            def offer_context_menu():
+                reply = QMessageBox.question(
+                    ballontrans,
+                    "Context menu",
+                    "Add \"Open in BallonsTranslator\" to the right-click context menu for .json files and folders?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                config.windows_context_menu_offered = True
+                try:
+                    from utils.config import save_config
+                    save_config()
+                except Exception:
+                    pass
+                if reply == QMessageBox.StandardButton.Yes:
+                    from utils.windows_context_menu import install as install_context_menu
+                    ok, msg = install_context_menu()
+                    if ok:
+                        QMessageBox.information(ballontrans, "Context menu", msg)
+                    else:
+                        QMessageBox.warning(ballontrans, "Context menu", msg)
+
+            QTimer.singleShot(500, offer_context_menu)
+
     sys.exit(app.exec())
 
 def is_amd_gpu():

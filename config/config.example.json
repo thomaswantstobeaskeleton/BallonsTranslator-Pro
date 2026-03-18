@@ -127,8 +127,8 @@
     "video_translator_flow_fixer": "none",
     "video_translator_flow_fixer_context_lines": 20,
     "video_translator_flow_fixer_server_url": "http://localhost:1234/v1",
-    "video_translator_flow_fixer_model": "local",
-    "video_translator_flow_fixer_max_tokens": 256,
+    "video_translator_flow_fixer_model": "",
+    "video_translator_flow_fixer_max_tokens": 512,
     "video_translator_flow_fixer_timeout": 30.0
   },
   "drawpanel": {},
