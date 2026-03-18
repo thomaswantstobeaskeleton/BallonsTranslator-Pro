@@ -1,4 +1,5 @@
 from .base import *
+from .exceptions import MissingTranslatorParams
 import deepl
 
 
@@ -8,7 +9,10 @@ class DeeplTranslator(BaseTranslator):
     concate_text = False
     cht_require_convert = True
     params: Dict = {
-        'api_key': '',
+        'api_key': {
+            'value': '',
+            'description': 'DeepL API key (required). Get a key at https://www.deepl.com/pro-api (free tier: 500,000 chars/month).',
+        },
         'delay': 0.0,
         'formality': {
             'type': 'selector',
@@ -78,7 +82,11 @@ class DeeplTranslator(BaseTranslator):
         self.lang_map['Tiếng Việt'] = 'vi'  # Vietnamese (#1123)
 
     def _translate(self, src_list: List[str]) -> List[str]:
-        api_key = self.params['api_key']
+        api_key = (self.get_param_value('api_key') or '').strip()
+        if not api_key:
+            raise MissingTranslatorParams(
+                'DeepL requires an API key. Set it in Config → Translator → DeepL → api_key.'
+            )
         translator = deepl.Translator(api_key)
         formality_selected = self.formality
         context_text = self.context

@@ -17,12 +17,13 @@ from .base import (
 )
 from utils.config import pcfg
 from utils.logger import logger as LOGGER
+from utils.series_context_store import get_series_context_dir, append_page_to_series_context as store_append_page, ensure_series_dir
 
 
 def _valid_candidate_translators():
-    """Translator names that can be used as candidates (exclude ensemble, None, Copy Source)."""
+    """Translator names that can be used as candidates (exclude meta/recursive, None, Copy Source)."""
     from modules import GET_VALID_TRANSLATORS
-    exclude = {'Ensemble (3+1)', 'None', 'Copy Source'}
+    exclude = {'Ensemble (3+1)', 'Chimera (multi-source)', 'Hunyuan_MT_Chimera_7B', 'None', 'Copy Source'}
     return [t for t in GET_VALID_TRANSLATORS() if t not in exclude]
 
 
@@ -101,6 +102,48 @@ class EnsembleTranslator(BaseTranslator):
             TRANSLATORS.get,
         )
 
+    @staticmethod
+    def _flatten_params(params: Dict) -> Dict:
+        """Resolve dict params to 'value' so sub-translators get scalar values."""
+        if not isinstance(params, dict):
+            return params
+        return {k: v.get("value", v) if isinstance(v, dict) and "value" in v else v for k, v in params.items() if not (isinstance(k, str) and k.startswith("__"))}
+
+    def _forward_translation_context(self, inst) -> None:
+        """Forward all context/settings the pipeline gives the main translator so sub-translators (e.g. LLM API) get the same."""
+        if inst is None:
+            return
+        ctx = getattr(self, "_cache_translation_context", None)
+        if ctx and hasattr(inst, "set_translation_context"):
+            try:
+                inst.set_translation_context(
+                    previous_pages=ctx.get("previous_pages") or [],
+                    project_glossary=ctx.get("project_glossary") or [],
+                    series_context_path=ctx.get("series_context_path"),
+                    next_page=ctx.get("next_page"),
+                )
+            except Exception:
+                pass
+        if ctx is not None:
+            try:
+                setattr(inst, "_cache_translation_context", ctx)
+            except Exception:
+                pass
+        for attr in ("_current_page_key", "_current_page_image"):
+            if hasattr(self, attr):
+                try:
+                    setattr(inst, attr, getattr(self, attr))
+                except Exception:
+                    pass
+
+    def append_page_to_series_context(self, series_context_path: str, sources: List[str], translations: List[str]) -> None:
+        """Append ensemble output to series context store."""
+        path = get_series_context_dir((series_context_path or "").strip())
+        if not path or not sources:
+            return
+        ensure_series_dir(path)
+        store_append_page(path, sources, translations, max_stored_pages=15)
+
     def _build_candidates_and_judge(self):
         if self._candidates:
             return
@@ -118,9 +161,7 @@ class EnsembleTranslator(BaseTranslator):
                 continue
             try:
                 Klass = TRANSLATORS.get(name)
-                params = merged.get(name, {})
-                if isinstance(params, dict):
-                    params = {k: v for k, v in params.items() if not (isinstance(k, str) and k.startswith('__'))}
+                params = self._flatten_params(merged.get(name, {}))
                 inst = Klass(
                     lang_source=self.lang_source,
                     lang_target=self.lang_target,
@@ -135,9 +176,7 @@ class EnsembleTranslator(BaseTranslator):
         if judge_name and judge_name in valid:
             try:
                 Klass = TRANSLATORS.get(judge_name)
-                params = merged.get(judge_name, {})
-                if isinstance(params, dict):
-                    params = {k: v for k, v in params.items() if not (isinstance(k, str) and k.startswith('__'))}
+                params = self._flatten_params(merged.get(judge_name, {}))
                 self._judge = Klass(
                     lang_source=self.lang_source,
                     lang_target=self.lang_target,
@@ -152,6 +191,7 @@ class EnsembleTranslator(BaseTranslator):
             if candidate_label:
                 LOGGER.debug('Ensemble candidate %s skipped (not available or no translate method)', candidate_label)
             return ['[candidate failed]'] * len(src_list)
+        self._forward_translation_context(candidate)
         try:
             return candidate.translate(src_list)
         except Exception as e:
@@ -205,6 +245,7 @@ class EnsembleTranslator(BaseTranslator):
         if not src_list:
             return []
         self._build_candidates_and_judge()
+        self._forward_translation_context(self._judge)
         c1_name = (self.get_param_value('candidate_1') or '').strip() or '1'
         c2_name = (self.get_param_value('candidate_2') or '').strip() or '2'
         c3_name = (self.get_param_value('candidate_3') or '').strip() or '3'

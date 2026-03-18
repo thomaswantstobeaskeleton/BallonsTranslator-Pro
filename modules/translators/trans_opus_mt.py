@@ -1,6 +1,7 @@
 """
 OPUS-MT – Helsinki-NLP multilingual translation (Hugging Face).
-One model per language pair; lightweight and fast. Many pairs available.
+Marian-based models (MarianMT) trained on OPUS parallel data; one model per language pair.
+Lightweight and robust. Chinese↔English: opus-mt-zh-en / opus-mt-en-zh.
 Requires: pip install transformers torch
 """
 from .base import *

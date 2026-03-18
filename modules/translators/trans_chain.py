@@ -2,6 +2,7 @@
 from .base import *
 from typing import List
 from utils.config import pcfg
+from utils.series_context_store import get_series_context_dir, append_page_to_series_context as store_append_page, ensure_series_dir
 
 cfg_module = pcfg.module
 
@@ -29,6 +30,14 @@ class TransChain(BaseTranslator):
         for k in self.lang_map.keys():
             self.lang_map[k] = k
 
+    def append_page_to_series_context(self, series_context_path: str, sources: List[str], translations: List[str]) -> None:
+        """Append final chain output to series context store."""
+        path = get_series_context_dir((series_context_path or "").strip())
+        if not path or not sources:
+            return
+        ensure_series_dir(path)
+        store_append_page(path, sources, translations, max_stored_pages=15)
+
     def _get_chain_config(self):
         raw = (self.get_param_value('chain_translators') or 'google').strip()
         names = [n.strip() for n in raw.split(',') if n.strip()]
@@ -50,7 +59,7 @@ class TransChain(BaseTranslator):
             lang_sequence.append(intermediate_langs[i] if i < len(intermediate_langs) else (intermediate_langs[0] if intermediate_langs else 'English'))
         lang_sequence.append(self.lang_target)
 
-        exclude = {'Chain', 'None', 'Copy Source', 'Ensemble (3+1)'}
+        exclude = {'Chain', 'None', 'Copy Source', 'Ensemble (3+1)', 'Chimera (multi-source)'}
         current = list(src_list)
         for i, tname in enumerate(names):
             if tname in exclude:
@@ -64,12 +73,37 @@ class TransChain(BaseTranslator):
             params = (cfg_module.translator_params or {}).get(tname)
             try:
                 if params is not None:
-                    trans = trans_cls(src_lang, tgt_lang, raise_unsupported_lang=False, **params)
+                    # Flatten selector params so sub-translators get scalar values
+                    flat = {k: v.get("value", v) if isinstance(v, dict) and "value" in v else v for k, v in params.items() if not (isinstance(k, str) and k.startswith("__"))}
+                    trans = trans_cls(src_lang, tgt_lang, raise_unsupported_lang=False, **flat)
                 else:
                     trans = trans_cls(src_lang, tgt_lang, raise_unsupported_lang=False)
             except Exception as e:
                 self.logger.error(f"Chain: failed to create '{tname}': {e}")
                 break
+            # Forward all context/settings the pipeline gives the main translator (same as LLM API translator gets)
+            ctx = getattr(self, "_cache_translation_context", None)
+            if ctx and hasattr(trans, "set_translation_context"):
+                try:
+                    trans.set_translation_context(
+                        previous_pages=ctx.get("previous_pages") or [],
+                        project_glossary=ctx.get("project_glossary") or [],
+                        series_context_path=ctx.get("series_context_path"),
+                        next_page=ctx.get("next_page"),
+                    )
+                except Exception:
+                    pass
+            if ctx is not None:
+                try:
+                    setattr(trans, "_cache_translation_context", ctx)
+                except Exception:
+                    pass
+            for attr in ("_current_page_key", "_current_page_image"):
+                if hasattr(self, attr):
+                    try:
+                        setattr(trans, attr, getattr(self, attr))
+                    except Exception:
+                        pass
             try:
                 current = trans.translate(current)
             except Exception as e:

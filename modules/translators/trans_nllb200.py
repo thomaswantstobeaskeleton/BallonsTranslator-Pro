@@ -67,7 +67,7 @@ class NLLB200Translator(BaseTranslator):
                 'facebook/nllb-200-distilled-1.3B',
             ],
             'value': 'facebook/nllb-200-distilled-600M',
-            'description': 'NLLB model (600M = less VRAM, 1.3B = better quality).',
+            'description': 'NLLB model. 600M = low VRAM (~3GB), default. 1.3B = better quality, more VRAM.',
         },
         'device': DEVICE_SELECTOR(),
     }

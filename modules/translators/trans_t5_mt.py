@@ -46,7 +46,7 @@ class T5MTTranslator(BaseTranslator):
                 'google-t5/t5-base',
             ],
             'value': 'google-t5/t5-small',
-            'description': 'T5 model (small = faster/less VRAM, base = better quality).',
+            'description': 'T5 model. small = ~60M params, low VRAM. base = better quality, more VRAM.',
         },
         'device': DEVICE_SELECTOR(),
     }

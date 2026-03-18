@@ -237,8 +237,8 @@ class BaseTranslator(BaseModule):
             try:
                 assert len(text_trans) == len(text)
             except:
-                LOGGER.error('This translator seems to messed up the translation which resulted in inconsistent translated line count.\n \
-                             Set concate_text to False or change textblk_break in the source code may solve the problem.')
+                LOGGER.error('This translator seems to have messed up the translation which resulted in inconsistent translated line count.\n'
+                             'Set concate_text to False or change textblk_break in the source code may solve the problem.')
                 raise
 
         return text_trans
