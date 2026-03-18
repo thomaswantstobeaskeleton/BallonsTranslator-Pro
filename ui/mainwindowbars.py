@@ -949,12 +949,9 @@ class TitleBar(Widget):
             except Exception:
                 pass
 
-        # Show popup when we have results
-        try:
-            if self._omni_model.rowCount() > 0:
-                self.omniSearch.showPopup()
-        except Exception:
-            pass
+        # Do NOT auto-open the popup while typing.
+        # Some Qt styles steal focus from the line edit when the popup opens, which makes typing painful.
+        # Users can still open the dropdown with the mouse or keyboard (e.g. Alt+Down / Down).
         finally:
             # Restore the user's typed query and clear any implicit selection.
             try:
@@ -963,8 +960,16 @@ class TitleBar(Widget):
                 pass
             try:
                 le = self.omniSearch.lineEdit()
-                if le is not None and le.text() != q_raw:
-                    le.setText(q_raw)
+                if le is not None:
+                    pos = le.cursorPosition()
+                    if le.text() != q_raw:
+                        le.setText(q_raw)
+                        try:
+                            le.setCursorPosition(min(pos, len(q_raw)))
+                        except Exception:
+                            pass
+                    # Ensure focus stays in the editor after rebuilding results
+                    le.setFocus(Qt.FocusReason.OtherFocusReason)
             except Exception:
                 pass
             try:
