@@ -56,7 +56,8 @@ def load_series_glossary(series_context_path: str) -> List[Tuple[str, str]]:
     """
     Load glossary from {series_context_path}/glossary.txt.
     Format: one entry per line, e.g. "source -> target" or "source = target".
-    Returns list of (source, target) pairs.
+    Target may use " | " for alternates (e.g. "Chu Province | Chuzhou"); the translator
+    accepts any variant and uses the first for replacements. Returns list of (source, target) pairs.
     """
     if not series_context_path:
         return []

@@ -38,6 +38,10 @@ class TranslationResponse(BaseModel):
     translations: List[TranslationElement] = Field(
         ..., description="A list of all translated elements."
     )
+    revised_previous: Optional[List[str]] = Field(
+        default=None,
+        description="Optional (video only): improved translations for the previous N subtitles, in same order, for better flow. Omit if not needed.",
+    )
 
 
 @register_translator("LLM_API_Translator")
@@ -118,7 +122,32 @@ class LLM_API_Translator(BaseTranslator):
                 "No markdown, no code fences, no extra text.\n"
                 "Example: {\"translations\": [{\"id\": 1, \"translation\": \"Translated text.\"}]}"
             ),
-            "description": "Section 18: Dedicated translation system prompt (cohesion rules, styling guide). For z-ai/glm-4.5-air: keep short; emphasize JSON-only and consistent terms.",
+            "description": "Main translator system prompt (JSON mode, comics/pages). Used for regular image/page translation.",
+        },
+        "video_system_prompt": {
+            "type": "editor",
+            "value": (
+                "You are an expert subtitle translator for Chinese video subtitles.\n"
+                "- You will receive the last few subtitle lines (source and translation) as context. "
+                "Your new translation MUST flow naturally from them—read as one continuous dialogue.\n"
+                "- Translate each new input line into fluent, natural English suitable for on-screen subtitles.\n"
+                "- HARD RULES: Do not add new facts/plot. Do not invent names, places, events, or backstory. If unsure, stay close to the source.\n"
+                "- Use appropriate punctuation: ? for questions, ! for exclamations or strong reactions; add or fix when the tone clearly calls for it.\n"
+                "- Continuations: when a line is clearly the first half of a sentence that continues in the next subtitle, end it with a comma (e.g. \"Around thirty years old,\"). If a continuation line would be a fragment, you may add the subject (e.g. \"I was taken away...\") when the speaker is first person.\n"
+                "- Preserve speaker perspective: when the preceding context is first person (I / I'm / my) or the source implies 我, use first person (my not his, I not he).\n"
+                "- NEVER output placeholders like \"[region 1]\" or \"Region 1\". If input is unreadable/noise, output an empty string.\n"
+                "- Keep terminology, names, and tone consistent with the previous subtitles and the series.\n"
+                "- If the first few previous subtitles read as fragments or break the flow, you MAY output an optional \"revised_previous\" array in your JSON: one improved translation per previous subtitle (same order), so the whole sequence reads smoothly. Only do this when it significantly improves flow; omit to save tokens and avoid rate limits.\n"
+                "- When it helps clarity or tone, you may use *italic* for emphasis or off-screen dialogue and **bold** for strong emphasis (rendered on-screen). Use sparingly. No other markdown or code.\n"
+                "- OUTPUT FORMAT (strict): Return ONLY a single JSON object. No markdown, no code fences, no commentary. JSON keys: \"translations\" (list of {id:int, translation:str}) and optionally \"revised_previous\" (list of strings, same count/order as provided previous lines). Do not add any other keys.\n"
+                "Example: {\"translations\": [{\"id\": 1, \"translation\": \"Translated line.\"}], \"revised_previous\": [\"Improved line 1.\", \"Improved line 2.\"]}"
+            ),
+            "description": "System prompt for Video translator. Asks for JSON with 'translations' and optional 'revised_previous' for flow. Use video_allow_revised_previous to disable revised_previous to save tokens.",
+        },
+        "video_allow_revised_previous": {
+            "type": "checkbox",
+            "value": True,
+            "description": "When translating for Video translator: allow model to return optional revised_previous (improved earlier lines for flow). Turn off to reduce tokens and avoid rate limits.",
         },
         "translation_glossary": {
             "type": "editor",
@@ -187,8 +216,8 @@ class LLM_API_Translator(BaseTranslator):
         },
         "post_check_target_ratio": {
             "type": "line_editor",
-            "value": 0.5,
-            "description": "Minimum fraction of output that must be in target language (post_translation_check). 0 = disabled.",
+            "value": 0.4,
+            "description": "Minimum fraction of output that must be in target language (post_translation_check). 0 = disabled. Lower if translations with names/terms in source script trigger retries.",
         },
         "post_check_max_retries": {
             "type": "line_editor",
@@ -246,6 +275,21 @@ class LLM_API_Translator(BaseTranslator):
             "value": False,
             "description": "Include the current page image as context for the model (vision-capable models only). Helps with layout and style.",
         },
+        "reflection_translation": {
+            "type": "checkbox",
+            "value": False,
+            "description": "After translating, ask the model to review and improve the translation (VideoCaptioner-style). One extra API call per batch; improves naturalness at higher cost.",
+        },
+        "correct_ocr_with_llm": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Before translating, ask the model to correct OCR output (typos, punctuation, spacing). Used by video translator when enabled. One extra API call per keyframe.",
+        },
+        "correct_asr_with_llm": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Correct ASR output with LLM before translating (punctuation, casing, typos). Used by video translator when Source = Audio. One extra API call per run.",
+        },
     }
 
     def _setup_translator(self):
@@ -282,6 +326,7 @@ class LLM_API_Translator(BaseTranslator):
         self.minute_start_time = time.time()
         self.key_usage = {}
         self.client = None
+        self._logged_lm_studio_default_endpoint = False
         self._translation_context_previous_pages = None
         self._translation_project_glossary = None
         self._translation_series_context_path = ""
@@ -337,7 +382,14 @@ class LLM_API_Translator(BaseTranslator):
 
     def _build_system_prompt(self) -> str:
         """System prompt plus optional glossary (translator + project + series) and series context."""
-        parts = [self.system_prompt]
+        # Choose base prompt: dedicated video prompt for video translator contexts,
+        # otherwise the main system_prompt.
+        page_key = getattr(self, "_current_page_key", None) or ""
+        if page_key.startswith("video_"):
+            base_prompt = (self.get_param_value("video_system_prompt") or "").strip() or self.system_prompt
+        else:
+            base_prompt = self.system_prompt
+        parts = [base_prompt]
         translator_glossary = self._get_glossary_entries()
         proj_glossary = getattr(self, "_translation_project_glossary", None) or []
         proj_as_tuples = [
@@ -371,6 +423,16 @@ class LLM_API_Translator(BaseTranslator):
         series = (self.get_param_value("series_context_prompt") or "").strip()
         if series:
             parts.append(f"\n\nContext: {series}")
+        video_glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
+        if video_glossary:
+            parts.append(f"\n\nVideo translator context/glossary (use for terminology and consistency):\n{video_glossary}")
+        if page_key.startswith("video_"):
+            parts.append(
+                "\nPreserve speaker perspective: when the source or the preceding subtitles are first person (e.g. I'm back, I, my; 我, 俺 in Chinese), "
+                "translate as first person. Use my not his, I not he when the speaker is referring to themselves (e.g. 'Because of his talent' → 'Because of my talent' when the protagonist is speaking). Do not use third person for the speaker."
+            )
+            if not self.get_param_value("video_allow_revised_previous"):
+                parts.append("\nDo not output revised_previous; translate only the current line(s).")
         return "\n".join(parts)
 
     def _get_effective_glossary_entries(self) -> List[Tuple[str, str]]:
@@ -504,6 +566,27 @@ class LLM_API_Translator(BaseTranslator):
             return False
         return True
 
+    def _translation_effectively_empty(self, s: str) -> bool:
+        """True if translation is empty or only punctuation/whitespace (no point glossary-checking)."""
+        t = s.strip()
+        if not t or len(t) < 2:
+            return True
+        return not any(c.isalnum() for c in t)
+
+    def _translation_contains_target_words_in_order(self, trans_norm: str, tgt_stripped: str) -> bool:
+        """True if all words of target appear in translation in order (case-insensitive, as substrings)."""
+        words = tgt_stripped.strip().lower().split()
+        if not words:
+            return True
+        t = trans_norm.lower()
+        pos = 0
+        for w in words:
+            idx = t.find(w, pos)
+            if idx == -1:
+                return False
+            pos = idx + len(w)
+        return True
+
     def _check_glossary_terms_in_translations(
         self, src_list: List[str], trans_list: List[str]
     ) -> None:
@@ -512,12 +595,33 @@ class LLM_API_Translator(BaseTranslator):
         glossary = self._get_effective_glossary_entries()
         if not glossary:
             return
+        # Process longer source terms first so e.g. 心魔劫 is applied before 心魔 (avoids "mental heart demon tribulation")
+        glossary = sorted(glossary, key=lambda x: len((x[0] or "").strip()), reverse=True)
         page_key = getattr(self, "_current_page_key", None)
         page_suffix = f" (page: {page_key})" if page_key else ""
         for i, (src_text, trans_text) in enumerate(zip(src_list, trans_list)):
             if not src_text or not isinstance(trans_text, str):
                 continue
             trans_norm = trans_text.strip()
+            if self._translation_effectively_empty(trans_norm):
+                continue
+            # When the whole block source is exactly one glossary term, use glossary target if model returned something else (e.g. name -> "I'm back.")
+            src_stripped = src_text.strip()
+            exact_override = False
+            for term_src, term_tgt in glossary:
+                if (term_src or "").strip() == src_stripped:
+                    primary = ((term_tgt or "").strip().split("|")[0].strip()
+                               if "|" in (term_tgt or "") else (term_tgt or "").strip())
+                    if primary and primary.lower() not in trans_norm.lower():
+                        trans_list[i] = primary
+                        self.logger.info(
+                            "Glossary term applied (exact block source): '%s' -> '%s'%s",
+                            term_src, primary, page_suffix,
+                        )
+                        exact_override = True
+                    break
+            if exact_override:
+                continue
             new_trans = trans_text
             for term_src, term_tgt in glossary:
                 if not term_src or not term_tgt:
@@ -549,50 +653,72 @@ class LLM_API_Translator(BaseTranslator):
                 if covered_by_longer:
                     continue
                 tgt_stripped = term_tgt.strip()
-                if tgt_stripped in trans_norm:
+                # Allow pipe-separated alternates in glossary (e.g. "Chu Province | Chuzhou"); 楚州: accept Chuzhou as correct
+                acceptable = [s.strip() for s in tgt_stripped.split("|") if s.strip()]
+                if not acceptable:
+                    acceptable = [tgt_stripped]
+                if term_src.strip() == "楚州" and "Chuzhou" not in [a for a in acceptable if a]:
+                    acceptable = list(acceptable) + ["Chuzhou"]
+                if term_src.strip() == "天劫":
+                    for alt in ("Tribulation", "Tribulation stage"):
+                        if alt not in acceptable:
+                            acceptable = list(acceptable) + [alt]
+                if term_src.strip() == "仙界" and "realm of immortality" not in acceptable:
+                    acceptable = list(acceptable) + ["realm of immortality"]
+                satisfied = False
+                for alt in acceptable:
+                    if not alt:
+                        continue
+                    if alt in trans_norm or alt.lower() in trans_norm.lower():
+                        satisfied = True
+                        break
+                    alt_no_sp = alt.lower().replace(" ", "")
+                    if alt_no_sp and alt_no_sp in trans_norm.lower().replace(" ", ""):
+                        satisfied = True
+                        break
+                    if self._translation_contains_target_words_in_order(trans_norm, alt):
+                        satisfied = True
+                        break
+                if satisfied:
                     continue
-                if tgt_stripped.lower() in trans_norm.lower():
-                    continue
-                # Treat as present if translation has target with extra internal spaces (e.g. "Yun Wu Mountain Villa" vs "Yunwu Mountain Villa")
-                tgt_no_sp = tgt_stripped.lower().replace(" ", "")
-                if tgt_no_sp and tgt_no_sp in trans_norm.lower().replace(" ", ""):
-                    continue
+                # Use first acceptable target when replacing wrong forms (e.g. "Chu Province | Chuzhou" -> use first)
+                primary_tgt = acceptable[0] if acceptable else tgt_stripped
                 # Try to replace wrong forms: first heuristics (e.g. "x province"), then auto-detect phrase from target shape
                 replaced = False
-                for wrong in self._wrong_alternatives_for_glossary_term(tgt_stripped):
+                for wrong in self._wrong_alternatives_for_glossary_term(primary_tgt):
                     if not wrong:
                         continue
                     if wrong.lower() in new_trans.lower():
                         idx = new_trans.lower().find(wrong.lower())
                         if idx >= 0 and not self._allow_glossary_replacement(
-                            wrong, tgt_stripped, term_src, glossary, new_trans, idx
+                            wrong, primary_tgt, term_src, glossary, new_trans, idx
                         ):
                             continue
                         if idx >= 0:
-                            new_trans = new_trans[:idx] + tgt_stripped + new_trans[idx + len(wrong):]
+                            new_trans = new_trans[:idx] + primary_tgt + new_trans[idx + len(wrong):]
                             replaced = True
                             self.logger.info(
                                 "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
-                                term_src, term_tgt, wrong, page_suffix,
+                                term_src, primary_tgt, wrong, page_suffix,
                             )
                             break
                 if not replaced:
                     # Auto-detect: find phrase that matches target's last word (e.g. "heart demon" for "mental demons")
-                    auto_phrase = self._find_auto_wrong_phrase(new_trans, tgt_stripped)
+                    auto_phrase = self._find_auto_wrong_phrase(new_trans, primary_tgt)
                     # Skip when phrase and target have same word count and same last word (e.g. "true disciple" vs "official disciple") - treat as valid alternate
                     same_shape = False
-                    if auto_phrase and tgt_stripped:
+                    if auto_phrase and primary_tgt:
                         aw = auto_phrase.strip().lower().split()
-                        tw = tgt_stripped.strip().lower().split()
+                        tw = primary_tgt.strip().lower().split()
                         same_shape = len(aw) == len(tw) and aw and tw and aw[-1] == tw[-1]
                     pos_auto = new_trans.lower().find(auto_phrase.lower()) if auto_phrase else -1
                     if auto_phrase and not same_shape and pos_auto >= 0 and self._allow_glossary_replacement(
-                        auto_phrase, tgt_stripped, term_src, glossary, new_trans, pos_auto
+                        auto_phrase, primary_tgt, term_src, glossary, new_trans, pos_auto
                     ):
                         pos = pos_auto
                         if pos >= 0:
                             actual = new_trans[pos : pos + len(auto_phrase)]
-                            new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
+                            new_trans = new_trans[:pos] + primary_tgt + new_trans[pos + len(actual):]
                             replaced = True
                             self.logger.info(
                                 "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
@@ -600,21 +726,21 @@ class LLM_API_Translator(BaseTranslator):
                             )
                 if not replaced:
                     # Fallback: only replace n-word phrase that shares a word with target (avoids "Having fought" -> "Immortal Realm")
-                    n = len(tgt_stripped.split())
+                    n = len(primary_tgt.split())
                     if 2 <= n <= 3:
-                        any_phrase = self._find_any_n_word_phrase_to_replace(new_trans, tgt_stripped, n)
+                        any_phrase = self._find_any_n_word_phrase_to_replace(new_trans, primary_tgt, n)
                         pos_fb = new_trans.lower().find(any_phrase.lower()) if any_phrase else -1
                         if any_phrase and pos_fb >= 0 and self._allow_glossary_replacement(
-                            any_phrase, tgt_stripped, term_src, glossary, new_trans, pos_fb
+                            any_phrase, primary_tgt, term_src, glossary, new_trans, pos_fb
                         ):
                             pos = pos_fb
                             if pos >= 0:
                                 actual = new_trans[pos : pos + len(any_phrase)]
-                                new_trans = new_trans[:pos] + tgt_stripped + new_trans[pos + len(actual):]
+                                new_trans = new_trans[:pos] + primary_tgt + new_trans[pos + len(actual):]
                                 replaced = True
                                 self.logger.info(
                                     "Glossary term corrected: '%s' -> '%s' (replaced '%s' in translation)%s",
-                                    term_src, term_tgt, actual, page_suffix,
+                                    term_src, primary_tgt, actual, page_suffix,
                                 )
                 if replaced:
                     trans_list[i] = new_trans
@@ -645,6 +771,8 @@ class LLM_API_Translator(BaseTranslator):
                 endpoint = "https://openrouter.ai/api/v1"
             elif provider == "Grok":
                 endpoint = "https://api.x.ai/v1"
+            elif provider == "LLM Studio":
+                endpoint = "http://localhost:1234/v1"
 
         proxy = self.proxy
         timeout = httpx.Timeout(30.0, read=120.0)
@@ -956,19 +1084,23 @@ class LLM_API_Translator(BaseTranslator):
                     if s or t:
                         pairs.append(f"  [{s}] -> [{t}]")
                 if pairs:
+                    ctx_label = "Subtitle context:" if (getattr(self, "_current_page_key", None) or "").startswith("video_") else "Page context:"
                     if trim_mode == "compact":
                         # Keep at most 2 lines per page to stay within context limits
                         if len(pairs) <= 2:
-                            lines.append("Page context:\n" + "\n".join(pairs))
+                            lines.append(ctx_label + "\n" + "\n".join(pairs))
                         else:
-                            lines.append("Page context:\n" + "\n".join([pairs[0], pairs[-1]]))
+                            lines.append(ctx_label + "\n" + "\n".join([pairs[0], pairs[-1]]))
                     else:
-                        lines.append("Page context:\n" + "\n".join(pairs[:10]))
+                        lines.append(ctx_label + "\n" + "\n".join(pairs[:10]))
             if lines:
-                context_block = (
-                    "Previous context (for terminology and style consistency):\n"
-                    + "\n".join(lines[-6:])
+                is_video = (getattr(self, "_current_page_key", None) or "").startswith("video_")
+                context_header = (
+                    "Previous subtitles (for continuity and flow):\n"
+                    if is_video
+                    else "Previous context (for terminology and style consistency):\n"
                 )
+                context_block = context_header + "\n".join(lines[-6:])
                 try:
                     max_chars = int(self.get_param_value("context_max_chars") or 0)
                 except (TypeError, ValueError):
@@ -1050,6 +1182,185 @@ class LLM_API_Translator(BaseTranslator):
                     results.append(error_placeholder)
             time.sleep(max(0, self.global_delay))
         return results
+
+    def _reflection_improve(
+        self, src_list: List[str], trans_list: List[str], to_lang: str
+    ) -> List[str]:
+        """VideoCaptioner-style: ask the model to review and improve translations. Returns improved list or original on failure."""
+        if not trans_list or not src_list or len(trans_list) != len(src_list):
+            return trans_list
+        pairs = "\n".join(
+            f"{i + 1}. Source: {s}\n   Current: {t}"
+            for i, (s, t) in enumerate(zip(src_list, trans_list))
+        )
+        system = (
+            f"You are a translation reviewer for subtitles. Improve the following translations into {to_lang} for naturalness and accuracy. "
+            "HARD RULES: do not add new facts/plot; do not invent names; keep each line aligned to its source snippet (no merging/splitting). "
+            "Return ONLY a single JSON object with keys \"1\", \"2\", ... (as strings) and the improved translation text for each key. "
+            "No extra keys. No other text."
+        )
+        user = f"Review and improve these translations:\n\n{pairs}"
+        glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
+        if glossary:
+            user += f"\n\nContext/glossary to respect:\n{glossary}"
+        try:
+            self._respect_delay()
+            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            if not raw or not raw.strip():
+                return trans_list
+            start, end = raw.find("{"), raw.rfind("}")
+            if start == -1 or end <= start:
+                return trans_list
+            data = json.loads(raw[start : end + 1])
+            improved = []
+            for i in range(1, len(trans_list) + 1):
+                key = str(i)
+                val = data.get(key) if isinstance(data, dict) else None
+                if isinstance(val, str) and val.strip():
+                    improved.append(val.strip())
+                else:
+                    improved.append(trans_list[i - 1])
+            return improved
+        except Exception as e:
+            self.logger.debug("Reflection improve failed (using original): %s", e)
+            return trans_list
+
+    def correct_ocr_texts(
+        self, texts: List[str], lang_hint: Optional[str] = None
+    ) -> List[str]:
+        """Correct OCR output (typos, punctuation, spacing) via LLM. Returns corrected list or original on failure. Used by video translator when Correct OCR with LLM is on."""
+        if not texts:
+            return texts
+        lang = (lang_hint or self.lang_map.get(self.lang_source, self.lang_source) or "the source language").strip()
+        glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
+        numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+        system = (
+            f"You are an OCR corrector for subtitles/text bubbles. The following lines are raw OCR output (possibly {lang}). "
+            "Fix typos, spacing, and obvious character confusions. Preserve meaning and do not translate. "
+            "Do NOT hallucinate missing words/sentences; if uncertain, keep the original characters. "
+            "Keep numbers (e.g. 1904073...), punctuation, and symbols as-is unless clearly wrong. "
+            "Return ONLY a single JSON object with keys \"1\", \"2\", ... (as strings) and the corrected text for each line. "
+            "No extra keys. No other text."
+        )
+        user = f"Correct these OCR lines:\n\n{numbered}"
+        if glossary:
+            user += f"\n\nUse the following as reference (terminology, names, context):\n{glossary}"
+        try:
+            self._respect_delay()
+            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            if not raw or not raw.strip():
+                return texts
+            start, end = raw.find("{"), raw.rfind("}")
+            if start == -1 or end <= start:
+                return texts
+            data = json.loads(raw[start : end + 1])
+            corrected = []
+            for i in range(1, len(texts) + 1):
+                key = str(i)
+                val = data.get(key) if isinstance(data, dict) else None
+                if isinstance(val, str) and val.strip():
+                    corrected.append(val.strip())
+                else:
+                    corrected.append(texts[i - 1])
+            return corrected
+        except Exception as e:
+            self.logger.debug("OCR correction failed (using original): %s", e)
+            return texts
+
+    def correct_asr_texts(
+        self, texts: List[str], lang_hint: Optional[str] = None
+    ) -> List[str]:
+        """Correct ASR (speech-to-text) output via LLM. Fix punctuation, capitalization, obvious errors. Returns corrected list or original on failure. Used by video translator when Source = Audio and Correct ASR with LLM is on."""
+        if not texts:
+            return texts
+        glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
+        numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+        system = (
+            "You are a subtitle corrector. The following lines are raw speech-to-text output. "
+            "Fix punctuation, capitalization, and obvious errors. Preserve meaning and do not translate. "
+            "Do NOT add new content; do NOT expand into long prose. Keep each line short and subtitle-like. "
+            "Return ONLY a single JSON object with keys \"1\", \"2\", ... (as strings) and the corrected text for each line. "
+            "No extra keys. No other text."
+        )
+        user = f"Correct these ASR lines:\n\n{numbered}"
+        if glossary:
+            user += f"\n\nUse the following as reference (terminology, names, context):\n{glossary}"
+        try:
+            self._respect_delay()
+            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            if not raw or not raw.strip():
+                return texts
+            start, end = raw.find("{"), raw.rfind("}")
+            if start == -1 or end <= start:
+                return texts
+            data = json.loads(raw[start : end + 1])
+            corrected = []
+            for i in range(1, len(texts) + 1):
+                key = str(i)
+                val = data.get(key) if isinstance(data, dict) else None
+                if isinstance(val, str) and val.strip():
+                    corrected.append(val.strip())
+                else:
+                    corrected.append(texts[i - 1])
+            return corrected
+        except Exception as e:
+            self.logger.debug("ASR correction failed (using original): %s", e)
+            return texts
+
+    def sentence_break_segments(
+        self, segments: List[Tuple[float, float, str]], lang_hint: str = ""
+    ) -> List[Tuple[float, float, str]]:
+        """Merge/split ASR segments into natural sentences via LLM. Returns list of (start_sec, end_sec, text) with timestamps assigned by character-length ratio. Used by video translator when Smart sentence break is on."""
+        if not segments:
+            return segments
+        texts = [t for _s, _e, t in segments]
+        combined = " ".join(t.strip() for t in texts if (t or "").strip())
+        if not combined.strip():
+            return segments
+        t0 = segments[0][0]
+        t1 = segments[-1][1]
+        total_time = max(0.001, t1 - t0)
+        lang = (lang_hint or self.lang_map.get(self.lang_source, self.lang_source) or "the source language").strip()
+        system = (
+            f"You are a subtitle editor. The following is concatenated speech-to-text ({lang}). "
+            "Split or merge into natural subtitle sentences. Preserve order and meaning. Do not translate. "
+            "HARD RULES: do not add new facts/plot; do not invent names. "
+            "Prefer shorter sentences suitable for on-screen subtitles; avoid extremely long lines. "
+            "Return ONLY a single JSON object with keys \"1\", \"2\", ... (as strings); each value is one sentence. "
+            "No extra keys. No other text."
+        )
+        user = f"Output natural sentences (one per key):\n\n{combined}"
+        glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
+        if glossary:
+            user += f"\n\nContext:\n{glossary}"
+        try:
+            self._respect_delay()
+            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            if not raw or not raw.strip():
+                return segments
+            start, end = raw.find("{"), raw.rfind("}")
+            if start == -1 or end <= start:
+                return segments
+            data = json.loads(raw[start : end + 1])
+            ordered = []
+            i = 1
+            while str(i) in data and isinstance(data[str(i)], str):
+                ordered.append(data[str(i)].strip())
+                i += 1
+            if not ordered:
+                return segments
+            total_chars = sum(len(s) for s in ordered) or 1
+            result = []
+            acc = 0
+            for s in ordered:
+                start_sec = t0 + total_time * (acc / total_chars)
+                acc += len(s)
+                end_sec = t0 + total_time * (acc / total_chars)
+                result.append((start_sec, end_sec, s))
+            return result
+        except Exception as e:
+            self.logger.debug("Sentence break failed (using original): %s", e)
+            return segments
 
     def _respect_delay(self):
         current_time = time.time()
@@ -1170,6 +1481,13 @@ class LLM_API_Translator(BaseTranslator):
             text = re.sub(r"\b" + re.escape(original) + r"\b", replacement, text)
         return text
 
+    def _sanitize_json_control_chars(self, s: str) -> str:
+        """Replace ASCII control characters (except tab, newline, carriage return) so json.loads can parse."""
+        return "".join(
+            c if c in "\t\n\r" or ord(c) >= 32 else " "
+            for c in s
+        )
+
     def _first_json_object(self, s: str) -> str:
         """Extract the first complete {...} object (brace-balanced). Handles 'Extra data' when model returns concatenated JSON."""
         start = s.find("{")
@@ -1187,8 +1505,10 @@ class LLM_API_Translator(BaseTranslator):
 
     def _repair_json_malformed_translations_key_and_unquoted(self, s: str) -> str:
         """Repair common model mistakes: wrong key 'translations: [' and unquoted 'id:' / 'translation:' in objects."""
-        # Fix key: "translations: [" or "translations:[" -> "translations": [
+        # Fix key when quoted: "translations: [" or "translations:[" -> "translations": [
         s = re.sub(r'"translations\s*:\s*\[', '"translations": [', s, flags=re.IGNORECASE)
+        # Fix key when unquoted (model returned translations: [ {id: 1, ...} ): translations: [ -> "translations": [
+        s = re.sub(r'(\{)\s*translations\s*:\s*\[', r'\1"translations": [', s, flags=re.IGNORECASE)
         # Quote unquoted keys in object context (after { or ,): id: -> "id":, translation: -> "translation":
         s = re.sub(r'([{,]\s*)id\s*:', r'\1"id":', s, flags=re.IGNORECASE)
         s = re.sub(r'([{,]\s*)translation\s*:', r'\1"translation":', s, flags=re.IGNORECASE)
@@ -1276,12 +1596,54 @@ class LLM_API_Translator(BaseTranslator):
             for i in range(1, count + 1)
         ]
 
+    def _clean_json_artifact_from_translation(self, s: str) -> str:
+        """
+        If the string looks like JSON fragments (e.g. ', "id": 5, "translation": " Real text"'),
+        extract only the quoted translation value(s) and return the best one. Otherwise return s.
+        Also handles single-key objects like {"answer": "..."} or {"text": "..."} so plain text is returned.
+        """
+        if not s or not s.strip():
+            return s
+        s = s.strip()
+        # If the whole string is a JSON object with a single content key, return that value (avoids showing raw JSON)
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict) and len(data) == 1:
+                k, v = next(iter(data.items()))
+                if isinstance(k, str) and isinstance(v, str) and v.strip():
+                    content_keys = ("answer", "text", "content", "result", "output", "translation", "message")
+                    if k.lower().strip() in content_keys:
+                        return v.strip()
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Match "translation": "..." - take the quoted value (handles one or more occurrences)
+        pattern = re.compile(r'"translation"\s*:\s*"((?:[^"\\]|\\.)*)"', re.IGNORECASE)
+        matches = pattern.findall(s)
+        if matches:
+            # Prefer the longest match that looks like real text (not just punctuation/JSON)
+            candidates = []
+            for m in matches:
+                unescaped = m.replace("\\\"", "\"").replace("\\\\", "\\").strip()
+                if len(unescaped) > 1 and not re.match(r"^[\s\],{}:]+$", unescaped):
+                    candidates.append(unescaped)
+            if candidates:
+                return max(candidates, key=len)
+        # If string starts/ends with JSON junk (e.g. starts with ", "id":), try to extract any quoted phrase
+        if '"translation"' in s or '"id"' in s or "translation\":" in s.lower():
+            # Try to find a quoted string that looks like prose (has space or is long)
+            quoted = re.findall(r'"((?:[^"\\]|\\.)*)"', s)
+            for q in quoted:
+                u = q.replace("\\\"", "\"").strip()
+                if len(u) > 10 and " " in u and "id" not in u.lower()[:5] and "translation" not in u.lower()[:12]:
+                    return u
+        return s
+
     def _raw_content_to_fallback_translations(
         self, raw_content: str, expected_count: int
     ) -> Optional[TranslationResponse]:
         """
         Last resort: build a TranslationResponse from raw API content when JSON parsing failed.
-        Tries to strip markdown/code blocks, then use whole text (expected_count==1) or split by lines.
+        Tries to strip markdown/code blocks, extract id/translation, then line-split; cleans JSON artifacts from each string.
         """
         if not raw_content or not raw_content.strip() or expected_count < 1:
             return None
@@ -1291,21 +1653,40 @@ class LLM_API_Translator(BaseTranslator):
         if text_no_blocks:
             text = text_no_blocks
         if not text:
-            # Model may have returned only a code block; use content inside first block as translation
             m = re.search(r"```(?:\w*)\s*([\s\S]*?)```", raw_content)
             if m and m.group(1).strip():
                 text = m.group(1).strip()
         if not text:
             return None
-        # Single item: use whole text (trim to reasonable length so we don't store huge garbage)
+        # Single item: use whole text (trim); clean if it looks like JSON
         if expected_count == 1:
             single = text[:8000].strip() if len(text) > 8000 else text
+            single = self._clean_json_artifact_from_translation(single)
             if single:
                 return TranslationResponse(translations=[
                     TranslationElement(id=1, translation=single)
                 ])
             return None
-        # Multiple: split by double newline or by lines; take first expected_count segments
+        # Multiple: try to extract id/translation from JSON-like content first
+        extracted = self._extract_translations_from_broken_json(
+            self._repair_json_unescaped_quotes(text)
+        )
+        if not extracted:
+            extracted = self._extract_translations_from_broken_json(text)
+        if extracted:
+            by_id = {x["id"]: x["translation"] for x in extracted}
+            result = []
+            for i in range(1, expected_count + 1):
+                trans = by_id.get(i, "[missing]")
+                trans = self._clean_json_artifact_from_translation(trans)
+                if trans == "[missing]" and i not in by_id:
+                    trans = "[missing]"
+                if len(trans) > 8000:
+                    trans = trans[:8000].strip()
+                result.append(TranslationElement(id=i, translation=trans or "[missing]"))
+            if result:
+                return TranslationResponse(translations=result)
+        # Fallback: split by double newline or by lines; clean each segment so we don't put raw JSON in boxes
         segments = re.split(r"\n\s*\n", text)
         if len(segments) <= 1:
             segments = [ln.strip() for ln in text.split("\n") if ln.strip()]
@@ -1313,6 +1694,7 @@ class LLM_API_Translator(BaseTranslator):
         for i in range(expected_count):
             if i < len(segments):
                 seg = (segments[i] or "").strip()
+                seg = self._clean_json_artifact_from_translation(seg)
                 if len(seg) > 8000:
                     seg = seg[:8000].strip()
                 result.append(TranslationElement(id=i + 1, translation=seg or "[missing]"))
@@ -1364,8 +1746,6 @@ class LLM_API_Translator(BaseTranslator):
         if not current_api_key and provider != "LLM Studio":
             self.logger.warning("No API key for custom completion.")
             return None
-        if provider == "LLM Studio" and not self.endpoint:
-            return None
         if not self._initialize_client(current_api_key, provider_override=provider):
             return None
         self._respect_delay()
@@ -1384,8 +1764,6 @@ class LLM_API_Translator(BaseTranslator):
             if not current_api_key:
                 self.logger.warning("No API key for context summary; truncating.")
                 return "...\n" + long_context[-max_chars:]
-        if provider == "LLM Studio" and not self.endpoint:
-            return "...\n" + long_context[-max_chars:]
         if not self._initialize_client(current_api_key, provider_override=provider):
             return "...\n" + long_context[-max_chars:]
         self._respect_delay()
@@ -1462,9 +1840,11 @@ class LLM_API_Translator(BaseTranslator):
                 raise ConnectionError("No available API key found.")
 
         if provider == "LLM Studio" and not self.endpoint:
-            raise ValueError(
-                "Endpoint must be specified when using the LLM Studio provider (e.g., http://localhost:1234/v1)."
-            )
+            if not getattr(self, "_logged_lm_studio_default_endpoint", False):
+                self._logged_lm_studio_default_endpoint = True
+                self.logger.debug(
+                    "LLM Studio provider: endpoint not set, using default http://localhost:1234/v1. Set endpoint in translator options if your server uses a different URL."
+                )
 
         if not self._initialize_client(current_api_key, provider_override=provider):
             raise ConnectionError("Failed to initialize API client.")
@@ -1600,6 +1980,9 @@ class LLM_API_Translator(BaseTranslator):
             end = json_to_parse.rfind("}")
             if start != -1 and end != -1 and end > start:
                 json_to_parse = json_to_parse[start : end + 1]
+        json_to_parse = self._sanitize_json_control_chars(json_to_parse)
+        # Try repair before first parse so "translations: [ {id: 1, translation: \"...\"}" parses
+        json_to_parse = self._repair_json_malformed_translations_key_and_unquoted(json_to_parse)
         try:
             data_to_validate = json.loads(json_to_parse)
             # Normalize Grok-style {"1": "text", "2": "..."} to {"translations": [...]} before validate (#1031)
@@ -1611,13 +1994,36 @@ class LLM_API_Translator(BaseTranslator):
                             for k, v in sorted(data_to_validate.items(), key=lambda x: int(str(x[0]).strip()) if str(x[0]).strip().isdigit() else 0)
                         ]
                     }
+                elif len(data_to_validate) == 1:
+                    # Single-key content (e.g. {"answer": "..."}, {"text": "..."}) — use as single translation
+                    k, v = next(iter(data_to_validate.items()))
+                    if isinstance(k, str) and isinstance(v, str) and v.strip():
+                        content_keys = ("answer", "text", "content", "result", "output", "translation", "message")
+                        if k.lower().strip() in content_keys:
+                            data_to_validate = {"translations": [{"id": 1, "translation": v.strip()}]}
+                if "translations" not in data_to_validate:
+                    # Malformed key: model returned e.g. {"translations: [ {id: 1, ...": ...}; try extraction from raw
+                    malformed_key = next(
+                        (k for k in data_to_validate.keys() if isinstance(k, str) and k.strip().lower().startswith("translations") and "[" in k),
+                        None,
+                    )
+                    if malformed_key is not None and expected_count is not None and expected_count >= 1:
+                        extracted = self._extract_translations_from_broken_json(json_to_parse)
+                        if extracted:
+                            by_id = {x["id"]: x["translation"] for x in extracted}
+                            data_to_validate = {
+                                "translations": [
+                                    {"id": i, "translation": by_id.get(i, "[missing]")}
+                                    for i in range(1, expected_count + 1)
+                                ]
+                            }
             validated_response = TranslationResponse.model_validate(
                 data_to_validate
             )
         except (ValidationError, json.JSONDecodeError) as e:
                 validated_response = None
-                self.logger.warning(
-                    f"Initial Pydantic validation failed: {e}. Attempting repair and fallbacks."
+                self.logger.debug(
+                    "Initial JSON parse failed: %s. Attempting repair and fallbacks.", e
                 )
                 # 0) If "Extra data", model likely returned concatenated JSON; use first object only
                 if "Extra data" in str(e):
@@ -1748,6 +2154,7 @@ class LLM_API_Translator(BaseTranslator):
     def _translate(self, src_list: List[str]) -> List[str]:
         if not src_list:
             return []
+        setattr(self, "_last_revised_previous", None)
 
         RETRYABLE_EXCEPTIONS = (
             openai.RateLimitError,
@@ -1774,40 +2181,73 @@ class LLM_API_Translator(BaseTranslator):
                             "Received empty or invalid parsed response from API."
                         )
 
-                    translations_dict = {
-                        item.id: item.translation
-                        for item in parsed_response.translations
-                    }
-                    ordered_translations = [
-                        translations_dict.get(i, "") for i in range(1, num_src + 1)
-                    ]
+                    # Strict alignment: we require a 1:1 mapping for ids 1..N.
+                    # If the model returns extra/missing items or wrong ids, we retry (up to invalid_repeat_count),
+                    # then fall back to best-effort ordering without mixing subtitles.
                     got = len(parsed_response.translations)
-                    if got != num_src:
+                    ids = []
+                    id_set = set()
+                    duplicates = False
+                    for it in parsed_response.translations:
+                        try:
+                            tid = int(getattr(it, "id", 0) or 0)
+                        except Exception:
+                            tid = 0
+                        ids.append(tid)
+                        if tid in id_set:
+                            duplicates = True
+                        id_set.add(tid)
+
+                    expected_ids = set(range(1, num_src + 1))
+                    ids_ok = (not duplicates) and expected_ids.issubset(id_set)
+                    count_ok = (got == num_src)
+                    if (not count_ok) or (not ids_ok):
                         self.logger.warning(
-                            f"Translation count mismatch: expected {num_src}, got {got}. Using available entries (missing filled with empty)."
+                            "Translation alignment mismatch: expected %d items with ids 1..%d; got %d items (ids=%s).",
+                            num_src,
+                            num_src,
+                            got,
+                            ids[: min(len(ids), 24)],
                         )
-                        # check_br_and_retry: retry request when count mismatch
                         if mismatch_retry_attempt < self.invalid_repeat_count:
                             mismatch_retry_attempt += 1
                             self.logger.info(
-                                f"Retrying due to count mismatch (attempt {mismatch_retry_attempt}/{self.invalid_repeat_count})."
+                                "Retrying due to translation alignment mismatch (attempt %d/%d).",
+                                mismatch_retry_attempt,
+                                self.invalid_repeat_count,
                             )
                             time.sleep(self.retry_timeout)
                             continue
+
+                    # Best-effort final ordering:
+                    # - Prefer explicit ids 1..N (stable even if API returns extra items).
+                    # - If ids are missing/wrong (or duplicates), fall back to response order (truncate/pad).
+                    translations_by_id = {}
+                    for it in parsed_response.translations:
+                        try:
+                            tid = int(getattr(it, "id", 0) or 0)
+                        except Exception:
+                            tid = 0
+                        txt = getattr(it, "translation", "")
+                        if tid not in translations_by_id:
+                            translations_by_id[tid] = txt
+                    ordered_translations = []
+                    if expected_ids.issubset(set(translations_by_id.keys())) and not duplicates:
+                        ordered_translations = [translations_by_id.get(i, "") for i in range(1, num_src + 1)]
+                    else:
+                        ordered_translations = [
+                            (getattr(parsed_response.translations[i], "translation", "") if i < got else "")
+                            for i in range(num_src)
+                        ]
                         # If we got 1 and expected N, try newline split as improvement over empty slots
                         if got == 1 and num_src > 1:
-                            one = parsed_response.translations[0].translation
-                            lines = [s.strip() for s in one.split("\n") if s.strip()]
+                            one = getattr(parsed_response.translations[0], "translation", "")
+                            lines = [s.strip() for s in (one or "").split("\n") if s.strip()]
                             if len(lines) >= num_src:
                                 ordered_translations = lines[:num_src]
-                                self.logger.info(
-                                    "Recovered from single newline-separated response."
-                                )
+                                self.logger.info("Recovered from single newline-separated response.")
                             elif len(lines) > 0:
-                                # Use lines we have, pad rest with ""
-                                ordered_translations = lines[:num_src] + [""] * (
-                                    num_src - len(lines)
-                                )
+                                ordered_translations = lines[:num_src] + [""] * (num_src - len(lines))
 
                     # Post-translation check: repetition / target-language ratio; retry up to N times
                     post_check_retry = 0
@@ -1824,19 +2264,31 @@ class LLM_API_Translator(BaseTranslator):
                         parsed_response = self._request_translation(prompt, expected_count=num_src)
                         if not parsed_response or not parsed_response.translations:
                             break
-                        translations_dict = {
-                            item.id: item.translation for item in parsed_response.translations
-                        }
-                        ordered_translations = [
-                            translations_dict.get(i, "") for i in range(1, num_src + 1)
-                        ]
+                        # Re-apply strict alignment after post-check retry; if still broken, keep last ordered_translations.
+                        try:
+                            translations_by_id = {int(item.id): item.translation for item in parsed_response.translations if getattr(item, "id", None) is not None}
+                            if set(range(1, num_src + 1)).issubset(set(translations_by_id.keys())):
+                                ordered_translations = [translations_by_id.get(i, "") for i in range(1, num_src + 1)]
+                        except Exception:
+                            pass
 
+                    # Optional reflection pass (VideoCaptioner-style: review and improve)
+                    if self.get_param_value("reflection_translation") and len(ordered_translations) == num_src:
+                        ordered_translations = self._reflection_improve(
+                            src_list[:num_src], ordered_translations, to_lang
+                        )
                     # Apply keyword substitutions (e.g. powers -> abilities)
                     ordered_translations = [
                         self._apply_keyword_substitutions(t) for t in ordered_translations
                     ]
                     self._check_glossary_terms_in_translations(src_list[:num_src], ordered_translations)
                     translations.extend(ordered_translations)
+                    # Video: expose optional revised_previous so dialog can update context/SRT/cache
+                    page_key = getattr(self, "_current_page_key", None) or ""
+                    if page_key.startswith("video_") and getattr(parsed_response, "revised_previous", None):
+                        rev = parsed_response.revised_previous
+                        if isinstance(rev, list) and rev:
+                            setattr(self, "_last_revised_previous", [str(s).strip() for s in rev if s])
                     if self.get_param_value("extract_glossary"):
                         self._extract_and_append_glossary(src_list[:num_src], ordered_translations)
                     self.logger.info(
