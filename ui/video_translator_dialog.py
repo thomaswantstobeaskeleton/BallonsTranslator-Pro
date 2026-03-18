@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import os.path as osp
 import tempfile
+import re
 from typing import Optional
 
 from qtpy.QtWidgets import (
@@ -15,11 +16,112 @@ from qtpy.QtWidgets import (
     QComboBox, QWidget, QPlainTextEdit, QListWidget, QListWidgetItem, QAbstractItemView,
     QScrollArea, QFrame, QSizePolicy,
 )
-from qtpy.QtCore import Qt, QThread, Signal, QEvent
-from qtpy.QtGui import QIcon, QImage, QPixmap, QCloseEvent
+from qtpy.QtCore import Qt, QThread, Signal, QEvent, QTimer
+from qtpy.QtGui import QIcon, QImage, QPixmap, QCloseEvent, QKeySequence, QShowEvent, QResizeEvent
+from qtpy.QtWidgets import QShortcut
 
 from utils.config import pcfg, save_config
 from utils.logger import logger as LOGGER
+
+
+_REGION_PLACEHOLDER_RE = re.compile(
+    r"^\s*(?:\[\s*)?(?:reg(?:i|l|1)on)\s*[:#-]?\s*\d+\s*(?:\]\s*)?$",
+    re.IGNORECASE,
+)
+
+
+def _is_region_placeholder_text(text: str) -> bool:
+    """Some translators/models occasionally output placeholders like '[region 1]' / 'Region 1'. Treat those as empty."""
+    try:
+        return bool(_REGION_PLACEHOLDER_RE.match((text or "").strip()))
+    except Exception:
+        return False
+
+
+def _apply_continuation_comma_fix(revised_prev, revised_new, previous_entries, video_previous_subtitles, srt_entries=None):
+    """
+    When the flow fixer returns unchanged text, apply a rule-based fix: if the last
+    previous line has no trailing comma and the first new line is a continuation
+    (e.g. 'Taken away from Earth...'), add a comma to the previous line and optionally
+    'I was ' to the new line so the pair reads as one sentence. Mutates in place.
+    When mutating video_previous_subtitles, pass srt_entries to update the last SRT segment text.
+    Returns (n_prev_fixed, n_new_fixed) for logging.
+    """
+    n_prev_fixed, n_new_fixed = 0, 0
+    if not revised_new:
+        return n_prev_fixed, n_new_fixed
+    first_new = (revised_new[0] or "").strip()
+    if not first_new:
+        return n_prev_fixed, n_new_fixed
+    first_lower = first_new.lower()
+    continuation_starts = (
+        first_new.startswith("Taken ") or first_new.startswith("Taken away")
+        or first_new.startswith("Reached ") or first_new.startswith("Because of ")
+        or first_new.startswith("Thus ") or first_new.startswith("From this ")
+        or first_new.startswith("From the ") or first_new.startswith("Called ")
+        or first_new.startswith("Left ") or first_new.startswith("Bringing ")
+        or first_new.startswith("Having ")
+        or (first_new.startswith("By ") and len(first_new) > 10)
+        or first_lower.startswith("and ") or first_lower.startswith("but ")
+    )
+    if not continuation_starts:
+        return n_prev_fixed, n_new_fixed
+    # Get last previous line
+    last_prev_line = None
+    last_prev_source = None  # (revised_prev, idx_ent, idx_trans) or ("subs", idx_ent, idx_trans)
+    if revised_prev and len(revised_prev) > 0:
+        ent = revised_prev[-1]
+        trans = ent.get("translations") or []
+        if trans:
+            last_prev_line = (trans[-1] or "").strip()
+            last_prev_source = ("revised_prev", len(revised_prev) - 1, len(trans) - 1)
+    if last_prev_line is None and previous_entries and len(previous_entries) > 0:
+        ent = previous_entries[-1]
+        trans = ent.get("translations") or []
+        if trans:
+            last_prev_line = (trans[-1] or "").strip()
+            last_prev_source = ("previous_entries", len(previous_entries) - 1, len(trans) - 1)
+    if last_prev_line is None and video_previous_subtitles and len(video_previous_subtitles) >= 2:
+        ent = video_previous_subtitles[-2]
+        trans = ent.get("translations") or []
+        if trans:
+            last_prev_line = (trans[-1] or "").strip()
+            last_prev_source = ("video_subs", -2, len(trans) - 1)
+    if not last_prev_line or last_prev_source is None:
+        return n_prev_fixed, n_new_fixed
+    if last_prev_line.rstrip().endswith(",") or last_prev_line.rstrip().endswith(";"):
+        return n_prev_fixed, n_new_fixed
+    if last_prev_line.rstrip().endswith(".") or last_prev_line.rstrip().endswith("?") or last_prev_line.rstrip().endswith("!"):
+        return n_prev_fixed, n_new_fixed
+    # Add comma to last previous line
+    fixed_prev = last_prev_line.rstrip()
+    if not fixed_prev.endswith(","):
+        fixed_prev = fixed_prev + ","
+        kind, idx_ent, idx_trans = last_prev_source
+        if kind == "revised_prev" and revised_prev is not None:
+            revised_prev[idx_ent]["translations"][idx_trans] = fixed_prev
+            n_prev_fixed = 1
+        elif kind == "video_subs" and video_previous_subtitles and len(video_previous_subtitles) >= 2:
+            ent = video_previous_subtitles[-2]
+            trans = ent.get("translations") or []
+            if trans:
+                trans[-1] = fixed_prev
+                if "translations" not in ent:
+                    ent["translations"] = trans
+                n_prev_fixed = 1
+                if srt_entries and len(srt_entries) >= 1:
+                    srt_entries[-1] = (srt_entries[-1][0], srt_entries[-1][1], " ".join(trans).strip())
+    # Optionally add "I was " to first new line when it's passive and context is first person
+    recent_text = ""
+    if previous_entries:
+        for e in previous_entries[-5:]:
+            recent_text += " " + " ".join((e.get("translations") or []))
+    if (
+        first_new.startswith("Taken ") or first_new.startswith("Taken away")
+    ) and (" I " in recent_text or " I'm " in recent_text or " my " in recent_text) and not first_new.lower().startswith("i was "):
+        revised_new[0] = "I was " + first_new
+        n_new_fixed = 1
+    return n_prev_fixed, n_new_fixed
 
 
 def _get_video_module(module_type: str, name: str):
@@ -140,12 +242,63 @@ def _get_source_bitrate_kbps(video_path: str, ffmpeg_exe: str = "") -> int:
     return 0
 
 
-def _normalize_fps(cap, reported_fps: float, total_frames: int) -> float:
-    """Return a sane FPS for encoding. OpenCV CAP_PROP_FPS can be wrong for some codecs/VFR.
-    When reported FPS is suspicious (0, >200, or <15), try FPS = frame_count / duration (seek to end).
-    Never return below 30 fps: bogus 1-5 from underreported frame count becomes 30."""
+def _get_source_fps_ffprobe(video_path: str, ffmpeg_exe: str = "") -> float:
+    """Get source video FPS via ffprobe (avg_frame_rate). Returns 0.0 if not detectable.
+    Parses rationals like 24/1, 30000/1001, 24000/1001."""
+    import subprocess
+    exe = "ffprobe"
+    if (ffmpeg_exe or "").strip():
+        base = (ffmpeg_exe or "").strip()
+        d = osp.dirname(base)
+        name = "ffprobe.exe" if base.lower().endswith(".exe") else "ffprobe"
+        exe = osp.join(d, name) if d else name
+    try:
+        out = subprocess.run(
+            [
+                exe, "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode != 0 or not out.stdout:
+            return 0.0
+        lines = [s.strip() for s in out.stdout.strip().splitlines() if s.strip()]
+        for raw in (lines[0:1] if lines else []):
+            if "/" in raw:
+                num, den = raw.split("/", 1)
+                try:
+                    n, d = float(num.strip()), float(den.strip())
+                    if d > 0 and 1.0 <= (n / d) <= 200.0:
+                        return round(n / d, 4)
+                except (ValueError, ZeroDivisionError):
+                    pass
+            try:
+                v = float(raw)
+                if 1.0 <= v <= 200.0:
+                    return round(v, 4)
+            except ValueError:
+                pass
+    except Exception:
+        pass
+    return 0.0
+
+
+def _normalize_fps(cap, reported_fps: float, total_frames: int, video_path: str = "", ffmpeg_exe: str = "") -> float:
+    """Return FPS for encoding that matches the source. Preserves 24, 23.976, 25, 29.97, 30, etc.
+    Prefers ffprobe when video_path given; else OpenCV; else frame_count/duration. Never forces 30 for 24fps sources."""
+    import cv2
     fps = reported_fps or 0.0
-    if (fps <= 0 or fps > 200 or fps < 15.0) and cap and total_frames > 0:
+    # Prefer ffprobe so output framerate matches source exactly (avoids wrong duration/speed)
+    if video_path:
+        probe = _get_source_fps_ffprobe(video_path, ffmpeg_exe)
+        if probe > 0:
+            return probe
+    # OpenCV reported FPS: use if sane; only treat 0 or (0,6) as bogus
+    if (fps <= 0 or fps > 200 or (0 < fps < 6.0)) and cap and total_frames > 0:
         try:
             cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1.0)
             end_ms = cap.get(cv2.CAP_PROP_POS_MSEC) or 0
@@ -153,14 +306,14 @@ def _normalize_fps(cap, reported_fps: float, total_frames: int) -> float:
             if end_ms > 0:
                 from_fps = total_frames / (end_ms / 1000.0)
                 if 1.0 <= from_fps <= 200.0:
-                    return max(30.0, min(120.0, round(from_fps, 2)))
+                    return round(from_fps, 4)
         except Exception:
             pass
-    if fps <= 0:
-        return 30.0
-    if fps < 15.0:
-        return 30.0
-    return fps
+    if fps <= 0 or (0 < fps < 6.0):
+        return 24.0  # safe default; do not force 30
+    if fps > 200:
+        return 120.0
+    return round(fps, 4)
 
 
 def _scene_change(prev_gray, curr_gray, threshold: float) -> bool:
@@ -190,6 +343,36 @@ def _temporal_blend(prev: "np.ndarray", curr: "np.ndarray", alpha: float, bottom
     blend_roi = (1.0 - alpha) * blend_roi + alpha * prev_roi
     np.clip(blend_roi, 0, 255, out=blend_roi)
     out[y_start:h, :] = blend_roi.astype(np.uint8)
+    return out
+
+
+def _composite_cached_subs_on_frame(
+    frame: "np.ndarray",
+    cached_result: "np.ndarray",
+    cached_source_frame: "np.ndarray",
+    blk_list: list,
+    h: int,
+    w: int,
+) -> "np.ndarray":
+    """Paste cached subtitle regions (inpainted + drawn text) onto the current frame so motion stays at full fps."""
+    if (
+        frame is None
+        or cached_result is None
+        or not blk_list
+        or frame.shape[:2] != cached_result.shape[:2]
+    ):
+        return frame.copy() if frame is not None else None
+    out = frame.copy()
+    for blk in blk_list:
+        xyxy = getattr(blk, "xyxy", None)
+        if not xyxy or len(xyxy) < 4:
+            continue
+        x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+        x1, x2 = max(0, min(x1, w)), max(0, min(x2, w))
+        y1, y2 = max(0, min(y1, h)), max(0, min(y2, h))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        out[y1:y2, x1:x2] = cached_result[y1:y2, x1:x2]
     return out
 
 
@@ -232,6 +415,14 @@ def _write_srt(path: str, entries: list, fps: float) -> None:
     """Write SRT file. entries: list of (start_frame, end_frame, text)."""
     with open(path, "w", encoding="utf-8") as f:
         for i, (start, end, text) in enumerate(entries, 1):
+            # Ensure every cue has at least 1-frame duration; some players glitch on 0/negative-length cues.
+            try:
+                if end is None or start is None:
+                    continue
+                end = max(int(end), int(start) + 1)
+                start = int(start)
+            except Exception:
+                pass
             text = (text or "").strip().replace("\n", " ")
             if not text:
                 text = ""
@@ -243,17 +434,38 @@ def _write_vtt(path: str, entries: list, fps: float) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write("WEBVTT\n\n")
         for i, (start, end, text) in enumerate(entries, 1):
+            # Ensure every cue has at least 1-frame duration; prevents 0-length cues.
+            try:
+                if end is None or start is None:
+                    continue
+                end = max(int(end), int(start) + 1)
+                start = int(start)
+            except Exception:
+                pass
             text = (text or "").strip().replace("\n", " ")
             if not text:
                 text = ""
             f.write("%d\n%s --> %s\n%s\n\n" % (i, _ts_vtt(start, fps), _ts_vtt(end, fps), text))
 
 
-def _write_ass(path: str, entries: list, fps: float) -> None:
-    """Write ASS file. entries: list of (start_frame, end_frame, text)."""
+def _write_ass(path: str, entries: list, fps: float, width: int | None = None, height: int | None = None) -> None:
+    """Write ASS file. entries: list of (start_frame, end_frame, text).
+    If width/height given, write PlayResX/PlayResY in [Script Info] for correct scaling (matches video resolution)."""
     with open(path, "w", encoding="utf-8") as f:
-        f.write("[Script Info]\nTitle: BallonsTranslator\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, ShadowColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H00000000,&H00000000,&H80000000,0,0,1,2,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+        script_info = "[Script Info]\nTitle: BallonsTranslator\n"
+        if width is not None and height is not None and width > 0 and height > 0:
+            script_info += "PlayResX: %d\nPlayResY: %d\n" % (width, height)
+        script_info += "\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, ShadowColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H00000000,&H00000000,&H80000000,0,0,1,2,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        f.write(script_info)
         for start, end, text in entries:
+            # Ensure at least 1-frame duration.
+            try:
+                if end is None or start is None:
+                    continue
+                end = max(int(end), int(start) + 1)
+                start = int(start)
+            except Exception:
+                pass
             text = (text or "").strip().replace("\n", "\\N")
             if not text:
                 text = ""
@@ -436,6 +648,8 @@ class VideoTranslateThread(QThread):
                     LOGGER.warning("ASR translate batch failed: %s", e)
                 for (s, e, _), blk in zip(segments, blk_list):
                     trans = (getattr(blk, "translation", None) or blk.get_text() or "").strip()
+                    if _is_region_placeholder_text(trans):
+                        trans = ""
                     segments_with_trans.append((s, e, trans))
             else:
                 segments_with_trans = [(s, e, (t or "").strip()) for s, e, t in segments]
@@ -484,24 +698,25 @@ class VideoTranslateThread(QThread):
                     if effective_kbps > 0:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium",
                             "-b:v", "%dk" % effective_kbps,
                             "-minrate", "%dk" % effective_kbps,
                             "-maxrate", "%dk" % effective_kbps,
                             "-bufsize", "%dk" % (effective_kbps * 2),
                             "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
                     else:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
+                    if self.output_path.lower().endswith((".mp4", ".mov")):
+                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
+                    ffmpeg_cmd.append(self.output_path)
                     ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
                 except Exception as e:
                     LOGGER.warning("FFmpeg not available for ASR output: %s. Using OpenCV.", e)
@@ -524,6 +739,7 @@ class VideoTranslateThread(QThread):
             if style not in ("anime", "documentary"):
                 style = "default"
             n = 0
+            prev_active = []  # list of active subtitle texts on previous frame
             step = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
             while True:
                 if self._cancel:
@@ -533,7 +749,47 @@ class VideoTranslateThread(QThread):
                     break
                 time_sec = n / fps if fps > 0 else 0
                 if not self.soft_subs_only:
-                    _draw_timed_subs_on_image(frame, time_sec, segments_with_trans, style=style)
+                    # Log start/end transitions for hardcoded (burn-in) subtitles (only when active set changes).
+                    try:
+                        active_now = []
+                        for s, e, t in segments_with_trans:
+                            txt = (t or "").strip()
+                            if txt and (not _is_region_placeholder_text(txt)) and float(s) <= float(time_sec) < float(e):
+                                active_now.append(txt)
+                        if active_now != prev_active:
+                            ended = [t for t in prev_active if t not in active_now]
+                            started = [t for t in active_now if t not in prev_active]
+                            for t in ended:
+                                LOGGER.info("ASR subtitle ended @ %.3fs: %r", float(time_sec), t)
+                            for t in started:
+                                # Find the segment time window for this text (best-effort)
+                                seg_s, seg_e = None, None
+                                for s, e, txt in segments_with_trans:
+                                    if (txt or "").strip() == t:
+                                        seg_s, seg_e = float(s), float(e)
+                                        break
+                                if seg_s is not None and seg_e is not None:
+                                    LOGGER.info("ASR subtitle started @ %.3fs (%.3f-%.3fs): %r", float(time_sec), seg_s, seg_e, t)
+                                else:
+                                    LOGGER.info("ASR subtitle started @ %.3fs: %r", float(time_sec), t)
+                            prev_active = active_now
+                    except Exception:
+                        pass
+                    # Stack back-to-back/overlapping subs and give very short cues a 1-frame overlap at boundaries
+                    # to avoid flicker/overwrite when end/start are extremely close.
+                    dt = (1.0 / fps) if fps > 0 else 0.04
+                    overlap_frames = min(15, max(5, int(fps * 0.5))) if fps > 0 else 10
+                    overlap_sec = overlap_frames / fps if fps > 0 else 0.4
+                    segs_for_draw = []
+                    for s, e, t in segments_with_trans:
+                        try:
+                            if abs(float(e) - float(time_sec)) <= dt and (float(e) - float(s)) <= overlap_sec:
+                                segs_for_draw.append((float(s), float(time_sec) + dt, t))
+                            else:
+                                segs_for_draw.append((s, e, t))
+                        except Exception:
+                            segs_for_draw.append((s, e, t))
+                    _draw_timed_subs_on_image(frame, time_sec, segs_for_draw, style=style, stack_multiple_lines=True)
                 if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
                     try:
                         ffmpeg_proc.stdin.write(frame.tobytes())
@@ -561,12 +817,16 @@ class VideoTranslateThread(QThread):
 
             # Only write sidecar SRT/ASS/VTT when not burning in (avoids double subtitles when player auto-loads SRT)
             if self.soft_subs_only:
-                srt_entries = [(int(s * fps), int(e * fps), text) for s, e, text in segments_with_trans]
+                srt_entries = [
+                    (int(s * fps), int(e * fps), text)
+                    for s, e, text in segments_with_trans
+                    if (text or "").strip() and not _is_region_placeholder_text(text)
+                ]
                 base_path = osp.splitext(self.output_path)[0]
                 if srt_entries:
                     _write_srt(base_path + ".srt", srt_entries, fps)
                     if self.export_ass:
-                        _write_ass(base_path + ".ass", srt_entries, fps)
+                        _write_ass(base_path + ".ass", srt_entries, fps, w, h)
                     if self.export_vtt:
                         _write_vtt(base_path + ".vtt", srt_entries, fps)
 
@@ -621,6 +881,8 @@ class VideoTranslateThread(QThread):
                     LOGGER.warning("Existing subs translate batch failed: %s", e)
                 for (s, e, _), blk in zip(segments, blk_list):
                     trans = (getattr(blk, "translation", None) or blk.get_text() or "").strip()
+                    if _is_region_placeholder_text(trans):
+                        trans = ""
                     segments_with_trans.append((s, e, trans))
             else:
                 segments_with_trans = [(s, e, (t or "").strip()) for s, e, t in segments]
@@ -655,24 +917,25 @@ class VideoTranslateThread(QThread):
                     if effective_kbps > 0:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium",
                             "-b:v", "%dk" % effective_kbps,
                             "-minrate", "%dk" % effective_kbps,
                             "-maxrate", "%dk" % effective_kbps,
                             "-bufsize", "%dk" % (effective_kbps * 2),
                             "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
                     else:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
+                    if self.output_path.lower().endswith((".mp4", ".mov")):
+                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
+                    ffmpeg_cmd.append(self.output_path)
                     ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
                 except Exception as e:
                     LOGGER.warning("FFmpeg not available for existing subs output: %s. Using OpenCV.", e)
@@ -695,6 +958,7 @@ class VideoTranslateThread(QThread):
             if style not in ("anime", "documentary"):
                 style = "default"
             n = 0
+            prev_active = []  # list of active subtitle texts on previous frame
             step = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
             while True:
                 if self._cancel:
@@ -704,7 +968,46 @@ class VideoTranslateThread(QThread):
                     break
                 time_sec = n / fps if fps > 0 else 0
                 if not self.soft_subs_only:
-                    _draw_timed_subs_on_image(frame, time_sec, segments_with_trans, style=style)
+                    # Log start/end transitions for hardcoded (burn-in) subtitles (only when active set changes).
+                    try:
+                        active_now = []
+                        for s, e, t in segments_with_trans:
+                            txt = (t or "").strip()
+                            if txt and (not _is_region_placeholder_text(txt)) and float(s) <= float(time_sec) < float(e):
+                                active_now.append(txt)
+                        if active_now != prev_active:
+                            ended = [t for t in prev_active if t not in active_now]
+                            started = [t for t in active_now if t not in prev_active]
+                            for t in ended:
+                                LOGGER.info("Existing-sub subtitle ended @ %.3fs: %r", float(time_sec), t)
+                            for t in started:
+                                seg_s, seg_e = None, None
+                                for s, e, txt in segments_with_trans:
+                                    if (txt or "").strip() == t:
+                                        seg_s, seg_e = float(s), float(e)
+                                        break
+                                if seg_s is not None and seg_e is not None:
+                                    LOGGER.info("Existing-sub subtitle started @ %.3fs (%.3f-%.3fs): %r", float(time_sec), seg_s, seg_e, t)
+                                else:
+                                    LOGGER.info("Existing-sub subtitle started @ %.3fs: %r", float(time_sec), t)
+                            prev_active = active_now
+                    except Exception:
+                        pass
+                    # Stack back-to-back/overlapping subs and give very short cues a 1-frame overlap at boundaries
+                    # to avoid flicker/overwrite when end/start are extremely close.
+                    dt = (1.0 / fps) if fps > 0 else 0.04
+                    overlap_frames = min(15, max(5, int(fps * 0.5))) if fps > 0 else 10
+                    overlap_sec = overlap_frames / fps if fps > 0 else 0.4
+                    segs_for_draw = []
+                    for s, e, t in segments_with_trans:
+                        try:
+                            if abs(float(e) - float(time_sec)) <= dt and (float(e) - float(s)) <= overlap_sec:
+                                segs_for_draw.append((float(s), float(time_sec) + dt, t))
+                            else:
+                                segs_for_draw.append((s, e, t))
+                        except Exception:
+                            segs_for_draw.append((s, e, t))
+                    _draw_timed_subs_on_image(frame, time_sec, segs_for_draw, style=style, stack_multiple_lines=True)
                 if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
                     try:
                         ffmpeg_proc.stdin.write(frame.tobytes())
@@ -732,12 +1035,16 @@ class VideoTranslateThread(QThread):
 
             # Only write sidecar SRT/ASS/VTT when not burning in (avoids double subtitles when player auto-loads SRT)
             if self.soft_subs_only:
-                srt_entries = [(int(s * fps), int(e * fps), text) for s, e, text in segments_with_trans]
+                srt_entries = [
+                    (int(s * fps), int(e * fps), text)
+                    for s, e, text in segments_with_trans
+                    if (text or "").strip() and not _is_region_placeholder_text(text)
+                ]
                 base_path = osp.splitext(self.output_path)[0]
                 if srt_entries:
                     _write_srt(base_path + ".srt", srt_entries, fps)
                     if self.export_ass:
-                        _write_ass(base_path + ".ass", srt_entries, fps)
+                        _write_ass(base_path + ".ass", srt_entries, fps, w, h)
                     if self.export_vtt:
                         _write_vtt(base_path + ".vtt", srt_entries, fps)
 
@@ -753,7 +1060,7 @@ class VideoTranslateThread(QThread):
         import cv2
         import subprocess
         import numpy as np
-        from modules.video_translator import run_one_frame_pipeline, _region_fraction_from_preset
+        from modules.video_translator import run_one_frame_pipeline, _region_fraction_from_preset, _draw_text_on_image, _draw_timed_subs_on_image
 
         try:
             src = getattr(self, "source", "ocr").strip().lower()
@@ -769,7 +1076,11 @@ class VideoTranslateThread(QThread):
                 self.failed.emit("Could not open input video.")
                 return
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-            fps = _normalize_fps(cap, cap.get(cv2.CAP_PROP_FPS) or 0.0, total)
+            fps = _normalize_fps(
+                cap, cap.get(cv2.CAP_PROP_FPS) or 0.0, total,
+                video_path=self.input_path,
+                ffmpeg_exe=self.ffmpeg_path or "",
+            )
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             if w <= 0 or h <= 0:
@@ -835,13 +1146,20 @@ class VideoTranslateThread(QThread):
                                 timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
                             )
                         else:
-                            flow_fixer = get_flow_fixer(
-                                fixer_name,
-                                server_url=(getattr(cfg, "video_translator_flow_fixer_server_url", None) or "http://localhost:1234/v1").strip(),
-                                model=(getattr(cfg, "video_translator_flow_fixer_model", None) or "local").strip(),
-                                max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
-                                timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
-                            )
+                            # Local (Ollama / LM Studio): require non-empty model name so user picks the right one
+                            local_model = (getattr(cfg, "video_translator_flow_fixer_model", None) or "").strip()
+                            if not local_model:
+                                LOGGER.info(
+                                    "Flow fixer (local): model name is empty. Enter the exact model name in Video translator options (e.g. the name shown in LM Studio) to use flow fixer."
+                                )
+                            else:
+                                flow_fixer = get_flow_fixer(
+                                    fixer_name,
+                                    server_url=(getattr(cfg, "video_translator_flow_fixer_server_url", None) or "http://localhost:1234/v1").strip(),
+                                    model=local_model,
+                                    max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                                    timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                )
                     except Exception as e:
                         LOGGER.warning("Flow fixer not available: %s", e)
                         flow_fixer = None
@@ -859,24 +1177,25 @@ class VideoTranslateThread(QThread):
                     if effective_kbps > 0:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium",
                             "-b:v", "%dk" % effective_kbps,
                             "-minrate", "%dk" % effective_kbps,
                             "-maxrate", "%dk" % effective_kbps,
                             "-bufsize", "%dk" % (effective_kbps * 2),
                             "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
                     else:
                         ffmpeg_cmd = [
                             ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "pipe:0",
+                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
                             "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps),
-                            self.output_path,
+                            "-r", str(fps), "-pix_fmt", "yuv420p",
                         ]
+                    if self.output_path.lower().endswith((".mp4", ".mov")):
+                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
+                    ffmpeg_cmd.append(self.output_path)
                     ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
                 except Exception as e:
                     LOGGER.warning(
@@ -910,7 +1229,28 @@ class VideoTranslateThread(QThread):
                 elif out is not None:
                     out.write(frame)
 
+            # When burning in, remove any existing sidecar SRT/ASS/VTT so the player does not show double subtitles
+            if not self.soft_subs_only and not self.inpaint_only_soft_subs:
+                base_path = osp.splitext(self.output_path)[0]
+                for ext in (".srt", ".ass", ".vtt"):
+                    p = base_path + ext
+                    if osp.isfile(p):
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+
             cached_result = None
+            cached_blk_list = None  # blocks from last pipeline run (for compositing so motion stays full fps)
+            cached_source_frame = None  # raw frame at last "good" pipeline tick (used to validate reuse)
+            cached_inpainted = None  # inpainted frame without text (for srt-based burn-in with stacking)
+            # Keep last "good" subtitles so a single missed detection doesn't make subs flicker off.
+            last_good_cached_result = None
+            last_good_cached_blk_list = None
+            last_good_cached_source_frame = None
+            last_good_cached_inpainted = None
+            miss_streak = 0
+            cached_hold_until = -1  # frame index until which we keep compositing cached subs
             prev_gray = None
             prev_result = None
             last_pipeline_n = -self.sample_every_frames - 1  # so we run on n=0 and respect "process every N" minimum interval
@@ -920,6 +1260,13 @@ class VideoTranslateThread(QThread):
             preview_throttle = 5
             video_previous_subtitles = []
             max_video_context = 10
+            # Clear per-region OCR cache and translator cache so a new video run doesn't reuse old results
+            if ocr is not None:
+                setattr(ocr, "_video_frame_ocr_cache", None)
+                setattr(ocr, "_video_frame_ocr_cache_order", None)
+            if translator is not None:
+                setattr(translator, "_video_frame_cache", None)
+
             frac = _region_fraction_from_preset(cfg) if self.temporal_smoothing else 0.0
             if frac <= 0:
                 frac = 0.2
@@ -952,19 +1299,27 @@ class VideoTranslateThread(QThread):
                             )
                         # When inpaint_only_soft_subs, do not draw subtitles on frames (video gets SRT only)
                         draw_subs = not self.inpaint_only_soft_subs
+                        # Single draw path: never draw in pipeline; always draw once in dialog so we never get double/layered subtitles
                         out_frame, blk_list, _ = run_one_frame_pipeline(
                             frame,
                             detector, ocr, translator, inpainter,
                             self.enable_detect, self.enable_ocr, self.enable_translate, self.enable_inpaint,
                             cfg=cfg,
                             skip_detect=self.skip_detect,
-                            draw_subtitles=draw_subs,
+                            draw_subtitles=False,
                         )
+                        # Snapshot inpainted frame before we draw text (for srt-based burn-in with stacking).
+                        cached_inpainted = out_frame.copy() if out_frame is not None else None
                         if translator is not None and blk_list:
-                            video_previous_subtitles.append({
+                            new_entry = {
                                 "sources": [b.get_text() if hasattr(b, "get_text") else (b.text or [""])[0] for b in blk_list],
                                 "translations": [str(getattr(b, "translation", "") or "").strip() for b in blk_list],
-                            })
+                            }
+                            # Only append when subtitle content changed (avoid inflating n_prev with same cached line on multiple frames)
+                            last = video_previous_subtitles[-1] if video_previous_subtitles else None
+                            did_append = last is None or last.get("sources") != new_entry["sources"] or last.get("translations") != new_entry["translations"]
+                            if did_append:
+                                video_previous_subtitles.append(new_entry)
                             if len(video_previous_subtitles) > max_video_context:
                                 video_previous_subtitles = video_previous_subtitles[-max_video_context:]
                             # Apply optional revised_previous from model (flow fix; no extra API call)
@@ -989,47 +1344,164 @@ class VideoTranslateThread(QThread):
                                         if i < len(rev) and rev[i] and srcs:
                                             cache[tuple(srcs)] = [rev[i].strip()]
                                 setattr(translator, "_last_revised_previous", None)
-                        # Local flow fixer (Ollama/LM Studio): improve flow without extra cloud API calls
-                        if flow_fixer is not None and blk_list and getattr(flow_fixer, "improve_flow", None):
+                        # Flow fixer: only run after actual translation (not when reused cached translations)
+                        if flow_fixer is not None and blk_list and getattr(flow_fixer, "improve_flow", None) and did_append:
                             try:
                                 new_translations = [str(getattr(b, "translation", "") or "").strip() for b in blk_list]
-                                previous_entries = video_previous_subtitles[-flow_fixer_context:] if video_previous_subtitles else []
+                                # Previous entries = earlier frames only (we just appended so exclude current)
+                                if video_previous_subtitles:
+                                    previous_entries = video_previous_subtitles[-flow_fixer_context:-1]
+                                else:
+                                    previous_entries = []
                                 revised_prev, revised_new = flow_fixer.improve_flow(
                                     [dict(e) for e in previous_entries],
                                     new_translations,
                                     target_lang="en",
                                 )
+                                # Rule-based continuity fix when flow fixer returns unchanged text (e.g. local model echoes)
                                 if revised_new and len(revised_new) == len(blk_list):
+                                    comma_prev, comma_new = _apply_continuation_comma_fix(
+                                        revised_prev, revised_new, previous_entries, video_previous_subtitles, srt_entries
+                                    )
+                                    if comma_prev or comma_new:
+                                        LOGGER.info(
+                                            "Continuation comma fix applied: %d previous, %d new line(s)",
+                                            comma_prev, comma_new,
+                                        )
+                                if revised_new and len(revised_new) == len(blk_list):
+                                    n_new_changed = 0
+                                    new_changes = []  # list of (index, old, new) for logging
                                     for i, b in enumerate(blk_list):
                                         if i < len(revised_new):
+                                            orig = (getattr(b, "translation", None) or "").strip()
+                                            new_text = (revised_new[i] or "").strip()
+                                            changed = new_text != orig
+                                            if changed:
+                                                n_new_changed += 1
+                                                new_changes.append((i, orig, new_text))
+                                            setattr(b, "flow_fixed", changed)
                                             b.translation = revised_new[i]
-                                    if revised_prev is not None and len(revised_prev) > 0 and len(video_previous_subtitles) >= len(revised_prev):
+                                        else:
+                                            setattr(b, "flow_fixed", False)
+                                    # revised_prev corresponds to previous_entries only
+                                    n_prev_changed = 0
+                                    prev_changes = []  # list of (index, old, new) for logging
+                                    if revised_prev is not None and len(revised_prev) > 0:
                                         k = len(revised_prev)
-                                        for i in range(k):
-                                            video_previous_subtitles[-(k - i)] = revised_prev[i]
-                                        if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and len(srt_entries) >= k:
+                                        if k <= len(previous_entries):
                                             for i in range(k):
-                                                ent = revised_prev[i]
-                                                txt = " ".join((ent.get("translations") or [])).strip()
-                                                if txt and i < k:
-                                                    idx = -(k - i)
-                                                    srt_entries[idx] = (srt_entries[idx][0], srt_entries[idx][1], txt)
-                                        cache = getattr(translator, "_video_frame_cache", None) if translator else None
-                                        if cache is not None:
+                                                old_t = " ".join((previous_entries[i].get("translations") or [])).strip()
+                                                new_t = " ".join((revised_prev[i].get("translations") or [])).strip()
+                                                if old_t != new_t:
+                                                    n_prev_changed += 1
+                                                    prev_changes.append((i, old_t, new_t))
+                                        need = k + 1  # we appended so current is at -1
+                                        if len(video_previous_subtitles) >= need:
                                             for i in range(k):
-                                                seg = video_previous_subtitles[-k + i]
-                                                srcs = seg.get("sources") or []
-                                                trans = (seg.get("translations") or [])
-                                                if srcs and trans:
-                                                    cache[tuple(srcs)] = [str(t).strip() for t in trans]
+                                                video_previous_subtitles[-(k + 1) + i] = revised_prev[i]
+                                            if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and len(srt_entries) >= k + 1:
+                                                for i in range(k):
+                                                    ent = revised_prev[i]
+                                                    txt = " ".join((ent.get("translations") or [])).strip()
+                                                    if txt:
+                                                        idx = -(k + 1) + i
+                                                        srt_entries[idx] = (srt_entries[idx][0], srt_entries[idx][1], txt)
+                                            cache = getattr(translator, "_video_frame_cache", None) if translator else None
+                                            if cache is not None:
+                                                for i in range(k):
+                                                    seg = video_previous_subtitles[-(k + 1) + i]
+                                                    srcs = seg.get("sources") or []
+                                                    trans = (seg.get("translations") or [])
+                                                    if srcs and trans:
+                                                        cache[tuple(srcs)] = [str(t).strip() for t in trans]
+                                    if n_prev_changed or n_new_changed:
+                                        LOGGER.info(
+                                            "Flow fixer changed %d previous and %d new line(s)",
+                                            n_prev_changed, n_new_changed,
+                                        )
+                                        def _tr(s, max_len=120):
+                                            s = (s or "").strip()
+                                            return s if len(s) <= max_len else s[: max_len - 3] + "..."
+                                        for idx, old_t, new_t in prev_changes:
+                                            LOGGER.info(
+                                                "Flow fixer [prev %d]: %r -> %r",
+                                                idx, _tr(old_t), _tr(new_t),
+                                            )
+                                        for idx, old_t, new_t in new_changes:
+                                            LOGGER.info(
+                                                "Flow fixer [new %d]: %r -> %r",
+                                                idx, _tr(old_t), _tr(new_t),
+                                            )
                             except Exception as e:
                                 LOGGER.debug("Flow fixer failed: %s", e)
+                        # Single draw: burn-in subtitles once here (same style for all; no second layer)
+                        if draw_subs and blk_list:
+                            # Stabilize position: when subtitle text is unchanged, reuse previous frame's box so text doesn't jitter.
+                            # Match by translation (not index) so detector reordering doesn't assign wrong positions and cause "text thrown" glitches.
+                            if cached_blk_list is not None and len(cached_blk_list) == len(blk_list):
+                                current_texts = [(getattr(b, "translation", None) or "").strip() for b in blk_list]
+                                cached_texts = [(getattr(c, "translation", None) or "").strip() for c in cached_blk_list]
+                                if set(current_texts) == set(cached_texts) and len(current_texts) == len(set(current_texts)):
+                                    used = set()
+                                    for b in blk_list:
+                                        bt = (getattr(b, "translation", None) or "").strip()
+                                        for i, c in enumerate(cached_blk_list):
+                                            if i in used:
+                                                continue
+                                            ct = (getattr(c, "translation", None) or "").strip()
+                                            if bt == ct:
+                                                xy = getattr(c, "xyxy", None)
+                                                if xy is not None and len(xy) >= 4:
+                                                    b.xyxy = list(xy)
+                                                used.add(i)
+                                                break
+                            style = (getattr(cfg, "video_translator_subtitle_style", None) or "default").strip().lower()
+                            if style not in ("anime", "documentary"):
+                                style = "default"
+                            _draw_text_on_image(out_frame, blk_list, style=style)
                         if self.temporal_smoothing and prev_result is not None:
                             out_frame = _temporal_blend(prev_result, out_frame, self.temporal_alpha, frac)
-                        cached_result = out_frame
-                        prev_result = out_frame.copy()
+                        # If we got no blocks (or empty translations), don't wipe cached subtitles — keep last good.
+                        has_text = False
+                        try:
+                            has_text = bool(blk_list) and any((getattr(b, "translation", None) or "").strip() for b in blk_list)
+                        except Exception:
+                            has_text = bool(blk_list)
+                        if has_text:
+                            miss_streak = 0
+                            cached_result = out_frame
+                            cached_blk_list = blk_list
+                            cached_source_frame = frame.copy()
+                            last_good_cached_result = out_frame
+                            last_good_cached_blk_list = blk_list
+                            last_good_cached_source_frame = cached_source_frame
+                            last_good_cached_inpainted = cached_inpainted
+                            prev_result = out_frame.copy()
+                            # Hold the cached subtitle state for a short time so brief detector dropouts don't flicker.
+                            cached_hold_until = n + max(1, self.sample_every_frames)
+                        else:
+                            # If detection missed once, we can keep last good to avoid flicker.
+                            # But if it keeps missing, clear cached blocks so old inpaint doesn't "stick" after subtitles disappear/move.
+                            miss_streak += 1
+                            if miss_streak <= 2 and last_good_cached_result is not None:
+                                cached_result = last_good_cached_result
+                                cached_blk_list = last_good_cached_blk_list
+                                cached_source_frame = last_good_cached_source_frame
+                                cached_inpainted = last_good_cached_inpainted
+                                prev_result = last_good_cached_result.copy() if hasattr(last_good_cached_result, "copy") else last_good_cached_result
+                            else:
+                                cached_result = out_frame
+                                cached_blk_list = []  # stop compositing old subtitle regions
+                                cached_source_frame = None
+                                cached_inpainted = None
+                                prev_result = out_frame.copy()
                         if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and blk_list:
-                            text = " ".join((getattr(b, "translation", None) or "").strip() for b in blk_list).strip()
+                            parts = []
+                            for b in blk_list:
+                                t = (getattr(b, "translation", None) or "").strip()
+                                if t and not _is_region_placeholder_text(t):
+                                    parts.append(t)
+                            text = " ".join(parts).strip()
                             if text:
                                 if srt_entries and srt_entries[-1][2] == text:
                                     # Same text as last segment: just extend its end frame
@@ -1038,16 +1510,56 @@ class VideoTranslateThread(QThread):
                                     # Close previous segment at this frame, start a new one
                                     if srt_entries:
                                         srt_entries[-1] = (srt_entries[-1][0], n, srt_entries[-1][2])
+                                        try:
+                                            LOGGER.info(
+                                                "OCR subtitle ended @ %.3fs (frames %d-%d): %r",
+                                                n / fps if fps > 0 else 0.0,
+                                                int(srt_entries[-1][0]),
+                                                int(srt_entries[-1][1]),
+                                                srt_entries[-1][2],
+                                            )
+                                        except Exception:
+                                            pass
                                     srt_entries.append((n, n + self.sample_every_frames, text))
+                                    try:
+                                        LOGGER.info(
+                                            "OCR subtitle started @ %.3fs (frames %d-%d): %r",
+                                            n / fps if fps > 0 else 0.0,
+                                            int(srt_entries[-1][0]),
+                                            int(srt_entries[-1][1]),
+                                            srt_entries[-1][2],
+                                        )
+                                    except Exception:
+                                        pass
                         current_preview_texts = [(b.get_text() if hasattr(b, "get_text") else (b.text or [""])[0], (getattr(b, "translation", None) or "").strip()) for b in (blk_list or [])]
                         self.frame_preview_updated.emit(n, out_frame.copy(), current_preview_texts)
                     except Exception as e:
                         LOGGER.warning("Frame %d pipeline failed: %s", n, e)
-                        cached_result = frame.copy()
-                        prev_result = cached_result.copy()
+                        # On failure, keep last good cached result if any, so subtitles don't blink off.
+                        if last_good_cached_result is not None:
+                            cached_result = last_good_cached_result
+                            cached_blk_list = last_good_cached_blk_list
+                            cached_source_frame = last_good_cached_source_frame
+                            cached_inpainted = last_good_cached_inpainted
+                            prev_result = last_good_cached_result.copy() if hasattr(last_good_cached_result, "copy") else last_good_cached_result
+                        else:
+                            cached_result = frame.copy()
+                            prev_result = cached_result.copy()
 
                 elif cached_result is not None and n % preview_throttle == 0:
-                    self.frame_preview_updated.emit(n, cached_result.copy(), current_preview_texts)
+                    # Preview should match what we write (composited/validated), otherwise it can appear to flicker.
+                    try:
+                        if (not run_pipeline) and (n > cached_hold_until):
+                            self.frame_preview_updated.emit(n, frame.copy(), current_preview_texts)
+                        elif (not run_pipeline) and cached_blk_list is not None:
+                            prev_comp = _composite_cached_subs_on_frame(
+                                frame, cached_result, cached_source_frame, cached_blk_list, h, w
+                            )
+                            self.frame_preview_updated.emit(n, (prev_comp if prev_comp is not None else cached_result).copy(), current_preview_texts)
+                        else:
+                            self.frame_preview_updated.emit(n, cached_result.copy(), current_preview_texts)
+                    except Exception:
+                        self.frame_preview_updated.emit(n, cached_result.copy(), current_preview_texts)
 
                 if self.soft_subs_only:
                     # Original video only; subs in SRT/ASS/VTT (no inpainting, no burn-in)
@@ -1058,9 +1570,46 @@ class VideoTranslateThread(QThread):
                         cached_result = cv2.resize(cached_result, (w, h), interpolation=cv2.INTER_LINEAR)
                     write_frame(cached_result)
                 elif cached_result is not None:
-                    if cached_result.shape[1] != w or cached_result.shape[0] != h:
-                        cached_result = cv2.resize(cached_result, (w, h), interpolation=cv2.INTER_LINEAR)
-                    write_frame(cached_result)
+                    # Full-fps motion: on non-pipeline frames paste cached subtitle regions onto current frame
+                    # Stop pasting after TTL to avoid "stuck inpaint" when subtitles disappear/move.
+                    if (not run_pipeline) and (n > cached_hold_until):
+                        write_frame(frame)
+                    elif srt_entries and (cached_inpainted is not None or cached_result is not None) and (run_pipeline or (cached_blk_list is not None and n <= cached_hold_until)):
+                        # SRT-based burn-in: draw active segments from srt_entries so back-to-back close segments stack (e.g. short "I" above next line).
+                        overlap_frames = min(15, max(5, int(fps * 0.5)))
+                        segments_for_draw = []
+                        for (start_f, end_f, text) in srt_entries:
+                            if end_f == n and (end_f - start_f) <= overlap_frames:
+                                segments_for_draw.append((start_f / fps, (n + 1) / fps, text))
+                            else:
+                                segments_for_draw.append((start_f / fps, end_f / fps, text))
+                        base = frame.copy()
+                        if cached_blk_list:
+                            comp = _composite_cached_subs_on_frame(
+                                frame,
+                                cached_inpainted if cached_inpainted is not None else cached_result,
+                                cached_source_frame,
+                                cached_blk_list,
+                                h,
+                                w,
+                            )
+                            if comp is not None:
+                                base = comp
+                        _draw_timed_subs_on_image(base, n / fps, segments_for_draw, stack_multiple_lines=True)
+                        write_frame(base)
+                    elif not run_pipeline and cached_blk_list is not None:
+                        comp = _composite_cached_subs_on_frame(
+                            frame, cached_result, cached_source_frame, cached_blk_list, h, w
+                        )
+                        if comp is not None:
+                            write_frame(comp)
+                        else:
+                            # Fallback: never write the full cached frame (it freezes motion and looks like low FPS).
+                            write_frame(frame)
+                    else:
+                        if cached_result.shape[1] != w or cached_result.shape[0] != h:
+                            cached_result = cv2.resize(cached_result, (w, h), interpolation=cv2.INTER_LINEAR)
+                        write_frame(cached_result)
                 else:
                     write_frame(frame)
 
@@ -1102,7 +1651,7 @@ class VideoTranslateThread(QThread):
                 srt_path = base_path + ".srt"
                 _write_srt(srt_path, srt_entries, fps)
                 if self.export_ass:
-                    _write_ass(base_path + ".ass", srt_entries, fps)
+                    _write_ass(base_path + ".ass", srt_entries, fps, w, h)
                 if self.export_vtt:
                     _write_vtt(base_path + ".vtt", srt_entries, fps)
                 # Optionally mux SRT into the video as a subtitle stream (inpaint-only mode only; never with burn-in)
@@ -1136,18 +1685,25 @@ class VideoTranslatorDialog(QDialog):
         self.setWindowTitle(self.tr("Video translator"))
         self.setMinimumWidth(640)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        # Persist window state across hide/show (close button hides the dialog).
+        self._vt_was_maximized: bool = False
+        self._vt_saved_geometry = None
+        self._vt_first_show_done: bool = False
+        self._scroll = None
         self.thread: Optional[VideoTranslateThread] = None
         self._batch_jobs: list = []  # [(input_path, output_path), ...]
         self._batch_index: int = 0
 
         main_layout = QVBoxLayout(self)
         scroll = QScrollArea()
+        self._scroll = scroll
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setMinimumHeight(400)
         content_widget = QWidget()
+        content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         content = QVBoxLayout(content_widget)
         content.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(content_widget)
@@ -1276,9 +1832,10 @@ class VideoTranslatorDialog(QDialog):
         _process_every_label.setToolTip(self.tr(
             "Run detect/OCR/translate/inpaint only every N frames; other frames reuse the last result. "
             "Output video FPS is always the same as input (every frame is written). "
-            "Lower N = subtitles update more often but N times more work (e.g. 5 = much slower than 30). "
-            "Recommended: 24–30 for speed; use temporal smoothing to reduce flicker."
-        ) or "Run pipeline every N frames; other frames reuse last result. Lower N = slower. Recommended: 24–30.")
+            "Lower N = subtitles update more often but more work.\n"
+            "At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with less cost (~15–10 runs/sec); 5–6 for a good balance (~6–5 runs/sec). "
+            "Higher values (e.g. 24–30) are faster but short-lived subtitles may be missed; use temporal smoothing to reduce flicker."
+        ) or "Run pipeline every N frames. At 30fps: 1=best, 2–3=catch quickly, 5–6=balance. Higher= faster but may miss short subs.")
         row.addWidget(_process_every_label)
         self.sample_spin = QSpinBox()
         self.sample_spin.setRange(1, 300)
@@ -1511,14 +2068,14 @@ class VideoTranslatorDialog(QDialog):
         self.flow_fixer_url_edit = QLineEdit()
         self.flow_fixer_url_edit.setPlaceholderText("http://localhost:1234/v1")
         self.flow_fixer_url_edit.setText((getattr(pcfg.module, "video_translator_flow_fixer_server_url", None) or "http://localhost:1234/v1").strip())
-        self.flow_fixer_url_edit.setToolTip(self.tr("LM Studio: http://localhost:1234/v1  —  Ollama: http://localhost:11434/v1"))
+        self.flow_fixer_url_edit.setToolTip(self.tr("LM Studio: http://localhost:1234/v1  —  Ollama: http://localhost:11434/v1. If you get invalid JSON or wrong revision count, see docs/FLOW_FIXER_SETUP.md (context size, max tokens, stop sequences)."))
         self.flow_fixer_url_edit.textChanged.connect(self._save_options)
         g_flow_l.addWidget(self.flow_fixer_url_edit, 2, 1)
         g_flow_l.addWidget(QLabel(self.tr("Model (local):")), 3, 0)
         self.flow_fixer_model_edit = QLineEdit()
-        self.flow_fixer_model_edit.setPlaceholderText("local")
-        self.flow_fixer_model_edit.setText((getattr(pcfg.module, "video_translator_flow_fixer_model", None) or "local").strip())
-        self.flow_fixer_model_edit.setToolTip(self.tr("Ollama: e.g. qwen2.5:3b, phi3:mini, llama3.2:3b. LM Studio: model name when server runs (often \"local\"). Good local: Qwen2.5-3B, Phi-3-mini, Llama-3.2-3B."))
+        self.flow_fixer_model_edit.setPlaceholderText(self.tr("Type model name (required)"))
+        self.flow_fixer_model_edit.setText((getattr(pcfg.module, "video_translator_flow_fixer_model", None) or "").strip())
+        self.flow_fixer_model_edit.setToolTip(self.tr("Required: type the exact model name. LM Studio: use the name shown for the loaded model (e.g. llama-3.2-3b, Qwen2.5-3B-Instruct). Ollama: e.g. qwen2.5:3b, phi3:mini. Flow fixer is only used when this is non-empty; see docs/FLOW_FIXER_SETUP.md."))
         self.flow_fixer_model_edit.textChanged.connect(self._save_options)
         g_flow_l.addWidget(self.flow_fixer_model_edit, 3, 1)
         g_flow_l.addWidget(QLabel(self.tr("OpenRouter API key:")), 5, 0)
@@ -1595,15 +2152,30 @@ class VideoTranslatorDialog(QDialog):
         # Live preview (OCR pipeline: current frame + detected/translated subtitles)
         g_preview = QGroupBox(self.tr("Live preview (current frame)"))
         g_preview_l = QHBoxLayout(g_preview)
+        # Left: frame preview + full screen button
+        preview_frame_col = QVBoxLayout()
         self.preview_frame_label = QLabel()
         self.preview_frame_label.setMinimumSize(320, 180)
         self.preview_frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_frame_label.setStyleSheet("background-color: #1a1a1a; color: #666;")
         self.preview_frame_label.setText(self.tr("Frame and subtitles will appear here during OCR run"))
         self.preview_frame_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        g_preview_l.addWidget(self.preview_frame_label, 1)
-        # Text preview (detected / translated lines) – use a read-only plain text editor
-        # so users can select and copy subtitles during the run.
+        preview_frame_col.addWidget(self.preview_frame_label, 1)
+        self.preview_fullscreen_btn = QPushButton(self.tr("Full screen"))
+        self.preview_fullscreen_btn.setToolTip(self.tr("Show current frame in full screen. Press Esc to close."))
+        self.preview_fullscreen_btn.clicked.connect(self._show_preview_fullscreen)
+        preview_frame_col.addWidget(self.preview_fullscreen_btn)
+        g_preview_l.addLayout(preview_frame_col, 1)
+        # Right: text preview + view history button
+        preview_text_col = QVBoxLayout()
+        preview_text_header = QHBoxLayout()
+        preview_text_header.addWidget(QLabel(self.tr("Current frame translation:")))
+        self.preview_history_btn = QPushButton(self.tr("View history…"))
+        self.preview_history_btn.setToolTip(self.tr("Open a list of previous source text and translations so you can read how they flow together."))
+        self.preview_history_btn.clicked.connect(self._show_preview_history)
+        preview_text_header.addStretch()
+        preview_text_header.addWidget(self.preview_history_btn)
+        preview_text_col.addLayout(preview_text_header)
         self.preview_text_edit = QPlainTextEdit()
         self.preview_text_edit.setReadOnly(True)
         self.preview_text_edit.setUndoRedoEnabled(False)
@@ -1611,8 +2183,14 @@ class VideoTranslatorDialog(QDialog):
         self.preview_text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.preview_text_edit.setStyleSheet("color: #ccc; font-size: 0.9em; background: #202020;")
         self.preview_text_edit.setPlainText(self.tr("Detected / translated lines appear here during run."))
-        g_preview_l.addWidget(self.preview_text_edit, 1)
+        preview_text_col.addWidget(self.preview_text_edit, 1)
+        g_preview_l.addLayout(preview_text_col, 1)
         content.addWidget(g_preview)
+        # Full-screen preview window (created on demand)
+        self._preview_fullscreen_window = None
+        # Subtitle history for "View history" (frame_index, list of (source, trans)); cleared when run starts
+        self.preview_subtitle_history = []
+        self._last_preview_subtitle_lines = None
 
         # Progress
         self.progress_bar = QProgressBar()
@@ -1634,7 +2212,8 @@ class VideoTranslatorDialog(QDialog):
         self.cancel_btn = QPushButton(self.tr("Cancel"))
         self.cancel_btn.clicked.connect(self._cancel_run)
         self.close_btn = QPushButton(self.tr("Close"))
-        self.close_btn.clicked.connect(self.accept)
+        # Close should *not* cancel/stop a running job. We hide the dialog and keep state.
+        self.close_btn.clicked.connect(self.close)
         btn_layout.addWidget(self.run_btn)
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.close_btn)
@@ -1790,7 +2369,7 @@ class VideoTranslatorDialog(QDialog):
         idx = self.flow_fixer_combo.currentIndex()
         pcfg.module.video_translator_flow_fixer = "openai" if idx == 3 else ("openrouter" if idx == 2 else ("local_server" if idx == 1 else "none"))
         pcfg.module.video_translator_flow_fixer_server_url = (self.flow_fixer_url_edit.text() or "").strip() or "http://localhost:1234/v1"
-        pcfg.module.video_translator_flow_fixer_model = (self.flow_fixer_model_edit.text() or "").strip() or "local"
+        pcfg.module.video_translator_flow_fixer_model = (self.flow_fixer_model_edit.text() or "").strip()
         pcfg.module.video_translator_flow_fixer_max_tokens = self.flow_fixer_max_tokens_spin.value()
         pcfg.module.video_translator_flow_fixer_context_lines = self.flow_fixer_context_spin.value()
         pcfg.module.video_translator_flow_fixer_timeout = float(getattr(pcfg.module, "video_translator_flow_fixer_timeout", 30.0))
@@ -1929,6 +2508,8 @@ class VideoTranslatorDialog(QDialog):
         self.status_label.setText(self.tr("Running pipeline..."))
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self.preview_subtitle_history = []
+        self._last_preview_subtitle_lines = None
 
         soft_subs = self.check_soft_subs.isChecked()
         _idx = self.source_combo.currentIndex()
@@ -1981,6 +2562,8 @@ class VideoTranslatorDialog(QDialog):
         inp, out = self._batch_jobs[self._batch_index]
         total = len(self._batch_jobs)
         self.status_label.setText(self.tr("File {} / {}: {}").format(self._batch_index + 1, total, osp.basename(inp)))
+        self.preview_subtitle_history = []
+        self._last_preview_subtitle_lines = None
         soft_subs = self.check_soft_subs.isChecked()
         _idx = self.source_combo.currentIndex()
         src = "asr" if _idx == 1 else "existing_subs" if _idx == 2 else "ocr"
@@ -2046,6 +2629,13 @@ class VideoTranslatorDialog(QDialog):
                 self.preview_frame_label.setPixmap(
                     pix.scaled(self.preview_frame_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 )
+                # Update full-screen window if open
+                if self._preview_fullscreen_window is not None and self._preview_fullscreen_window.isVisible():
+                    lbl = getattr(self._preview_fullscreen_window, "_label", None)
+                    if lbl is not None:
+                        lbl.setPixmap(
+                            pix.scaled(lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                        )
             except Exception as e:
                 LOGGER.debug("Preview frame update: %s", e)
         lines = []
@@ -2054,6 +2644,80 @@ class VideoTranslatorDialog(QDialog):
                 lines.append("%s → %s" % ((src or "").strip() or "-", (trans or "").strip() or "-"))
         text = "\n".join(lines) if lines else self.tr("No text on this frame.")
         self.preview_text_edit.setPlainText(text)
+        # Append to history only when subtitle content changed (avoid duplicate entries)
+        if subtitle_lines is not None and subtitle_lines != self._last_preview_subtitle_lines:
+            self._last_preview_subtitle_lines = list(subtitle_lines) if subtitle_lines else []
+            self.preview_subtitle_history.append((frame_index, self._last_preview_subtitle_lines))
+
+    def _show_preview_fullscreen(self):
+        """Show current frame in a full-screen window. Esc to close."""
+        pix = self.preview_frame_label.pixmap()
+        if pix is None or pix.isNull():
+            return
+        if self._preview_fullscreen_window is not None and self._preview_fullscreen_window.isVisible():
+            self._preview_fullscreen_window.close()
+            return
+        win = QDialog(self)
+        win.setWindowTitle(self.tr("Preview — full screen"))
+        win.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        layout = QVBoxLayout(win)
+        layout.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel(win)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet("background-color: #000;")
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lbl.setPixmap(
+            pix.scaled(lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
+        layout.addWidget(lbl)
+        win._label = lbl
+        win._parent_dialog = self
+
+        def refresh_pix():
+            p = win._parent_dialog.preview_frame_label.pixmap()
+            if p is not None and not p.isNull() and lbl.size().width() > 10:
+                lbl.setPixmap(
+                    p.scaled(lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                )
+        win.showFullScreen()
+        QTimer.singleShot(50, refresh_pix)
+        win.finished.connect(lambda: setattr(self, "_preview_fullscreen_window", None))
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), win, win.close)
+        self._preview_fullscreen_window = win
+
+    def _show_preview_history(self):
+        """Open a dialog listing previous source text and translations for the current run."""
+        d = QDialog(self)
+        d.setWindowTitle(self.tr("Translation history"))
+        d.setMinimumSize(480, 360)
+        layout = QVBoxLayout(d)
+        te = QPlainTextEdit(d)
+        te.setReadOnly(True)
+        te.setStyleSheet("font-size: 0.95em; background: #1e1e1e; color: #ddd;")
+        te.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        if not self.preview_subtitle_history:
+            te.setPlainText(self.tr("No history yet. Run the pipeline to see source and translations as they are detected."))
+        else:
+            parts = []
+            for frame_index, pairs in self.preview_subtitle_history:
+                parts.append("——— " + self.tr("Frame %s") % frame_index + " ———")
+                for src, trans in pairs:
+                    src_s = (src or "").strip() or "-"
+                    trans_s = (trans or "").strip() or "-"
+                    parts.append(self.tr("Source: %s") % src_s)
+                    parts.append("→ " + trans_s)
+                    parts.append("")
+                parts.append("")
+            te.setPlainText("\n".join(parts))
+        layout.addWidget(te)
+        close_btn = QPushButton(self.tr("Close"))
+        close_btn.clicked.connect(d.accept)
+        layout.addWidget(close_btn)
+        d.exec()
 
     def _on_progress(self, current: int, total: int):
         if total > 0:
@@ -2080,12 +2744,79 @@ class VideoTranslatorDialog(QDialog):
             self.cancel_btn.setEnabled(False)
 
     def closeEvent(self, event: QCloseEvent):
-        """Close (X or Close button) does not stop the pipeline; only Cancel does."""
-        if self.thread and self.thread.isRunning():
-            event.accept()
-            self.accept()
-            return
-        super().closeEvent(event)
+        """Close (X / Close button) hides the dialog and keeps the run alive.
+
+        Only Cancel should stop the pipeline.
+        """
+        try:
+            self._save_options()
+        except Exception:
+            pass
+        try:
+            self._vt_was_maximized = bool(self.isMaximized())
+            if not self._vt_was_maximized:
+                self._vt_saved_geometry = self.saveGeometry()
+        except Exception:
+            pass
+        event.ignore()
+        self.hide()
+
+    def reject(self):
+        """Escape key / reject should behave like Close (hide), not cancel."""
+        try:
+            self._save_options()
+        except Exception:
+            pass
+        try:
+            self._vt_was_maximized = bool(self.isMaximized())
+            if not self._vt_was_maximized:
+                self._vt_saved_geometry = self.saveGeometry()
+        except Exception:
+            pass
+        self.hide()
+
+    def showEvent(self, event: QShowEvent):
+        """Restore geometry/maximized state after being hidden."""
+        try:
+            if self._vt_saved_geometry is not None and not self._vt_was_maximized:
+                self.restoreGeometry(self._vt_saved_geometry)
+        except Exception:
+            pass
+        super().showEvent(event)
+        # Force relayout after show/hide/maximize. Some Qt backends keep the old viewport size
+        # until the next event loop tick, which can make the UI appear "stuck in a corner".
+        def _force_relayout():
+            try:
+                if self._scroll is not None and self._scroll.widget() is not None:
+                    self._scroll.widget().updateGeometry()
+                    self._scroll.viewport().updateGeometry()
+                if self.layout() is not None:
+                    self.layout().activate()
+                self.updateGeometry()
+                self.update()
+            except Exception:
+                pass
+
+        # Restoring maximized needs to happen after show() on some platforms.
+        if getattr(self, "_vt_was_maximized", False):
+            QTimer.singleShot(0, self.showMaximized)
+            QTimer.singleShot(0, _force_relayout)
+            QTimer.singleShot(50, _force_relayout)
+        else:
+            QTimer.singleShot(0, _force_relayout)
+
+    def resizeEvent(self, event: QResizeEvent):
+        """Keep scroll contents synced to viewport size (prevents 'UI stuck in corner')."""
+        try:
+            if getattr(self, "_scroll", None) is not None:
+                w = self._scroll.viewport().width()
+                if self._scroll.widget() is not None and w > 0:
+                    # Force the scroll content to track the viewport width so layouts recompute.
+                    self._scroll.widget().setMinimumWidth(w)
+                    self._scroll.widget().updateGeometry()
+        except Exception:
+            pass
+        super().resizeEvent(event)
 
     def _cancel_run(self):
         """Cancel button: stop the running pipeline."""
