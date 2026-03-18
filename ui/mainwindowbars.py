@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Union
 
 from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QLineEdit, QCompleter, QComboBox
-from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex
+from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
 from modules.translators import BaseTranslator
@@ -760,6 +760,11 @@ class TitleBar(Widget):
         self._omni_completer = QCompleter(self._omni_proxy, self.omniSearch)
         self._omni_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self._omni_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        try:
+            # Prefer contains-style matching in the popup list.
+            self._omni_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        except Exception:
+            pass
         self._omni_completer.activated[QModelIndex].connect(self._on_omni_search_index_activated)
         self.omniSearch.setCompleter(self._omni_completer)
         self._omni_actions_cache = None  # lazily built list of (label, QAction)
@@ -769,7 +774,15 @@ class TitleBar(Widget):
         self._centerLayout = QHBoxLayout(self._centerContainer)
         self._centerLayout.setContentsMargins(0, 0, 0, 0)
         self._centerLayout.setSpacing(10)
-        self._centerLayout.addWidget(self.omniSearch)
+        # Add a small dropdown button (QLineEdit has no built-in arrow).
+        self._omniDropBtn = QToolButton(self._centerContainer)
+        self._omniDropBtn.setObjectName("OmniSearchDropBtn")
+        self._omniDropBtn.setText("▾")
+        self._omniDropBtn.setToolTip(self.tr("Show search results"))
+        self._omniDropBtn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._omniDropBtn.clicked.connect(self._on_omni_drop_clicked)
+        self._centerLayout.addWidget(self.omniSearch, 0)
+        self._centerLayout.addWidget(self._omniDropBtn, 0)
         self._centerLayout.addWidget(self.titleLabel, 1)
         self._centerContainer.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
@@ -964,9 +977,32 @@ class TitleBar(Widget):
 
         # Filter proxy and show popup (command palette UX). This does not replace the typed text.
         try:
-            self._omni_proxy.setFilterFixedString(q_raw)
+            # Use a "contains" regex, not fixed-string equality, so typing finds items like "Dark Mode".
+            pat = QRegularExpression.escape(q_raw)
+            self._omni_proxy.setFilterRegularExpression(QRegularExpression(pat, QRegularExpression.PatternOption.CaseInsensitiveOption))
             if self._omni_model.rowCount() > 0:
-                self._omni_completer.complete()
+                self._omni_completer.complete(self.omniSearch.rect())
+        except Exception:
+            pass
+
+    def _on_omni_drop_clicked(self):
+        """Open the popup list on demand."""
+        try:
+            q_raw = (self.omniSearch.text() or "")
+            if q_raw.strip():
+                self._on_omni_search_text_edited(q_raw)
+            else:
+                # Show a short list of menu actions as a starting point.
+                self._omni_model.clear()
+                n = 0
+                for label, act in self._get_actions_cache():
+                    self._add_result_item(label, {"type": "action", "action": act})
+                    n += 1
+                    if n >= 30:
+                        break
+                self._omni_proxy.setFilterRegularExpression(QRegularExpression(""))
+            self.omniSearch.setFocus(Qt.FocusReason.OtherFocusReason)
+            self._omni_completer.complete(self.omniSearch.rect())
         except Exception:
             pass
 
