@@ -2,7 +2,28 @@ import os.path as osp
 from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QLineEdit, QCompleter, QComboBox, QSpinBox, QDoubleSpinBox
+from qtpy.QtWidgets import (
+    QMainWindow,
+    QHBoxLayout,
+    QVBoxLayout,
+    QFileDialog,
+    QLabel,
+    QSizePolicy,
+    QToolBar,
+    QMenu,
+    QSpacerItem,
+    QPushButton,
+    QCheckBox,
+    QToolButton,
+    QMessageBox,
+    QWidget,
+    QScrollArea,
+    QLineEdit,
+    QCompleter,
+    QComboBox,
+    QSpinBox,
+    QDoubleSpinBox,
+)
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
@@ -1017,6 +1038,61 @@ class TitleBar(Widget):
             except Exception:
                 pass
 
+        # 4) Other UI text (format panel, bottom bar toggles, etc.)
+        if n_added < max_items:
+            try:
+                mw = self.mainwindow
+                # Bottom bar: text/tooltip of main toggles and actions
+                bb = getattr(mw, "bottomBar", None)
+                if bb is not None:
+                    bottom_items = []
+                    for attr_name in ("texteditChecker", "paintChecker", "textblockChecker", "spellcheckChecker"):
+                        w = getattr(bb, attr_name, None)
+                        if w is None:
+                            continue
+                        txt = (getattr(w, "text", lambda: "")() or "").strip()
+                        tip = (getattr(w, "toolTip", lambda: "")() or "").strip()
+                        label = txt or tip
+                        if not label:
+                            continue
+                        bottom_items.append(label)
+                    for lbl in bottom_items:
+                        if q_low in lbl.lower():
+                            self._add_result_item(f"UI > Bottom bar > {lbl}", {"type": "ui_text", "target": "bottom"})
+                            n_added += 1
+                            if n_added >= max_items:
+                                break
+
+                # Right text/format panel: labels and buttons
+                tp = getattr(mw, "textPanel", None)
+                if tp is not None and n_added < max_items:
+                    from qtpy.QtWidgets import QLabel as _Lbl, QAbstractButton as _Btn
+
+                    for lbl in tp.findChildren(_Lbl):
+                        txt = (lbl.text() or "").strip()
+                        if not txt:
+                            continue
+                        if q_low in txt.lower():
+                            self._add_result_item(f"UI > Format/Text panel > {txt}", {"type": "ui_text", "target": "text_panel"})
+                            n_added += 1
+                            if n_added >= max_items:
+                                break
+                    # Also search button texts/tooltips for format panel
+                    if n_added < max_items:
+                        for btn in tp.findChildren(_Btn):
+                            txt = (btn.text() or "").strip()
+                            tip = (btn.toolTip() or "").strip()
+                            label = txt or tip
+                            if not label:
+                                continue
+                            if q_low in label.lower():
+                                self._add_result_item(f"UI > Format/Text panel > {label}", {"type": "ui_text", "target": "text_panel"})
+                                n_added += 1
+                                if n_added >= max_items:
+                                    break
+            except Exception:
+                pass
+
         # Filter proxy and show popup (command palette UX). This does not replace the typed text.
         try:
             # Use a "contains" regex, not fixed-string equality, so typing finds items like "Dark Mode".
@@ -1071,6 +1147,20 @@ class TitleBar(Widget):
                 bi = int(payload.get("block_idx", -1))
                 if bi >= 0:
                     self.mainwindow.jump_to_canvas_block(bi)
+            elif t == "ui_text":
+                target = payload.get("target") or ""
+                # For now, route all UI text hits to the appropriate panel.
+                if target == "text_panel":
+                    try:
+                        self.mainwindow.jump_to_text_panel()
+                    except Exception:
+                        pass
+                elif target == "bottom":
+                    try:
+                        # Ensure main view is visible so bottom bar is meaningful.
+                        self.mainwindow.jump_to_canvas_block(0)  # no-op if no blocks; just focuses main view
+                    except Exception:
+                        pass
         finally:
             try:
                 self.omniSearch.clear()

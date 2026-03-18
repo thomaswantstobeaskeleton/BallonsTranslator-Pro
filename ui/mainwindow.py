@@ -1295,6 +1295,30 @@ class MainWindow(mainwindow_cls):
         except Exception:
             return
 
+    def jump_to_text_panel(self) -> None:
+        """Switch right-side stack to the text/format panel and ensure main canvas view is visible."""
+        try:
+            if hasattr(self, "leftBar") and hasattr(self.leftBar, "imgTransChecker"):
+                if not self.leftBar.imgTransChecker.isChecked():
+                    self.leftBar.imgTransChecker.setChecked(True)
+                    try:
+                        self.setupImgTransUI()
+                    except Exception:
+                        pass
+            try:
+                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 0:
+                    self.centralStackWidget.setCurrentIndex(0)
+            except Exception:
+                pass
+            # Right panel: index 1 is the text/format panel in rightComicTransStackPanel
+            try:
+                if hasattr(self, "rightComicTransStackPanel"):
+                    self.rightComicTransStackPanel.setCurrentIndex(1)
+            except Exception:
+                pass
+        except Exception:
+            return
+
     def on_update_from_github(self):
         """Pull latest changes from GitHub (Help menu). Only updates tracked files; config and local files are preserved."""
         from .custom_widget import ProgressMessageBox
