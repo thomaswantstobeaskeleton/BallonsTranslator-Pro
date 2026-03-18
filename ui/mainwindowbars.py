@@ -4,7 +4,7 @@ from typing import List, Union
 
 from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QComboBox
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize
-from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent
+from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
 from modules.translators import BaseTranslator
 from modules.translators.base import lang_display_label
@@ -708,6 +708,15 @@ class TitleBar(Widget):
         runMenu.addMenu(presetMenu)
         runMenu.addSeparator()
         runMenu.addActions([runAction, runWoUpdateTextStyle, translatePageAction])
+        runMenu.addSeparator()
+        videoTranslatorAc = QAction(self.tr('Video translator...'), self)
+        videoTranslatorAc.setToolTip(self.tr('Translate hardcoded subtitles in video: detect, OCR, translate, inpaint per frame.'))
+        runMenu.addAction(videoTranslatorAc)
+        self.video_translator_trigger = videoTranslatorAc.triggered
+        videoSubtitleEditorAc = QAction(self.tr('Video Subtitle Editor...'), self)
+        videoSubtitleEditorAc.setToolTip(self.tr('Edit video captions: cut, edit text, frame-accurate timing, export SRT/ASS/VTT, render with burned-in subtitles.'))
+        runMenu.addAction(videoSubtitleEditorAc)
+        self.video_subtitle_editor_trigger = videoSubtitleEditorAc.triggered
         self.runToolBtn.setMenu(runMenu)
         self.runToolBtn.setPopupMode(QToolButton.InstantPopup)
         self.run_trigger = runAction.triggered
@@ -731,6 +740,26 @@ class TitleBar(Widget):
         self.titleLabel = QLabel('BallonsTranslatorPro')
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Omni search (menus + settings + canvas)
+        self.omniSearch = QComboBox(self)
+        self.omniSearch.setObjectName("OmniSearch")
+        self.omniSearch.setEditable(True)
+        self.omniSearch.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.omniSearch.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.omniSearch.setMinimumWidth(260)
+        self.omniSearch.setMaximumWidth(560)
+        try:
+            le = self.omniSearch.lineEdit()
+            if le is not None:
+                le.setPlaceholderText(self.tr("Search: menus, settings, canvas…"))
+                le.textEdited.connect(self._on_omni_search_text_edited)
+        except Exception:
+            pass
+        self._omni_model = QStandardItemModel(self.omniSearch)
+        self.omniSearch.setModel(self._omni_model)
+        self.omniSearch.activated.connect(self._on_omni_search_activated)
+        self._omni_actions_cache = None  # lazily built list of (label, QAction)
         
         hlayout = QHBoxLayout(self)
         hlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -741,6 +770,8 @@ class TitleBar(Widget):
         hlayout.addWidget(self.goToolBtn)
         hlayout.addWidget(self.runToolBtn)
         hlayout.addWidget(self.toolsToolBtn)
+        hlayout.addSpacing(8)
+        hlayout.addWidget(self.omniSearch)
         hlayout.addStretch()
         hlayout.addWidget(self.titleLabel)
         hlayout.addStretch()
@@ -765,6 +796,174 @@ class TitleBar(Widget):
 
         for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn):
             install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74, with_scale=True)
+
+    def _walk_menu_actions(self, menu: QMenu, prefix: str = ""):
+        """Yield (label, QAction) for all actions in menu (including submenus)."""
+        if menu is None:
+            return
+        for act in menu.actions() or []:
+            try:
+                if act is None:
+                    continue
+                if act.isSeparator():
+                    continue
+                text = (act.text() or "").replace("&", "").strip()
+                if not text:
+                    continue
+                sub = act.menu()
+                if sub is not None:
+                    sub_prefix = f"{prefix}{text} > "
+                    yield from self._walk_menu_actions(sub, prefix=sub_prefix)
+                    continue
+                label = f"Menu > {prefix}{text}" if prefix else f"Menu > {text}"
+                yield (label, act)
+            except Exception:
+                continue
+
+    def _get_actions_cache(self):
+        if self._omni_actions_cache is not None:
+            return self._omni_actions_cache
+        actions = []
+        try:
+            # Tool buttons hold menus (some are set later, but by the time user searches they should exist)
+            for btn, name in (
+                (getattr(self, "fileToolBtn", None), "File"),
+                (getattr(self, "editToolBtn", None), "Edit"),
+                (getattr(self, "viewToolBtn", None), "View"),
+                (getattr(self, "goToolBtn", None), "Go"),
+                (getattr(self, "runToolBtn", None), "Run"),
+                (getattr(self, "toolsToolBtn", None), "Tools"),
+            ):
+                if btn is None:
+                    continue
+                m = btn.menu()
+                if m is None:
+                    continue
+                actions.extend(list(self._walk_menu_actions(m, prefix=f"{name} > ")))
+        except Exception:
+            pass
+        self._omni_actions_cache = actions
+        return actions
+
+    def _add_result_item(self, label: str, payload: dict):
+        it = QStandardItem(label)
+        it.setEditable(False)
+        it.setData(payload, Qt.ItemDataRole.UserRole)
+        self._omni_model.appendRow(it)
+
+    def _on_omni_search_text_edited(self, text: str):
+        q = (text or "").strip()
+        self._omni_model.clear()
+        if not q:
+            return
+        q_low = q.lower()
+        n_added = 0
+        max_items = 40
+
+        # 1) Menu actions
+        for label, act in self._get_actions_cache():
+            if q_low in label.lower():
+                self._add_result_item(label, {"type": "action", "action": act})
+                n_added += 1
+                if n_added >= max_items:
+                    break
+
+        # 2) Settings (ConfigPanel sub-blocks)
+        if n_added < max_items:
+            try:
+                mw = self.mainwindow
+                cp = getattr(mw, "configPanel", None)
+                content = getattr(cp, "configContent", None)
+                blocks = getattr(content, "config_block_list", None) or []
+                for b in blocks:
+                    header = ""
+                    try:
+                        header = (getattr(b, "header", None) and getattr(b.header, "text", lambda: "")()) or ""
+                    except Exception:
+                        header = ""
+                    for sb in getattr(b, "subblock_list", []) or []:
+                        name = ""
+                        try:
+                            nl = getattr(sb, "name_label", None)
+                            name = (nl.text() if nl is not None else "") or ""
+                        except Exception:
+                            name = ""
+                        if not name:
+                            continue
+                        label = f"Settings > {header} > {name}" if header else f"Settings > {name}"
+                        if q_low in label.lower():
+                            self._add_result_item(label, {"type": "config", "idx0": sb.idx0, "idx1": sb.idx1})
+                            n_added += 1
+                            if n_added >= max_items:
+                                break
+                    if n_added >= max_items:
+                        break
+            except Exception:
+                pass
+
+        # 3) Canvas (current page blocks)
+        if n_added < max_items:
+            try:
+                mw = self.mainwindow
+                st = getattr(mw, "st_manager", None)
+                items = getattr(st, "textblk_item_list", None) or []
+                for it in items:
+                    blk = getattr(it, "blk", None)
+                    if blk is None:
+                        continue
+                    src = (blk.get_text() if hasattr(blk, "get_text") else "") or ""
+                    trans = (getattr(blk, "translation", None) or "") or ""
+                    hay = f"{src} {trans}".lower()
+                    if q_low in hay:
+                        short = (trans.strip() or src.strip() or "").replace("\n", " ")
+                        if len(short) > 80:
+                            short = short[:80] + "…"
+                        label = f"Canvas > Block {getattr(it, 'idx', '?')}: {short}"
+                        self._add_result_item(label, {"type": "canvas", "block_idx": int(getattr(it, "idx", -1))})
+                        n_added += 1
+                        if n_added >= max_items:
+                            break
+            except Exception:
+                pass
+
+        # Show popup when we have results
+        try:
+            if self._omni_model.rowCount() > 0:
+                self.omniSearch.showPopup()
+        except Exception:
+            pass
+
+    def _on_omni_search_activated(self, index: int):
+        try:
+            if index < 0:
+                return
+            item = self._omni_model.item(index, 0)
+            payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(payload, dict):
+                return
+            t = payload.get("type")
+            if t == "action":
+                act = payload.get("action")
+                if act is not None and hasattr(act, "trigger"):
+                    act.trigger()
+            elif t == "config":
+                idx0, idx1 = payload.get("idx0"), payload.get("idx1")
+                if idx0 is not None and idx1 is not None:
+                    self.mainwindow.jump_to_config_item(int(idx0), int(idx1))
+            elif t == "canvas":
+                bi = int(payload.get("block_idx", -1))
+                if bi >= 0:
+                    self.mainwindow.jump_to_canvas_block(bi)
+        finally:
+            # reset UI state
+            try:
+                self.omniSearch.setCurrentIndex(-1)
+                le = self.omniSearch.lineEdit()
+                if le is not None:
+                    le.clear()
+                    le.clearFocus()
+            except Exception:
+                pass
 
     def setLeftBar(self, leftBar):
         """Build File menu and connect to left bar (open/save/export/import). Call from mainwindow after both are created."""

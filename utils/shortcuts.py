@@ -16,6 +16,7 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("edit.redo", "Ctrl+Shift+Z", "Edit", "Redo"),
     ("edit.page_search", "Ctrl+F", "Edit", "Search (current page)"),
     ("edit.global_search", "Ctrl+G", "Edit", "Global Search"),
+    ("edit.omni_search", "Ctrl+P", "Edit", "Omni search (menus/settings/canvas)"),
     ("edit.merge_tool", "Ctrl+Shift+M", "Edit", "Region merge tool"),
     # View
     ("view.draw_board", "P", "View", "Drawing Board"),

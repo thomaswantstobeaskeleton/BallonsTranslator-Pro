@@ -205,7 +205,10 @@ class MainWindow(mainwindow_cls):
         self.setAcceptDrops(True)
 
         if open_dir != '' and osp.exists(open_dir):
-            self.OpenProj(open_dir)
+            if osp.isfile(open_dir) and open_dir.lower().endswith('.json'):
+                self.openJsonProj(open_dir)
+            else:
+                self.OpenProj(open_dir)
         elif pcfg.open_recent_on_startup:
             # Auto-open most recent project when user has this preference.
             if len(self.leftBar.recent_proj_list) > 0:
@@ -918,12 +921,11 @@ class MainWindow(mainwindow_cls):
         self._update_page_list_ignored_style()
 
     def _ensure_first_page_loaded_and_autolayout(self):
-        """After opening a project, ensure the first page is displayed and auto layout is applied once."""
+        """After opening a project, ensure the first page is displayed. Use saved layout (no re-run of auto layout)."""
         if not self.imgtrans_proj.current_img:
             return
         self.canvas.updateCanvas()
         self.st_manager.updateSceneTextitems()
-        self.st_manager.run_auto_layout_on_current_page_once()
 
     def pageLabelStateChanged(self):
         setup = self.leftBar.showPageListLabel.isChecked()
@@ -1096,6 +1098,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.run_preset_detect_ocr_trigger.connect(self.on_run_preset_detect_ocr)
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
         self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
+        self.titleBar.video_translator_trigger.connect(self.on_video_translator)
+        self.titleBar.video_subtitle_editor_trigger.connect(self.on_video_subtitle_editor)
         self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
         self.titleBar.theme_customizer_trigger.connect(self.open_theme_customizer)
         self.titleBar.context_menu_options_trigger.connect(self.shortcutContextMenuOptions)
@@ -1125,6 +1129,7 @@ class MainWindow(mainwindow_cls):
         sel_all_shortcut = _mk_shortcut("canvas.select_all", "Ctrl+A", self.shortcutSelectAll)
         sel_all_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         _mk_shortcut("canvas.escape", "Escape", self.shortcutEscape)
+        _mk_shortcut("edit.omni_search", "Ctrl+P", self.shortcutOmniSearch)
         # Widget-level Ctrl+A when canvas view has focus: select all text blocks on canvas
         self._canvas_select_all_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.SelectAll), self.canvas.gv)
         self._canvas_select_all_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
@@ -1158,6 +1163,29 @@ class MainWindow(mainwindow_cls):
             self.drawingPanel.setShortcutTip(tool_name, key or default_key)
             self._shortcuts_list.append((action_id, default_key, shortcut))
         self._draw_shortcut_tools = drawpanel_shortcuts
+
+    def shortcutOmniSearch(self):
+        """Focus the top-bar omni search box (menus/settings/canvas)."""
+        try:
+            box = getattr(self.titleBar, "omniSearch", None)
+            if box is None:
+                return
+            le = box.lineEdit() if hasattr(box, "lineEdit") else None
+            if le is not None:
+                le.setFocus(Qt.FocusReason.ShortcutFocusReason)
+                try:
+                    le.selectAll()
+                except Exception:
+                    pass
+            else:
+                box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+            # Show dropdown if there are results (or to indicate focus)
+            try:
+                box.showPopup()
+            except Exception:
+                pass
+        except Exception:
+            return
 
     def apply_shortcuts(self, shortcuts_dict=None):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
@@ -1212,6 +1240,68 @@ class MainWindow(mainwindow_cls):
             self.tr('About'),
             self.tr('BallonsTranslatorPro — community fork') + f' {VERSION}\n\n' + self.tr('Deep learning–assisted comic/manga translation.')
         )
+
+    # --- Omni search jump helpers (TitleBar search box) ---
+    def jump_to_config_item(self, idx0: int, idx1: int) -> None:
+        """Open Config UI (if needed) and focus the requested config sub-block."""
+        try:
+            if hasattr(self, "leftBar") and hasattr(self.leftBar, "configChecker"):
+                if not self.leftBar.configChecker.isChecked():
+                    self.leftBar.configChecker.setChecked(True)
+                    try:
+                        self.setupConfigUI()
+                    except Exception:
+                        pass
+            cp = getattr(self, "configPanel", None)
+            if cp is None:
+                return
+            try:
+                cp.configTable.setCurrentItem(idx0, idx1)
+            except Exception:
+                pass
+            try:
+                cp.onTableItemPressed(idx0, idx1)
+            except Exception:
+                # Fallback: emit via table signal path
+                try:
+                    cp.configTable.tableitem_pressed.emit(idx0, idx1)
+                except Exception:
+                    pass
+        except Exception:
+            return
+
+    def jump_to_canvas_block(self, block_idx: int) -> None:
+        """Ensure canvas/text UI is visible and select a text block by index."""
+        try:
+            if hasattr(self, "leftBar") and hasattr(self.leftBar, "imgTransChecker"):
+                if not self.leftBar.imgTransChecker.isChecked():
+                    self.leftBar.imgTransChecker.setChecked(True)
+                    try:
+                        self.setupImgTransUI()
+                    except Exception:
+                        pass
+            # Switch to main canvas view (index 0 = imgtrans)
+            try:
+                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 0:
+                    self.centralStackWidget.setCurrentIndex(0)
+            except Exception:
+                pass
+            if not getattr(self, "st_manager", None) or not getattr(self.st_manager, "textblk_item_list", None):
+                return
+            if block_idx < 0 or block_idx >= len(self.st_manager.textblk_item_list):
+                return
+            self.rightComicTransStackPanel.setCurrentIndex(1)
+            self.canvas.block_selection_signal = True
+            self.canvas.clearSelection()
+            blk_item = self.st_manager.textblk_item_list[block_idx]
+            blk_item.setSelected(True)
+            self.canvas.block_selection_signal = False
+            try:
+                self.st_manager.textEditList.set_selected_list([block_idx])
+            except Exception:
+                pass
+        except Exception:
+            return
 
     def on_update_from_github(self):
         """Pull latest changes from GitHub (Help menu). Only updates tracked files; config and local files are preserved."""
@@ -2002,6 +2092,24 @@ class MainWindow(mainwindow_cls):
             sa.setChecked(pcfg.module.stage_enabled(idx))
         pcfg.module.run_preset_name = 'Inpaint'
 
+    def on_video_translator(self):
+        """Open the Video translator dialog (Pipeline → Video translator...)."""
+        from .video_translator_dialog import VideoTranslatorDialog
+        # Keep a single instance so closing/hiding doesn't lose a running job's UI.
+        dlg = getattr(self, "_video_translator_dlg", None)
+        if dlg is None:
+            dlg = VideoTranslatorDialog(self)
+            self._video_translator_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def on_video_subtitle_editor(self):
+        """Open the Video Subtitle Editor (Pipeline → Video Subtitle Editor...)."""
+        from .video_subtitle_editor import VideoSubtitleEditorWindow
+        win = VideoSubtitleEditorWindow(self)
+        win.show()
+
     def on_batch_export(self):
         """Export all pages as images (and optionally PDF) to a chosen folder."""
         if self.imgtrans_proj.is_empty:
@@ -2759,6 +2867,10 @@ class MainWindow(mainwindow_cls):
             self.imgtrans_proj.set_current_img_byidx(page_index)
             self.canvas.updateCanvas()
             self.st_manager.updateSceneTextitems()
+
+        # Run auto layout (and balloon shape Auto) on all blocks so text boxes match bubble shape after Run.
+        if self.st_manager.auto_textlayout_flag:
+            self.st_manager.run_auto_layout_on_current_page_once()
 
         if not pcfg.module.enable_detect and pcfg.module.enable_translate:
             # Skip squeeze when auto layout ran; layout_textblk already set box size and squeeze would narrow/stretch boxes
