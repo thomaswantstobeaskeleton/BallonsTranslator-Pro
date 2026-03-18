@@ -764,6 +764,15 @@ class TitleBar(Widget):
         self.omniSearch.setCompleter(self._omni_completer)
         self._omni_actions_cache = None  # lazily built list of (label, QAction)
         
+        # Center container: keep omni search + title aligned to the canvas area (between left/right panes).
+        self._centerContainer = QWidget(self)
+        self._centerLayout = QHBoxLayout(self._centerContainer)
+        self._centerLayout.setContentsMargins(0, 0, 0, 0)
+        self._centerLayout.setSpacing(10)
+        self._centerLayout.addWidget(self.omniSearch)
+        self._centerLayout.addWidget(self.titleLabel, 1)
+        self._centerContainer.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
         hlayout = QHBoxLayout(self)
         hlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hlayout.addWidget(self.iconLabel)
@@ -774,9 +783,7 @@ class TitleBar(Widget):
         hlayout.addWidget(self.runToolBtn)
         hlayout.addWidget(self.toolsToolBtn)
         hlayout.addStretch()
-        hlayout.addWidget(self.omniSearch)
-        hlayout.addSpacing(10)
-        hlayout.addWidget(self.titleLabel)
+        hlayout.addWidget(self._centerContainer)
         hlayout.addStretch()
         hlayout.setContentsMargins(0, 0, 0, 0)
 
@@ -801,15 +808,26 @@ class TitleBar(Widget):
             install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74, with_scale=True)
 
     def resizeEvent(self, event) -> None:
-        """Scale omni-search width with window size (fullscreen-friendly)."""
+        """Scale center container to canvas width (fullscreen-friendly)."""
         try:
-            w = int(self.width() or 0)
-            # Target ~34% of titlebar width, clamped.
-            desired = int(max(280, min(900, w * 0.34)))
-            # Keep a bit smaller when the window isn't very wide.
-            if w < 1100:
-                desired = int(max(260, min(560, w * 0.32)))
-            self.omniSearch.setFixedWidth(desired)
+            # Prefer actual canvas width (splitter middle pane).
+            canvas_w = None
+            try:
+                mw = getattr(self, "mainwindow", None)
+                splitter = getattr(mw, "comicTransSplitter", None)
+                if splitter is not None and hasattr(splitter, "sizes"):
+                    sizes = splitter.sizes()
+                    if isinstance(sizes, (list, tuple)) and len(sizes) >= 2:
+                        canvas_w = int(sizes[1])
+            except Exception:
+                canvas_w = None
+            if canvas_w is None or canvas_w <= 0:
+                canvas_w = int(self.width() * 0.45)
+            center_w = int(max(420, min(1400, canvas_w)))
+            self._centerContainer.setFixedWidth(center_w)
+            # Search takes ~45% of canvas area, clamped.
+            search_w = int(max(280, min(950, center_w * 0.45)))
+            self.omniSearch.setFixedWidth(search_w)
         except Exception:
             pass
         return super().resizeEvent(event)
