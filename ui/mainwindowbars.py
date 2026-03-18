@@ -852,9 +852,32 @@ class TitleBar(Widget):
         self._omni_model.appendRow(it)
 
     def _on_omni_search_text_edited(self, text: str):
-        q = (text or "").strip()
+        # Important: do NOT let QComboBox auto-select index 0 when we repopulate results.
+        # If it does, it will overwrite the user's partially typed query with the first result.
+        q_raw = text or ""
+        q = q_raw.strip()
+        # Block signals while we rebuild the model so activated/currentIndexChanged can't fire.
+        try:
+            self.omniSearch.blockSignals(True)
+        except Exception:
+            pass
         self._omni_model.clear()
         if not q:
+            try:
+                # Keep the user's text as-is and ensure no selection.
+                self.omniSearch.setCurrentIndex(-1)
+            except Exception:
+                pass
+            try:
+                le = self.omniSearch.lineEdit()
+                if le is not None and le.text() != q_raw:
+                    le.setText(q_raw)
+            except Exception:
+                pass
+            try:
+                self.omniSearch.blockSignals(False)
+            except Exception:
+                pass
             return
         q_low = q.lower()
         n_added = 0
@@ -932,6 +955,22 @@ class TitleBar(Widget):
                 self.omniSearch.showPopup()
         except Exception:
             pass
+        finally:
+            # Restore the user's typed query and clear any implicit selection.
+            try:
+                self.omniSearch.setCurrentIndex(-1)
+            except Exception:
+                pass
+            try:
+                le = self.omniSearch.lineEdit()
+                if le is not None and le.text() != q_raw:
+                    le.setText(q_raw)
+            except Exception:
+                pass
+            try:
+                self.omniSearch.blockSignals(False)
+            except Exception:
+                pass
 
     def _on_omni_search_activated(self, index: int):
         try:
