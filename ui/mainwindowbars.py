@@ -745,8 +745,10 @@ class TitleBar(Widget):
         self.omniSearch = QLineEdit(self)
         self.omniSearch.setObjectName("OmniSearch")
         self.omniSearch.setPlaceholderText(self.tr("Search: menus, settings, canvas…"))
+        # Width is dynamically adjusted in resizeEvent so it stays compact windowed,
+        # but becomes wider in fullscreen/maximized.
         self.omniSearch.setMinimumWidth(260)
-        self.omniSearch.setMaximumWidth(560)
+        self.omniSearch.setMaximumWidth(1200)
         self.omniSearch.textEdited.connect(self._on_omni_search_text_edited)
 
         self._omni_model = QStandardItemModel(self.omniSearch)
@@ -771,9 +773,9 @@ class TitleBar(Widget):
         hlayout.addWidget(self.goToolBtn)
         hlayout.addWidget(self.runToolBtn)
         hlayout.addWidget(self.toolsToolBtn)
-        hlayout.addSpacing(8)
-        hlayout.addWidget(self.omniSearch)
         hlayout.addStretch()
+        hlayout.addWidget(self.omniSearch)
+        hlayout.addSpacing(10)
         hlayout.addWidget(self.titleLabel)
         hlayout.addStretch()
         hlayout.setContentsMargins(0, 0, 0, 0)
@@ -797,6 +799,20 @@ class TitleBar(Widget):
 
         for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn):
             install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74, with_scale=True)
+
+    def resizeEvent(self, event) -> None:
+        """Scale omni-search width with window size (fullscreen-friendly)."""
+        try:
+            w = int(self.width() or 0)
+            # Target ~34% of titlebar width, clamped.
+            desired = int(max(280, min(900, w * 0.34)))
+            # Keep a bit smaller when the window isn't very wide.
+            if w < 1100:
+                desired = int(max(260, min(560, w * 0.32)))
+            self.omniSearch.setFixedWidth(desired)
+        except Exception:
+            pass
+        return super().resizeEvent(event)
 
     def _walk_menu_actions(self, menu: QMenu, prefix: str = ""):
         """Yield (label, QAction) for all actions in menu (including submenus)."""
