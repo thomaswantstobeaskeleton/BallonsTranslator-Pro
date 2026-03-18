@@ -80,7 +80,8 @@ class StrokeImgItem(QGraphicsItem):
 
     def startNewPoint(self, pos: QPointF):
         self.is_painting = True
-        self.painter.begin(self._img)
+        if not self.painter.isActive():
+            self.painter.begin(self._img)
         self.painter.setPen(self.pen)
         self.painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         self.cur_point = pos

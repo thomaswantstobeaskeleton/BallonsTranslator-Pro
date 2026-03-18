@@ -415,6 +415,52 @@ class TextBlkItem(QGraphicsTextItem):
         radius_item = min(radius_item, r.width() / 2, r.height() / 2)
         return r, max(0.0, radius_item)
 
+    def _box_outline_path(self) -> QPainterPath:
+        """Return a QPainterPath for the text box outline so the drawn shape can match the balloon (ellipse, diamond, etc.)."""
+        path = QPainterPath()
+        outline_rect, radius = self._box_outline_rect_and_radius()
+        w = outline_rect.width()
+        h = outline_rect.height()
+        shape = (getattr(self.fontformat, "text_box_shape", None) or "").strip().lower()
+        if shape in ("elongated", "narrow", "ellipse"):
+            path.addEllipse(outline_rect)
+        elif shape == "round":
+            r = min(w, h) / 2
+            path.addRoundedRect(outline_rect, r, r)
+        elif shape == "diamond" or shape == "point":
+            cx, cy = outline_rect.center().x(), outline_rect.center().y()
+            top = QPointF(cx, outline_rect.top())
+            right = QPointF(outline_rect.right(), cy)
+            bottom = QPointF(cx, outline_rect.bottom())
+            left = QPointF(outline_rect.left(), cy)
+            path.moveTo(top)
+            path.lineTo(right)
+            path.lineTo(bottom)
+            path.lineTo(left)
+            path.closeSubpath()
+        elif shape == "pentagon":
+            cx, cy = outline_rect.center().x(), outline_rect.center().y()
+            top = QPointF(cx, outline_rect.top())
+            # Five points: top, top-right, bottom-right, bottom-left, top-left (inset)
+            path.moveTo(top)
+            path.lineTo(outline_rect.right() - w * 0.1, outline_rect.top() + h * 0.35)
+            path.lineTo(outline_rect.right() - w * 0.2, outline_rect.bottom())
+            path.lineTo(outline_rect.left() + w * 0.2, outline_rect.bottom())
+            path.lineTo(outline_rect.left() + w * 0.1, outline_rect.top() + h * 0.35)
+            path.closeSubpath()
+        elif shape == "square":
+            path.addRect(outline_rect)
+        elif shape == "bevel":
+            r = min(w, h) * 0.2
+            path.addRoundedRect(outline_rect, r, r)
+        else:
+            # rectangle, auto, or empty: use corner radius if set
+            if radius > 0:
+                path.addRoundedRect(outline_rect, radius, radius)
+            else:
+                path.addRect(outline_rect)
+        return path
+
     def setRect(self, rect: Union[List, QRectF], padding=True, repaint=True) -> None:
         
         if isinstance(rect, List):
@@ -638,23 +684,17 @@ class TextBlkItem(QGraphicsTextItem):
                 painter.restore()
             br = self.boundingRect()
             draw_rect = self.draw_rect and not self.under_ctrl
-            outline_rect, radius = self._box_outline_rect_and_radius()
+            box_path = self._box_outline_path()
             if self.isSelected() and not self.is_editting():
                 pen = QPen(TEXTRECT_SELECTED_COLOR, 3.5 / self.get_scale(), Qt.PenStyle.DashLine)
                 painter.setPen(pen)
                 painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-                if radius > 0:
-                    painter.drawRoundedRect(outline_rect, radius, radius)
-                else:
-                    painter.drawRect(outline_rect)
+                painter.drawPath(box_path)
             elif draw_rect:
                 pen = QPen(TEXTRECT_SHOW_COLOR, 3 / self.get_scale(), Qt.PenStyle.SolidLine)
                 painter.setPen(pen)
                 painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-                if radius > 0:
-                    painter.drawRoundedRect(outline_rect, radius, radius)
-                else:
-                    painter.drawRect(outline_rect)
+                painter.drawPath(box_path)
             return
         option.state = QStyle.State_None
         # Prevent base class from filling with palette Base (e.g. brown/beige on some themes)
@@ -676,13 +716,8 @@ class TextBlkItem(QGraphicsTextItem):
                     pass
                 else:
                     mask_region = self._text_mask_region() if not self.is_editting() else None
-                    outline_rect, box_radius = self._box_outline_rect_and_radius()
-                    clip_region = None
-                    if box_radius > 0:
-                        path = QPainterPath()
-                        path.addRoundedRect(outline_rect, box_radius, box_radius)
-                        poly = path.toFillPolygon()
-                        clip_region = QRegion(poly.toPolygon())
+                    box_path = self._box_outline_path()
+                    clip_region = QRegion(box_path.toFillPolygon().toPolygon())
                     if mask_region is not None:
                         clip_region = mask_region.intersected(clip_region) if clip_region is not None else mask_region
                     if clip_region is not None:
@@ -891,23 +926,17 @@ class TextBlkItem(QGraphicsTextItem):
             painter.restore()
 
         draw_rect = self.draw_rect and not self.under_ctrl
-        outline_rect, radius = self._box_outline_rect_and_radius()
+        box_path = self._box_outline_path()
         if self.isSelected() and not self.is_editting():
             pen = QPen(TEXTRECT_SELECTED_COLOR, 3.5 / self.get_scale(), Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-            if radius > 0:
-                painter.drawRoundedRect(outline_rect, radius, radius)
-            else:
-                painter.drawRect(outline_rect)
+            painter.drawPath(box_path)
         elif draw_rect:
             pen = QPen(TEXTRECT_SHOW_COLOR, 3 / self.get_scale(), Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-            if radius > 0:
-                painter.drawRoundedRect(outline_rect, radius, radius)
-            else:
-                painter.drawRect(outline_rect)
+            painter.drawPath(box_path)
         painter.restore()
 
 

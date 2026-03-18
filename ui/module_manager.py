@@ -624,7 +624,7 @@ class ImgtransThread(QThread):
             if lines and len(lines) > 0:
                 clipped_lines = []
                 for line in lines:
-                    if not line or len(line) < 3:
+                    if line is None or len(line) < 3:
                         continue
                     pts = []
                     for p in line:
@@ -920,7 +920,10 @@ class ImgtransThread(QThread):
                 break
             LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)} ({imgname}): starting')
             if cfg_module.enable_ocr and hasattr(self.ocr, 'restore_to_device'):
-                self.ocr.restore_to_device()
+                try:
+                    self.ocr.restore_to_device()
+                except Exception as e:
+                    LOGGER.warning("OCR restore_to_device failed (will try to continue): %s", e)
             img = self.imgtrans_proj.read_img(imgname)
             orig_h, orig_w = img.shape[:2]
             scale = 1.0

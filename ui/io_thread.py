@@ -61,7 +61,10 @@ class ImgSaveThread(ThreadBase):
                 save_params = {}
             if isinstance(img, QImage) or isinstance(img, QPixmap):
                 img = pixmap2ndarray(img, keep_alpha=keep_alpha)
-            imwrite(save_path, img, **save_params)
+            if img is None:
+                LOGGER.warning("Save image skipped: source image is invalid or empty (path: %s)", save_path)
+            else:
+                imwrite(save_path, img, **save_params)
             self.img_writed.emit(pagename_in_proj)
             self.im_save_list.pop(0)
 
@@ -299,7 +302,7 @@ class MergeThread(ThreadBase):
 
         if failed_images:
             print(f"\n{'='*60}")
-            print(f"Region merge failed ({len(failed_images)}):")
+            print(f"No regions merged on {len(failed_images)} page(s) (merge ran but no block pairs met distance/overlap criteria):")
             print(f"{'='*60}")
             for img_name, reason in failed_images:
                 print(f"  {img_name}: {reason}")

@@ -900,51 +900,35 @@ class ConfigPanel(Widget):
         )
         self.layout_constrain_to_bubble_checker.stateChanged.connect(self._on_layout_constrain_to_bubble_changed)
 
-        self.layout_judge_enabled_checker, _ = generalConfigPanel.addCheckBox(
-            self.tr('Layout judge (center + margin)'),
-            discription=self.tr('Nudge text boxes toward the center of the bubble and keep them away from bubble edges/corners. Uses margin and center strength below.')
+        self.layout_center_in_bubble_after_autolayout_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Center in bubble after auto layout'),
+            discription=self.tr('After auto layout, move each text box so its center aligns with the bubble center. Skips boxes that are close to another (combined/overlapping bubbles).')
         )
-        self.layout_judge_enabled_checker.stateChanged.connect(self._on_layout_judge_enabled_changed)
-        self.layout_judge_margin_spin = QDoubleSpinBox()
-        self.layout_judge_margin_spin.setRange(0.01, 0.25)
-        self.layout_judge_margin_spin.setSingleStep(0.01)
-        self.layout_judge_margin_spin.setDecimals(2)
-        self.layout_judge_margin_spin.setValue(float(getattr(pcfg.module, 'layout_judge_margin_ratio', 0.06)))
-        self.layout_judge_margin_spin.valueChanged.connect(self._on_layout_judge_margin_changed)
+        self.layout_center_in_bubble_after_autolayout_checker.stateChanged.connect(self._on_layout_center_in_bubble_after_autolayout_changed)
+        self.layout_center_in_bubble_min_gap_spin = QDoubleSpinBox()
+        self.layout_center_in_bubble_min_gap_spin.setRange(0.0, 200.0)
+        self.layout_center_in_bubble_min_gap_spin.setSingleStep(10.0)
+        self.layout_center_in_bubble_min_gap_spin.setDecimals(0)
+        self.layout_center_in_bubble_min_gap_spin.setValue(float(getattr(pcfg.module, 'layout_center_in_bubble_min_gap_px', 40.0)))
+        self.layout_center_in_bubble_min_gap_spin.valueChanged.connect(self._on_layout_center_in_bubble_min_gap_px_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
-            self.layout_judge_margin_spin,
-            self.tr('Judge margin (fraction of bubble)'),
-            discription=self.tr('Minimum distance from bubble edge (e.g. 0.06 = 6% of bubble size). Text box will not touch corners.')
+            self.layout_center_in_bubble_min_gap_spin,
+            self.tr('Center in bubble: skip if another box within (px)'),
+            discription=self.tr('Do not center a box if another text box is within this many pixels (avoids pulling multiple boxes to the same spot in combined bubbles).')
         ))
-        self.layout_judge_center_spin = QDoubleSpinBox()
-        self.layout_judge_center_spin.setRange(0.0, 1.0)
-        self.layout_judge_center_spin.setSingleStep(0.1)
-        self.layout_judge_center_spin.setDecimals(1)
-        self.layout_judge_center_spin.setValue(float(getattr(pcfg.module, 'layout_judge_center_strength', 0.7)))
-        self.layout_judge_center_spin.valueChanged.connect(self._on_layout_judge_center_changed)
-        generalConfigPanel.addSublock(ConfigSubBlock(
-            self.layout_judge_center_spin,
-            self.tr('Judge center strength'),
-            discription=self.tr('How much to nudge the text box toward the bubble center (0 = no nudge, 1 = full center).')
-        ))
-        self.layout_judge_clamp_overflow_checker, _ = generalConfigPanel.addCheckBox(
-            self.tr('Clamp overflow (keep box inside bubble)'),
-            discription=self.tr('When on, shrink or move the text box so it never extends outside the bubble; fixes text/lines going out.')
+
+        self.layout_check_overflow_after_layout_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Check overflow after layout'),
+            discription=self.tr('After layout, check if the text box or lines extend outside the bubble. Shrink box to bubble and/or scale font down to fix (no model).')
         )
-        self.layout_judge_clamp_overflow_checker.stateChanged.connect(self._on_layout_judge_clamp_overflow_changed)
-        self.layout_judge_use_model_checker, _ = generalConfigPanel.addCheckBox(
-            self.tr('Use model for judge'),
-            discription=self.tr('Run a small image model on the bubble crop to modulate nudge strength. Uses the model ID below.')
-        )
-        self.layout_judge_use_model_checker.stateChanged.connect(self._on_layout_judge_use_model_changed)
-        self.layout_judge_model_id_edit = QLineEdit()
-        self.layout_judge_model_id_edit.setPlaceholderText("e.g. google/mobilenet_v2_1.0_224")
-        self.layout_judge_model_id_edit.setText(getattr(pcfg.module, "layout_judge_model_id", "google/mobilenet_v2_1.0_224") or "")
-        self.layout_judge_model_id_edit.textChanged.connect(self._on_layout_judge_model_id_changed)
+        self.layout_check_overflow_after_layout_checker.stateChanged.connect(self._on_layout_check_overflow_after_layout_changed)
+        self.layout_box_size_check_model_id_edit = QLineEdit()
+        self.layout_box_size_check_model_id_edit.setPlaceholderText(self.tr('Use "builtin" for zero-shot CLIP, or a Hugging Face model ID. Leave empty to skip.'))
+        self.layout_box_size_check_model_id_edit.textChanged.connect(self._on_layout_box_size_check_model_id_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
-            self.layout_judge_model_id_edit,
-            self.tr('Judge model (default: small/fast)'),
-            discription=self.tr('Hugging Face image-classification model ID. Default: google/mobilenet_v2_1.0_224 (~3.5M params). Leave empty = geometric only.')
+            self.layout_box_size_check_model_id_edit,
+            self.tr('Box size check model ID (secondary)'),
+            discription=self.tr('Built-in: use "builtin" (zero-shot CLIP). Custom: image-classification model with labels too_large, too_small, ok. Empty = geometric checks only.')
         ))
 
         self.layout_optimal_breaks_checker, _ = generalConfigPanel.addCheckBox(
@@ -1051,12 +1035,35 @@ class ConfigPanel(Widget):
         )
         self.layout_balloon_shape_auto_method_combo.activated.connect(self._on_layout_balloon_shape_auto_method_changed)
         self.layout_balloon_shape_model_id_edit = QLineEdit()
-        self.layout_balloon_shape_model_id_edit.setPlaceholderText(self.tr('e.g. prithivMLmods/Geometric-Shapes-Classification'))
+        self.layout_balloon_shape_model_id_edit.setPlaceholderText(self.tr('Default: prithivMLmods/Geometric-Shapes-Classification (92.9M). Lighter: 0-ma/vit-geometric-shapes-tiny'))
         self.layout_balloon_shape_model_id_edit.textChanged.connect(self._on_layout_balloon_shape_model_id_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.layout_balloon_shape_model_id_edit,
             self.tr('Balloon shape model ID'),
-            discription=self.tr('Required when Auto shape method includes "Model". Hugging Face image-classification model (circle, diamond, square, etc.).')
+            discription=self.tr('Default is prithivMLmods/Geometric-Shapes-Classification (SigLIP2-base, 92.9M params, 8 shapes, ~99% accuracy). Use 0-ma/vit-geometric-shapes-tiny for a lighter 5.5M model. Wide bubbles are forced to oval when the model says square.')
+        ))
+        # Minimum line width so short text (e.g. "pluck!") is not broken into 2–3 char lines
+        self.layout_min_line_width_spin = QSpinBox()
+        self.layout_min_line_width_spin.setRange(40, 400)
+        self.layout_min_line_width_spin.setSingleStep(10)
+        self.layout_min_line_width_spin.setValue(int(float(getattr(pcfg.module, 'layout_min_line_width_px', 80.0))))
+        self.layout_min_line_width_spin.valueChanged.connect(self._on_layout_min_line_width_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_min_line_width_spin,
+            self.tr('Minimum line width (px)'),
+            discription=self.tr('Layout never uses a narrower line width; avoids short text (e.g. "pluck!") breaking into 2–3 character lines.')
+        ))
+        # Max line width fraction for free-standing text (no bubble): lower = more lines
+        self.layout_max_line_width_frac_no_bubble_spin = QDoubleSpinBox()
+        self.layout_max_line_width_frac_no_bubble_spin.setRange(0.50, 1.00)
+        self.layout_max_line_width_frac_no_bubble_spin.setSingleStep(0.02)
+        self.layout_max_line_width_frac_no_bubble_spin.setDecimals(2)
+        self.layout_max_line_width_frac_no_bubble_spin.setValue(float(getattr(pcfg.module, 'layout_max_line_width_frac_no_bubble', 0.78)))
+        self.layout_max_line_width_frac_no_bubble_spin.valueChanged.connect(self._on_layout_max_line_width_frac_no_bubble_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_max_line_width_frac_no_bubble_spin,
+            self.tr('Max line width fraction (no bubble)'),
+            discription=self.tr('For text boxes outside bubbles: max line width = box width × this. Lower values give more, shorter lines (e.g. 0.78).')
         ))
         # 2.3 Stub penalty for 1-word lines
         self.layout_stub_penalty_1word_spin = QDoubleSpinBox()
@@ -1400,29 +1407,20 @@ class ConfigPanel(Widget):
         pcfg.module.layout_constrain_to_bubble = self.layout_constrain_to_bubble_checker.isChecked()
         self.save_config.emit()
 
-    def _on_layout_judge_enabled_changed(self):
-        pcfg.module.layout_judge_enabled = self.layout_judge_enabled_checker.isChecked()
+    def _on_layout_center_in_bubble_after_autolayout_changed(self):
+        pcfg.module.layout_center_in_bubble_after_autolayout = self.layout_center_in_bubble_after_autolayout_checker.isChecked()
         self.save_config.emit()
 
-    def _on_layout_judge_margin_changed(self, value: float):
-        pcfg.module.layout_judge_margin_ratio = value
+    def _on_layout_center_in_bubble_min_gap_px_changed(self, value: float):
+        pcfg.module.layout_center_in_bubble_min_gap_px = float(value)
         self.save_config.emit()
 
-    def _on_layout_judge_center_changed(self, value: float):
-        pcfg.module.layout_judge_center_strength = value
+    def _on_layout_check_overflow_after_layout_changed(self):
+        pcfg.module.layout_check_overflow_after_layout = self.layout_check_overflow_after_layout_checker.isChecked()
         self.save_config.emit()
 
-    def _on_layout_judge_clamp_overflow_changed(self):
-        pcfg.module.layout_judge_clamp_overflow = self.layout_judge_clamp_overflow_checker.isChecked()
-        self.save_config.emit()
-
-    def _on_layout_judge_use_model_changed(self):
-        pcfg.module.layout_judge_use_model = self.layout_judge_use_model_checker.isChecked()
-        self.save_config.emit()
-
-    def _on_layout_judge_model_id_changed(self, value: str):
-        pcfg.module.layout_judge_model_id = (value or "").strip()
-        self.save_config.emit()
+    def _on_layout_box_size_check_model_id_changed(self, text: str):
+        pcfg.module.layout_box_size_check_model_id = (text or "").strip()
 
     def _on_layout_optimal_breaks_changed(self):
         pcfg.module.layout_optimal_breaks = self.layout_optimal_breaks_checker.isChecked()
@@ -1465,6 +1463,12 @@ class ConfigPanel(Widget):
 
     def _on_layout_balloon_shape_model_id_changed(self, text: str):
         pcfg.module.layout_balloon_shape_model_id = (text or "").strip()
+
+    def _on_layout_min_line_width_changed(self, value: int):
+        pcfg.module.layout_min_line_width_px = float(value)
+
+    def _on_layout_max_line_width_frac_no_bubble_changed(self, value: float):
+        pcfg.module.layout_max_line_width_frac_no_bubble = float(value)
 
     def _on_layout_stub_penalty_1word_changed(self, value: float):
         pcfg.module.layout_stub_penalty_1word = float(value)
@@ -1623,18 +1627,18 @@ class ConfigPanel(Widget):
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
         if hasattr(self, 'layout_constrain_to_bubble_checker'):
             self.layout_constrain_to_bubble_checker.setChecked(getattr(pcfg.module, 'layout_constrain_to_bubble', True))
-        if hasattr(self, 'layout_judge_enabled_checker'):
-            self.layout_judge_enabled_checker.setChecked(getattr(pcfg.module, 'layout_judge_enabled', True))
-        if hasattr(self, 'layout_judge_margin_spin'):
-            self.layout_judge_margin_spin.setValue(float(getattr(pcfg.module, 'layout_judge_margin_ratio', 0.06)))
-        if hasattr(self, 'layout_judge_center_spin'):
-            self.layout_judge_center_spin.setValue(float(getattr(pcfg.module, 'layout_judge_center_strength', 0.7)))
-        if hasattr(self, 'layout_judge_clamp_overflow_checker'):
-            self.layout_judge_clamp_overflow_checker.setChecked(getattr(pcfg.module, 'layout_judge_clamp_overflow', True))
-        if hasattr(self, 'layout_judge_use_model_checker'):
-            self.layout_judge_use_model_checker.setChecked(getattr(pcfg.module, 'layout_judge_use_model', False))
-        if hasattr(self, 'layout_judge_model_id_edit'):
-            self.layout_judge_model_id_edit.setText(getattr(pcfg.module, 'layout_judge_model_id', 'google/mobilenet_v2_1.0_224') or '')
+        if hasattr(self, 'layout_center_in_bubble_after_autolayout_checker'):
+            self.layout_center_in_bubble_after_autolayout_checker.setChecked(getattr(pcfg.module, 'layout_center_in_bubble_after_autolayout', True))
+        if hasattr(self, 'layout_center_in_bubble_min_gap_spin'):
+            self.layout_center_in_bubble_min_gap_spin.blockSignals(True)
+            self.layout_center_in_bubble_min_gap_spin.setValue(float(getattr(pcfg.module, 'layout_center_in_bubble_min_gap_px', 40.0)))
+            self.layout_center_in_bubble_min_gap_spin.blockSignals(False)
+        if hasattr(self, 'layout_check_overflow_after_layout_checker'):
+            self.layout_check_overflow_after_layout_checker.setChecked(getattr(pcfg.module, 'layout_check_overflow_after_layout', True))
+        if hasattr(self, 'layout_box_size_check_model_id_edit'):
+            self.layout_box_size_check_model_id_edit.blockSignals(True)
+            self.layout_box_size_check_model_id_edit.setText(getattr(pcfg.module, 'layout_box_size_check_model_id', '') or '')
+            self.layout_box_size_check_model_id_edit.blockSignals(False)
         if hasattr(self, 'layout_optimal_breaks_checker'):
             self.layout_optimal_breaks_checker.setChecked(getattr(pcfg.module, 'layout_optimal_breaks', True))
         if hasattr(self, 'layout_hyphenation_checker'):
@@ -1668,8 +1672,8 @@ class ConfigPanel(Widget):
             self.layout_balloon_shape_combo.setCurrentIndex(idx)
             self.layout_balloon_shape_combo.blockSignals(False)
         if hasattr(self, 'layout_balloon_shape_auto_method_combo'):
-            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'contour_ratio') or 'contour_ratio').lower()
-            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 5)
+            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'model_contour') or 'model_contour').lower()
+            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 3)
             self.layout_balloon_shape_auto_method_combo.blockSignals(True)
             self.layout_balloon_shape_auto_method_combo.setCurrentIndex(idx)
             self.layout_balloon_shape_auto_method_combo.blockSignals(False)
@@ -1677,6 +1681,14 @@ class ConfigPanel(Widget):
             self.layout_balloon_shape_model_id_edit.blockSignals(True)
             self.layout_balloon_shape_model_id_edit.setText(getattr(pcfg.module, 'layout_balloon_shape_model_id', '') or '')
             self.layout_balloon_shape_model_id_edit.blockSignals(False)
+        if hasattr(self, 'layout_min_line_width_spin'):
+            self.layout_min_line_width_spin.blockSignals(True)
+            self.layout_min_line_width_spin.setValue(int(float(getattr(pcfg.module, 'layout_min_line_width_px', 80.0))))
+            self.layout_min_line_width_spin.blockSignals(False)
+        if hasattr(self, 'layout_max_line_width_frac_no_bubble_spin'):
+            self.layout_max_line_width_frac_no_bubble_spin.blockSignals(True)
+            self.layout_max_line_width_frac_no_bubble_spin.setValue(float(getattr(pcfg.module, 'layout_max_line_width_frac_no_bubble', 0.78)))
+            self.layout_max_line_width_frac_no_bubble_spin.blockSignals(False)
         if hasattr(self, 'layout_stub_penalty_1word_spin'):
             self.layout_stub_penalty_1word_spin.blockSignals(True)
             self.layout_stub_penalty_1word_spin.setValue(float(getattr(pcfg.module, 'layout_stub_penalty_1word', 2000.0)))

@@ -1,5 +1,5 @@
 
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 import numpy as np
 import copy
 
@@ -19,12 +19,12 @@ from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItem
 from .text_panel import FontFormatPanel
 from utils.config import pcfg
 from utils import shared
-from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask, classify_bubble_shape_from_mask
+from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask, classify_bubble_shape_from_mask, mask_centroid_in_crop
 from utils.bubble_shape_model import get_bubble_shape_from_model as _bubble_shape_from_model_impl
+from utils.box_size_check_model import check_box_size_from_model
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
 from utils.line_breaking import split_long_token_with_hyphenation
-from utils.layout_judge import judge_textbox_in_bubble, judge_with_model
 from utils.logger import logger as LOGGER
 from modules.textdetector.outside_text_processor import OSB_LABELS
 
@@ -33,6 +33,8 @@ from modules.textdetector.outside_text_processor import OSB_LABELS
 LAYOUT_FIT_RATIO = 0.50  # fit text to this fraction of region (use more of bubble width/height)
 LAYOUT_FIT_RATIO_MIN = 0.15  # minimum scale when fitting (allow smaller text when bubble is crowded)
 LAYOUT_MIN_FONT_PT = 10.0  # fallback minimum font size; config layout_font_size_min/max override (2.1).
+LAYOUT_MIN_BOX_W = 28  # minimum text box width (px) so at least one character is visible
+LAYOUT_MIN_BOX_H = 20  # minimum text box height (px)
 LAYOUT_HEIGHT_PADDING = 1.22  # multiplier for block height (bottom margin; prevent last-line/descender cropping)
 LAYOUT_WIDTH_STROKE_FACTOR = 1.24  # width = max line width * this (stroke/outline clearance; avoid horizontal crop e.g. "loo")
 LAYOUT_SCALE_UP_MAX = 1  # cap scale-up when bubble is large and text is short
@@ -43,14 +45,27 @@ LAYOUT_TEXT_SCALE_LONG = 0.58  # stronger scale-down for long paragraphs
 LAYOUT_TEXT_SCALE_LONG_MIN_LINES = 3  # use LAYOUT_TEXT_SCALE_LONG when at least this many lines
 LAYOUT_TEXT_SCALE_LONG_MIN_CHARS = 80  # or when at least this many characters
 LAYOUT_MAX_LINE_WIDTH_FRAC = 0.92  # max line width = bubble width * this (higher = fuller lines, text fills box more)
+# Extra crop padding (px) when extracting bubble region for balloon-shape classification so the mask sees the full bubble.
+LAYOUT_BALLOON_SHAPE_CROP_PAD = 20
+# Shapes that are resolved from "auto" (used to skip re-resolving when already set by a prior shape pass).
+CONCRETE_BALLOON_SHAPES = frozenset(("round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point"))
 
 
 def _aspect_ratio_shape(rw: int, rh: int) -> str:
-    """Aspect-ratio heuristic: no mask/model."""
+    """Aspect-ratio heuristic when no mask/contour: square, round, narrow, elongated."""
     if rw <= 0 or rh <= 0:
         return "round"
     ar = min(rw, rh) / max(rw, rh)
-    return "round" if ar >= 0.5 else ("narrow" if rh > rw * 1.4 else "elongated")
+    # Prefer elongated (oval) for wide bubbles; only call square when nearly square
+    if rw > rh * 1.2:
+        return "elongated"
+    if rh > rw * 1.5:
+        return "narrow"
+    if ar >= 0.9:
+        return "square"
+    if ar >= 0.55:
+        return "round"
+    return "round"
 
 
 def _resolve_auto_balloon_shape(
@@ -572,11 +587,11 @@ class SceneTextManager(QObject):
         self.canvas.paste_textblks.connect(self.onPasteBlkItems)
         self.canvas.format_textblks.connect(self.onFormatTextblks)
         self.canvas.layout_textblks.connect(self.onAutoLayoutTextblks)
-        self.canvas.layout_judge_textblks.connect(self.onJudgeTextblks)
         self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
         self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
         self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
         self.canvas.resize_to_fit_content_signal.connect(self.onResizeToFitContent)
+        self.canvas.center_in_bubble_signal.connect(self.onCenterInBubble)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -687,7 +702,8 @@ class SceneTextManager(QObject):
         self.hovering_transwidget = None
         self.txtblkShapeControl.setBlkItem(None)
         self.clearSceneTextitems()
-        # Apply auto layout when loading any page so layout persists after reopen (config-driven)
+        # Flag used when adding new blocks from Run (to run layout there). Do not re-run layout
+        # when loading a page from project, so saved text box size/format is preserved on reopen.
         self.auto_textlayout_flag = (
             pcfg.let_autolayout_flag
             and (pcfg.let_fntsize_flag == 0)
@@ -697,11 +713,6 @@ class SceneTextManager(QObject):
             if textblock.font_family is None or textblock.font_family.strip() == '':
                 textblock.font_family = self.formatpanel.familybox.currentText()
             blk_item = self.addTextBlock(textblock)
-        if self.auto_textlayout_flag:
-            self.updateTextBlkList()
-            # Auto layout on page (re)load changes text geometry; mark project as dirty
-            # so page switches / project close will persist the improved layout.
-            self.canvas.setProjSaveState(True)
 
     def addTextBlock(self, blk: Union[TextBlock, TextBlkItem] = None) -> TextBlkItem:
         if isinstance(blk, TextBlkItem):
@@ -716,20 +727,8 @@ class SceneTextManager(QObject):
             gb_radius = float(getattr(pcfg.global_fontformat, "text_box_corner_radius", 0.0) or 0.0)
             if gb_radius > 0 and getattr(blk.fontformat, "text_box_corner_radius", 0.0) == 0.0:
                 blk.fontformat.text_box_corner_radius = gb_radius
-            translation = ''
-            if self.auto_textlayout_flag and not blk.vertical:
-                translation = blk.translation
-                blk.translation = ''
+            # Load block as-is (saved layout). Auto layout is only run explicitly after Run or via menu.
             blk_item = TextBlkItem(blk, len(self.textblk_item_list), show_rect=self.canvas.textblock_mode)
-            if translation:
-                blk.translation = translation
-                # First pass: initial auto layout (stub/short-line penalties apply)
-                rst = self.layout_textblk(blk_item, text=translation)
-                if rst is None:
-                    blk_item.setPlainText(_merge_stub_lines_in_text(translation))
-                else:
-                    # Second pass: re-layout using updated geometry; same scoring so penalties apply again
-                    self.layout_textblk(blk_item)
         self.addTextBlkItem(blk_item)
 
         pair_widget = TransPairWidget(blk, len(self.pairwidget_list), pcfg.fold_textarea)
@@ -1052,6 +1051,60 @@ class SceneTextManager(QObject):
             fmt = self.formatpanel.global_format
         self.apply_fontformat(fmt)
 
+    def _resolve_balloon_shape_for_block(self, blkitem: TextBlkItem) -> None:
+        """Resolve and set balloon shape (Auto → round/diamond/etc.) for one block only when it has a detected bubble.
+        Skip for free-standing text (no mask) so we don't run contour detection or move boxes."""
+        if getattr(blkitem.fontformat, "vertical", False):
+            return
+        img = self.imgtrans_proj.img_array
+        if img is None:
+            return
+        im_h, im_w = img.shape[:2]
+        br = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
+        if not isinstance(br, list):
+            br = [br.x(), br.y(), br.width(), br.height()]
+        if br[2] <= 0 or br[3] <= 0:
+            return
+        # Only resolve shape when block has a detected bubble (mask); free-standing text stays "auto"
+        page_name = getattr(self.imgtrans_proj, "current_img", None)
+        if page_name:
+            try:
+                mask_array = self.imgtrans_proj.load_mask_by_imgname(page_name)
+                if mask_array is None or mask_array.size == 0 or mask_array.shape[:2] != (im_h, im_w):
+                    blkitem.fontformat.text_box_shape = "auto"
+                    return
+                mask, _ = get_block_mask(br, mask_array, blkitem.rotation())
+                if mask is None or mask.size == 0:
+                    blkitem.fontformat.text_box_shape = "auto"
+                    return
+            except Exception:
+                blkitem.fontformat.text_box_shape = "auto"
+                return
+        else:
+            blkitem.fontformat.text_box_shape = "auto"
+            return
+        try:
+            enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
+            mask, _area, mask_xyxy, region_rect = extract_ballon_region(
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+            )
+        except Exception:
+            blkitem.fontformat.text_box_shape = "auto"
+            return
+        shape_cfg = getattr(pcfg.module, "layout_balloon_shape", "auto") or "auto"
+        if shape_cfg != "auto":
+            blkitem.fontformat.text_box_shape = shape_cfg
+            return
+        if region_rect is None or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
+            blkitem.fontformat.text_box_shape = "auto"
+            return
+        rw, rh = region_rect[2], region_rect[3]
+        balloon_shape = _resolve_auto_balloon_shape(
+            getattr(pcfg.module, "layout_balloon_shape_auto_method", "contour_ratio"),
+            mask, mask_xyxy, img, rw, rh,
+        )
+        blkitem.fontformat.text_box_shape = balloon_shape or "auto"
+
     def run_auto_layout_on_current_page_once(self):
         """Run auto layout on all blocks of the current page (e.g. after opening project so first page is formatted)."""
         from utils.config import pcfg
@@ -1063,6 +1116,9 @@ class SceneTextManager(QObject):
         try:
             pcfg.let_autolayout_flag = True
             self.auto_textlayout_flag = True
+            # Resolve balloon shape first so layout can use correct shape for line breaking and box outline.
+            for blkitem in all_blks:
+                self._resolve_balloon_shape_for_block(blkitem)
             for blkitem in all_blks:
                 self.layout_textblk(blkitem)
                 self.layout_textblk(blkitem)
@@ -1071,6 +1127,16 @@ class SceneTextManager(QObject):
                     merged = _merge_stub_lines_in_text(blkitem.toPlainText())
                     blkitem.setPlainText(merged)
                     self.pairwidget_list[blkitem.idx].e_trans.setPlainText(merged)
+            # Optionally center each box in its bubble, skipping boxes that are close to another (combined bubbles).
+            if getattr(pcfg.module, "layout_center_in_bubble_after_autolayout", True):
+                img = self.imgtrans_proj.img_array
+                if img is not None:
+                    im_h, im_w = img.shape[:2]
+                    gap = float(getattr(pcfg.module, "layout_center_in_bubble_min_gap_px", 40) or 40)
+                    for blkitem in all_blks:
+                        if self._is_blk_close_to_others(blkitem, all_blks, gap):
+                            continue
+                        self._center_blkitem_in_bubble(blkitem, img, im_w, im_h)
             self.canvas.setProjSaveState(True)
         finally:
             pcfg.let_autolayout_flag = old_autolayout
@@ -1085,61 +1151,22 @@ class SceneTextManager(QObject):
                 old_html_lst.append(blkitem.toHtml())
                 old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
                 trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+                # Resolve balloon shape before layout so lines and box match the bubble.
+                self._resolve_balloon_shape_for_block(blkitem)
                 # Run auto layout twice: second pass uses the new box geometry to refine line breaks.
                 self.layout_textblk(blkitem)
                 self.layout_textblk(blkitem)
-
+            # Optionally center each box in its bubble, skipping boxes close to another (combined bubbles).
+            if getattr(pcfg.module, "layout_center_in_bubble_after_autolayout", True):
+                img = self.imgtrans_proj.img_array
+                if img is not None:
+                    im_h, im_w = img.shape[:2]
+                    gap = float(getattr(pcfg.module, "layout_center_in_bubble_min_gap_px", 40) or 40)
+                    for blkitem in selected_blks:
+                        if self._is_blk_close_to_others(blkitem, selected_blks, gap):
+                            continue
+                        self._center_blkitem_in_bubble(blkitem, img, im_w, im_h)
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
-
-    def onJudgeTextblks(self):
-        """Move selected text box(es) toward the center of each bubble (position only, no size or text change)."""
-        selected_blks = self.canvas.selected_text_items()
-        selected_blks = [b for b in selected_blks if not getattr(b.fontformat, "vertical", False)]
-        if not selected_blks:
-            return
-        img = self.imgtrans_proj.img_array
-        if img is None:
-            return
-        im_h, im_w = img.shape[:2]
-        margin_r = float(getattr(pcfg.module, "layout_judge_margin_ratio", 0.06) or 0.06)
-        center_str = float(getattr(pcfg.module, "layout_judge_center_strength", 0.7) or 0.7)
-        old_rect_lst = []
-        old_html_lst = []
-        trans_widget_lst = []
-        for blkitem in selected_blks:
-            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
-            old_html_lst.append(blkitem.toHtml())
-            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
-            bounding_rect = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
-            br = [bounding_rect.x(), bounding_rect.y(), bounding_rect.width(), bounding_rect.height()]
-            if br[2] <= 0 or br[3] <= 0:
-                continue
-            enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
-            try:
-                mask, _ballon_area, mask_xyxy, region_rect = extract_ballon_region(
-                    img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True
-                )
-            except Exception:
-                continue
-            if region_rect is None or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
-                continue
-            bubble_x = mask_xyxy[0] + region_rect[0]
-            bubble_y = mask_xyxy[1] + region_rect[1]
-            bubble_w = region_rect[2]
-            bubble_h = region_rect[3]
-            abr = blkitem.absBoundingRect(qrect=True)
-            bx, by, bw, bh = abr.x(), abr.y(), abr.width(), abr.height()
-            if bw <= 0 or bh <= 0:
-                continue
-            bubble_xyxy = (bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h)
-            new_x, new_y, _, _ = judge_textbox_in_bubble(
-                [bx, by, bw, bh], bubble_xyxy,
-                margin_ratio=margin_r, center_strength=center_str,
-                clamp_overflow=False,
-            )
-            if abs(new_x - bx) > 0.5 or abs(new_y - by) > 0.5:
-                blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
-        self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
 
     def onAutoFitFontToBox(self):
         """Run layout (stub-aware line breaks) then scale font so text fits the selected box(es). Avoids Qt reflow introducing single-word lines."""
@@ -1169,6 +1196,7 @@ class SceneTextManager(QObject):
             return
         old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
         for blkitem in selected_blks:
+            blkitem.fontformat.text_box_shape = shape
             old_html_lst.append(blkitem.toHtml())
             old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
             trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
@@ -1197,7 +1225,7 @@ class SceneTextManager(QObject):
             pcfg.module.layout_font_binary_search = old_binary
 
     def onResizeToFitContent(self):
-        """Resize selected text box(es) so the full text is visible (e.g. when box is too small and clips content)."""
+        """Resize selected text box(es) so the full text is visible, respecting current line breaks (not one long line)."""
         selected_blks = self.canvas.selected_text_items()
         if not selected_blks:
             return
@@ -1210,18 +1238,349 @@ class SceneTextManager(QObject):
                 new_w = max(min_w, blkitem.oldRect.width())
                 new_h = max(min_h, blkitem.oldRect.height())
             else:
-                ff = blkitem.fontformat
-                font = QFont(ff.font_family or "Arial", max(1, int(round(ff.font_size))))
-                if getattr(ff, "bold", False):
-                    font.setBold(True)
-                if getattr(ff, "italic", False):
-                    font.setItalic(True)
-                fm = QFontMetricsF(font)
-                br = fm.boundingRect(text)
-                new_w = max(min_w, br.width() + 2 * pad)
-                new_h = max(min_h, br.height() + 2 * pad)
+                # Use the document layout's block rects so we respect line breaks and wrapping (avoid "straight line").
+                doc = blkitem.document()
+                layout = doc.documentLayout() if doc else None
+                if layout is not None:
+                    content_w, content_h = 0.0, 0.0
+                    block = doc.firstBlock()
+                    while block.isValid():
+                        r = layout.blockBoundingRect(block)
+                        content_w = max(content_w, r.width())
+                        content_h += r.height()
+                        block = block.next()
+                    if content_w > 0 and content_h > 0:
+                        new_w = max(min_w, content_w + 2 * pad)
+                        new_h = max(min_h, content_h + 2 * pad)
+                    else:
+                        new_w = max(min_w, blkitem.oldRect.width())
+                        new_h = max(min_h, blkitem.oldRect.height())
+                else:
+                    ff = blkitem.fontformat
+                    font = QFont(ff.font_family or "Arial", max(1, int(round(ff.font_size))))
+                    if getattr(ff, "bold", False):
+                        font.setBold(True)
+                    if getattr(ff, "italic", False):
+                        font.setItalic(True)
+                    fm = QFontMetricsF(font)
+                    br = fm.boundingRect(text)
+                    new_w = max(min_w, br.width() + 2 * pad)
+                    new_h = max(min_h, br.height() + 2 * pad)
             blkitem.set_size(new_w, new_h, set_layout_maxsize=True, set_blk_size=True, preserve_topleft=False)
             self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+
+    def _center_blkitem_in_bubble(self, blkitem: TextBlkItem, img: np.ndarray, im_w: int, im_h: int) -> bool:
+        """Move this text box so its center aligns with the bubble centroid. No undo. Returns True if position changed.
+        Skips blocks that have no detected bubble (project mask) so free-standing text is not moved."""
+        abr = blkitem.absBoundingRect(qrect=True)
+        bx, by, bw, bh = abr.x(), abr.y(), abr.width(), abr.height()
+        if bw <= 0 or bh <= 0:
+            return False
+        # Only center when block has a detected bubble (project mask); skip free-standing text
+        page_name = getattr(self.imgtrans_proj, "current_img", None)
+        if page_name:
+            try:
+                mask_array = self.imgtrans_proj.load_mask_by_imgname(page_name)
+                if mask_array is not None and mask_array.size > 0 and mask_array.shape[:2] == img.shape[:2]:
+                    br_list = [abr.x(), abr.y(), abr.width(), abr.height()]
+                    block_mask, _ = get_block_mask(br_list, mask_array, blkitem.rotation())
+                    if block_mask is None or block_mask.size == 0:
+                        return False
+            except Exception:
+                return False
+        else:
+            return False
+        cx, cy = bx + bw / 2, by + bh / 2
+        if bw > 0.5 * im_w or bh > 0.5 * im_h:
+            search_w = min(bw, max(80, int(0.25 * im_w)))
+            search_h = min(bh, max(60, int(0.25 * im_h)))
+            br_x = max(0, min(int(cx - search_w / 2), im_w - search_w))
+            br_y = max(0, min(int(cy - search_h / 2), im_h - search_h))
+            br = [br_x, br_y, search_w, search_h]
+        else:
+            br = [int(abr.x()), int(abr.y()), int(abr.width()), int(abr.height())]
+        try:
+            enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
+            mask, _area, mask_xyxy, region_rect = extract_ballon_region(
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+            )
+        except Exception:
+            return False
+        if region_rect is None or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
+            return False
+        cx_crop, cy_crop = mask_centroid_in_crop(mask)
+        im_cx = mask_xyxy[0] + cx_crop
+        im_cy = mask_xyxy[1] + cy_crop
+        new_x = im_cx - bw / 2
+        new_y = im_cy - bh / 2
+        bubble_x = mask_xyxy[0] + region_rect[0]
+        bubble_y = mask_xyxy[1] + region_rect[1]
+        bubble_w, bubble_h = region_rect[2], region_rect[3]
+        min_x, min_y = bubble_x, bubble_y
+        max_x = bubble_x + bubble_w - bw
+        max_y = bubble_y + bubble_h - bh
+        if max_x >= min_x:
+            new_x = min(max(new_x, min_x), max_x)
+        if max_y >= min_y:
+            new_y = min(max(new_y, min_y), max_y)
+        new_x = max(0, min(new_x, im_w - bw))
+        new_y = max(0, min(new_y, im_h - bh))
+        if abs(new_x - bx) < 0.5 and abs(new_y - by) < 0.5:
+            return False
+        blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
+        if blkitem.blk is not None:
+            blkitem.blk._bounding_rect = blkitem.absBoundingRect()
+        return True
+
+    def _is_blk_close_to_others(self, blkitem: TextBlkItem, other_blks: List, gap_px: float) -> bool:
+        """True if this block's rect is within gap_px of any other block (combined/overlapping bubbles)."""
+        r = blkitem.absBoundingRect(qrect=True)
+        for other in other_blks:
+            if other is blkitem:
+                continue
+            ro = other.absBoundingRect(qrect=True)
+            # Inflate other by gap_px so "close" = within gap_px edge-to-edge
+            expanded = QRectF(
+                ro.x() - gap_px, ro.y() - gap_px,
+                ro.width() + 2 * gap_px, ro.height() + 2 * gap_px
+            )
+            if r.intersects(expanded):
+                return True
+        return False
+
+    def _text_box_overflows_bubble(
+        self, blkitem: TextBlkItem, mask_xyxy: List, region_rect: List
+    ) -> bool:
+        """True if the text box is larger than the bubble or extends outside the bubble rect (no mask)."""
+        if not region_rect or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
+            return False
+        bubble_x = mask_xyxy[0] + region_rect[0]
+        bubble_y = mask_xyxy[1] + region_rect[1]
+        bubble_w, bubble_h = region_rect[2], region_rect[3]
+        abr = blkitem.absBoundingRect(qrect=True)
+        bx, by, bw, bh = abr.x(), abr.y(), abr.width(), abr.height()
+        if bw <= 0 or bh <= 0:
+            return False
+        if bw > bubble_w or bh > bubble_h:
+            return True
+        if bx < bubble_x or by < bubble_y:
+            return True
+        if bx + bw > bubble_x + bubble_w or by + bh > bubble_y + bubble_h:
+            return True
+        return False
+
+    def _lines_outside_bubble_mask(
+        self, blkitem: TextBlkItem, mask: np.ndarray, mask_xyxy: List
+    ) -> bool:
+        """True if any document line (block) extends outside the bubble mask (e.g. oval). Geometry only, no model."""
+        if mask is None or mask.size == 0 or len(mask_xyxy) < 4:
+            return False
+        doc = blkitem.document()
+        if doc is None:
+            return False
+        layout = doc.documentLayout()
+        if layout is None:
+            return False
+        pad = blkitem.padding()
+        item_pos = blkitem.pos()
+        x0 = item_pos.x() + pad
+        y0 = item_pos.y() + pad
+        m_h, m_w = mask.shape[0], mask.shape[1]
+        mx1, my1 = int(mask_xyxy[0]), int(mask_xyxy[1])
+        block = doc.firstBlock()
+        while block.isValid():
+            r = layout.blockBoundingRect(block)
+            if r.width() < 1 and r.height() < 1:
+                block = block.next()
+                continue
+            # Line rect in image coords (scene = image)
+            lx = x0 + r.x()
+            ly = y0 + r.y()
+            lw, lh = r.width(), r.height()
+            # Sample center and corners of the line rect
+            for sx, sy in [
+                (lx + lw / 2, ly + lh / 2),
+                (lx, ly),
+                (lx + lw, ly),
+                (lx + lw, ly + lh),
+                (lx, ly + lh),
+            ]:
+                cx = int(round(sx - mx1))
+                cy = int(round(sy - my1))
+                if 0 <= cx < m_w and 0 <= cy < m_h:
+                    if mask[cy, cx] <= 0:
+                        return True
+            block = block.next()
+        return False
+
+    def _clamp_rect_to_original(self, new_x: float, new_y: float, new_w: float, new_h: float, orig_rect: List[float]) -> Tuple[float, float, float, float]:
+        """Clamp new rect so it stays within the original text box area (no moving or growing past it)."""
+        if not orig_rect or len(orig_rect) < 4 or orig_rect[2] <= 0 or orig_rect[3] <= 0:
+            return new_x, new_y, new_w, new_h
+        ox, oy, ow, oh = orig_rect[0], orig_rect[1], orig_rect[2], orig_rect[3]
+        new_w = min(new_w, ow)
+        new_h = min(new_h, oh)
+        new_x = max(ox, min(new_x, ox + ow - new_w))
+        new_y = max(oy, min(new_y, oy + oh - new_h))
+        return new_x, new_y, new_w, new_h
+
+    def _fix_overflow_after_layout(
+        self,
+        blkitem: TextBlkItem,
+        mask: np.ndarray,
+        mask_xyxy: List,
+        region_rect: List,
+        is_osb: bool,
+        img: Optional[np.ndarray] = None,
+        original_rect: Optional[List[float]] = None,
+    ) -> None:
+        """If box is too large or lines go outside the bubble, shrink box and/or scale font. Optional model check. Clamps to original_rect when given."""
+        if is_osb or not region_rect or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
+            return
+        if not getattr(pcfg.module, "layout_check_overflow_after_layout", True):
+            return
+        bubble_x = mask_xyxy[0] + region_rect[0]
+        bubble_y = mask_xyxy[1] + region_rect[1]
+        bubble_w, bubble_h = region_rect[2], region_rect[3]
+        abr = blkitem.absBoundingRect(qrect=True)
+        bx, by, bw, bh = abr.x(), abr.y(), abr.width(), abr.height()
+        img_area = (img.shape[0] * img.shape[1]) if img is not None and img.size > 0 else 0
+        bubble_area = bubble_w * bubble_h
+        bubble_suspiciously_large = img_area > 0 and (bubble_area > 0.5 * img_area or bubble_area > 2.5 * (bw * bh))
+
+        def _apply_rect(nx: float, ny: float, nw: float, nh: float) -> None:
+            if original_rect and len(original_rect) >= 4:
+                nx, ny, nw, nh = self._clamp_rect_to_original(nx, ny, nw, nh, original_rect)
+            blkitem.setRect([nx, ny, nw, nh], repaint=True)
+            if blkitem.blk is not None:
+                blkitem.blk._bounding_rect = blkitem.absBoundingRect()
+
+        # 0) Optional model: secondary check if detection box is too large or too small for the bubble
+        model_id = (getattr(pcfg.module, "layout_box_size_check_model_id", None) or "").strip()
+        if model_id and img is not None and img.size > 0 and not bubble_suspiciously_large:
+            try:
+                result = check_box_size_from_model(img, mask_xyxy, model_id)
+                if result == "too_large":
+                    _apply_rect(bubble_x, bubble_y, bubble_w, bubble_h)
+                    self._scale_font_to_fit_box(blkitem)
+                    self.canvas.setProjSaveState(True)
+                    return
+                if result == "too_small" and (bw < bubble_w or bh < bubble_h):
+                    new_w = min(bubble_w, 2 * bw) if bw > 0 else bubble_w
+                    new_h = min(bubble_h, 2 * bh) if bh > 0 else bubble_h
+                    _apply_rect(bubble_x, bubble_y, new_w, new_h)
+                    self._scale_font_to_fit_box(blkitem)
+                    self.canvas.setProjSaveState(True)
+                    return
+            except Exception:
+                pass
+
+        # 1) Box larger than bubble: shrink box to bubble and scale font to fit (skip if bubble is suspiciously huge)
+        if not bubble_suspiciously_large and (bw > bubble_w or bh > bubble_h):
+            _apply_rect(bubble_x, bubble_y, bubble_w, bubble_h)
+            self._scale_font_to_fit_box(blkitem)
+            return
+
+        # 2) Box extends outside bubble rect: move to fit (skip if bubble is suspiciously huge); clamp to original area
+        if not bubble_suspiciously_large and (bx < bubble_x or by < bubble_y or bx + bw > bubble_x + bubble_w or by + bh > bubble_y + bubble_h):
+            new_x = max(bubble_x, min(bx, bubble_x + bubble_w - bw))
+            new_y = max(bubble_y, min(by, bubble_y + bubble_h - bh))
+            _apply_rect(new_x, new_y, bw, bh)
+
+        # 3) Lines outside bubble mask (e.g. oval): scale font down so text stays inside (skip if bubble suspicious)
+        if not bubble_suspiciously_large and mask is not None and mask.size > 0 and self._lines_outside_bubble_mask(blkitem, mask, mask_xyxy):
+            for _ in range(2):
+                pt = blkitem.font().pointSizeF()
+                if pt < 6:
+                    break
+                new_pt = max(6.0, pt * 0.88)
+                blkitem.setFontSize(new_pt)
+                if blkitem.blk is not None and hasattr(blkitem.blk, "fontformat"):
+                    try:
+                        blkitem.blk.fontformat.font_size = pt2px(new_pt)
+                    except Exception:
+                        pass
+                blkitem.layout.reLayoutEverything()
+                blkitem.repaint_background()
+                if not self._lines_outside_bubble_mask(blkitem, mask, mask_xyxy):
+                    break
+        self.canvas.setProjSaveState(True)
+
+    def onCenterInBubble(self):
+        """Move selected text box(es) so their center aligns with the bubble centroid (no resize, no model)."""
+        selected_blks = self.canvas.selected_text_items()
+        selected_blks = [b for b in selected_blks if not getattr(b.fontformat, "vertical", False)]
+        if not selected_blks:
+            return
+        img = self.imgtrans_proj.img_array
+        if img is None:
+            return
+        im_h, im_w = img.shape[:2]
+        page_name = getattr(self.imgtrans_proj, "current_img", None)
+        for blkitem in selected_blks:
+            abr = blkitem.absBoundingRect(qrect=True)
+            bx, by, bw, bh = abr.x(), abr.y(), abr.width(), abr.height()
+            if bw <= 0 or bh <= 0:
+                continue
+            # Skip blocks with no detected bubble (project mask) so free-standing text is not moved
+            if page_name:
+                try:
+                    mask_array = self.imgtrans_proj.load_mask_by_imgname(page_name)
+                    if mask_array is None or mask_array.size == 0 or mask_array.shape[:2] != (im_h, im_w):
+                        continue
+                    block_mask, _ = get_block_mask([bx, by, bw, bh], mask_array, blkitem.rotation())
+                    if block_mask is None or block_mask.size == 0:
+                        continue
+                except Exception:
+                    continue
+            else:
+                continue
+            # When the box is very large (bigger than the bubble), using the full box as the search
+            # region makes extract_ballon_region find the wrong contour and the centroid moves the box
+            # far away. Use a search rect centered on the box center with a capped size so we always
+            # look for the bubble near the current box.
+            cx, cy = bx + bw / 2, by + bh / 2
+            if bw > 0.5 * im_w or bh > 0.5 * im_h:
+                search_w = min(bw, max(80, int(0.25 * im_w)))
+                search_h = min(bh, max(60, int(0.25 * im_h)))
+                br_x = max(0, min(int(cx - search_w / 2), im_w - search_w))
+                br_y = max(0, min(int(cy - search_h / 2), im_h - search_h))
+                br = [br_x, br_y, search_w, search_h]
+            else:
+                br = [int(abr.x()), int(abr.y()), int(abr.width()), int(abr.height())]
+            try:
+                enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
+                mask, _area, mask_xyxy, region_rect = extract_ballon_region(
+                    img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+                )
+            except Exception:
+                continue
+            if region_rect is None or len(region_rect) < 4 or region_rect[2] <= 0 or region_rect[3] <= 0:
+                continue
+            cx_crop, cy_crop = mask_centroid_in_crop(mask)
+            im_cx = mask_xyxy[0] + cx_crop
+            im_cy = mask_xyxy[1] + cy_crop
+            new_x = im_cx - bw / 2
+            new_y = im_cy - bh / 2
+            bubble_x = mask_xyxy[0] + region_rect[0]
+            bubble_y = mask_xyxy[1] + region_rect[1]
+            bubble_w, bubble_h = region_rect[2], region_rect[3]
+            min_x = bubble_x
+            max_x = bubble_x + bubble_w - bw
+            min_y = bubble_y
+            max_y = bubble_y + bubble_h - bh
+            if max_x >= min_x:
+                new_x = min(max(new_x, min_x), max_x)
+            if max_y >= min_y:
+                new_y = min(max(new_y, min_y), max_y)
+            new_x = max(0, min(new_x, im_w - bw))
+            new_y = max(0, min(new_y, im_h - bh))
+            blkitem.oldRect = abr
+            blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
+            if blkitem.blk is not None:
+                blkitem.blk._bounding_rect = blkitem.absBoundingRect()
+            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+        self.canvas.setProjSaveState(True)
 
     def _scale_font_to_fit_box(self, blkitem: TextBlkItem):
         """Scale this block's font so its text fits inside the current box (no layout/box change)."""
@@ -1329,8 +1688,28 @@ class SceneTextManager(QObject):
         if not text.strip():
             return
 
+        # When mask not passed, try to get block's mask from project so we only run bubble/balloon logic when a bubble was detected
+        if mask is None and img is not None:
+            page_name = getattr(self.imgtrans_proj, "current_img", None)
+            if page_name:
+                try:
+                    mask_array = self.imgtrans_proj.load_mask_by_imgname(page_name)
+                    if mask_array is not None and mask_array.size > 0 and mask_array.shape[:2] == (im_h, im_w):
+                        br = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
+                        br_list = [br.x(), br.y(), br.width(), br.height()] if not isinstance(br, list) else br
+                        mask, _ = get_block_mask(br_list, mask_array, blkitem.rotation())
+                        if mask is None or mask.size == 0:
+                            mask = None
+                    else:
+                        mask = None
+                except Exception:
+                    mask = None
+            else:
+                mask = None
+
         original_block_area = None  # used later to cap resize for huge blocks
         if mask is None:
+            # No detected bubble (block had no mask): use only the text box area; do not run bubble detection or balloon/overflow logic.
             bounding_rect = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
             if bounding_rect[2] <= 0 or bounding_rect[3] <= 0:
                 text = _merge_stub_lines_in_text(text)
@@ -1338,7 +1717,6 @@ class SceneTextManager(QObject):
                 if len(self.pairwidget_list) > blkitem.idx:
                     self.pairwidget_list[blkitem.idx].e_trans.setPlainText(text)
                 return
-            # Constrain only clearly abnormal blocks (>50% image) so normal bubbles keep good size
             block_area = bounding_rect[2] * bounding_rect[3]
             original_block_area = block_area
             if img_area > 0 and block_area > 0.5 * img_area:
@@ -1354,35 +1732,60 @@ class SceneTextManager(QObject):
                 ]
                 bounding_rect[0] = max(0, min(bounding_rect[0], im_w - max_w))
                 bounding_rect[1] = max(0, min(bounding_rect[1], im_h - max_h))
+            region_rect = None
+            mask_xyxy = [bounding_rect[0], bounding_rect[1], bounding_rect[0] + bounding_rect[2], bounding_rect[1] + bounding_rect[3]]
+            balloon_shape = getattr(pcfg.module, "layout_balloon_shape", "auto") or "auto"
+            # Synthetic rectangular mask so layout_text can run and wrap to box width (avoids one long line for free-standing text)
+            bw, bh = max(1, int(bounding_rect[2])), max(1, int(bounding_rect[3]))
+            mask = np.full((bh, bw), 255, dtype=np.uint8)
+        else:
+            # Detected bubble (block has mask): get bubble region and optionally shape from contour/model.
+            bounding_rect = bounding_rect or blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
+            if bounding_rect[2] <= 0 or bounding_rect[3] <= 0:
+                text = _merge_stub_lines_in_text(text)
+                blkitem.setPlainText(text)
+                if len(self.pairwidget_list) > blkitem.idx:
+                    self.pairwidget_list[blkitem.idx].e_trans.setPlainText(text)
+                return
+            block_area = bounding_rect[2] * bounding_rect[3]
+            original_block_area = block_area
             if tgt_is_cjk:
                 max_enlarge_ratio = 2.5
             else:
                 max_enlarge_ratio = 3
             enlarge_ratio = min(max(bounding_rect[2] / bounding_rect[3], bounding_rect[3] / bounding_rect[2]) * 1.5, max_enlarge_ratio)
-            mask, ballon_area, mask_xyxy, region_rect = extract_ballon_region(img, bounding_rect, enlarge_ratio=enlarge_ratio, cal_region_rect=True)
-            # Diamond-Text style: shape-aware insets (round vs elongated vs narrow). Shrink text region so text stays inside bubble.
+            mask, ballon_area, mask_xyxy, region_rect = extract_ballon_region(
+                img, bounding_rect, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+            )
+            if region_rect is not None and len(region_rect) >= 4 and img_area > 0:
+                region_area = region_rect[2] * region_rect[3]
+                if region_area > 2.5 * block_area or region_area > 0.5 * img_area:
+                    region_rect = None
             if region_rect is not None and len(region_rect) >= 4:
                 rw, rh = region_rect[2], region_rect[3]
                 if rw > 0 and rh > 0:
                     shape_cfg = getattr(pcfg.module, "layout_balloon_shape", "auto") or "auto"
                     if shape_cfg == "auto":
-                        balloon_shape = _resolve_auto_balloon_shape(
-                            getattr(pcfg.module, "layout_balloon_shape_auto_method", "contour_ratio"),
-                            mask, mask_xyxy, img, rw, rh,
-                        )
+                        already = (getattr(blkitem.fontformat, "text_box_shape", None) or "").strip().lower()
+                        if already in CONCRETE_BALLOON_SHAPES:
+                            balloon_shape = already
+                        else:
+                            balloon_shape = _resolve_auto_balloon_shape(
+                                getattr(pcfg.module, "layout_balloon_shape_auto_method", "contour_ratio"),
+                                mask, mask_xyxy, img, rw, rh,
+                            )
                     else:
                         balloon_shape = shape_cfg
-                    # Diamond-Text shapes: insets so text stays inside bubble (round, elongated, narrow, diamond, square, bevel, pentagon, point)
                     if balloon_shape == "round":
-                        inset = 0.96  # 4% margin
+                        inset = 0.96
                     elif balloon_shape == "narrow" or balloon_shape == "point":
-                        inset = 0.97  # 3% for tall/narrow or pointed tail
+                        inset = 0.97
                     elif balloon_shape == "diamond":
-                        inset = 0.95  # 5% for pointy corners
+                        inset = 0.95
                     elif balloon_shape in ("square", "bevel", "pentagon"):
-                        inset = 0.96  # 4%
+                        inset = 0.96
                     else:
-                        inset = 0.98  # 2% for elongated
+                        inset = 0.98
                     new_w, new_h = rw * inset, rh * inset
                     region_rect = [
                         region_rect[0] + (rw - new_w) / 2,
@@ -1391,12 +1794,14 @@ class SceneTextManager(QObject):
                         new_h,
                     ]
                 else:
-                    balloon_shape = "auto"
+                    balloon_shape = getattr(pcfg.module, "layout_balloon_shape", "auto") or "auto"
             else:
                 balloon_shape = getattr(pcfg.module, "layout_balloon_shape", "auto") or "auto"
-        else:
-            mask_xyxy = [bounding_rect[0], bounding_rect[1], bounding_rect[0]+bounding_rect[2], bounding_rect[1]+bounding_rect[3]]
-            balloon_shape = "auto"
+                mask_xyxy = [bounding_rect[0], bounding_rect[1], bounding_rect[0] + bounding_rect[2], bounding_rect[1] + bounding_rect[3]]
+
+        # Store balloon shape on the block so the text box outline is drawn to match (ellipse, diamond, etc.).
+        if getattr(blkitem.fontformat, "text_box_shape", None) != balloon_shape:
+            blkitem.fontformat.text_box_shape = balloon_shape
 
         words, delimiter = seg_text(text, pcfg.module.translate_target)
         if len(words) < 1:
@@ -1441,6 +1846,8 @@ class SceneTextManager(QObject):
                                 blk_font.setPointSizeF(orig_pt)
                                 pass  # fall through to multi-line layout
                             else:
+                                layout_w = max(layout_w, LAYOUT_MIN_BOX_W)
+                                layout_h = max(layout_h, LAYOUT_MIN_BOX_H)
                                 blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
                                 blkitem.setPlainText(single)
                                 blkitem._ensure_transparent_document_background()
@@ -1448,6 +1855,8 @@ class SceneTextManager(QObject):
                                     self.pairwidget_list[blkitem.idx].e_trans.setPlainText(single)
                                 return True
                         else:
+                            layout_w = max(layout_w, LAYOUT_MIN_BOX_W)
+                            layout_h = max(layout_h, LAYOUT_MIN_BOX_H)
                             blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
                             blkitem.setPlainText(single)
                             blkitem._ensure_transparent_document_background()
@@ -1483,7 +1892,8 @@ class SceneTextManager(QObject):
                 area_ratio = ballon_area / text_area
                 ballon_area_thresh = 1.7
                 downscale_constraint = 0.6
-                resize_ratio = np.clip(min(area_ratio / ballon_area_thresh, region_rect [2] / max(wl_list)), downscale_constraint, 1.0)
+                region_w = (region_rect[2] if region_rect is not None and len(region_rect) >= 4 else bounding_rect[2])
+                resize_ratio = np.clip(min(area_ratio / ballon_area_thresh, region_w / max(wl_list)), downscale_constraint, 1.0)
 
             else:
                 if not src_is_cjk:
@@ -1555,9 +1965,17 @@ class SceneTextManager(QObject):
                 abs_centroid = blkitem.blk.lines[0][0]
                 centroid[0] = int(abs_centroid[0] - mask_xyxy[0])
                 centroid[1] = int(abs_centroid[1] - mask_xyxy[1])
-        # Limit line width so layout uses more, shorter lines (smaller frac = narrower lines).
+        # Limit line width so layout wraps instead of one long line (avoids text overflowing bubble).
         if region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0:
             max_central_width = float(region_rect[2] * LAYOUT_MAX_LINE_WIDTH_FRAC)
+        elif bounding_rect[2] > 0:
+            # No bubble region: cap line width to bounding rect so text wraps; use stricter fraction so more lines fit (e.g. free-standing notices)
+            no_bubble_frac = float(getattr(pcfg.module, "layout_max_line_width_frac_no_bubble", 0.78) or 0.78)
+            max_central_width = float(bounding_rect[2] * no_bubble_frac)
+        # Ensure minimum line width so short text (e.g. "pluck!") is not broken into 2-char lines.
+        min_lw = float(getattr(pcfg.module, "layout_min_line_width_px", 80.0) or 80.0)
+        if max_central_width < min_lw:
+            max_central_width = min_lw
 
         # Optional: hyphenation for non-CJK text (improves ugly wraps for long tokens).
         # We no longer pre-force line breaks here; instead we let layout_text() score candidates.
@@ -1711,7 +2129,8 @@ class SceneTextManager(QObject):
                 if adaptive_fntsize:
                     downscale_constraint = 0.5
                     w = xywh[2]
-                    post_resize_ratio = np.clip(max(region_rect[2] / w, downscale_constraint), 0, 1)
+                    region_w = (region_rect[2] if region_rect is not None and len(region_rect) >= 4 else w)
+                    post_resize_ratio = np.clip(max(region_w / w, downscale_constraint), 0, 1)
                     resize_ratio *= post_resize_ratio
                 elif region_rect is not None and len(region_rect) >= 4:
                     rw, rh = region_rect[2], region_rect[3]
@@ -1756,6 +2175,13 @@ class SceneTextManager(QObject):
                 # Even when not fully constraining: cap height to bubble so box never extends past, and don't squeeze narrower than bubble
                 layout_h = min(layout_h, region_rect[3])
                 layout_w = max(layout_w, region_rect[2])
+            elif region_rect is None and original_block_area is not None:
+                # No bubble (free-standing text): cap box to original detected size so layout matches source area and uses more lines
+                orig_w = old_br[2] if len(old_br) >= 4 else bounding_rect[2]
+                orig_h = old_br[3] if len(old_br) >= 4 else bounding_rect[3]
+                if orig_w > 0 and orig_h > 0:
+                    layout_w = min(layout_w, max(orig_w, LAYOUT_MIN_BOX_W))
+                    layout_h = min(layout_h, max(orig_h, LAYOUT_MIN_BOX_H))
             # So the bubble text box shows the same line breaks as the right panel: scale font so each of our
             # lines fits in the box width (2.1: clamp to layout_font_size_min/max). When box is constrained to
             # bubble, allow font to go below layout_min_pt so text fits instead of being cropped (e.g. small bubbles).
@@ -1772,6 +2198,8 @@ class SceneTextManager(QObject):
                 ffmt = QFontMetricsF(blk_font)
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.font_size = pt2px(fit_pt)
+            layout_w = max(layout_w, LAYOUT_MIN_BOX_W)
+            layout_h = max(layout_h, LAYOUT_MIN_BOX_H)
             blkitem.set_size(layout_w, layout_h, set_layout_maxsize=True)
             new_text = _merge_stub_lines_in_text(new_text)  # merge again right before set so 'stage.', 'in', 'the' never appear alone
             blkitem.setPlainText(new_text)
@@ -1856,10 +2284,7 @@ class SceneTextManager(QObject):
                 y2 = max(0, min(y, im_h - h))
                 if x2 != x or y2 != y:
                     blkitem.setRect([x2, y2, w, h], repaint=True)
-                # For non-constrained layout with a known bubble region, gently clamp the box horizontally
-                # (and vertically) so it stays mostly inside the bubble instead of drifting far away.
-                # Judge runs last, after: binary font search, layout_text, resize/fit, set_size, setPlainText,
-                # LAYOUT_TEXT_SCALE (final_pt), restore_charfmts, reLayoutEverything, and image-bounds clamp.
+                # For non-constrained layout with a known bubble region, gently clamp the box so it stays inside the bubble.
                 if (not constrain_to_bubble
                         and region_rect is not None and len(region_rect) >= 4
                         and region_rect[2] > 0 and region_rect[3] > 0
@@ -1868,11 +2293,9 @@ class SceneTextManager(QObject):
                     bubble_y = mask_xyxy[1] + region_rect[1]
                     bubble_w = region_rect[2]
                     bubble_h = region_rect[3]
-                    # Re-read after image-bounds clamp so we use final position/size
                     abr2 = blkitem.absBoundingRect(qrect=True)
                     bx, by, bw, bh = abr2.x(), abr2.y(), abr2.width(), abr2.height()
                     new_x, new_y = bx, by
-                    # Gentle clamp when box already fits inside bubble
                     if bw > 0 and bh > 0 and bw <= bubble_w * 1.05 and bh <= bubble_h * 1.05:
                         min_x = bubble_x
                         max_x = bubble_x + bubble_w - bw
@@ -1882,45 +2305,13 @@ class SceneTextManager(QObject):
                             new_x = min(max(bx, min_x), max_x)
                         if max_y >= min_y:
                             new_y = min(max(by, min_y), max_y)
-                    # Layout judge (position-only): move box toward bubble center. No size/text changes.
-                    if bw > 0 and bh > 0 and bool(getattr(pcfg.module, "layout_judge_enabled", True)):
-                        bubble_xyxy = (bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h)
-                        margin_r = float(getattr(pcfg.module, "layout_judge_margin_ratio", 0.06) or 0.06)
-                        center_str = float(getattr(pcfg.module, "layout_judge_center_strength", 0.7) or 0.7)
-                        # Optional model: scale strength by model score on bubble crop
-                        if bool(getattr(pcfg.module, "layout_judge_use_model", False)):
-                            model_id = (getattr(pcfg.module, "layout_judge_model_id", "") or "").strip()
-                            if model_id and img is not None:
-                                x1, y1 = int(bubble_x), int(bubble_y)
-                                x2, y2 = int(bubble_x + bubble_w), int(bubble_y + bubble_h)
-                                x1, x2 = max(0, x1), min(img.shape[1], x2)
-                                y1, y2 = max(0, y1), min(img.shape[0], y2)
-                                if x2 > x1 and y2 > y1:
-                                    crop = img[y1:y2, x1:x2]
-                                    if crop.ndim == 2:
-                                        crop = np.stack([crop] * 3, axis=-1)
-                                    score = judge_with_model(crop, model_id)
-                                    if score is not None:
-                                        orig_str = center_str
-                                        center_str = center_str * max(0.3, 1.2 - score)
-                                        center_str = min(1.0, max(0.0, center_str))
-                                        LOGGER.debug(
-                                            "Layout judge: center_strength %.2f -> %.2f (model score=%.3f)",
-                                            orig_str,
-                                            center_str,
-                                            score,
-                                        )
-                        # Position-only: clamp_overflow=False so judge never changes box size
-                        judge_x, judge_y, _, _ = judge_textbox_in_bubble(
-                            [new_x, new_y, bw, bh], bubble_xyxy,
-                            margin_ratio=margin_r, center_strength=center_str,
-                            clamp_overflow=False,
-                        )
-                        new_x, new_y = judge_x, judge_y
                     if abs(new_x - bx) > 0.5 or abs(new_y - by) > 0.5:
                         blkitem.setRect([new_x, new_y, bw, bh], repaint=True)
                 if constrain_to_bubble and blkitem.blk is not None:
                     blkitem.blk._bounding_rect = blkitem.absBoundingRect()
+            # Post-layout overflow check: shrink box or scale font if text/box extends outside bubble; clamp to original box area
+            if region_rect is not None and len(region_rect) >= 4 and mask_xyxy is not None:
+                self._fix_overflow_after_layout(blkitem, mask, mask_xyxy, region_rect, is_osb, img, original_rect=old_br)
             return True
         except Exception:
             if is_osb:

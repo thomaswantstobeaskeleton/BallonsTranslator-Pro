@@ -206,11 +206,11 @@ class Canvas(QGraphicsScene):
 
     format_textblks = Signal()
     layout_textblks = Signal()
-    layout_judge_textblks = Signal()
     auto_fit_font_signal = Signal()
     auto_fit_binary_signal = Signal()
     set_balloon_shape_signal = Signal(str)
     resize_to_fit_content_signal = Signal()
+    center_in_bubble_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1255,11 +1255,10 @@ class Canvas(QGraphicsScene):
 
             # --- Format ---
             format_act = layout_act = fit_to_bubble_act = auto_fit_act = auto_fit_binary_act = angle_act = squeeze_act = None
-            resize_to_fit_content_act = None
+            resize_to_fit_content_act = center_in_bubble_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
-            judge_act = None
             if context_menu_visible('format_apply'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 format_act = format_menu.addAction(self.tr("Apply font formatting"))
@@ -1268,12 +1267,6 @@ class Canvas(QGraphicsScene):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 layout_act = format_menu.addAction(self.tr("Auto layout"))
                 actions_map['format_layout'] = layout_act
-            if context_menu_visible('format_judge') and n_sel >= 1:
-                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
-                judge_act = format_menu.addAction(self.tr("Judge (center in bubble)"))
-                if judge_act is not None:
-                    judge_act.setToolTip(self.tr("Move selected text box(es) toward the center of each bubble (position only, no size change)."))
-                actions_map['format_judge'] = judge_act
             if context_menu_visible('format_fit_to_bubble') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 fit_to_bubble_act = format_menu.addAction(self.tr("Fit to bubble"))
@@ -1311,6 +1304,12 @@ class Canvas(QGraphicsScene):
                 if resize_to_fit_content_act is not None:
                     resize_to_fit_content_act.setToolTip(self.tr("Resize the text box so all text is visible (e.g. when the box is too small and clips content)."))
                 actions_map['format_resize_to_fit_content'] = resize_to_fit_content_act
+            if context_menu_visible('format_center_in_bubble') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                center_in_bubble_act = format_menu.addAction(self.tr("Center in bubble"))
+                if center_in_bubble_act is not None:
+                    center_in_bubble_act.setToolTip(self.tr("Move the text box so its center aligns with the bubble center (no resize)."))
+                actions_map['format_center_in_bubble'] = center_in_bubble_act
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
@@ -1537,8 +1536,6 @@ class Canvas(QGraphicsScene):
                 self.format_textblks.emit()
             elif rst == layout_act:
                 self.layout_textblks.emit()
-            elif judge_act is not None and rst == judge_act:
-                self.layout_judge_textblks.emit()
             elif rst == fit_to_bubble_act:
                 self.layout_textblks.emit()
             elif rst == auto_fit_act:
@@ -1565,6 +1562,8 @@ class Canvas(QGraphicsScene):
                 self.set_balloon_shape_signal.emit("auto")
             elif rst == resize_to_fit_content_act:
                 self.resize_to_fit_content_signal.emit()
+            elif rst == center_in_bubble_act:
+                self.center_in_bubble_signal.emit()
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

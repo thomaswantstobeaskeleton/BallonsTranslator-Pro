@@ -73,7 +73,7 @@ class FocusRingFrame(QFrame):
         super().paintEvent(event)
         if self._ring_opacity <= 0.0 or self._child is None:
             return
-        painter = QPainter(self)
+        painter = QPainter()
         if not painter.begin(self):
             return
         try:
