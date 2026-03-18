@@ -2,8 +2,8 @@ import os.path as osp
 from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QComboBox
-from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize
+from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QLineEdit, QCompleter
+from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
 from modules.translators import BaseTranslator
@@ -741,24 +741,25 @@ class TitleBar(Widget):
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Omni search (menus + settings + canvas)
-        self.omniSearch = QComboBox(self)
+        # Omni search (menus + settings + canvas): QLineEdit + QCompleter popup (avoids QComboBox auto-fill issues)
+        self.omniSearch = QLineEdit(self)
         self.omniSearch.setObjectName("OmniSearch")
-        self.omniSearch.setEditable(True)
-        self.omniSearch.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.omniSearch.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.omniSearch.setPlaceholderText(self.tr("Search: menus, settings, canvas…"))
         self.omniSearch.setMinimumWidth(260)
         self.omniSearch.setMaximumWidth(560)
-        try:
-            le = self.omniSearch.lineEdit()
-            if le is not None:
-                le.setPlaceholderText(self.tr("Search: menus, settings, canvas…"))
-                le.textEdited.connect(self._on_omni_search_text_edited)
-        except Exception:
-            pass
+        self.omniSearch.textEdited.connect(self._on_omni_search_text_edited)
+
         self._omni_model = QStandardItemModel(self.omniSearch)
-        self.omniSearch.setModel(self._omni_model)
-        self.omniSearch.activated.connect(self._on_omni_search_activated)
+        self._omni_proxy = QSortFilterProxyModel(self.omniSearch)
+        self._omni_proxy.setSourceModel(self._omni_model)
+        self._omni_proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._omni_proxy.setFilterKeyColumn(0)
+
+        self._omni_completer = QCompleter(self._omni_proxy, self.omniSearch)
+        self._omni_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self._omni_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._omni_completer.activated[QModelIndex].connect(self._on_omni_search_index_activated)
+        self.omniSearch.setCompleter(self._omni_completer)
         self._omni_actions_cache = None  # lazily built list of (label, QAction)
         
         hlayout = QHBoxLayout(self)
@@ -852,35 +853,10 @@ class TitleBar(Widget):
         self._omni_model.appendRow(it)
 
     def _on_omni_search_text_edited(self, text: str):
-        # Important: do NOT let QComboBox auto-select index 0 when we repopulate results.
-        # If it does, it will overwrite the user's partially typed query with the first result.
         q_raw = text or ""
         q = q_raw.strip()
-        le0 = None
-        cursor_pos = None
-        try:
-            le0 = self.omniSearch.lineEdit()
-            if le0 is not None:
-                cursor_pos = le0.cursorPosition()
-        except Exception:
-            le0 = None
-            cursor_pos = None
-        # Block signals while we rebuild the model so activated/currentIndexChanged can't fire.
-        try:
-            self.omniSearch.blockSignals(True)
-        except Exception:
-            pass
         self._omni_model.clear()
         if not q:
-            # Keep typed text and cursor; just clear results and selection.
-            try:
-                self.omniSearch.setCurrentIndex(-1)
-            except Exception:
-                pass
-            try:
-                self.omniSearch.blockSignals(False)
-            except Exception:
-                pass
             return
         q_low = q.lower()
         n_added = 0
@@ -952,48 +928,21 @@ class TitleBar(Widget):
             except Exception:
                 pass
 
-        # Release signal block first, then (optionally) open popup.
+        # Filter proxy and show popup (command palette UX). This does not replace the typed text.
         try:
-            self.omniSearch.setCurrentIndex(-1)
-        except Exception:
-            pass
-        try:
-            self.omniSearch.blockSignals(False)
-        except Exception:
-            pass
-
-        # Show popup when we have results, but do it "queued" so we can restore focus/cursor after popup opens.
-        # This prevents the editor from losing focus and avoids the cursor jumping to the start (typing backwards).
-        try:
+            self._omni_proxy.setFilterFixedString(q_raw)
             if self._omni_model.rowCount() > 0:
-                def _show_and_restore():
-                    try:
-                        self.omniSearch.showPopup()
-                    except Exception:
-                        pass
-                    try:
-                        le = self.omniSearch.lineEdit()
-                        if le is not None:
-                            le.setFocus(Qt.FocusReason.OtherFocusReason)
-                            if cursor_pos is not None:
-                                le.setCursorPosition(min(int(cursor_pos), len(le.text())))
-                    except Exception:
-                        pass
-                QTimer.singleShot(0, _show_and_restore)
-            else:
-                # Ensure focus remains in the editor even when no results.
-                if le0 is not None:
-                    le0.setFocus(Qt.FocusReason.OtherFocusReason)
-                    if cursor_pos is not None:
-                        le0.setCursorPosition(min(int(cursor_pos), len(le0.text())))
+                self._omni_completer.complete()
         except Exception:
             pass
 
-    def _on_omni_search_activated(self, index: int):
+    def _on_omni_search_index_activated(self, proxy_index: QModelIndex):
+        """Triggered when the user explicitly selects a completion (click/enter)."""
         try:
-            if index < 0:
+            if not proxy_index or not proxy_index.isValid():
                 return
-            item = self._omni_model.item(index, 0)
+            src_index = self._omni_proxy.mapToSource(proxy_index)
+            item = self._omni_model.itemFromIndex(src_index) if src_index.isValid() else None
             payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if not isinstance(payload, dict):
                 return
@@ -1011,13 +960,9 @@ class TitleBar(Widget):
                 if bi >= 0:
                     self.mainwindow.jump_to_canvas_block(bi)
         finally:
-            # reset UI state
             try:
-                self.omniSearch.setCurrentIndex(-1)
-                le = self.omniSearch.lineEdit()
-                if le is not None:
-                    le.clear()
-                    le.clearFocus()
+                self.omniSearch.clear()
+                self.omniSearch.clearFocus()
             except Exception:
                 pass
 

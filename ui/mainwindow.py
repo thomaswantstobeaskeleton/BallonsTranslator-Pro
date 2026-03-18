@@ -1170,18 +1170,10 @@ class MainWindow(mainwindow_cls):
             box = getattr(self.titleBar, "omniSearch", None)
             if box is None:
                 return
-            le = box.lineEdit() if hasattr(box, "lineEdit") else None
-            if le is not None:
-                le.setFocus(Qt.FocusReason.ShortcutFocusReason)
-                try:
-                    le.selectAll()
-                except Exception:
-                    pass
-            else:
-                box.setFocus(Qt.FocusReason.ShortcutFocusReason)
-            # Show dropdown if there are results (or to indicate focus)
+            # omniSearch is a QLineEdit
+            box.setFocus(Qt.FocusReason.ShortcutFocusReason)
             try:
-                box.showPopup()
+                box.selectAll()
             except Exception:
                 pass
         except Exception:
