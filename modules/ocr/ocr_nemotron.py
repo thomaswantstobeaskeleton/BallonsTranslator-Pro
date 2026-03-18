@@ -37,6 +37,57 @@ def _iou_rect(a: Tuple[float, float, float, float], b: Tuple[float, float, float
     return inter / union if union > 0 else 0.0
 
 
+def _fallback_extract_classes_bboxes(text: str) -> Tuple[List[str], List[Tuple[float, float, float, float]], List[str]]:
+    """Bundled fallback when repo postprocessing.py is missing or has no such function. Matches NVIDIA format <x_...><y_...>...<x_...><y_...><class_...>."""
+    # Pattern: <x_{x1}><y_{y1}>{text}<x_{x2}><y_{y2}><class_{cls}>
+    _re = re.compile(
+        r"<x_([^>]+)><y_([^>]+)>(.*?)<x_([^>]+)><y_([^>]+)><class_([^>]+)>",
+        re.DOTALL,
+    )
+    classes, bboxes, texts = [], [], []
+    for m in _re.finditer(text):
+        x1_s, y1_s, mid, x2_s, y2_s, cls = m.groups()
+        try:
+            x1, y1 = float(x1_s), float(y1_s)
+            x2, y2 = float(x2_s), float(y2_s)
+        except (ValueError, TypeError):
+            continue
+        cls = "Formula" if cls == "Inline-formula" else cls
+        if cls == "Page-number":
+            continue
+        classes.append(cls)
+        bboxes.append((x1, y1, x2, y2))
+        texts.append((mid or "").strip())
+    return classes, bboxes, texts
+
+
+def _fallback_transform_bbox_to_original(
+    bbox: Tuple[float, float, float, float],
+    original_width: int,
+    original_height: int,
+    target_w: int = 1648,
+    target_h: int = 2048,
+) -> Tuple[float, float, float, float]:
+    """Bundled fallback: transform normalized bbox (0–1) back to original image coordinates."""
+    aspect_ratio = original_width / original_height if original_height else 1.0
+    new_height, new_width = original_height, original_width
+    if original_height > target_h:
+        new_height = target_h
+        new_width = int(new_height * aspect_ratio)
+    if new_width > target_w:
+        new_width = target_w
+        new_height = int(new_width / aspect_ratio)
+    resized_width = new_width
+    resized_height = new_height
+    pad_left = (target_w - resized_width) // 2
+    pad_top = (target_h - resized_height) // 2
+    left = ((bbox[0] * target_w) - pad_left) * original_width / resized_width if resized_width else 0
+    right = ((bbox[2] * target_w) - pad_left) * original_width / resized_width if resized_width else 0
+    top = ((bbox[1] * target_h) - pad_top) * original_height / resized_height if resized_height else 0
+    bottom = ((bbox[3] * target_h) - pad_top) * original_height / resized_height if resized_height else 0
+    return (left, top, right, bottom)
+
+
 @register_OCR("nemotron_parse")
 class NemotronParseOCR(OCRBase):
     """
@@ -89,23 +140,21 @@ class NemotronParseOCR(OCRBase):
             return
         try:
             from utils.model_manager import get_model_manager
-            post_path = get_model_manager().hf_hub_download("nvidia/NVIDIA-Nemotron-Parse-v1.1", "postprocessing.py")
+            post_path = get_model_manager().hf_hub_download(
+                "nvidia/NVIDIA-Nemotron-Parse-v1.1", "postprocessing.py", revision="main"
+            )
             import importlib.util
             spec = importlib.util.spec_from_file_location("nemotron_postprocessing", post_path)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             self._extract_classes_bboxes = getattr(mod, "extract_classes_bboxes", None)
             self._transform_bbox_to_original = getattr(mod, "transform_bbox_to_original", None)
-        except Exception as e:
-            raise RuntimeError(
-                "Nemotron Parse: could not load postprocessing from nvidia/NVIDIA-Nemotron-Parse-v1.1. "
-                "Install: pip install transformers accelerate torch albumentations timm; ensure huggingface_hub is available."
-            ) from e
+        except Exception:
+            self._extract_classes_bboxes = None
+            self._transform_bbox_to_original = None
         if not self._extract_classes_bboxes or not self._transform_bbox_to_original:
-            raise RuntimeError(
-                "Nemotron Parse: postprocessing.py did not expose extract_classes_bboxes/transform_bbox_to_original. "
-                "Check the model repo nvidia/NVIDIA-Nemotron-Parse-v1.1."
-            )
+            self._extract_classes_bboxes = _fallback_extract_classes_bboxes
+            self._transform_bbox_to_original = lambda b, w, h: _fallback_transform_bbox_to_original(b, w, h)
         self._model_id = model_id
         self._device = device
         self.model = AutoModel.from_pretrained(

@@ -103,14 +103,27 @@ if _INTERNVL3_AVAILABLE:
                 dtype = torch.float16
             if not use_bf16:
                 dtype = torch.float16
+            # Prefer fast processor for speed (user preference).
             self.processor = AutoProcessor.from_pretrained(model_name)
             self.model = AutoModelForImageTextToText.from_pretrained(
                 model_name,
-                torch_dtype=dtype,
+                dtype=dtype,
                 device_map=dev if dev == "cuda" else None,
             )
             if dev == "cpu":
                 self.model = self.model.to(dev)
+            # Reduce generation warnings: ensure pad_token_id is set.
+            try:
+                tok = getattr(self.processor, "tokenizer", None)
+                if tok is not None:
+                    pad_id = getattr(tok, "pad_token_id", None)
+                    eos_id = getattr(tok, "eos_token_id", None)
+                    if pad_id is None and eos_id is not None:
+                        pad_id = eos_id
+                    if pad_id is not None and getattr(self.model, "generation_config", None) is not None:
+                        self.model.generation_config.pad_token_id = int(pad_id)
+            except Exception:
+                pass
             self.model.eval()
 
         def _run_one(self, pil_img: "Image.Image") -> str:
@@ -151,7 +164,18 @@ if _INTERNVL3_AVAILABLE:
                 if "pixel_values" in inputs and hasattr(inputs["pixel_values"], "to"):
                     inputs["pixel_values"] = inputs["pixel_values"].to(self.model.dtype)
                 with torch.inference_mode():
-                    out = self.model.generate(**inputs, max_new_tokens=max_nt)
+                    gen_kw = {"max_new_tokens": max_nt}
+                    # Silence pad_token_id warning for open-end generation.
+                    try:
+                        pad_id = getattr(getattr(self.processor, "tokenizer", None), "pad_token_id", None)
+                        eos_id = getattr(getattr(self.processor, "tokenizer", None), "eos_token_id", None)
+                        if pad_id is None and eos_id is not None:
+                            pad_id = eos_id
+                        if pad_id is not None:
+                            gen_kw["pad_token_id"] = int(pad_id)
+                    except Exception:
+                        pass
+                    out = self.model.generate(**inputs, **gen_kw)
                 input_len = inputs["input_ids"].shape[1]
                 text = self.processor.decode(out[0, input_len:], skip_special_tokens=True)
                 return (text or "").strip()

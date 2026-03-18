@@ -18,6 +18,11 @@ try:
     import torch
     _HUNYUAN_AVAILABLE = True
     try:
+        # Preferred concrete class for HunyuanVL (matches official examples).
+        from transformers import HunYuanVLForConditionalGeneration  # type: ignore
+    except Exception:
+        HunYuanVLForConditionalGeneration = None  # type: ignore
+    try:
         from transformers.dynamic_module_utils import get_class_from_dynamic_module
     except ImportError:
         get_class_from_dynamic_module = None
@@ -119,6 +124,7 @@ if _HUNYUAN_AVAILABLE:
             if self.processor is not None and self._model_name == model_name:
                 return
             self._model_name = model_name
+            # Prefer fast processor when available (user preference).
             self.processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
             use_bf16 = self.params.get("use_bf16", {}).get("value", True)
             dtype = (
@@ -159,9 +165,14 @@ if _HUNYUAN_AVAILABLE:
             if config is not None:
                 load_kw["config"] = config
             try:
-                self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_name, torch_dtype=dtype, **load_kw
-                )
+                if HunYuanVLForConditionalGeneration is not None:
+                    self.model = HunYuanVLForConditionalGeneration.from_pretrained(
+                        model_name, torch_dtype=dtype, **load_kw
+                    )
+                else:
+                    self.model = AutoModelForImageTextToText.from_pretrained(
+                        model_name, torch_dtype=dtype, **load_kw
+                    )
             except (KeyError, ValueError) as model_err:
                 err_str = str(model_err)
                 is_hunyuan = (
@@ -232,14 +243,16 @@ if _HUNYUAN_AVAILABLE:
                             raise
                 else:
                     self.logger.warning(f"HunyuanOCR load with dtype failed: {model_err}; trying default dtype.")
-                    self.model = AutoModelForImageTextToText.from_pretrained(
-                        model_name, **load_kw
-                    )
+                    if HunYuanVLForConditionalGeneration is not None:
+                        self.model = HunYuanVLForConditionalGeneration.from_pretrained(model_name, **load_kw)
+                    else:
+                        self.model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kw)
             except Exception as e:
                 self.logger.warning(f"HunyuanOCR load with dtype failed: {e}; trying default dtype.")
-                self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_name, **load_kw
-                )
+                if HunYuanVLForConditionalGeneration is not None:
+                    self.model = HunYuanVLForConditionalGeneration.from_pretrained(model_name, **load_kw)
+                else:
+                    self.model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kw)
             self.model.to(self.device)
 
         def _run_one(self, pil_img: "Image.Image") -> str:
@@ -265,15 +278,50 @@ if _HUNYUAN_AVAILABLE:
                 )
                 inputs = self.processor(
                     text=[text],
-                    images=[pil_img],
+                    images=pil_img,
                     padding=True,
                     return_tensors="pt",
                 )
-                inputs = {k: (v.to(self.model.device) if hasattr(v, "to") else v) for k, v in inputs.items()}
-                # HunyuanVL can expect 4D image tensors [B,C,H,W]; processor sometimes returns 3D [C,H,W].
-                for k, v in inputs.items():
-                    if isinstance(v, torch.Tensor) and v.dim() == 3 and v.shape[0] in (1, 3, 4):
-                        inputs[k] = v.unsqueeze(0)
+                # If the processor ignores images (common when transformers lacks hunyuan_vl processor),
+                # inputs won't include pixel_values / image tensors and generate() will fail downstream.
+                try:
+                    _keys = list(inputs.keys())
+                except Exception:
+                    _keys = []
+                if _keys and not any(("pixel" in k) for k in _keys):
+                    has_vision_tensor = False
+                    try:
+                        for k in _keys:
+                            v = inputs[k]
+                            if isinstance(v, torch.Tensor) and v.dim() >= 3:
+                                has_vision_tensor = True
+                                break
+                    except Exception:
+                        pass
+                    if not has_vision_tensor:
+                        raise RuntimeError(
+                            "HunyuanOCR processor did not produce any image tensors (e.g. pixel_values). "
+                            "This usually means your installed transformers version does not support hunyuan_vl "
+                            "processing on this platform. Try upgrading: pip install --upgrade 'transformers>=4.49' "
+                            "and restart the app, or switch OCR to easyocr_ocr / manga_ocr / paddle_ocr."
+                        )
+                # Plain dict so modifications persist; move to device.
+                inputs = dict(inputs)
+                device = self.model.device
+                inputs = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
+                # HunyuanVL expects 4D image tensors [B,C,H,W]. Recursively fix 3D tensors anywhere in inputs.
+                def ensure_4d(obj):
+                    if isinstance(obj, torch.Tensor):
+                        return obj.unsqueeze(0) if obj.dim() == 3 else obj
+                    if isinstance(obj, list):
+                        out = [ensure_4d(x) for x in obj]
+                        if len(out) == 1 and isinstance(out[0], torch.Tensor):
+                            return out[0]
+                        return out
+                    if isinstance(obj, dict):
+                        return {k: ensure_4d(v) for k, v in obj.items()}
+                    return obj
+                inputs = ensure_4d(inputs)
                 max_tokens = 256
                 mt = self.params.get("max_new_tokens", {})
                 if isinstance(mt, dict):
@@ -281,8 +329,25 @@ if _HUNYUAN_AVAILABLE:
                         max_tokens = max(32, min(2048, int(mt.get("value", 256))))
                     except (TypeError, ValueError):
                         pass
-                with torch.inference_mode():
-                    generated_ids = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+                try:
+                    with torch.inference_mode():
+                        generated_ids = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+                except Exception as gen_e:
+                    # Helpful debug when processor returns unexpected tensor shapes (common cause: 3D image tensor).
+                    try:
+                        shape_lines = []
+                        for k, v in (inputs or {}).items():
+                            if isinstance(v, torch.Tensor):
+                                shape_lines.append(f"{k}: tensor{tuple(v.shape)} dim={v.dim()} dtype={v.dtype} device={v.device}")
+                            elif isinstance(v, list) and v and all(isinstance(t, torch.Tensor) for t in v):
+                                shape_lines.append(
+                                    f"{k}: list[{len(v)}] " + ", ".join(f"tensor{tuple(t.shape)} dim={t.dim()}" for t in v[:3])
+                                )
+                        if shape_lines:
+                            self.logger.debug("HunyuanOCR inputs summary:\n" + "\n".join(shape_lines))
+                    except Exception:
+                        pass
+                    raise gen_e
                 if "input_ids" in inputs:
                     in_ids = inputs["input_ids"]
                 else:

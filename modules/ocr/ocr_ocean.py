@@ -188,7 +188,18 @@ if _OCEAN_AVAILABLE:
                 trust_remote_code=True,
                 torch_dtype=dtype,
             )
-            self.model.to(self.device)
+            try:
+                self.model.to(self.device)
+            except torch.cuda.OutOfMemoryError:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                self.logger.warning(
+                    "Ocean-OCR: GPU out of memory moving model to %s; falling back to CPU. "
+                    "Use OCR device='CPU' or free GPU memory (e.g. close other models) for faster runs.",
+                    self.device,
+                )
+                self.device = "cpu"
+                self.model.to("cpu")
             self.model.eval()
             if hasattr(self.model, "bind_processor"):
                 # Ocean's OceanAudioProcessor asserts torchaudio backends; we only use image OCR.

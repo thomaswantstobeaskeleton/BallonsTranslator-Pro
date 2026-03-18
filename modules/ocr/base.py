@@ -29,6 +29,47 @@ SOURCE_JUNK_PATTERN = re.compile(
 )
 
 
+# VLM OCR models sometimes wrap the answer with assistant boilerplate (bad for source text).
+# We strip *wrappers* but keep the actual recognized content.
+_VLM_OCR_WRAPPER_PATTERNS = [
+    re.compile(r"^\s*All\s+words\s+in\s+the\s+image\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*All\s+text\s+in\s+the\s+image\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*Extracted\s+text\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*Sure,\s*here\s+is\s+the\s+extracted\s+text\s+from\s+the\s+image\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*Here\s+is\s+the\s+extracted\s+text\s+from\s+the\s+image\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*The\s+text\s+in\s+the\s+image\s+(?:is|reads)\s*:\s*", re.IGNORECASE),
+]
+
+
+def _strip_vlm_ocr_wrappers(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return text or ""
+    t = text.strip()
+    if not t:
+        return ""
+    # Remove leading wrappers (repeat a few times in case model nests them)
+    for _ in range(3):
+        changed = False
+        for pat in _VLM_OCR_WRAPPER_PATTERNS:
+            if pat.search(t):
+                t2 = pat.sub("", t, count=1).strip()
+                if t2 != t:
+                    t = t2
+                    changed = True
+                    break
+        if not changed:
+            break
+    # Strip markdown code fences while keeping inner content
+    if "```" in t:
+        t = re.sub(r"```(?:\w+)?\s*", "", t)
+        t = t.replace("```", "")
+        t = t.strip()
+    # Remove a single layer of surrounding quotes
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'\u201c\u201d\u2018\u2019":
+        t = t[1:-1].strip()
+    return t
+
+
 def _filter_source_junk(text_list: List[str]) -> None:
     """In-place: replace any line that contains known junk with empty string."""
     for i, line in enumerate(text_list):
@@ -92,6 +133,7 @@ def normalize_block_text(blk: TextBlock) -> None:
     blk.text = expanded if expanded else [""]
     blk.text = [normalize_line_breaks(t) for t in blk.text]
     blk.text = [t.replace("\uFFFD", "\u25A1") for t in blk.text]
+    blk.text = [_strip_vlm_ocr_wrappers(t) for t in blk.text]
     _filter_source_junk(blk.text)
 
 
@@ -174,5 +216,23 @@ class OCRBase(BaseModule):
         """Move OCR model back to its configured device. Call before running OCR again after offload_to_cpu."""
         model = getattr(self, "model", None)
         device = getattr(self, "device", None)
-        if model is not None and device is not None and hasattr(model, "to"):
+        if model is None or device is None or not hasattr(model, "to"):
+            return
+        try:
             model.to(device)
+        except Exception as e:
+            if "OutOfMemoryError" in type(e).__name__ or "out of memory" in str(e).lower():
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                try:
+                    model.to("cpu")
+                    self.device = "cpu"
+                    LOGGER.warning(
+                        "OCR restore_to_device ran out of GPU memory; model kept on CPU. "
+                        "Use OCR device='CPU' or free GPU memory to avoid this."
+                    )
+                except Exception:
+                    LOGGER.warning("OCR restore_to_device failed (OOM) and could not move to CPU: %s", e)
+            else:
+                raise

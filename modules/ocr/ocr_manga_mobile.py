@@ -31,6 +31,7 @@ def _post_process(text: str) -> str:
 
 
 def _load_tflite_and_tokenizer(cache_dir: str):
+    """Load TFLite encoder/decoder and tokenizer. Returns (True, None) on success, (False, error_message) on failure."""
     global _interpreter_enc, _interpreter_dec, _tokenizer
     try:
         from utils.model_manager import get_model_manager
@@ -40,20 +41,29 @@ def _load_tflite_and_tokenizer(cache_dir: str):
         dec_path = os.path.join(base, "decoder.tflite")
         tok_path = os.path.join(base, "tokenizer")
         if not os.path.isfile(enc_path) or not os.path.isfile(dec_path):
-            return False
+            return False, (
+                f"Model files not found in {base!r} (encoder.tflite and decoder.tflite required). "
+                "Check that the Hugging Face repo bluolightning/manga-ocr-mobile contains v1_fp16/."
+            )
         try:
             import tflite_runtime.interpreter as tflite
         except ImportError:
-            import tensorflow.lite as tflite
+            try:
+                import tensorflow.lite as tflite
+            except ImportError as e:
+                return False, (
+                    "tflite_runtime and tensorflow are not installed. "
+                    "Install one of: pip install tflite-runtime  (or  pip install tensorflow)"
+                ) + f" — {e}"
         _interpreter_enc = tflite.Interpreter(model_path=enc_path)
         _interpreter_enc.allocate_tensors()
         _interpreter_dec = tflite.Interpreter(model_path=dec_path)
         _interpreter_dec.allocate_tensors()
         from transformers import AutoTokenizer
         _tokenizer = AutoTokenizer.from_pretrained(tok_path)
-        return True
-    except Exception:
-        return False
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 def _run_manga_mobile(img: np.ndarray, interpreter_enc, interpreter_dec, tokenizer) -> str:
@@ -159,17 +169,12 @@ class MangaOCRMobile(OCRBase):
         if self._loaded and _interpreter_enc is not None:
             return
         cache = (self.params.get("cache_dir") or {}).get("value", "") or None
-        try:
-            ok = _load_tflite_and_tokenizer(cache)
-        except Exception as e:
-            raise RuntimeError(
-                "Manga OCR Mobile requires tflite_runtime (or tensorflow), huggingface_hub, and transformers. "
-                "Install: pip install tflite-runtime huggingface_hub transformers"
-            ) from e
+        ok, err = _load_tflite_and_tokenizer(cache)
         if not ok:
+            hint = "Install: pip install tflite-runtime huggingface_hub transformers"
             raise RuntimeError(
-                "Manga OCR Mobile: failed to load TFLite model from bluolightning/manga-ocr-mobile. "
-                "Install: pip install tflite-runtime huggingface_hub transformers"
+                f"Manga OCR Mobile: failed to load TFLite model from bluolightning/manga-ocr-mobile. {hint}"
+                + (f" — {err}" if err else "")
             )
         self._enc = _interpreter_enc
         self._dec = _interpreter_dec

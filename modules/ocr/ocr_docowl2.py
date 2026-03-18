@@ -84,7 +84,8 @@ if _DOCOWL2_AVAILABLE:
             if self.model is not None and self._model_name == model_name:
                 return
             self._model_name = model_name
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, trust_remote_code=True)
+            # Prefer fast tokenizer when available (user preference).
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             use_bf16 = self.params.get("use_bf16", {}).get("value", True)
             dtype = torch.bfloat16 if (use_bf16 and torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()) else torch.float16
             self.model = AutoModel.from_pretrained(

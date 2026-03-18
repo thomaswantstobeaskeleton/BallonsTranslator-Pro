@@ -12,7 +12,7 @@ from .base import OCRBase, register_OCR, DEVICE_SELECTOR, TextBlock
 
 _LIGHTON_AVAILABLE = False
 try:
-    from transformers import pipeline, AutoProcessor, AutoModelForImageTextToText
+    from transformers import pipeline, AutoProcessor, AutoModelForImageTextToText, GenerationConfig
     from PIL import Image
     import torch
     _LIGHTON_AVAILABLE = True
@@ -93,7 +93,7 @@ if _LIGHTON_AVAILABLE:
                     "image-text-to-text",
                     model=model_name,
                     device=self.device if self.device != "cpu" else -1,
-                    torch_dtype=dtype,
+                    dtype=dtype,
                 )
                 self.model = getattr(self.pipe, "model", self.pipe)
             except Exception as e:
@@ -102,21 +102,28 @@ if _LIGHTON_AVAILABLE:
 
         def _load_model_fallback(self, model_name: str, dtype):
             self.processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-            self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype, trust_remote_code=True)
+            self.model = AutoModelForImageTextToText.from_pretrained(
+                model_name, dtype=dtype, trust_remote_code=True
+            )
             self.model.to(self.device)
             self.pipe = None
 
         def _run_one(self, pil_img: "Image.Image") -> str:
             try:
                 if self.pipe is not None:
-                    out = self.pipe(pil_img, max_new_tokens=self._max_tokens())
-                    if isinstance(out, list) and len(out) > 0:
-                        item = out[0]
-                        if isinstance(item, dict) and "generated_text" in item:
-                            return (item["generated_text"] or "").strip()
-                        if isinstance(item, str):
-                            return item.strip()
-                    return ""
+                    # image-text-to-text pipeline requires text (prompt) when model supports chat.
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "image": pil_img},
+                                {"type": "text", "text": "Extract all text from this image."},
+                            ],
+                        }
+                    ]
+                    gen_config = GenerationConfig(max_new_tokens=self._max_tokens())
+                    out = self.pipe(messages, generation_config=gen_config)
+                    return self._normalize_pipeline_output(out)
                 # Fallback: processor + model (chat-style if needed)
                 processor = getattr(self, "processor", None)
                 model = getattr(self, "model", None)
@@ -149,6 +156,29 @@ if _LIGHTON_AVAILABLE:
             except Exception as e:
                 self.logger.warning(f"LightOnOCR failed: {e}")
                 return ""
+
+        def _normalize_pipeline_output(self, out) -> str:
+            """Convert pipeline output (list, dict, nested) to a single string. Never call .strip() on a list."""
+            if out is None:
+                return ""
+            if isinstance(out, str):
+                return out.strip()
+            if not isinstance(out, list) or len(out) == 0:
+                return ""
+            item = out[0]
+            if item is None:
+                return ""
+            if isinstance(item, str):
+                return item.strip()
+            if isinstance(item, list):
+                return " ".join(self._normalize_pipeline_output(x) for x in item if x).strip()
+            if isinstance(item, dict):
+                gen = item.get("generated_text")
+                if gen is not None:
+                    if isinstance(gen, list):
+                        return " ".join(self._normalize_pipeline_output(x) for x in gen if x).strip()
+                    return str(gen).strip()
+            return ""
 
         def _max_tokens(self):
             mt = self.params.get("max_new_tokens", {})
