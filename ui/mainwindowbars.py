@@ -2,7 +2,7 @@ import os.path as osp
 from pathlib import Path
 from typing import List, Union
 
-from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QLineEdit, QCompleter, QComboBox
+from qtpy.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QFileDialog, QLabel, QSizePolicy, QToolBar, QMenu, QSpacerItem, QPushButton, QCheckBox, QToolButton, QMessageBox, QWidget, QScrollArea, QLineEdit, QCompleter, QComboBox, QSpinBox, QDoubleSpinBox
 from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
@@ -963,8 +963,26 @@ class TitleBar(Widget):
                             name = ""
                         if not name:
                             continue
-                        label = f"Settings > {header} > {name}" if header else f"Settings > {name}"
-                        if q_low in label.lower():
+                        # Include current value text in search so numbers (e.g. 60, 4096) are searchable.
+                        value_str = ""
+                        w = getattr(sb, "widget", None)
+                        try:
+                            if isinstance(w, QLineEdit):
+                                value_str = (w.text() or "").strip()
+                            elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                                value_str = str(w.value())
+                            elif isinstance(w, QCheckBox):
+                                value_str = "true" if w.isChecked() else "false"
+                            elif isinstance(w, QComboBox):
+                                value_str = (w.currentText() or "").strip()
+                        except Exception:
+                            value_str = ""
+                        base_label = f"Settings > {header} > {name}" if header else f"Settings > {name}"
+                        label = base_label
+                        if value_str:
+                            label = f"{base_label} = {value_str}"
+                        hay = f"{base_label} {value_str}".lower()
+                        if q_low in hay:
                             self._add_result_item(label, {"type": "config", "idx0": sb.idx0, "idx1": sb.idx1})
                             n_added += 1
                             if n_added >= max_items:
