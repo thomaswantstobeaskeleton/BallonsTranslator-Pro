@@ -250,14 +250,24 @@ def color_difference(rgb1: List, rgb2: List) -> float:
     diff = np.linalg.norm(diff, axis=2) 
     return diff.item()
 
-def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False, enlarge_ratio=2.0, cal_region_rect=False) -> Tuple[np.ndarray, int, List]:
+def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False, enlarge_ratio=2.0, cal_region_rect=False, margin_px: int = 0) -> Tuple[np.ndarray, int, List]:
+    """
+    Extract bubble mask from a crop around ballon_rect.
+    margin_px: extra pixels added on each side to the crop (for shape classification so the full bubble is visible). 0 = no extra margin.
+    """
     WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
+    im_h, im_w = img.shape[:2]
 
     x1, y1, x2, y2 = ballon_rect[0], ballon_rect[1], \
         ballon_rect[2] + ballon_rect[0], ballon_rect[3] + ballon_rect[1]
     if enlarge_ratio > 1:
-        x1, y1, x2, y2 = enlarge_window([x1, y1, x2, y2], img.shape[1], img.shape[0], enlarge_ratio, aspect_ratio=ballon_rect[3] / ballon_rect[2])
+        x1, y1, x2, y2 = enlarge_window([x1, y1, x2, y2], im_w, im_h, enlarge_ratio, aspect_ratio=ballon_rect[3] / ballon_rect[2])
+    if margin_px > 0:
+        x1 = max(0, x1 - margin_px)
+        y1 = max(0, y1 - margin_px)
+        x2 = min(im_w, x2 + margin_px)
+        y2 = min(im_h, y2 + margin_px)
 
     img = img[y1:y2, x1:x2].copy()
 
@@ -329,10 +339,26 @@ def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False
     return ballon_mask, (ballon_mask > 0).sum(), [x1, y1, x2, y2]
 
 
+def mask_centroid_in_crop(mask: np.ndarray) -> Tuple[float, float]:
+    """Return (cx, cy) of the white pixels in crop coordinates. Fallback to crop center if moments fail."""
+    h, w = mask.shape[:2]
+    if w < 1 or h < 1:
+        return w / 2, h / 2
+    if len(mask.shape) > 2:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    M = cv2.moments(binary)
+    if M["m00"] and M["m00"] > 0:
+        cx = M["m10"] / M["m00"]
+        cy = M["m01"] / M["m00"]
+        return float(cx), float(cy)
+    return w / 2, h / 2
+
+
 def classify_bubble_shape_from_mask(mask: np.ndarray) -> str:
     """
     Classify bubble shape from its binary mask using contour analysis (no neural net).
-    Returns one of: round, elongated, narrow, square, diamond, pentagon.
+    Returns one of: round, elongated, narrow, square, diamond, pentagon, bevel, point.
     Used when layout_balloon_shape == 'auto': after optional model (if enabled), then
     contour is used; fallback is the aspect-ratio heuristic.
     """
@@ -358,34 +384,56 @@ def classify_bubble_shape_from_mask(mask: np.ndarray) -> str:
     if rw <= 0 or rh <= 0:
         return "round"
     ar = min(rw, rh) / max(rw, rh)
+    box_area = rw * rh
+    # Very tall and thin -> point (speech tail / pointer)
+    if rh > rw * 2.2:
+        return "point"
     # Tall and thin -> narrow
-    if rh > rw * 1.4:
+    if rh > rw * 1.35:
         return "narrow"
     if rw > rh * 1.4:
         pass  # wide -> possibly elongated
-    # Approximate polygon to get vertex count
+
     peri = cv2.arcLength(main, True)
-    eps = max(0.02 * peri, 1.0)
-    approx = cv2.approxPolyDP(main, eps, True)
-    n_verts = len(approx)
-    if n_verts == 4:
-        # Square vs diamond: use minAreaRect to get oriented bbox; if angle is ~45 deg and ar~1, diamond-like
-        (cx, cy), (mw, mh), angle = cv2.minAreaRect(main)
-        if mw > 0 and mh > 0:
-            mar = min(mw, mh) / max(mw, mh)
-            if mar > 0.85 and (abs(angle) > 20 and abs(angle) < 70 or abs(angle) > 110 and abs(angle) < 160):
-                return "diamond"
-        if ar >= 0.85:
-            return "square"
-        return "elongated"
-    if n_verts == 5:
-        return "pentagon"
-    if n_verts >= 6 or n_verts <= 3:
-        # Smooth / many vertices -> round or oval
-        if ar >= 0.65:
-            return "round"
-        return "elongated"
-    return "round"
+    # Try several approximation levels: tighter (more verts) then looser (fewer verts).
+    # Looser approx can turn a smooth blob into 4–6 verts so we get square/diamond/pentagon.
+    for eps_rel in (0.012, 0.02, 0.04, 0.06):
+        eps = max(eps_rel * peri, 1.0)
+        approx = cv2.approxPolyDP(main, eps, True)
+        n_verts = len(approx)
+        if n_verts == 4:
+            (cx, cy), (mw, mh), angle = cv2.minAreaRect(main)
+            if mw > 0 and mh > 0:
+                mar = min(mw, mh) / max(mw, mh)
+                # Diamond: oriented ~45° and nearly square minimal rect
+                if mar > 0.82 and (15 <= abs(angle) <= 75 or 105 <= abs(angle) <= 165):
+                    return "diamond"
+            # Bevel: near-square but contour has rounded corners (area < box)
+            solidity = area / box_area if box_area > 0 else 1.0
+            if ar >= 0.78 and 0.88 <= solidity < 0.98:
+                return "bevel"
+            # Wide bubbles (rw > rh) should be oval/elongated, not square, unless nearly square
+            if rw > rh * 1.15:
+                return "elongated"
+            if ar >= 0.88:
+                return "square"
+            return "elongated"
+        if n_verts == 5:
+            return "pentagon"
+        if n_verts == 6:
+            # Hexagon: often bevel (rounded square) or elongated
+            if ar >= 0.75:
+                return "bevel"
+            if ar >= 0.55:
+                return "round"
+            return "elongated"
+        # 7+ or 3- verts: smooth blob; try next eps to see if looser gives 4–6
+        if n_verts <= 3:
+            break
+    # Smooth contour (many verts or degenerate): use aspect ratio
+    if ar >= 0.65:
+        return "round"
+    return "elongated"
 
 
 def square_pad_resize(img: np.ndarray, tgt_size: int):

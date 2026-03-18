@@ -684,8 +684,17 @@ def layout_text(
     # if ref_src_lines:
     #     mask = np.ones_like(mask) * 255
 
-    if max_central_width == np.inf:
-        max_central_width = mask.shape[1]
+    # Allow no-bubble path: synthetic rectangular mask from box so line breaking still runs
+    if mask is None or mask.size == 0:
+        if mask_xyxy is not None and len(mask_xyxy) >= 4:
+            mh = max(1, int(mask_xyxy[3]) - int(mask_xyxy[1]))
+            mw = max(1, int(mask_xyxy[2]) - int(mask_xyxy[0]))
+            mask = np.full((mh, mw), 255, dtype=np.uint8)
+        else:
+            return "", [0, 0, 0, 0], start_from_top, (0, 0)
+
+    if max_central_width == np.inf or max_central_width <= 0:
+        max_central_width = float(mask.shape[1])
 
     centroid_x, centroid_y = centroid
     center_x = mask_xyxy[0] + centroid_x
@@ -804,10 +813,11 @@ def layout_text(
     best_adjust_xy = (0, 0)
     best_score = 1e18
 
+    min_line_width = max(16, int(float(getattr(pcfg.module, "layout_min_line_width_px", 80.0) or 80.0)))
     for attempt in range(num_width_attempts):
         words[:] = words_orig[:]
         wl_list[:] = wl_list_orig[:]
-        cur_maxw = max(16, int(maxw * (shrink_per_retry ** attempt)))
+        cur_maxw = max(min_line_width, int(maxw * (shrink_per_retry ** attempt)))
         lines, adjust_xy = _layout_once(cur_maxw)
         if not lines:
             continue

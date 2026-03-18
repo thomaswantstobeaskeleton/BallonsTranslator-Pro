@@ -9,11 +9,12 @@ import numpy as np
 
 from .logger import logger as LOGGER
 
-# Default small, fast models for optional model-assisted judge (image classification).
-# These are lightweight and run quickly; leave empty to use geometric-only judge.
+# Default models for optional model-assisted judge (image classification on bubble crop).
+# ResNet-18: larger but still lightweight (~11.7M params), better accuracy. MobileNets: smaller/faster.
 DEFAULT_JUDGE_MODEL_IDS = [
-    "google/mobilenet_v2_1.0_224",   # ~3.5M params, fast
-    "qualcomm/MobileNet-v3-Small",    # ~2.5M params, very fast
+    "microsoft/resnet-18",             # ~11.7M params, good accuracy, still lightweight
+    "google/mobilenet_v2_1.0_224",    # ~3.5M params, fast
+    "qualcomm/MobileNet-v3-Small",     # ~2.5M params, very fast
 ]
 
 
@@ -23,6 +24,7 @@ def judge_textbox_in_bubble(
     margin_ratio: float = 0.06,
     center_strength: float = 0.7,
     clamp_overflow: bool = True,
+    bubble_center: Optional[Tuple[float, float]] = None,
 ) -> Tuple[float, float, float, float]:
     """
     Suggest a new (x, y, w, h) for the text box so it is closer to the bubble center,
@@ -34,6 +36,8 @@ def judge_textbox_in_bubble(
         margin_ratio: Min margin from bubble edges as fraction of min(bubble_w, bubble_h). e.g. 0.06 = 6%.
         center_strength: 0 = no nudge toward center, 1 = full nudge to center.
         clamp_overflow: If True, shrink box to fit inside (bubble - margin) when it would extend out.
+        bubble_center: Optional (cx, cy) in image coords. When set, nudge toward this point instead of
+            bbox center (use mask centroid for tailed/irregular bubbles so we don't nudge toward empty space).
 
     Returns:
         (new_x, new_y, new_w, new_h). Size is clamped so the box never goes out of the bubble.
@@ -82,8 +86,15 @@ def judge_textbox_in_bubble(
         new_y = max(inner_y1, min(by, max_y))
         return (new_x, new_y, float(bw_box), float(bh_box))
 
-    bubble_cx = (x1 + x2) / 2
-    bubble_cy = (y1 + y2) / 2
+    # Use mask centroid when provided so tailed/irregular bubbles nudge toward actual center, not bbox center.
+    if bubble_center is not None and len(bubble_center) >= 2:
+        bubble_cx, bubble_cy = float(bubble_center[0]), float(bubble_center[1])
+        # Keep center inside inner region so we don't nudge toward a point outside the bubble
+        bubble_cx = max(inner_x1, min(bubble_cx, inner_x2))
+        bubble_cy = max(inner_y1, min(bubble_cy, inner_y2))
+    else:
+        bubble_cx = (x1 + x2) / 2
+        bubble_cy = (y1 + y2) / 2
     box_cx = bx + bw_box / 2
     box_cy = by + bh_box / 2
 

@@ -196,6 +196,8 @@ def imread(imgpath, read_type=cv2.IMREAD_COLOR, max_retry_limit=5, retry_interva
 
 def imwrite(img_path, img, ext='.png', quality=100, jxl_encode_effort=3, webp_lossless=False):
     # cv2 writing is faster than PIL
+    if img is None:
+        raise ValueError("imwrite: image is None (invalid or empty source)")
     suffix = Path(img_path).suffix
     ext = ext.lower()
     assert ext in IMG_EXT

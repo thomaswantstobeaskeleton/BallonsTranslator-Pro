@@ -105,6 +105,8 @@ class FontFormat(Config):
     skew_y: float = 0.0
     # Text box shape: 0 = rectangle, >0 = corner radius in px (rounded rect)
     text_box_corner_radius: float = 0.0
+    # Box outline shape to match balloon: "", "round", "elongated", "narrow", "ellipse", "diamond", "square", "bevel", "pentagon", "point"
+    text_box_shape: str = ""
     # #35: per-character stroke color (list of [r,g,b], one per character; used for text-on-path)
     stroke_rgb_per_char: List = field(default=None)  # optional
 

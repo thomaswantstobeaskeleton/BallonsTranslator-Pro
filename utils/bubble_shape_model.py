@@ -21,8 +21,11 @@ LABEL_TO_SHAPE = {
     "diamond": "diamond",
     "rhombus": "diamond",
     "pentagon": "pentagon",
+    "hexagon": "bevel",
     "triangle": "point",
     "star": "point",
+    "trapezoid": "bevel",
+    "kite": "point",
 }
 
 
@@ -67,12 +70,20 @@ def get_bubble_shape_from_model(
             if crop.shape[2] == 4:
                 crop = crop[:, :, :3]
             pil_img = Image.fromarray(crop).convert("RGB")
+        crop_h, crop_w = crop.shape[0], crop.shape[1]
+        is_wide = crop_w > crop_h * 1.2 if (crop_h and crop_w) else False
         out = pipe(pil_img, top_k=1)
         if not out or not isinstance(out, list) or not out[0]:
             return None
         label = out[0].get("label") or out[0].get("label_str") or ""
         if isinstance(label, str):
             label = label.lower().strip()
-        return LABEL_TO_SHAPE.get(label) or LABEL_TO_SHAPE.get(label.replace(" ", "_")) or None
+        shape = LABEL_TO_SHAPE.get(label) or LABEL_TO_SHAPE.get(label.replace(" ", "_"))
+        if shape is None:
+            return None
+        # Wide crops (oval-like): treat model "square" as elongated so bubbles draw as oval
+        if is_wide and shape == "square":
+            return "elongated"
+        return shape
     except Exception:
         return None
