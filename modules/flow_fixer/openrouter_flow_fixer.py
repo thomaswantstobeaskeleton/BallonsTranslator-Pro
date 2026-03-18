@@ -9,14 +9,16 @@ from utils.logger import logger as LOGGER
 
 from . import BaseFlowFixer, register_flow_fixer
 from .context_builder import (
+    FLOW_FIXER_SYSTEM_MESSAGE,
     RECENT_LINES_KEEP,
+    build_flow_fixer_retry_prompt,
     build_flow_fixer_user_content,
     build_prev_lines_from_entries,
     get_summarize_prompt,
     parse_summary_response,
     should_summarize,
 )
-from .response_parser import parse_flow_fixer_response
+from .response_parser import parse_flow_fixer_response, sanitize_flow_fixer_revisions
 
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
 
@@ -98,18 +100,16 @@ class OpenRouterFlowFixer(BaseFlowFixer):
         _, user_content = build_flow_fixer_user_content(prev_lines, new_translations, use_parts=True)
 
         n_prev, n_new = len(prev_lines), len(new_translations)
-        LOGGER.debug(
-            "Flow fixer (OpenRouter): improve_flow request n_prev=%s n_new=%s new_lines=%s",
-            n_prev,
-            n_new,
-            new_translations[:3] if len(new_translations) > 3 else new_translations,
-        )
         try:
             response = client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": user_content}],
+                messages=[
+                    {"role": "system", "content": FLOW_FIXER_SYSTEM_MESSAGE},
+                    {"role": "user", "content": user_content},
+                ],
                 max_tokens=self.max_tokens,
-                temperature=0.2,
+                temperature=0.1,
+                stop=["</think>"],
             )
         except Exception as e:
             LOGGER.debug("Flow fixer (OpenRouter): request failed: %s", e)
@@ -127,9 +127,36 @@ class OpenRouterFlowFixer(BaseFlowFixer):
             content, n_prev=n_prev, n_new=n_new, log_prefix="Flow fixer (OpenRouter)"
         )
         if data is None:
-            if parse_err and parse_err != "empty response":
-                LOGGER.debug("Flow fixer (OpenRouter): %s", parse_err)
-            return previous_entries, new_translations
+            if content.strip().lower().startswith("</think>") or (
+                parse_err and "reasoning" in (parse_err or "").lower()
+            ):
+                retry_prompt = build_flow_fixer_retry_prompt(prev_lines, new_translations)
+                try:
+                    retry_resp = client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": FLOW_FIXER_SYSTEM_MESSAGE},
+                            {"role": "user", "content": retry_prompt},
+                        ],
+                        max_tokens=self.max_tokens,
+                        temperature=0,
+                        stop=["</think>"],
+                    )
+                    if retry_resp and retry_resp.choices:
+                        content = (retry_resp.choices[0].message.content or "").strip()
+                        if content:
+                            data, parse_err = parse_flow_fixer_response(
+                                content, n_prev=n_prev, n_new=n_new, log_prefix="Flow fixer (OpenRouter)"
+                            )
+                except Exception as e:
+                    LOGGER.debug("Flow fixer (OpenRouter): retry failed: %s", e)
+            if data is None:
+                if parse_err and parse_err != "empty response":
+                    if "reasoning" in (parse_err or "").lower():
+                        LOGGER.info("Flow fixer (OpenRouter): %s", parse_err)
+                    else:
+                        LOGGER.debug("Flow fixer (OpenRouter): %s", parse_err)
+                return previous_entries, new_translations
 
         revised_previous = data.get("revised_previous")
         revised_new = data.get("revised_new")
@@ -142,11 +169,44 @@ class OpenRouterFlowFixer(BaseFlowFixer):
                 adjusted_prev = [str(s).strip() or prev_lines[i] for i, s in enumerate(revised_previous[:n_prev])]
             else:
                 adjusted_prev = [str(s).strip() or prev_lines[i] for i, s in enumerate(revised_previous)]
-                adjusted_prev.extend(prev_lines[len(revised_previous) : n_prev])
+                missing = n_prev - len(adjusted_prev)
+                # When one short, repeat last revision (model often drops last line); else pad with originals
+                if missing == 1 and adjusted_prev:
+                    adjusted_prev.append(adjusted_prev[-1])
+                else:
+                    adjusted_prev.extend(prev_lines[len(revised_previous) : n_prev])
             revised_previous = adjusted_prev
+
+        # Safety gate: keep subtitles aligned with timing/layout; prevent line drift & hallucinations.
+        safe_prev, safe_new, stats = sanitize_flow_fixer_revisions(
+            prev_lines,
+            new_translations,
+            revised_previous if isinstance(revised_previous, list) else None,
+            revised_new if isinstance(revised_new, list) else None,
+            allow_prev_edits_last_n=2,
+        )
+        if stats.get("prev_reverted") or stats.get("new_reverted"):
+            LOGGER.debug(
+                "Flow fixer (OpenRouter): safety gate reverted %d previous, %d new line(s)",
+                int(stats.get("prev_reverted") or 0),
+                int(stats.get("new_reverted") or 0),
+            )
+        if safe_new is not None:
+            revised_new = safe_new
+        if safe_prev is not None:
+            revised_previous = safe_prev
         n_prev_used = int(len(revised_previous)) if isinstance(revised_previous, list) else 0
         n_new_used = int(len(revised_new))
-        LOGGER.debug("Flow fixer (OpenRouter): applied revisions n_prev=%d n_new=%d", n_prev_used, n_new_used)
+        n_prev_changed = sum(
+            1 for i in range(min(len(prev_lines), n_prev_used))
+            if (revised_previous[i] or "").strip() != (prev_lines[i] or "").strip()
+        ) if isinstance(revised_previous, list) else 0
+        n_new_changed = sum(
+            1 for i in range(min(len(new_translations), n_new_used))
+            if (revised_new[i] or "").strip() != (new_translations[i] or "").strip()
+        )
+        if n_prev_changed or n_new_changed:
+            LOGGER.debug("Flow fixer (OpenRouter): revised %d previous, %d new line(s)", n_prev_changed, n_new_changed)
 
         if isinstance(revised_previous, list) and len(revised_previous) == len(prev_lines):
             rev_idx = 0

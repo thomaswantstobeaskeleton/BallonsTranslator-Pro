@@ -21,6 +21,9 @@ class BaseFlowFixer:
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
         Optionally revise previous subtitle entries and the new segment for better flow.
+        Callers must pass all entries/lines needed: previous_entries (full context from
+        earlier frames) and new_translations (all current-frame lines). The model
+        receives every previous line and every new line for each request.
         Return (revised_previous_entries, revised_new_translations). Default: return inputs unchanged.
         """
         return previous_entries, new_translations

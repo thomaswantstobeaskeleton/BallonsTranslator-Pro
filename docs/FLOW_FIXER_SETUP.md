@@ -63,6 +63,46 @@ The **flow fixer** runs a second pass after translation to smooth subtitle flow 
    - **Server URL:** `http://localhost:1234/v1`
    - **Model (local):** the name shown in LM Studio when the server is running (often `local` or the model filename).
 
+**Structured output (recommended):** If LM Studio (or your local server) supports **structured output**, the **app sends the correct JSON Schema automatically** with each request (with the right counts for that request). You usually do **not** need to paste a schema in LM Studio—leave the schema field empty so the request from the app is used.
+
+If LM Studio requires you to paste a schema in the UI (and it must be valid JSON), use the one below. Replace the numbers with your usual **Context lines** (e.g. 20) and 1 for new lines. This is only a fallback; the app still sends the exact schema per request when possible.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "revised_previous": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 20,
+      "maxItems": 20,
+      "description": "One string per previous line, same order."
+    },
+    "revised_new": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "maxItems": 1,
+      "description": "One string per new line, same order."
+    }
+  },
+  "required": ["revised_previous", "revised_new"],
+  "additionalProperties": false
+}
+```
+
+**Note:** The code uses variables `n_prev` and `n_new`; in JSON you must use actual numbers (e.g. 20 and 1). If you use a pasted schema, set the numbers to match your flow fixer **Context lines** and typical new-line count (usually 1).
+
+**LM Studio settings that affect the flow fixer (avoid these causing errors):**
+
+- **Context length** — Must be large enough for the prompt (system + user with 10–20+ subtitle lines). If the model’s context is too small, output can be cut off and you get invalid JSON. Use at least **4096** (or 8192) in the model / server settings.
+- **Max new tokens** — The app sends `max_tokens` (default **512**) in the API request. If LM Studio caps responses below that (e.g. 256), the JSON can be truncated and parsing fails. Set LM Studio’s “Max new tokens” (or equivalent) to **at least 512** so the server can return full responses, or rely on the app’s request (if your LM Studio version honors the API’s `max_tokens`).
+- **Stop sequences** — The app sends `stop=["</think>"]` so the model stops before emitting reasoning. If your model is “think”-style and you have **</think>** in LM Studio’s stop list, that’s good. If the server ignores the API’s stop and the model outputs long `</think>...` before JSON, you’ll see “invalid JSON” or “model returned only reasoning”; use a model that doesn’t lead with reasoning, or ensure the server respects the stop sequence from the request.
+- **Temperature** — The app uses low temperature (0.1, and 0 on retry) for stable JSON. If LM Studio overrides with a higher temperature in the UI, output can be less consistent. Prefer letting the API request control temperature, or set a low value (e.g. 0.1–0.2) in LM Studio when using the flow fixer.
+- **Instruction-following models** — The flow fixer needs **only a JSON object** (no markdown, no `</think>`, no explanation). Models that always wrap output in markdown or emit long reasoning often cause parse errors. Use a model that follows “reply with only JSON” well (e.g. Qwen 2.5, Phi-3, Llama 3.2 instruction-tuned).
+
+If you see **“revised_previous length X (expected Y)”**, **“invalid JSON”**, or **“model returned only reasoning”**, check the points above; the app will still pad/trim and retry where it can, but correct LM Studio (or local server) setup reduces these errors.
+
 ---
 
 ## Recommended local models (flow-only task)
@@ -75,6 +115,29 @@ The **flow fixer** runs a second pass after translation to smooth subtitle flow 
 | **Gemma 2 2B**   | 2B    | ~1.5–2 GB      | Smallest; still usable.  |
 
 Flow fixing is light: the model only rewrites a few lines for continuity. A 2B–3B model is enough; larger models are optional.
+
+---
+
+## LM Studio / local models for main translation (low VRAM)
+
+If you use **LM Studio** (or Ollama) for the **main translator** (not just the flow fixer), small 2B **translation-only** models (e.g. HY MT 1.5 2B) often struggle with:
+
+- **Instruction-following** (JSON output, glossary, “use this term”)
+- **Consistent terminology** and flow
+
+**Better low-VRAM options** (instruction-tuned, same ~2–4 GB VRAM):
+
+| Model (LM Studio / Ollama) | Size  | VRAM (approx) | Notes                          |
+|----------------------------|-------|----------------|--------------------------------|
+| **Qwen2.5 3B Instruct**   | 3B    | ~2–3 GB        | Strong instructions, good CN→EN. |
+| **Phi-3 mini**             | 3.8B  | ~2–4 GB        | Fast, follows prompts well.    |
+| **Llama 3.2 3B Instruct**  | 3B    | ~2–3 GB        | Reliable default.              |
+| **Qwen2.5 1.5B Instruct** | 1.5B  | ~1–2 GB        | Smallest; better than 2B MT-only. |
+| **Gemma 2 2B**             | 2B    | ~1.5–2 GB      | OK; 3B usually better.         |
+
+Use the **exact model name** shown in LM Studio in **Translator** options (and in **Flow fixer → Model (local)** if you use a local flow fixer). For glossary and JSON, 3B instruction models usually beat 2B MT-only models without needing more VRAM.
+
+**Dedicated MT models (Chinese → English):** For best quality at ~4–5 GB VRAM, use **HY-MT1.5-7B** quantized to **Q4** (e.g. GGUF Q4_K_M or GPTQ-Int4). It is built for machine translation and tops WMT/FLORES-style benchmarks; Q4 keeps translation quality close to full precision. See **docs/MT_MODELS_AND_LAYOUT.md** for a sample paragraph of subtitle lines, benchmarks, and quantization notes.
 
 ---
 
