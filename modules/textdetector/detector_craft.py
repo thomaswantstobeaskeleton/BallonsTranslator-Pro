@@ -26,7 +26,7 @@ try:
         v_tuple = (v_tuple + (0,) * 4)[:4]
         if v_tuple >= (4, 5, 4, 62):
             import logging
-            logging.getLogger("BallonTranslator").warning(
+            logging.getLogger("BallonTranslator").debug(
                 "craft_det: craft-text-detector requires opencv-python<4.5.4.62; you have %s. "
                 "Use easyocr_det or mmocr_det, or see docs/OPTIONAL_DEPENDENCIES.md.",
                 cv2.__version__,

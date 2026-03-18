@@ -214,23 +214,55 @@ def preprocess_img(img, detect_size=(1024, 1024), device='cpu', bgr2rgb=True, ha
     if bgr2rgb:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_in, ratio, (dw, dh) = letterbox(img, new_shape=detect_size, auto=False, stride=stride)
+
+    # Optional tensor conversion (torch backend) – keep numpy path for ONNX / OpenCV.
     if to_tensor:
         img_in = img_in.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img_in = np.array([np.ascontiguousarray(img_in)]).astype(np.float32) / 255
-        if to_tensor:
-            img_in = torch.from_numpy(img_in).to(device)
-            if half:
-                img_in = img_in.half()
+        img_in = torch.from_numpy(img_in).to(device)
+        if half:
+            img_in = img_in.half()
+
     # Ensure spatial dimensions are multiples of stride (safeguard for any letterbox edge case)
-    _, _, h, w = img_in.shape
-    pad_h = (stride - h % stride) % stride
-    pad_w = (stride - w % stride) % stride
-    if pad_h or pad_w:
-        img_in = F.pad(img_in, (0, pad_w, 0, pad_h))
-        dw = int(dw) + pad_w
-        dh = int(dh) + pad_h
+    if isinstance(img_in, torch.Tensor):
+        # Accept both 3D (CHW) and 4D (NCHW) tensors
+        if img_in.dim() == 3:
+            img_in = img_in.unsqueeze(0)
+        _, _, h, w = img_in.shape
+        pad_h = (stride - h % stride) % stride
+        pad_w = (stride - w % stride) % stride
+        if pad_h or pad_w:
+            img_in = F.pad(img_in, (0, pad_w, 0, pad_h))
+            dw = int(dw) + pad_w
+            dh = int(dh) + pad_h
+        else:
+            dw, dh = int(dw), int(dh)
     else:
-        dw, dh = int(dw), int(dh)
+        # Numpy path (e.g. ONNX backend). Handle both HWC and NHWC, but do
+        # padding in 2D so we don't depend on torch.nn.functional here.
+        if img_in.ndim == 3:
+            h, w = img_in.shape[:2]
+        elif img_in.ndim == 4:
+            h, w = img_in.shape[-2], img_in.shape[-1]
+        else:
+            # Fallback: try to interpret the last two dims as spatial.
+            h, w = img_in.shape[-2], img_in.shape[-1]
+        pad_h = (stride - h % stride) % stride
+        pad_w = (stride - w % stride) % stride
+        if pad_h or pad_w:
+            img_in = cv2.copyMakeBorder(
+                img_in,
+                0,
+                pad_h,
+                0,
+                pad_w,
+                borderType=cv2.BORDER_CONSTANT,
+                value=0,
+            )
+            dw = int(dw) + pad_w
+            dh = int(dh) + pad_h
+        else:
+            dw, dh = int(dw), int(dh)
     return img_in, ratio, dw, dh
 
 def postprocess_mask(img: Union[torch.Tensor, np.ndarray], thresh=None):
