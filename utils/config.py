@@ -1,4 +1,6 @@
 import json, os, traceback
+import threading
+import time
 import os.path as osp
 import copy
 from typing import Callable, Optional
@@ -228,8 +230,8 @@ class ModuleConfig(Config):
     video_translator_flow_fixer: str = "none"  # none | local_server | openrouter | openai
     video_translator_flow_fixer_context_lines: int = 20  # Max previous subtitle lines sent to flow fixer (1–50). Revisions apply this far back.
     video_translator_flow_fixer_server_url: str = "http://localhost:1234/v1"  # LM Studio default; Ollama: http://localhost:11434/v1
-    video_translator_flow_fixer_model: str = "local"  # Model name for local_server; ignored for openrouter
-    video_translator_flow_fixer_max_tokens: int = 256
+    video_translator_flow_fixer_model: str = ""  # Model name for local_server (required: type exact name for LM Studio/Ollama)
+    video_translator_flow_fixer_max_tokens: int = 512
     video_translator_flow_fixer_timeout: float = 30.0
     # OpenRouter flow fixer (when flow_fixer == "openrouter"): second model for flow only
     video_translator_flow_fixer_openrouter_apikey: str = ""
@@ -699,7 +701,7 @@ def load_config(config_path: str = shared.CONFIG_PATH):
 
     # Create config.json on first run so ZIP users get recommended defaults from config.example.json
     if not osp.exists(shared.CONFIG_PATH):
-        save_config()
+        save_config(force=True)
 
 
 def json_dump_program_config(obj, **kwargs):
@@ -722,12 +724,66 @@ def json_dump_program_config(obj, **kwargs):
     return json.dumps(obj, default=lambda o: _default(o), ensure_ascii=False, **kwargs)
 
 
-def save_config():
-    """Save program config to user config file (config/config.json). Never writes to config.example.json."""
+# --- Debounced config saving (reduces log spam / disk writes) ---
+_CONFIG_SAVE_DEBOUNCE_SEC = 0.6
+_config_save_lock = threading.Lock()
+_config_save_timer: Optional[threading.Timer] = None
+_config_save_last_write_ts: float = 0.0
+_config_save_pending: bool = False
+
+
+def _flush_debounced_config_save():
+    """Timer callback: perform a trailing save if there were pending requests."""
+    with _config_save_lock:
+        global _config_save_timer, _config_save_pending
+        _config_save_timer = None
+        pending = bool(_config_save_pending)
+        _config_save_pending = False
+    if pending:
+        try:
+            save_config(force=True)
+        except Exception:
+            pass
+
+
+def flush_config_save() -> bool:
+    """Force an immediate save if one is pending (e.g., before exit)."""
+    with _config_save_lock:
+        global _config_save_timer, _config_save_pending
+        if _config_save_timer is not None:
+            try:
+                _config_save_timer.cancel()
+            except Exception:
+                pass
+            _config_save_timer = None
+        pending = bool(_config_save_pending)
+        _config_save_pending = False
+    if pending:
+        return bool(save_config(force=True))
+    return False
+
+
+def save_config(force: bool = False):
+    """Save program config to user config file (config/config.json). Never writes to config.example.json.
+
+    When force=False (default), this is debounced to avoid frequent writes when UI changes many settings quickly.
+    """
     global pcfg
     if osp.basename(shared.CONFIG_PATH) == 'config.example.json':
         LOGGER.warning('Refusing to save to config.example.json; user config is config.json (gitignored).')
         return False
+    if not force:
+        now = time.time()
+        with _config_save_lock:
+            global _config_save_timer, _config_save_last_write_ts, _config_save_pending
+            if (now - (_config_save_last_write_ts or 0.0)) < _CONFIG_SAVE_DEBOUNCE_SEC:
+                _config_save_pending = True
+                if _config_save_timer is None:
+                    delay = max(0.05, _CONFIG_SAVE_DEBOUNCE_SEC - (now - (_config_save_last_write_ts or 0.0)))
+                    _config_save_timer = threading.Timer(delay, _flush_debounced_config_save)
+                    _config_save_timer.daemon = True
+                    _config_save_timer.start()
+                return True
     try:
         tmp_save_tgt = shared.CONFIG_PATH + '.tmp'
         with open(tmp_save_tgt, 'w', encoding='utf8') as f:
@@ -739,6 +795,9 @@ def save_config():
 
     os.replace(tmp_save_tgt, shared.CONFIG_PATH)
     LOGGER.info('Config saved')
+    with _config_save_lock:
+        _config_save_last_write_ts = time.time()
+        _config_save_pending = False
     return True
 
 def save_text_styles(raise_exception = False):

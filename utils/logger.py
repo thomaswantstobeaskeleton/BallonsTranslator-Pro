@@ -56,6 +56,41 @@ FORMAT = (
     "[%(levelname2)s] %(module2)s:%(funcName2)s:%(lineno2)s - %(message2)s"
 )
 
+class NoisyThirdPartyFilter(logging.Filter):
+    """Filter out known-noisy third-party log messages (transformers, tensor_parallel, etc.) to reduce console clutter."""
+
+    _SUPPRESS_PATTERNS = (
+        "tie model.shared.weight",
+        "The tied weights mapping",
+        "so we will NOT tie them",
+        "You should update the config with",
+        "to silence this warning",
+        "The following layers were not sharded",
+        "layers were not sharded",
+        "Unrecognized keys in `rope_parameters`",
+        "Unrecognized keys in rope_parameters",
+        "SiglipImageProcessor",
+        "fast processor",
+        "use_fast=False",
+        "slow processor",
+        "breaking change",
+        "checkpoint was saved with a slow processor",
+        "pipelines sequentially on GPU",
+        "maximize efficiency please use a dataset",
+        "Materializing param=",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        for pattern in self._SUPPRESS_PATTERNS:
+            if pattern in msg:
+                return False
+        return True
+
+
 class ColoredLogger(logging.Logger):
 
     def __init__(self, name):
@@ -98,11 +133,29 @@ def setup_logging(logfile_dir: str, max_num_logs=14):
     fh.setLevel(logging.DEBUG)
     logger.addHandler(fh)
 
+    # Suppress noisy third-party warnings (transformers tie_weights, tensor_parallel sharding, etc.)
+    root = logging.getLogger()
+    if not any(isinstance(f, NoisyThirdPartyFilter) for f in root.filters):
+        root.addFilter(NoisyThirdPartyFilter())
+
 
 logging.setLoggerClass(ColoredLogger)
 logger = logging.getLogger('BallonsTranslatorPro')
 logger.setLevel(logging.DEBUG)
 logger.propagate = False
+
+# Silence extremely noisy third-party TP warnings early (some are emitted before setup_logging runs).
+for _name in (
+    "tensor_parallel",
+    "accelerate.tensor_parallel",
+    "megatron.tensor_parallel",
+    "accelerate.big_modeling",
+    "transformers.modeling_utils",
+):
+    try:
+        logging.getLogger(_name).setLevel(logging.ERROR)
+    except Exception:
+        pass
 
 
 def apply_dev_mode_logging(enable: bool) -> None:
