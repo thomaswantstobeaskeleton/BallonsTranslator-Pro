@@ -2,6 +2,8 @@ import re
 import time
 import json
 import traceback
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Type, Tuple
 
 import httpx
@@ -19,6 +21,12 @@ from utils.series_context_store import (
 )
 from .base import BaseTranslator, register_translator
 from .exceptions import CriticalTranslationError
+
+
+_MAX_VIDEO_OCR_CORRECT_CACHE = 256  # dedupe per-frame OCR LLM calls (e.g. static title cards)
+# Video: merged glossary can be 100k+ chars; system prompt must stay bounded for local LLMs.
+_MAX_VIDEO_GLOSSARY_SYSTEM_CHARS = 12000
+_MAX_VIDEO_GLOSSARY_TERMS = 50
 
 
 class InvalidNumTranslations(Exception):
@@ -48,6 +56,12 @@ class TranslationResponse(BaseModel):
 class LLM_API_Translator(BaseTranslator):
     concate_text = False
     cht_require_convert = True
+
+    @staticmethod
+    def _page_key_subtitle_batch_pipeline(page_key: str) -> bool:
+        """Chunked NLP, strict alignment fallback, per-line fixes (video dialog + subtitle file tool)."""
+        pk = page_key or ""
+        return pk.startswith("video_") or pk.startswith("subtitle_file")
     params: Dict = {
         "provider": {
             "type": "selector",
@@ -239,7 +253,18 @@ class LLM_API_Translator(BaseTranslator):
         },
         "max tokens": {
             "value": 4096,
-            "description": "Maximum tokens for the response.",
+            "description": "Maximum tokens for the response (upper bound). Translation requests use a smaller effective cap from batch size so values like 20000 do not slow local servers.",
+        },
+        "enable_reasoning": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Enable model reasoning/thinking when supported. Safe fallback is automatic: if unsupported, request retries without reasoning params.",
+        },
+        "reasoning_effort": {
+            "type": "selector",
+            "options": ["low", "medium", "high"],
+            "value": "medium",
+            "description": "Reasoning effort level when reasoning is enabled. Higher can improve difficult lines but may be slower/costlier.",
         },
         "temperature": {
             "value": 0.1,
@@ -320,12 +345,15 @@ class LLM_API_Translator(BaseTranslator):
         }
         self.token_count = 0
         self.token_count_last = 0
+        self._token_count_lock = threading.Lock()
+        self._client_init_lock = threading.Lock()
         self.current_key_index = 0
         self.last_request_time = 0
         self.request_count_minute = 0
         self.minute_start_time = time.time()
         self.key_usage = {}
         self.client = None
+        self._client_signature = None
         self._logged_lm_studio_default_endpoint = False
         self._translation_context_previous_pages = None
         self._translation_project_glossary = None
@@ -408,32 +436,143 @@ class LLM_API_Translator(BaseTranslator):
         # Log when series context path is active (count only; actual used/corrected terms are logged in _check_glossary_terms_in_translations).
         series_id = (getattr(self, "_translation_series_context_path", None) or "").strip() or (self.get_param_value("series_context_path") or "").strip()
         if series_id and series_glossary:
-            self.logger.info("Translation series context (path=%s): %d glossary terms loaded", series_id, len(series_glossary))
+            n_terms = len(series_glossary)
+            last_key = getattr(self, "_last_series_glossary_log_key", None)
+            cur_key = (series_id, n_terms)
+            if last_key != cur_key:
+                self.logger.info(
+                    "Translation series context (path=%s): %d glossary terms loaded",
+                    series_id,
+                    n_terms,
+                )
+                self._last_series_glossary_log_key = cur_key
+            else:
+                self.logger.debug(
+                    "Translation series context (path=%s): %d glossary terms (same as previous request)",
+                    series_id,
+                    n_terms,
+                )
         if glossary_entries:
             # Section 18: Rosetta-style models get glossary as JSON list for systematic injection
             model_name = (self.override_model or self.model or "").strip()
             if ": " in model_name:
                 model_name = model_name.split(": ", 1)[1]
+            is_video_ctx = self._page_key_subtitle_batch_pipeline(page_key)
+            if is_video_ctx:
+                current_sources = getattr(self, "_video_current_sources", None) or []
+                glossary_entries = self._select_video_glossary_entries(
+                    glossary_entries,
+                    current_sources,
+                    max_terms=_MAX_VIDEO_GLOSSARY_TERMS,
+                )
             if "rosetta" in model_name.lower():
-                gl_list = json.dumps([{"source": s, "target": t} for s, t in glossary_entries], ensure_ascii=False)
+                if is_video_ctx:
+                    budget = _MAX_VIDEO_GLOSSARY_SYSTEM_CHARS - 80
+                    acc: List[Dict[str, str]] = []
+                    for s, t in glossary_entries:
+                        item = {"source": s, "target": t}
+                        trial = json.dumps(acc + [item], ensure_ascii=False)
+                        if len(trial) > budget:
+                            if not acc:
+                                acc.append(item)  # keep at least one term
+                            break
+                        acc.append(item)
+                    gl_list = json.dumps(acc, ensure_ascii=False)
+                else:
+                    gl_list = json.dumps(
+                        [{"source": s, "target": t} for s, t in glossary_entries], ensure_ascii=False
+                    )
                 parts.append(f"\n\nGlossary (use these exact translations when the source term appears):\n{gl_list}")
             else:
                 gl_str = "; ".join(f"{s} -> {t}" for s, t in glossary_entries)
+                if is_video_ctx and len(gl_str) > _MAX_VIDEO_GLOSSARY_SYSTEM_CHARS:
+                    gl_str = gl_str[: _MAX_VIDEO_GLOSSARY_SYSTEM_CHARS - 24].rstrip() + " ... [truncated]"
                 parts.append(f"\n\nUse these exact translations for terms when they appear: {gl_str}")
         series = (self.get_param_value("series_context_prompt") or "").strip()
         if series:
             parts.append(f"\n\nContext: {series}")
         video_glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
         if video_glossary:
-            parts.append(f"\n\nVideo translator context/glossary (use for terminology and consistency):\n{video_glossary}")
+            vg = video_glossary
+            if self._page_key_subtitle_batch_pipeline(page_key) and len(vg) > _MAX_VIDEO_GLOSSARY_SYSTEM_CHARS:
+                vg = vg[: _MAX_VIDEO_GLOSSARY_SYSTEM_CHARS - 24].rstrip() + " ... [truncated]"
+            parts.append(
+                f"\n\nVideo translator context/glossary (use for terminology and consistency):\n{vg}"
+            )
         if page_key.startswith("video_"):
             parts.append(
                 "\nPreserve speaker perspective: when the source or the preceding subtitles are first person (e.g. I'm back, I, my; 我, 俺 in Chinese), "
                 "translate as first person. Use my not his, I not he when the speaker is referring to themselves (e.g. 'Because of his talent' → 'Because of my talent' when the protagonist is speaking). Do not use third person for the speaker."
             )
+            parts.append(
+                "\nMaintain tense continuity with nearby subtitles: do not randomly switch between present and past. "
+                "If surrounding lines are in past narrative (was/were/did), keep past unless the source clearly indicates present; "
+                "if surrounding lines are immediate dialogue in present, keep present."
+            )
+            parts.append(
+                "\nPronoun consistency rule: keep the same speaker viewpoint as recent context. "
+                "Do not switch I/me/my to he/him/his (or vice versa) unless the source explicitly changes subject. "
+                "Resolve omitted subjects from context to avoid ambiguous or wrong pronouns."
+            )
             if not self.get_param_value("video_allow_revised_previous"):
                 parts.append("\nDo not output revised_previous; translate only the current line(s).")
         return "\n".join(parts)
+
+    def _select_video_glossary_entries(
+        self,
+        entries: List[Tuple[str, str]],
+        current_sources: List[str],
+        max_terms: int = _MAX_VIDEO_GLOSSARY_TERMS,
+    ) -> List[Tuple[str, str]]:
+        """
+        For video_* requests, keep glossary compact:
+        - prioritize entries whose source/target appears in current subtitle sources
+        - cap final glossary size to max_terms
+        """
+        if not entries:
+            return []
+        max_terms = max(1, int(max_terms or _MAX_VIDEO_GLOSSARY_TERMS))
+        if len(entries) <= max_terms:
+            return entries
+
+        haystack = " ".join((s or "").strip().lower() for s in (current_sources or []) if (s or "").strip())
+        if not haystack:
+            return entries[:max_terms]
+
+        matched: List[Tuple[str, str]] = []
+        unmatched: List[Tuple[str, str]] = []
+        for src, tgt in entries:
+            s = (src or "").strip().lower()
+            t = (tgt or "").strip().lower()
+            if not s and not t:
+                continue
+            # Ignore single-char tokens for fuzzy matching to reduce accidental hits.
+            s_hit = len(s) >= 2 and s in haystack
+            t_hit = len(t) >= 2 and t in haystack
+            if s_hit or t_hit:
+                matched.append((src, tgt))
+            else:
+                unmatched.append((src, tgt))
+
+        out = matched[:max_terms]
+        if len(out) < max_terms:
+            unmatched_budget = max_terms - len(out)
+            # When nothing in the merged glossary matches current cues, padding to max_terms
+            # with arbitrary series entries wastes prompt tokens (~15–25 tokens/term) and makes
+            # LM Studio's prompt-cache path churn on every slightly different user message.
+            if not matched and haystack:
+                unmatched_budget = min(unmatched_budget, 10)
+            out.extend(unmatched[:unmatched_budget])
+
+        try:
+            if len(entries) > len(out):
+                self.logger.debug(
+                    "Video glossary filter: selected %d/%d terms (%d matched current sources, cap=%d)",
+                    len(out), len(entries), min(len(matched), max_terms), max_terms,
+                )
+        except Exception:
+            pass
+        return out
 
     def _get_effective_glossary_entries(self) -> List[Tuple[str, str]]:
         """Return merged glossary (series + project + translator) for checks."""
@@ -452,16 +591,25 @@ class LLM_API_Translator(BaseTranslator):
             translator_glossary,
         )
 
-    def _wrong_alternatives_for_glossary_term(self, term_tgt: str) -> List[str]:
-        """Return possible wrong translations to replace with term_tgt (heuristics only; no manual list)."""
+    # Video/subtitle: known wrong phrasings for glossary terms (source -> wrong alternatives to replace with glossary target).
+    _VIDEO_GLOSSARY_WRONG_ALTERNATIVES: Dict[str, List[str]] = {
+        "心魔劫": ["mental demons", "mental demon", "inner demons", "battle against the mental demons"],
+    }
+
+    def _wrong_alternatives_for_glossary_term(self, term_tgt: str, term_src: str = "") -> List[str]:
+        """Return possible wrong translations to replace with term_tgt (heuristics + video-specific list)."""
         t = (term_tgt or "").strip()
+        out = []
+        # Video: use known wrong alternatives for common terms (e.g. 心魔劫 -> "heart demon tribulation" vs "mental demons").
+        if term_src and term_src in self._VIDEO_GLOSSARY_WRONG_ALTERNATIVES:
+            out.extend(self._VIDEO_GLOSSARY_WRONG_ALTERNATIVES[term_src])
         if not t:
-            return []
+            return out
         # Heuristic: single-word proper noun often mistranslated as "x province" (e.g. Chuzhou -> chu province)
         if " " not in t and len(t) > 1:
             low = t[0].lower() + t[1:]
-            return [low + " province", t[0] + t[1:].lower() + " province"]
-        return []
+            out.extend([low + " province", t[0] + t[1:].lower() + " province"])
+        return out
 
     # Common 2-word phrases we must not replace (would break the sentence).
     _STOPLIST_2W = frozenset(
@@ -595,9 +743,17 @@ class LLM_API_Translator(BaseTranslator):
         glossary = self._get_effective_glossary_entries()
         if not glossary:
             return
+        page_key = getattr(self, "_current_page_key", None)
+        # Video: merged series glossary can be 1000+ entries; scanning all per cue is slow and redundant
+        # with the capped glossary already injected into the system prompt.
+        if page_key and self._page_key_subtitle_batch_pipeline(str(page_key)):
+            glossary = self._select_video_glossary_entries(
+                glossary, src_list, max_terms=_MAX_VIDEO_GLOSSARY_TERMS
+            )
+            if not glossary:
+                return
         # Process longer source terms first so e.g. 心魔劫 is applied before 心魔 (avoids "mental heart demon tribulation")
         glossary = sorted(glossary, key=lambda x: len((x[0] or "").strip()), reverse=True)
-        page_key = getattr(self, "_current_page_key", None)
         page_suffix = f" (page: {page_key})" if page_key else ""
         for i, (src_text, trans_text) in enumerate(zip(src_list, trans_list)):
             if not src_text or not isinstance(trans_text, str):
@@ -683,9 +839,9 @@ class LLM_API_Translator(BaseTranslator):
                     continue
                 # Use first acceptable target when replacing wrong forms (e.g. "Chu Province | Chuzhou" -> use first)
                 primary_tgt = acceptable[0] if acceptable else tgt_stripped
-                # Try to replace wrong forms: first heuristics (e.g. "x province"), then auto-detect phrase from target shape
+                # Try to replace wrong forms: first heuristics (e.g. "x province"), then video-specific (e.g. 心魔劫), then auto-detect
                 replaced = False
-                for wrong in self._wrong_alternatives_for_glossary_term(primary_tgt):
+                for wrong in self._wrong_alternatives_for_glossary_term(primary_tgt, term_src or ""):
                     if not wrong:
                         continue
                     if wrong.lower() in new_trans.lower():
@@ -760,8 +916,8 @@ class LLM_API_Translator(BaseTranslator):
             return 0
 
     def _initialize_client(self, api_key_to_use: str, provider_override: Optional[str] = None) -> bool:
-        endpoint = self.endpoint
         provider = provider_override or self.provider
+        endpoint = self.endpoint
         if not endpoint:
             if provider == "Google":
                 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -775,33 +931,46 @@ class LLM_API_Translator(BaseTranslator):
                 endpoint = "http://localhost:1234/v1"
 
         proxy = self.proxy
-        timeout = httpx.Timeout(30.0, read=120.0)
-        try:
-            http_client = create_httpx_client(proxy, timeout=timeout)
-        except Exception as e:
-            self.logger.error(
-                f"Failed to initialize proxy '{proxy}': {e}. Proceeding without proxy."
-            )
-            http_client = httpx.Client(timeout=timeout)
+        # Reuse existing client when connection config is unchanged.
+        # Serialize creation so parallel video NLP workers do not double-init or race httpx/OpenAI client.
+        sig = (provider, endpoint, proxy or "", api_key_to_use)
+        lock = getattr(self, "_client_init_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._client_init_lock = lock
+        with lock:
+            if getattr(self, "client", None) is not None and getattr(self, "_client_signature", None) == sig:
+                return True
 
-        masked_key = (
-            api_key_to_use[:4] + "..." + api_key_to_use[-4:]
-            if len(api_key_to_use) > 8
-            else api_key_to_use
-        )
-        self.logger.debug(
-            f"Initializing client for {provider} with key {masked_key} at endpoint {endpoint}"
-        )
+            timeout = httpx.Timeout(30.0, read=120.0)
+            try:
+                http_client = create_httpx_client(proxy, timeout=timeout)
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to initialize proxy '{proxy}': {e}. Proceeding without proxy."
+                )
+                http_client = httpx.Client(timeout=timeout)
 
-        try:
-            self.client = openai.OpenAI(
-                api_key=api_key_to_use, base_url=endpoint, http_client=http_client
+            masked_key = (
+                api_key_to_use[:4] + "..." + api_key_to_use[-4:]
+                if len(api_key_to_use) > 8
+                else api_key_to_use
             )
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to initialize OpenAI client: {e}")
-            self.client = None
-            return False
+            self.logger.debug(
+                f"Initializing client for {provider} with key {masked_key} at endpoint {endpoint}"
+            )
+
+            try:
+                self.client = openai.OpenAI(
+                    api_key=api_key_to_use, base_url=endpoint, http_client=http_client
+                )
+                self._client_signature = sig
+                return True
+            except Exception as e:
+                self.logger.error(f"Failed to initialize OpenAI client: {e}")
+                self.client = None
+                self._client_signature = None
+                return False
 
     def is_deterministic(self) -> bool:
         try:
@@ -841,11 +1010,67 @@ class LLM_API_Translator(BaseTranslator):
         if provider == "OpenAI":
             cfg["frequency_penalty"] = self.frequency_penalty
             cfg["presence_penalty"] = self.presence_penalty
-        max_tok = self.max_tokens
-        if provider == "Google" and max_tok > 8192:
-            max_tok = 8192
-        cfg["max_tokens"] = max_tok
+        # Do not set max_tokens here.
+        # _request_translation() already computes a tighter per-request cap via
+        # _translation_completion_max_tokens(provider, expected_count). Overriding it
+        # with the global user cap (often very high, e.g. 20k) slows local servers.
         return cfg
+
+    def _reasoning_effort(self) -> str:
+        v = (self.get_param_value("reasoning_effort") or "medium").strip().lower()
+        if v not in {"low", "medium", "high"}:
+            return "medium"
+        return v
+
+    def _apply_reasoning_controls(self, api_args: dict, provider: str, model_name: str) -> None:
+        """
+        Add opt-in reasoning controls for providers/models that may support them.
+        These keys are best-effort: callers should retry without them if rejected.
+        """
+        if not bool(self.get_param_value("enable_reasoning")):
+            return
+        effort = self._reasoning_effort()
+        try:
+            if provider in {"OpenAI", "Grok", "OpenRouter", "LLM Studio"}:
+                # Use extra_body passthrough for broad OpenAI SDK compatibility.
+                extra = api_args.get("extra_body")
+                if not isinstance(extra, dict):
+                    extra = {}
+                extra["reasoning"] = {"effort": effort}
+                api_args["extra_body"] = extra
+            if provider == "OpenRouter":
+                # Ask OpenRouter for reasoning-enabled mode when available.
+                extra = api_args.get("extra_body")
+                if not isinstance(extra, dict):
+                    extra = {}
+                extra["include_reasoning"] = True
+                api_args["extra_body"] = extra
+        except Exception:
+            pass
+
+    def _is_reasoning_param_error(self, err: Exception) -> bool:
+        s = str(err).lower()
+        return (
+            "reasoning" in s
+            or "include_reasoning" in s
+            or "unknown argument" in s
+            or "unknown field" in s
+            or "extra inputs are not permitted" in s
+            or "unexpected keyword argument" in s
+        )
+
+    def _strip_reasoning_args(self, api_args: dict) -> dict:
+        clean = dict(api_args or {})
+        extra = clean.get("extra_body")
+        if isinstance(extra, dict):
+            extra = dict(extra)
+            extra.pop("reasoning", None)
+            extra.pop("include_reasoning", None)
+            if extra:
+                clean["extra_body"] = extra
+            else:
+                clean.pop("extra_body", None)
+        return clean
 
     # --- Property getters ---
     @property
@@ -983,6 +1208,174 @@ class LLM_API_Translator(BaseTranslator):
             return True
         return False
 
+    def _line_post_check_fail(self, line: str) -> bool:
+        """True if a single subtitle line fails repetition or target-language ratio (video per-line retry)."""
+        if not self.get_param_value("post_translation_check"):
+            return False
+        if not (line or "").strip():
+            return False
+        try:
+            rep_chars = int(self.get_param_value("post_check_repetition_chars") or 20)
+        except (TypeError, ValueError):
+            rep_chars = 20
+        if self._has_repetition_hallucination([line], rep_chars):
+            return True
+        try:
+            ratio = float(self.get_param_value("post_check_target_ratio") or 0)
+        except (TypeError, ValueError):
+            ratio = 0
+        if ratio <= 0:
+            return False
+        r = self._target_lang_ratio([line])
+        return r < ratio
+
+    def _apply_per_line_post_check_retries(
+        self,
+        src_list: List[str],
+        ordered_translations: List[str],
+        to_lang: str,
+        num_src: int,
+    ) -> List[str]:
+        """
+        For video_* page keys: re-translate only lines that still fail post-check after batch retries.
+        Avoids whole-batch-only recovery when one cue is wrong language or garbled.
+        """
+        if getattr(self, "_inside_per_line_post_check", False):
+            return ordered_translations
+        page_key = getattr(self, "_current_page_key", "") or ""
+        if not self._page_key_subtitle_batch_pipeline(page_key):
+            return ordered_translations
+        if not self.get_param_value("post_translation_check"):
+            return ordered_translations
+        try:
+            max_post = int(self.get_param_value("post_check_max_retries") or 0)
+        except (TypeError, ValueError):
+            max_post = 0
+        if max_post <= 0:
+            return ordered_translations
+
+        max_per_line = 2
+        max_total_calls = min(max(num_src * 2, max_post * 4), 48)
+        total_calls = 0
+        line_retries: dict = {}
+        out = list(ordered_translations)
+
+        for _sweep in range(4):
+            bad = [i for i in range(num_src) if i < len(out) and self._line_post_check_fail(out[i])]
+            if not bad:
+                break
+            for i in bad:
+                if total_calls >= max_total_calls:
+                    return out
+                if line_retries.get(i, 0) >= max_per_line:
+                    continue
+                line_retries[i] = line_retries.get(i, 0) + 1
+                total_calls += 1
+                src_one = src_list[i] if i < len(src_list) else ""
+                self.logger.info(
+                    "Post-check per-line retry for cue %d/%d (video).",
+                    i + 1,
+                    num_src,
+                )
+                time.sleep(self._subrequest_delay())
+                self._inside_per_line_post_check = True
+                try:
+                    new_lines = self._translate_single_item_fallback(
+                        [src_one],
+                        to_lang,
+                        out[i] if i < len(out) else "",
+                    )
+                finally:
+                    self._inside_per_line_post_check = False
+                if new_lines and len(new_lines) >= 1 and (new_lines[0] or "").strip():
+                    while len(out) <= i:
+                        out.append("")
+                    out[i] = new_lines[0]
+        return out
+
+    def _source_has_cjk_jp_kr(self, src: str) -> bool:
+        """True if text contains CJK, Japanese kana, or Korean syllables (common untranslated-echo cases)."""
+        for c in src or "":
+            o = ord(c)
+            if 0x4E00 <= o <= 0x9FFF:
+                return True
+            if 0x3040 <= o <= 0x30FF:
+                return True
+            if 0xAC00 <= o <= 0xD7AF:
+                return True
+        return False
+
+    def _likely_untranslated_echo(self, src: str, trans: str) -> bool:
+        """Model sometimes returns the source line unchanged; re-translate when target should differ."""
+        s = (src or "").strip()
+        t = (trans or "").strip()
+        if not s or not t:
+            return False
+        if s == t and self._source_has_cjk_jp_kr(s):
+            return True
+        return False
+
+    def _apply_video_per_line_quality_fixes(
+        self,
+        src_list: List[str],
+        ordered_translations: List[str],
+        to_lang: str,
+        num_src: int,
+    ) -> List[str]:
+        """
+        For video_*: fix empty translations and obvious source-echo lines with a few per-cue API calls.
+        Runs before per-line post-check retries (which need post_translation_check).
+        """
+        if getattr(self, "_inside_per_line_post_check", False):
+            return ordered_translations
+        page_key = getattr(self, "_current_page_key", "") or ""
+        if not self._page_key_subtitle_batch_pipeline(page_key):
+            return ordered_translations
+        try:
+            from utils.config import pcfg as _pc
+
+            if not bool(
+                getattr(_pc.module, "video_translator_llm_per_line_quality_fix", True)
+            ):
+                return ordered_translations
+        except Exception:
+            pass
+
+        out = list(ordered_translations)
+        max_fixes = min(24, max(4, num_src))
+        fixes = 0
+        for i in range(num_src):
+            if fixes >= max_fixes:
+                break
+            src_one = src_list[i] if i < len(src_list) else ""
+            if not (src_one or "").strip():
+                continue
+            cur = out[i] if i < len(out) else ""
+            need = not (cur or "").strip() or self._likely_untranslated_echo(src_one, cur)
+            if not need:
+                continue
+            fixes += 1
+            self.logger.info(
+                "Video per-line quality fix for cue %d/%d (empty or source-echo).",
+                i + 1,
+                num_src,
+            )
+            time.sleep(self._subrequest_delay())
+            self._inside_per_line_post_check = True
+            try:
+                new_lines = self._translate_single_item_fallback(
+                    [src_one],
+                    to_lang,
+                    cur if (cur or "").strip() else "",
+                )
+            finally:
+                self._inside_per_line_post_check = False
+            if new_lines and len(new_lines) >= 1 and (new_lines[0] or "").strip():
+                while len(out) <= i:
+                    out.append("")
+                out[i] = new_lines[0]
+        return out
+
     def _extract_and_append_glossary(
         self, sources: List[str], translations: List[str]
     ) -> None:
@@ -1048,6 +1441,16 @@ class LLM_API_Translator(BaseTranslator):
     def global_delay(self) -> float:
         return float(self.get_param_value("delay"))
 
+    def _subrequest_delay(self) -> float:
+        """Sleep between rapid follow-up LLM calls (per-line video fix, single-item fallback loop).
+
+        Cloud APIs benefit from ``delay``; a local LM Studio server typically does not, and sleeping
+        here makes video runs feel much slower when many cues need a fix.
+        """
+        if getattr(self, "provider", None) == "LLM Studio":
+            return 0.0
+        return max(0.0, self.global_delay)
+
     def _assemble_prompts(self, queries: List[str], to_lang: str):
         from_lang = self.lang_map.get(self.lang_source, self.lang_source)
 
@@ -1084,7 +1487,13 @@ class LLM_API_Translator(BaseTranslator):
                     if s or t:
                         pairs.append(f"  [{s}] -> [{t}]")
                 if pairs:
-                    ctx_label = "Subtitle context:" if (getattr(self, "_current_page_key", None) or "").startswith("video_") else "Page context:"
+                    ctx_label = (
+                        "Subtitle context:"
+                        if self._page_key_subtitle_batch_pipeline(
+                            (getattr(self, "_current_page_key", None) or "")
+                        )
+                        else "Page context:"
+                    )
                     if trim_mode == "compact":
                         # Keep at most 2 lines per page to stay within context limits
                         if len(pairs) <= 2:
@@ -1094,7 +1503,9 @@ class LLM_API_Translator(BaseTranslator):
                     else:
                         lines.append(ctx_label + "\n" + "\n".join(pairs[:10]))
             if lines:
-                is_video = (getattr(self, "_current_page_key", None) or "").startswith("video_")
+                is_video = self._page_key_subtitle_batch_pipeline(
+                    (getattr(self, "_current_page_key", None) or "")
+                )
                 context_header = (
                     "Previous subtitles (for continuity and flow):\n"
                     if is_video
@@ -1107,6 +1518,20 @@ class LLM_API_Translator(BaseTranslator):
                     max_chars = 2000
                 if max_chars > 0 and len(context_block) > max_chars:
                     summarize = self.get_param_value("summarize_context_when_over_limit")
+                    # Local Qwen 3.5 4B often times out on context summarization requests.
+                    # For video subtitles, prefer deterministic truncation to keep latency stable.
+                    try:
+                        page_key = getattr(self, "_current_page_key", "") or ""
+                        model_name = (getattr(self, "override_model", None) or getattr(self, "model", None) or "").strip().lower()
+                        is_qwen_35_4b = (
+                            "qwen" in model_name
+                            and ("3.5" in model_name or "3_5" in model_name or "3-5" in model_name)
+                            and ("4b" in model_name or "4-b" in model_name or "4 b" in model_name)
+                        )
+                        if self._page_key_subtitle_batch_pipeline(page_key) and is_qwen_35_4b:
+                            summarize = False
+                    except Exception:
+                        pass
                     if summarize:
                         context_block = self._request_context_summary(
                             context_block, max_chars
@@ -1180,7 +1605,7 @@ class LLM_API_Translator(BaseTranslator):
                         results.append(error_placeholder)
                 except Exception:
                     results.append(error_placeholder)
-            time.sleep(max(0, self.global_delay))
+            time.sleep(self._subrequest_delay())
         return results
 
     def _reflection_improve(
@@ -1189,6 +1614,48 @@ class LLM_API_Translator(BaseTranslator):
         """VideoCaptioner-style: ask the model to review and improve translations. Returns improved list or original on failure."""
         if not trans_list or not src_list or len(trans_list) != len(src_list):
             return trans_list
+        provider = self._effective_provider_for_model()
+        use_json_schema = provider == "LLM Studio"
+        # Qwen 3.5 4B (common LM Studio local deployment) frequently emits very verbose
+        # "Thinking Process" during the reviewer step and truncates before valid JSON,
+        # which leads to useless outputs. Skip reflection for this specific model.
+        model_name = (getattr(self, "override_model", None) or getattr(self, "model", None) or "").strip()
+        model_lower = model_name.lower()
+        is_qwen_35_4b = (
+            "qwen" in model_lower
+            and ("3.5" in model_lower or "3_5" in model_lower or "3-5" in model_lower)
+            and ("4b" in model_lower or "4-b" in model_lower or "4 b" in model_lower)
+        )
+        allow_qwen_aux = False
+        try:
+            allow_qwen_aux = bool(getattr(_pc.module, "video_translator_qwen35_allow_aux_passes", False))
+        except Exception:
+            allow_qwen_aux = False
+        if use_json_schema and is_qwen_35_4b and (not allow_qwen_aux):
+            self.logger.info(
+                "Skipping subtitle reflection for %s on LLM Studio (Qwen 3.5 4B verbose reviewer issue).",
+                model_name or "<unknown model>",
+            )
+            return trans_list
+
+        def _reflection_response_format(n: int) -> dict:
+            """
+            Build response_format for reflection JSON.
+
+            LM Studio rejects `{"type":"json_object"}` and only accepts `json_schema` or `text`,
+            so we generate a per-line key schema for the expected {"1": "...", ...} object.
+            """
+            if use_json_schema:
+                props = {str(i): {"type": "string"} for i in range(1, n + 1)}
+                schema = {
+                    "type": "object",
+                    "properties": props,
+                    "required": list(props.keys()),
+                    "additionalProperties": False,
+                }
+                return {"type": "json_schema", "json_schema": {"schema": schema}}
+            # OpenAI-compatible providers
+            return {"type": "json_object"}
         pairs = "\n".join(
             f"{i + 1}. Source: {s}\n   Current: {t}"
             for i, (s, t) in enumerate(zip(src_list, trans_list))
@@ -1196,6 +1663,10 @@ class LLM_API_Translator(BaseTranslator):
         system = (
             f"You are a translation reviewer for subtitles. Improve the following translations into {to_lang} for naturalness and accuracy. "
             "HARD RULES: do not add new facts/plot; do not invent names; keep each line aligned to its source snippet (no merging/splitting). "
+            f"Each output value must be written ONLY in {to_lang} — never copy the Source line untranslated or leave it in the source language. "
+            "Do not replace a translation with the source text; always produce the subtitle line in the target language. "
+            "Never output bilingual lines (no \"Source:\" / \"Current:\" labels in values); never paste the Source field into an output value. "
+            "Do NOT output any reasoning, analysis, thinking process, or chain-of-thought. "
             "Return ONLY a single JSON object with keys \"1\", \"2\", ... (as strings) and the improved translation text for each key. "
             "No extra keys. No other text."
         )
@@ -1205,13 +1676,174 @@ class LLM_API_Translator(BaseTranslator):
             user += f"\n\nContext/glossary to respect:\n{glossary}"
         try:
             self._respect_delay()
-            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            # Keep reflection compact to avoid long reasoning loops on some local models.
+            # Typical subtitle lines are short; this budget scales with item count but stays bounded.
+            reflection_max_tokens = max(256, min(1200, 120 + len(trans_list) * 80))
+            raw = self.request_custom_completion(
+                system,
+                user,
+                max_tokens=reflection_max_tokens,
+                response_format=_reflection_response_format(len(trans_list)),
+            )
             if not raw or not raw.strip():
                 return trans_list
-            start, end = raw.find("{"), raw.rfind("}")
-            if start == -1 or end <= start:
+
+            def _strip_think_tags(content: str) -> str:
+                """Remove <think>...</think> so we can parse JSON after reasoning."""
+                if not content or "</think>" not in content:
+                    return content
+                parts = re.split(r"</think>", content, flags=re.IGNORECASE)
+                return parts[-1].strip() if parts else content
+
+            def _strip_reflection_reasoning_preamble(content: str) -> str:
+                """Drop leading 'Thinking Process' / analysis blobs so { ... } can be parsed."""
+                t = (content or "").strip()
+                if not t:
+                    return t
+                head = t[:1200].lower()
+                if (
+                    ("thinking process" in head)
+                    or ("analyze the request" in head)
+                    or ("**analyze" in head)
+                ):
+                    i = t.find("{")
+                    if i >= 0:
+                        return t[i:].strip()
+                return t
+
+            def _find_balanced_braces(s: str, start: int):
+                """Return (start, end) for next balanced { ... } from start, or None."""
+                if not s:
+                    return None
+                i = s.find("{", start)
+                if i < 0:
+                    return None
+                depth = 0
+                for j in range(i, len(s)):
+                    if s[j] == "{":
+                        depth += 1
+                    elif s[j] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            return (i, j + 1)
+                return None
+
+            def _try_fix_json(s: str) -> str:
+                """Try to fix common JSON issues so json.loads() succeeds."""
+                s = (s or "").strip()
+                if not s:
+                    return s
+                s = re.sub(r",\s*([}\]])", r"\1", s)
+                for _ in range(5):
+                    prev = s
+                    s = re.sub(r"([}\]])[\s\n\r]*(?=\"[a-zA-Z_])", r"\1,", s)
+                    if s == prev:
+                        break
+                s = re.sub(r'"([^"\\]*(?:\\.[^"\\]*)*)"\s+"', r'"\1", "', s)
+                return s
+
+            def _parse_reflection_json(raw_content: str):
+                """Extract and parse the last balanced JSON object (handles <think> leakage)."""
+                content = (raw_content or "").strip()
+                if not content:
+                    return None
+                content = _strip_reflection_reasoning_preamble(content)
+                content_no_think = _strip_think_tags(content)
+                candidates = []
+                if content_no_think and content_no_think != content:
+                    candidates.append(content_no_think)
+                candidates.append(content)
+                # From each candidate, also try the last balanced { ... } blocks
+                for src in list(candidates):
+                    if not src:
+                        continue
+                    pos = 0
+                    spans = []
+                    while True:
+                        span = _find_balanced_braces(src, pos)
+                        if not span:
+                            break
+                        spans.append(span)
+                        pos = span[1]
+                    if spans:
+                        # Usually the final answer is the last JSON object.
+                        for (st, en) in spans[-3:]:
+                            candidates.append(src[st:en])
+
+                last_error = None
+                for cand in candidates:
+                    if not cand or "{" not in cand or "}" not in cand:
+                        continue
+                    for attempt in (cand, _try_fix_json(cand)):
+                        if not attempt:
+                            continue
+                        try:
+                            data_parsed = json.loads(attempt)
+                            if isinstance(data_parsed, dict):
+                                return data_parsed
+                        except Exception as e:
+                            last_error = e
+                            continue
+                if last_error:
+                    self.logger.debug("Reflection JSON parse failed after robust extraction: %s", last_error)
+                return None
+
+            data = _parse_reflection_json(raw)
+            if not isinstance(data, dict):
+                # Local models (e.g. Qwen 3.5 4B) often emit long "Thinking Process" and burn the whole
+                # budget before '{'. Strict retry must NOT inherit reflection_max_tokens (e.g. 256 for 1 line).
+                low = (raw or "").lower()
+                raw_s = raw or ""
+                should_strict_retry = (
+                    ("thinking process" in low)
+                    or ("analyze the request" in low)
+                    or ("final decision" in low)
+                    or ("chain-of-thought" in low)
+                    or ("**analyze" in low)
+                    or ("{" not in raw_s)
+                )
+                if should_strict_retry:
+                    # Qwen-style models may emit long "Thinking Process" first; need headroom for JSON after.
+                    # Do NOT prefix lines as `1. "..."` when the subtitle itself starts with "1." (ambiguous → rambling).
+                    strict_max = max(1024, min(2048, 240 + len(trans_list) * 180))
+                    strict_system = (
+                        f"You output one JSON object only. First character must be {{. "
+                        f"Keys \"1\",\"2\",... = improved subtitle in {to_lang} only. "
+                        f"No Thinking, no markdown, no text before {{."
+                    )
+                    strict_blocks = "\n\n".join(
+                        f'=== Line {i + 1} (JSON key "{i + 1}") ===\n{t}'
+                        for i, t in enumerate(trans_list)
+                    )
+                    strict_user = (
+                        f"Polish each subtitle below for natural {to_lang}. "
+                        f'Respond with exactly one JSON object like {{"1":"...","2":"..."}} matching the line count.\n\n'
+                        f"{strict_blocks}"
+                    )
+                    json_mode = _reflection_response_format(len(trans_list))
+                    strict_raw = self.request_custom_completion(
+                        strict_system,
+                        strict_user,
+                        max_tokens=strict_max,
+                        temperature=0.0,
+                        response_format=json_mode,
+                    )
+                    if strict_raw and strict_raw.strip():
+                        data = _parse_reflection_json(strict_raw)
+                if not isinstance(data, dict) and len(trans_list) == 1:
+                    # Last resort: single-line micro-prompt (some chat templates ignore long system text).
+                    micro = self.request_custom_completion(
+                        'Return only JSON: {"1":"<string>"}. No other words.',
+                        f"Improve this subtitle in {to_lang} (natural, accurate). Subtitle text:\n{trans_list[0]}",
+                        max_tokens=768,
+                        temperature=0.0,
+                        response_format=_reflection_response_format(1),
+                    )
+                    if micro and micro.strip():
+                        data = _parse_reflection_json(micro)
+            if not isinstance(data, dict):
                 return trans_list
-            data = json.loads(raw[start : end + 1])
+
             improved = []
             for i in range(1, len(trans_list) + 1):
                 key = str(i)
@@ -1231,9 +1863,47 @@ class LLM_API_Translator(BaseTranslator):
         """Correct OCR output (typos, punctuation, spacing) via LLM. Returns corrected list or original on failure. Used by video translator when Correct OCR with LLM is on."""
         if not texts:
             return texts
+        # LM Studio + Qwen 3.5 4B is known to emit long "Thinking Process" text for this OCR
+        # correction prompt and frequently never reaches valid JSON in time. Skip correction here;
+        # translation stage already has safeguards and this avoids repeated stalls.
+        try:
+            provider = self._effective_provider_for_model()
+            model_name = (getattr(self, "override_model", None) or getattr(self, "model", None) or "").strip().lower()
+            is_qwen_35_4b = (
+                "qwen" in model_name
+                and ("3.5" in model_name or "3_5" in model_name or "3-5" in model_name)
+                and ("4b" in model_name or "4-b" in model_name or "4 b" in model_name)
+            )
+            allow_qwen_aux = bool(getattr(_pc.module, "video_translator_qwen35_allow_aux_passes", False))
+            if provider == "LLM Studio" and is_qwen_35_4b and (not allow_qwen_aux):
+                # Video calls this once per subtitle frame; log once per session, not per frame.
+                if not getattr(self, "_skip_ocr_correct_qwen_lmstudio_logged", False):
+                    setattr(self, "_skip_ocr_correct_qwen_lmstudio_logged", True)
+                    self.logger.info(
+                        "Skipping OCR correction for %s on LLM Studio (verbose thinking / JSON issues). "
+                        "Turn off 'Correct OCR with LLM' in translator options to avoid this check each frame.",
+                        model_name or "<unknown model>",
+                    )
+                return texts
+        except Exception:
+            pass
         lang = (lang_hint or self.lang_map.get(self.lang_source, self.lang_source) or "the source language").strip()
         glossary = (getattr(self, "_video_glossary_hint", None) or "").strip()
         numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+        # Video translator calls this once per frame; identical OCR (e.g. opening 备案号 card) would
+        # hammer the local LLM. Reuse result when inputs match.
+        cache_key = (tuple(texts), lang, glossary)
+        ocr_cache = getattr(self, "_video_ocr_correct_cache", None)
+        ocr_order = getattr(self, "_video_ocr_correct_cache_order", None)
+        if ocr_cache is None:
+            ocr_cache = {}
+            ocr_order = []
+            self._video_ocr_correct_cache = ocr_cache
+            self._video_ocr_correct_cache_order = ocr_order
+        cached_corr = ocr_cache.get(cache_key)
+        if cached_corr is not None:
+            return list(cached_corr)
+
         system = (
             f"You are an OCR corrector for subtitles/text bubbles. The following lines are raw OCR output (possibly {lang}). "
             "Fix typos, spacing, and obvious character confusions. Preserve meaning and do not translate. "
@@ -1245,15 +1915,117 @@ class LLM_API_Translator(BaseTranslator):
         user = f"Correct these OCR lines:\n\n{numbered}"
         if glossary:
             user += f"\n\nUse the following as reference (terminology, names, context):\n{glossary}"
+
+        def _strip_think_tags(content: str) -> str:
+            """Remove <think>...</think> so we can parse JSON after reasoning."""
+            if not content or "</think>" not in content:
+                return content
+            # Use last </think> so we get the final answer after any nested think
+            parts = re.split(r"</think>", content, flags=re.IGNORECASE)
+            return parts[-1].strip() if parts else content
+
+        def _find_balanced_braces(s: str, start: int) -> Optional[Tuple[int, int]]:
+            """Return (start, end) for next balanced { ... } from start, or None."""
+            i = s.find("{", start)
+            if i < 0:
+                return None
+            depth = 0
+            for j in range(i, len(s)):
+                if s[j] == "{":
+                    depth += 1
+                elif s[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return (i, j + 1)
+            return None
+
+        def _try_fix_json(s: str) -> str:
+            """Try to fix common JSON issues to improve parsing success."""
+            s = (s or "").strip()
+            if not s:
+                return s
+            # Remove trailing comma before ] or }
+            s = re.sub(r",\s*([}\]])", r"\1", s)
+            # Add missing comma after } or ] before a following key
+            for _ in range(5):
+                prev = s
+                s = re.sub(r"([}\]])[\s\n\r]*(?=\"[a-zA-Z_])", r"\1,", s)
+                if s == prev:
+                    break
+            # Fix adjacent quoted strings (rare but happens): "a" "b" -> "a", "b"
+            s = re.sub(r'"([^"\\]*(?:\\.[^"\\]*)*)"\s+"', r'"\1", "', s)
+            return s
+
+        def _extract_json_object_candidates(content: str) -> List[str]:
+            """Extract candidate JSON object strings (handles <think> leakage and extra text)."""
+            candidates: List[str] = []
+            content = (content or "").strip()
+            if not content:
+                return candidates
+
+            content_no_think = _strip_think_tags(content)
+            # Prefer content after think so we don't parse reasoning as JSON
+            if content_no_think and content_no_think != content:
+                candidates.append(content_no_think)
+            candidates.append(content)
+
+            # Markdown code block
+            for src in (content_no_think, content):
+                if not src:
+                    continue
+                m = re.search(r"```(?:json)?\s*([\s\S]*?)```", src)
+                if m:
+                    candidates.append(m.group(1).strip())
+
+            # Balanced braces: collect all top-level { ... } blocks and keep the last ones.
+            # This avoids "Extra data" when the model outputs multiple JSON objects.
+            for src in (content, content_no_think):
+                if not src:
+                    continue
+                pos = 0
+                spans: List[Tuple[int, int]] = []
+                while True:
+                    span = _find_balanced_braces(src, pos)
+                    if not span:
+                        break
+                    spans.append(span)
+                    pos = span[1]
+                if spans:
+                    # Prefer the last few blocks (usually the final answer)
+                    for (st, en) in spans[-3:]:
+                        candidates.append(src[st:en])
+
+            return candidates
+
+        def _parse_single_json_object(raw_content: str) -> Optional[dict]:
+            """Parse a single JSON object from raw model output, tolerating <think> and minor JSON issues."""
+            candidates = _extract_json_object_candidates(raw_content)
+            last_error: Optional[Exception] = None
+            for raw in candidates:
+                for attempt in (raw, _try_fix_json(raw)):
+                    if not attempt:
+                        continue
+                    try:
+                        data = json.loads(attempt)
+                        if isinstance(data, dict):
+                            return data
+                    except Exception as e:
+                        last_error = e
+                        continue
+            if last_error:
+                self.logger.debug("OCR JSON parse failed after robust extraction: %s", last_error)
+            return None
+
         try:
             self._respect_delay()
-            raw = self.request_custom_completion(system, user, max_tokens=4096)
+            raw = self.request_custom_completion(system, user, max_tokens=768)
             if not raw or not raw.strip():
                 return texts
-            start, end = raw.find("{"), raw.rfind("}")
-            if start == -1 or end <= start:
+
+            data = _parse_single_json_object(raw)
+            if not isinstance(data, dict):
                 return texts
-            data = json.loads(raw[start : end + 1])
+
             corrected = []
             for i in range(1, len(texts) + 1):
                 key = str(i)
@@ -1262,6 +2034,13 @@ class LLM_API_Translator(BaseTranslator):
                     corrected.append(val.strip())
                 else:
                     corrected.append(texts[i - 1])
+            tup = tuple(corrected)
+            if cache_key not in ocr_cache:
+                ocr_order.append(cache_key)
+                while len(ocr_order) > _MAX_VIDEO_OCR_CORRECT_CACHE:
+                    old = ocr_order.pop(0)
+                    ocr_cache.pop(old, None)
+            ocr_cache[cache_key] = tup
             return corrected
         except Exception as e:
             self.logger.debug("OCR correction failed (using original): %s", e)
@@ -1705,7 +2484,11 @@ class LLM_API_Translator(BaseTranslator):
         return None
 
     def _request_raw_completion(
-        self, messages: List[dict], max_tokens: int = 1024
+        self,
+        messages: List[dict],
+        max_tokens: int = 1024,
+        temperature: Optional[float] = None,
+        response_format: Optional[dict] = None,
     ) -> Optional[str]:
         """Perform a single chat completion without JSON response format. Returns content or None."""
         model_name = self.override_model or self.model
@@ -1714,14 +2497,42 @@ class LLM_API_Translator(BaseTranslator):
         api_args = {
             "model": model_name,
             "messages": messages,
-            "temperature": 0.2,
+            "temperature": 0.2 if temperature is None else float(temperature),
             "max_tokens": max_tokens,
         }
+        provider = self._effective_provider_for_model()
+        self._apply_reasoning_controls(api_args, provider, model_name)
+        if response_format is not None:
+            api_args["response_format"] = response_format
         try:
             completion = self.client.chat.completions.create(**api_args)
         except Exception as e:
-            self.logger.warning(f"Context summary request failed: {e}")
-            return None
+            # LM Studio / some endpoints reject json_object mode; retry once without it.
+            if response_format is not None and "response_format" in api_args:
+                self.logger.debug(
+                    "Chat completion with response_format failed (%s); retrying without it.",
+                    e,
+                )
+                api_args.pop("response_format", None)
+                try:
+                    completion = self.client.chat.completions.create(**api_args)
+                except Exception as e2:
+                    self.logger.warning(f"Context summary request failed: {e2}")
+                    return None
+            elif self._is_reasoning_param_error(e):
+                self.logger.debug(
+                    "Chat completion reasoning params unsupported (%s); retrying without reasoning params.",
+                    e,
+                )
+                api_args = self._strip_reasoning_args(api_args)
+                try:
+                    completion = self.client.chat.completions.create(**api_args)
+                except Exception as e2:
+                    self.logger.warning(f"Context summary request failed: {e2}")
+                    return None
+            else:
+                self.logger.warning(f"Context summary request failed: {e}")
+                return None
         if completion is None:
             return None
         if isinstance(completion, str):
@@ -1735,7 +2546,12 @@ class LLM_API_Translator(BaseTranslator):
         return None
 
     def request_custom_completion(
-        self, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: Optional[float] = None,
+        response_format: Optional[dict] = None,
     ) -> Optional[str]:
         """
         One-off completion with custom system and user prompts (e.g. for ensemble judge).
@@ -1753,7 +2569,12 @@ class LLM_API_Translator(BaseTranslator):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return self._request_raw_completion(messages, max_tokens=max_tokens)
+        return self._request_raw_completion(
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            response_format=response_format,
+        )
 
     def _request_context_summary(self, long_context: str, max_chars: int) -> str:
         """Ask the model to summarize long_context to under max_chars; on failure, truncate."""
@@ -1787,6 +2608,11 @@ class LLM_API_Translator(BaseTranslator):
 
     def _include_page_image_enabled(self) -> bool:
         """True only if include_page_image is explicitly enabled. Handles bool, str, and missing param."""
+        # Video frames as base64 + vision tokens can add 10k+ prompt tokens per request; OCR text
+        # is already in the user JSON. Ignore the checkbox for video_* so local LLMs stay fast.
+        page_key = getattr(self, "_current_page_key", None) or ""
+        if self._page_key_subtitle_batch_pipeline(page_key):
+            return False
         try:
             if not hasattr(self, "params") or self.params is None or "include_page_image" not in self.params:
                 return False
@@ -1804,6 +2630,29 @@ class LLM_API_Translator(BaseTranslator):
             if s in ("false", "0", "no", "off", ""):
                 return False
         return False
+
+    def _translation_completion_max_tokens(
+        self, provider: str, expected_count: Optional[int]
+    ) -> int:
+        """Upper bound for translation JSON completions.
+
+        Users often set 'max tokens' very high (e.g. 20k) for reasoning or long manga pages.
+        For subtitle-sized JSON, that is unnecessary; LM Studio / llama.cpp may also behave
+        worse with huge max_tokens. We still respect a lower user cap if they set one.
+        """
+        try:
+            user_cap = max(64, int(self.max_tokens))
+        except (TypeError, ValueError):
+            user_cap = 4096
+        n = max(1, int(expected_count or 1))
+        page_key = getattr(self, "_current_page_key", "") or ""
+        is_video = self._page_key_subtitle_batch_pipeline(page_key)
+        # JSON wrapper, braces, optional revised_previous array (video).
+        overhead = 220 if is_video else 140
+        per_line = 200 if provider == "LLM Studio" else 320
+        computed = overhead + n * per_line
+        computed = max(256, min(computed, 12000))
+        return min(user_cap, computed)
 
     def _build_user_content_with_optional_image(self, prompt: str):
         """Build user message content: plain text or text + page image when include_page_image is on."""
@@ -1874,9 +2723,29 @@ class LLM_API_Translator(BaseTranslator):
             "messages": messages,
             "temperature": self.temperature,
             "top_p": self.top_p,
-            "max_tokens": self.max_tokens,
+            "max_tokens": self._translation_completion_max_tokens(provider, expected_count),
         }
         api_args.update(self._build_generation_config(provider, model_name))
+        self._apply_reasoning_controls(api_args, provider, model_name)
+        try:
+            prompt_chars = len(str(messages[0].get("content") or "")) + len(str(messages[1].get("content") or ""))
+        except Exception:
+            prompt_chars = -1
+        self.logger.debug(
+            "Translation request: provider=%s model=%s expected_count=%s max_tokens=%s prompt_chars=%s reasoning=%s",
+            provider,
+            model_name,
+            int(expected_count or 0),
+            int(api_args.get("max_tokens", 0) or 0),
+            int(prompt_chars),
+            bool(
+                isinstance(api_args.get("extra_body"), dict)
+                and (
+                    "reasoning" in api_args.get("extra_body", {})
+                    or "include_reasoning" in api_args.get("extra_body", {})
+                )
+            ),
+        )
 
         # Section 18: OpenRouter reasoning models may need higher max_tokens
         if provider == "OpenRouter":
@@ -1942,6 +2811,16 @@ class LLM_API_Translator(BaseTranslator):
                     f"Model does not support json_object response_format. Retrying without it."
                 )
                 api_args = {k: v for k, v in api_args.items() if k != "response_format"}
+                try:
+                    completion = self.client.chat.completions.create(**api_args)
+                except Exception as e2:
+                    self.logger.error(f"API request failed: {e2}")
+                    raise
+            elif self._is_reasoning_param_error(e):
+                self.logger.warning(
+                    "Reasoning params are not supported by this model/provider. Retrying without reasoning params."
+                )
+                api_args = self._strip_reasoning_args(api_args)
                 try:
                     completion = self.client.chat.completions.create(**api_args)
                 except Exception as e2:
@@ -2143,9 +3022,15 @@ class LLM_API_Translator(BaseTranslator):
                     raise e
         # (no else: when try succeeds we keep validated_response and fall through to return it)
 
+        lock = getattr(self, "_token_count_lock", None)
         if hasattr(completion, "usage") and completion.usage:
-            self.token_count += completion.usage.total_tokens
-            self.token_count_last = completion.usage.total_tokens
+            if lock is not None:
+                with lock:
+                    self.token_count += completion.usage.total_tokens
+                    self.token_count_last = completion.usage.total_tokens
+            else:
+                self.token_count += completion.usage.total_tokens
+                self.token_count_last = completion.usage.total_tokens
         else:
             self.token_count_last = 0
 
@@ -2155,6 +3040,47 @@ class LLM_API_Translator(BaseTranslator):
         if not src_list:
             return []
         setattr(self, "_last_revised_previous", None)
+
+        page_key = getattr(self, "_current_page_key", "") or ""
+        is_video_page = self._page_key_subtitle_batch_pipeline(page_key)
+        try:
+            chunk_sz = int(getattr(self, "_video_nlp_chunk_size", 0) or 0)
+        except (TypeError, ValueError):
+            chunk_sz = 0
+        try:
+            max_workers = int(getattr(self, "_video_nlp_max_workers", 1) or 1)
+        except (TypeError, ValueError):
+            max_workers = 1
+        max_workers = max(1, max_workers)
+
+        # VideoCaptioner-style: many cues → multiple API batches; optional parallel requests (translation only).
+        if is_video_page and chunk_sz > 0 and len(src_list) > chunk_sz:
+            chunks = [src_list[i : i + chunk_sz] for i in range(0, len(src_list), chunk_sz)]
+            n_chunk = len(chunks)
+            use_parallel = max_workers > 1 and n_chunk > 1
+            if use_parallel:
+                self.logger.info(
+                    "Video NLP: %d snippets → %d API chunk(s), up to %d parallel worker(s).",
+                    len(src_list),
+                    n_chunk,
+                    min(max_workers, n_chunk),
+                )
+                fut_to_idx = {}
+                with ThreadPoolExecutor(max_workers=min(max_workers, n_chunk)) as ex:
+                    for idx, ch in enumerate(chunks):
+                        fut = ex.submit(self._translate, ch)
+                        fut_to_idx[fut] = idx
+                results_by_idx = {}
+                for fut in as_completed(fut_to_idx):
+                    results_by_idx[fut_to_idx[fut]] = fut.result()
+                merged: List[str] = []
+                for idx in range(n_chunk):
+                    merged.extend(results_by_idx[idx])
+                return merged
+            merged_seq: List[str] = []
+            for ch in chunks:
+                merged_seq.extend(self._translate(ch))
+            return merged_seq
 
         RETRYABLE_EXCEPTIONS = (
             openai.RateLimitError,
@@ -2201,6 +3127,10 @@ class LLM_API_Translator(BaseTranslator):
                     expected_ids = set(range(1, num_src + 1))
                     ids_ok = (not duplicates) and expected_ids.issubset(id_set)
                     count_ok = (got == num_src)
+                    # For single-line subtitle batches, some models occasionally append one extra item
+                    # while still returning a correct id=1 translation. Avoid costly retry/fallback.
+                    if num_src == 1 and got > 1 and 1 in id_set and not duplicates:
+                        count_ok = True
                     if (not count_ok) or (not ids_ok):
                         self.logger.warning(
                             "Translation alignment mismatch: expected %d items with ids 1..%d; got %d items (ids=%s).",
@@ -2219,6 +3149,8 @@ class LLM_API_Translator(BaseTranslator):
                             time.sleep(self.retry_timeout)
                             continue
 
+                    batch_alignment_ok = count_ok and ids_ok and not duplicates
+
                     # Best-effort final ordering:
                     # - Prefer explicit ids 1..N (stable even if API returns extra items).
                     # - If ids are missing/wrong (or duplicates), fall back to response order (truncate/pad).
@@ -2235,10 +3167,41 @@ class LLM_API_Translator(BaseTranslator):
                     if expected_ids.issubset(set(translations_by_id.keys())) and not duplicates:
                         ordered_translations = [translations_by_id.get(i, "") for i in range(1, num_src + 1)]
                     else:
-                        ordered_translations = [
-                            (getattr(parsed_response.translations[i], "translation", "") if i < got else "")
-                            for i in range(num_src)
-                        ]
+                        # When model returned more items than requested, pick by best length match to avoid wrong assignment.
+                        if got > num_src and num_src <= len(src_list):
+                            src_lens = [len((src_list[i] or "").strip()) for i in range(num_src)]
+                            trans_tuples = [
+                                (getattr(parsed_response.translations[j], "translation", "") or "")
+                                for j in range(got)
+                            ]
+                            used = set()
+                            for i in range(num_src):
+                                best_j = None
+                                best_diff = float("inf")
+                                for j in range(got):
+                                    if j in used:
+                                        continue
+                                    t = (trans_tuples[j] or "").strip()
+                                    diff = abs(len(t) - src_lens[i])
+                                    if diff < best_diff:
+                                        best_diff = diff
+                                        best_j = j
+                                if best_j is not None:
+                                    used.add(best_j)
+                                    ordered_translations.append(trans_tuples[best_j])
+                                else:
+                                    ordered_translations.append("")
+                            if len(ordered_translations) < num_src:
+                                ordered_translations.extend([""] * (num_src - len(ordered_translations)))
+                            self.logger.info(
+                                "Translation alignment: picked %d items by length match (expected %d, got %d).",
+                                num_src, num_src, got,
+                            )
+                        else:
+                            ordered_translations = [
+                                (getattr(parsed_response.translations[i], "translation", "") if i < got else "")
+                                for i in range(num_src)
+                            ]
                         # If we got 1 and expected N, try newline split as improvement over empty slots
                         if got == 1 and num_src > 1:
                             one = getattr(parsed_response.translations[0], "translation", "")
@@ -2249,13 +3212,43 @@ class LLM_API_Translator(BaseTranslator):
                             elif len(lines) > 0:
                                 ordered_translations = lines[:num_src] + [""] * (num_src - len(lines))
 
+                    try:
+                        from utils import config as _ucfg_mod
+
+                        strict_fb = bool(
+                            getattr(
+                                _ucfg_mod.pcfg.module,
+                                "video_translator_llm_strict_alignment_fallback",
+                                True,
+                            )
+                        )
+                    except Exception:
+                        strict_fb = True
+                    if (
+                        is_video_page
+                        and strict_fb
+                        and not batch_alignment_ok
+                        and not getattr(self, "_inside_per_line_post_check", False)
+                    ):
+                        self.logger.warning(
+                            "Video: batch response misaligned after retries; per-cue translation fallback (%d items).",
+                            num_src,
+                        )
+                        ordered_translations = self._translate_single_item_fallback(
+                            src_list[:num_src], to_lang, ""
+                        )
+
                     # Post-translation check: repetition / target-language ratio; retry up to N times
                     post_check_retry = 0
                     try:
                         max_post = int(self.get_param_value("post_check_max_retries") or 0)
                     except (TypeError, ValueError):
                         max_post = 0
-                    while self._post_check_fail(ordered_translations) and post_check_retry < max_post:
+                    while (
+                        not getattr(self, "_inside_per_line_post_check", False)
+                        and self._post_check_fail(ordered_translations)
+                        and post_check_retry < max_post
+                    ):
                         post_check_retry += 1
                         self.logger.info(
                             f"Post-check retry {post_check_retry}/{max_post}. Re-requesting translation."
@@ -2271,6 +3264,22 @@ class LLM_API_Translator(BaseTranslator):
                                 ordered_translations = [translations_by_id.get(i, "") for i in range(1, num_src + 1)]
                         except Exception:
                             pass
+
+                    if not getattr(self, "_inside_per_line_post_check", False):
+                        page_key_pc = getattr(self, "_current_page_key", "") or ""
+                        if self._page_key_subtitle_batch_pipeline(page_key_pc):
+                            ordered_translations = self._apply_video_per_line_quality_fixes(
+                                src_list[:num_src],
+                                ordered_translations,
+                                to_lang,
+                                num_src,
+                            )
+                            ordered_translations = self._apply_per_line_post_check_retries(
+                                src_list[:num_src],
+                                ordered_translations,
+                                to_lang,
+                                num_src,
+                            )
 
                     # Optional reflection pass (VideoCaptioner-style: review and improve)
                     if self.get_param_value("reflection_translation") and len(ordered_translations) == num_src:
@@ -2299,16 +3308,23 @@ class LLM_API_Translator(BaseTranslator):
                 except RETRYABLE_EXCEPTIONS as e:
                     api_retry_attempt += 1
                     err_msg = str(e)
+                    # OpenRouter 404 "model not found" / "model moved" → do not retry; user must change model in settings.
+                    if self.provider == "OpenRouter" and "404" in err_msg:
+                        if "data policy" in err_msg.lower():
+                            self.logger.info(
+                                "OpenRouter 404: enable 'Free model publication' (or your model) at https://openrouter.ai/settings/privacy"
+                            )
+                        elif "find it here" in err_msg.lower() or "was a stealth" in err_msg.lower() or "mimo-v2" in err_msg.lower():
+                            raise CriticalTranslationError(
+                                "OpenRouter returned 404: this model was removed or renamed. Change the model in Translator → LLM API (e.g. to xiaomi/mimo-v2-pro if you used Hunter Alpha). Check the log or OpenRouter docs for the new model ID.",
+                                cause=e,
+                            )
                     self.logger.warning(
                         f"API Error (retryable): {type(e).__name__} - {e}. Attempt {api_retry_attempt}/{self.retry_attempts}."
                     )
                     if isinstance(e, (openai.APIConnectionError, httpx.RequestError)):
                         self.logger.info(
                             "Connection error: check firewall/proxy, VPN, or DNS. If behind a proxy, set 'Proxy' in translator settings (e.g. http://proxy:port). Test: curl -I https://openrouter.ai"
-                        )
-                    if self.provider == "OpenRouter" and "404" in err_msg and "data policy" in err_msg.lower():
-                        self.logger.info(
-                            "OpenRouter 404: enable 'Free model publication' (or your model) at https://openrouter.ai/settings/privacy"
                         )
                     is_rate_limit = self.provider == "OpenRouter" and "429" in err_msg and ("rate limit" in err_msg.lower() or "Rate limit" in err_msg)
                     if is_rate_limit:
