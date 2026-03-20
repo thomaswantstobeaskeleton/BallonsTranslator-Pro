@@ -69,6 +69,7 @@ For a **portable-style** install (e.g. copy folder and run elsewhere):
 
 1. **Setup script (optional)**  
    - **Windows:** run `setup.bat` to create a venv and install dependencies (or run `python launch.py` directly; it will install base deps and PyTorch).  
+   - **Windows (recommended after venv exists):** double-click **`Launch BallonsTranslator.bat`** in the project root so the app always runs with **`venv\Scripts\python.exe`** instead of a global Python (avoids mixed pip installs).  
    - **Linux / macOS:** run `./setup.sh` (or `bash setup.sh`) for the same.
 
 2. **Torch**  
