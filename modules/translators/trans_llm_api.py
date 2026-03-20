@@ -2680,6 +2680,75 @@ class LLM_API_Translator(BaseTranslator):
             self.logger.debug("Failed to attach page image to LLM request: %s", e)
         return prompt
 
+    def _normalize_chat_message_text(self, msg) -> Optional[str]:
+        """
+        Extract usable text from a chat completion message.
+        OpenRouter (reasoning models + json_object) sometimes leaves ``content`` empty
+        and puts the model output in ``reasoning`` / pydantic extras.
+        """
+        if msg is None:
+            return None
+        content = getattr(msg, "content", None)
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            parts: List[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text" and part.get("text"):
+                        parts.append(str(part["text"]))
+                else:
+                    t = getattr(part, "text", None)
+                    if t:
+                        parts.append(str(t))
+            joined = "".join(parts).strip()
+            if joined:
+                return joined
+        extra = getattr(msg, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            for key in ("reasoning", "reasoning_content", "reasoning_details", "text"):
+                val = extra.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+                if isinstance(val, list):
+                    acc = "".join(str(x) for x in val).strip()
+                    if acc:
+                        return acc
+        try:
+            if hasattr(msg, "model_dump"):
+                d = msg.model_dump(mode="python")
+                for key in ("content", "reasoning", "reasoning_content"):
+                    v = d.get(key)
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+                    if isinstance(v, list):
+                        acc = "".join(str(x) for x in v).strip()
+                        if acc:
+                            return acc
+        except Exception:
+            pass
+        return None
+
+    def _raw_text_from_completion(self, completion) -> Optional[str]:
+        """First assistant message text (content, reasoning extras, or legacy string body)."""
+        if completion is None:
+            return None
+        if isinstance(completion, str):
+            s = completion.strip()
+            return s if s else None
+        choices = getattr(completion, "choices", None)
+        if not choices:
+            return None
+        ch0 = choices[0]
+        msg = getattr(ch0, "message", None)
+        text = self._normalize_chat_message_text(msg)
+        if text:
+            return text
+        legacy = getattr(ch0, "text", None)
+        if isinstance(legacy, str) and legacy.strip():
+            return legacy.strip()
+        return None
+
     def _request_translation(self, prompt: str, expected_count: Optional[int] = None) -> Optional[TranslationResponse]:
         provider = self._effective_provider_for_model()
         current_api_key = "lm-studio"
@@ -2833,16 +2902,45 @@ class LLM_API_Translator(BaseTranslator):
         if completion is None:
             self.logger.warning("API returned None.")
             return None
-        # Some providers return a raw string instead of an object with .choices (#1098)
-        raw_content = None
-        if isinstance(completion, str):
-            raw_content = completion.strip()
-        elif getattr(completion, "choices", None) and completion.choices:
-            msg = getattr(completion.choices[0], "message", None)
-            if msg and getattr(msg, "content", None):
-                raw_content = msg.content.strip()
+
+        raw_content = self._raw_text_from_completion(completion)
+
+        # OpenRouter: reasoning + json_object often yields empty ``content``; body may be in ``reasoning`` extras
+        # or the stack returns nothing usable until reasoning is disabled.
+        def _args_use_reasoning_extras(args: dict) -> bool:
+            ex = args.get("extra_body")
+            if not isinstance(ex, dict):
+                return False
+            return "reasoning" in ex or "include_reasoning" in ex
+
+        stripped_once = False
+        if not raw_content and provider == "OpenRouter" and _args_use_reasoning_extras(api_args):
+            self.logger.warning(
+                "OpenRouter returned an empty assistant message (often reasoning + JSON mode). "
+                "Retrying once without reasoning extras."
+            )
+            try:
+                api_args_retry = self._strip_reasoning_args(dict(api_args))
+                stripped_once = True
+                completion = self.client.chat.completions.create(**api_args_retry)
+                raw_content = self._raw_text_from_completion(completion)
+            except Exception as e:
+                self.logger.warning("OpenRouter retry without reasoning failed: %s", e)
+
         if not raw_content:
-            self.logger.warning("API returned no content or unexpected response shape.")
+            try:
+                ch0 = completion.choices[0] if getattr(completion, "choices", None) else None
+                fr = getattr(ch0, "finish_reason", None) if ch0 is not None else None
+                self.logger.warning(
+                    "API returned no usable assistant text (content/reasoning empty). finish_reason=%s "
+                    "expected_count=%s stripped_reasoning_retry=%s. "
+                    "For very large batches, reduce NLP chunk size or disable reasoning.",
+                    fr,
+                    expected_count,
+                    stripped_once,
+                )
+            except Exception:
+                self.logger.warning("API returned no content or unexpected response shape.")
             return None
         json_to_parse = raw_content
 
