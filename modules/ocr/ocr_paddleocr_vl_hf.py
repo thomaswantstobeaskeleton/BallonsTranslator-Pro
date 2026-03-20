@@ -110,7 +110,8 @@ if _PADDLEOCR_VL_AVAILABLE:
                     warnings.filterwarnings("ignore", message=".*layers were not sharded")
                     warnings.filterwarnings("ignore", message=".*deprecated.*dtype")
                     warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated", category=UserWarning)
-                    kwargs = {"local_files_only": use_offline}
+                    # HF repo uses custom code; required on all platforms. Avoids Windows SIGALRM path in transformers.
+                    kwargs = {"local_files_only": use_offline, "trust_remote_code": True}
                     try:
                         try:
                             self.processor = AutoProcessor.from_pretrained(model_name, use_fast=True, **kwargs)

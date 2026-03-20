@@ -11,6 +11,7 @@ import traceback
 
 from qtpy.QtCore import Qt, QThread, Signal
 from qtpy.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -18,6 +19,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -31,6 +33,7 @@ from modules.translators.exceptions import CriticalTranslationError
 from modules.video_translator import clear_translator_video_nlp_parallel, configure_translator_video_nlp_parallel
 from utils.config import pcfg
 from utils.logger import logger as LOGGER
+from utils.series_context_store import get_series_context_dir, load_recent_context
 from utils.subtitle_cue_io import (
     FormatHint,
     SubtitleCue,
@@ -38,6 +41,20 @@ from utils.subtitle_cue_io import (
     write_srt,
     write_timestamped_txt,
 )
+
+from ui.translation_context_dialog import _text_to_glossary
+
+
+def _llm_translator_series_path_default() -> str:
+    """Default series context ID from Config → LLM_API_Translator, if set."""
+    try:
+        tp = (pcfg.module.translator_params.get("LLM_API_Translator") or {})
+        sc = tp.get("series_context_path") or {}
+        if isinstance(sc, dict):
+            return (sc.get("value") or "").strip()
+    except Exception:
+        pass
+    return ""
 
 
 class SubtitleFileTranslateThread(QThread):
@@ -51,6 +68,9 @@ class SubtitleFileTranslateThread(QThread):
         lang_source: str,
         lang_target: str,
         glossary_hint: str,
+        series_context_path: str = "",
+        project_glossary: list | None = None,
+        use_recent_series_context: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -58,6 +78,9 @@ class SubtitleFileTranslateThread(QThread):
         self.lang_source = lang_source
         self.lang_target = lang_target
         self.glossary_hint = (glossary_hint or "").strip()
+        self.series_context_path = (series_context_path or "").strip()
+        self.project_glossary = project_glossary or []
+        self.use_recent_series_context = bool(use_recent_series_context)
 
     def run(self):
         n = len(self.texts)
@@ -89,10 +112,41 @@ class SubtitleFileTranslateThread(QThread):
             configure_translator_video_nlp_parallel(translator, pcfg.module)
             if self.glossary_hint:
                 setattr(translator, "_video_glossary_hint", self.glossary_hint)
+
+            ui_series = self.series_context_path
+            resolved_dir = ""
+            if ui_series:
+                resolved_dir = get_series_context_dir(ui_series)
+            else:
+                getter = getattr(translator, "_get_series_context_path", None)
+                resolved_dir = (getter() or "") if callable(getter) else ""
+
+            previous_pages: list = []
+            if self.use_recent_series_context and resolved_dir:
+                try:
+                    n_prev = max(
+                        1,
+                        int(getattr(translator, "context_previous_pages_count", 1) or 1),
+                    )
+                except (TypeError, ValueError):
+                    n_prev = 1
+                previous_pages = load_recent_context(resolved_dir, max_pages=n_prev)
+
+            series_kw = None
+            if ui_series:
+                series_kw = ui_series
+            elif self.use_recent_series_context and resolved_dir:
+                # Match glossary/recent store when only "use recent" is on (path from translator param).
+                try:
+                    p = (translator.get_param_value("series_context_path") or "").strip()
+                except Exception:
+                    p = ""
+                series_kw = p if p else None
+
             translator.set_translation_context(
-                previous_pages=[],
-                project_glossary=[],
-                series_context_path=None,
+                previous_pages=previous_pages,
+                project_glossary=list(self.project_glossary),
+                series_context_path=series_kw,
                 next_page=None,
             )
 
@@ -128,7 +182,7 @@ class SubtitleFileTranslatorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(self.tr("Translate subtitle file…"))
-        self.resize(560, 520)
+        self.resize(580, 680)
         self._input_path = ""
         self._cues: list[SubtitleCue] = []
         self._detected_format: str = "srt"
@@ -186,11 +240,56 @@ class SubtitleFileTranslatorDialog(QDialog):
         out_form.addRow(self.tr("Save as:"), self.out_format_combo)
         root.addWidget(out_box)
 
-        gloss_box = QGroupBox(self.tr("Optional glossary / notes for the model"))
+        ctx_box = QGroupBox(self.tr("Series translation context"))
+        ctx_v = QVBoxLayout(ctx_box)
+        ctx_v.addWidget(
+            QLabel(
+                self.tr(
+                    "Loads series glossary (glossary.txt under data/translation_context/). "
+                    "Leave blank to use the translator’s Series context path from Config."
+                )
+            )
+        )
+        ser_row = QHBoxLayout()
+        self.series_context_edit = QLineEdit()
+        self.series_context_edit.setPlaceholderText(self.tr("e.g. default, urban_immortal, or a subfolder path"))
+        self.series_context_edit.setText(_llm_translator_series_path_default())
+        try:
+            self.series_context_edit.setClearButtonEnabled(True)
+        except Exception:
+            pass
+        ser_row.addWidget(self.series_context_edit)
+        ctx_v.addLayout(ser_row)
+        self.check_series_recent = QCheckBox(
+            self.tr("Include recent pages from series store (recent_context.json)")
+        )
+        self.check_series_recent.setToolTip(
+            self.tr(
+                "Uses the same “previous pages” count as the translator config. "
+                "Requires an existing series folder with recent_context.json (e.g. from comic translation)."
+            )
+        )
+        ctx_v.addWidget(self.check_series_recent)
+        ctx_v.addWidget(
+            QLabel(
+                self.tr(
+                    "Extra project glossary for this run only (merged with series + translator; one line per entry):"
+                )
+            )
+        )
+        self.project_glossary_edit = QPlainTextEdit()
+        self.project_glossary_edit.setPlaceholderText(
+            self.tr("e.g. 主角名 -> Hero Name\n门派 -> sect")
+        )
+        self.project_glossary_edit.setMaximumHeight(90)
+        ctx_v.addWidget(self.project_glossary_edit)
+        root.addWidget(ctx_box)
+
+        gloss_box = QGroupBox(self.tr("Optional subtitle / model hint (video-style)"))
         gv = QVBoxLayout(gloss_box)
         self.glossary_edit = QPlainTextEdit()
         self.glossary_edit.setPlaceholderText(
-            self.tr("One term per line: source -> target (same as translator glossary).")
+            self.tr("Short notes or terms appended to the prompt (like the video translator glossary hint).")
         )
         self.glossary_edit.setMaximumHeight(100)
         gv.addWidget(self.glossary_edit)
@@ -307,6 +406,7 @@ class SubtitleFileTranslatorDialog(QDialog):
         if not isinstance(tgt, str) or not tgt:
             tgt = lang_display_to_key(self.tgt_combo.currentText())
         glossary = self.glossary_edit.toPlainText()
+        proj_glossary = _text_to_glossary(self.project_glossary_edit.toPlainText())
 
         self.btn_translate.setEnabled(False)
         self.btn_open.setEnabled(False)
@@ -318,6 +418,9 @@ class SubtitleFileTranslatorDialog(QDialog):
             src,
             tgt,
             glossary,
+            series_context_path=self.series_context_edit.text(),
+            project_glossary=proj_glossary,
+            use_recent_series_context=self.check_series_recent.isChecked(),
             parent=self,
         )
         self._thread.progress.connect(self._on_progress)
