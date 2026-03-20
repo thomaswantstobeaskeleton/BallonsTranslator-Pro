@@ -734,6 +734,12 @@ class TitleBar(Widget):
         videoTranslatorAc.setToolTip(self.tr('Translate hardcoded subtitles in video: detect, OCR, translate, inpaint per frame.'))
         runMenu.addAction(videoTranslatorAc)
         self.video_translator_trigger = videoTranslatorAc.triggered
+        subtitleFileTranslatorAc = QAction(self.tr('Translate subtitle file…'), self)
+        subtitleFileTranslatorAc.setToolTip(
+            self.tr('Translate a standalone .srt or timestamped .txt using the configured translator (OpenRouter via LLM API).')
+        )
+        runMenu.addAction(subtitleFileTranslatorAc)
+        self.subtitle_file_translator_trigger = subtitleFileTranslatorAc.triggered
         videoSubtitleEditorAc = QAction(self.tr('Video Subtitle Editor...'), self)
         videoSubtitleEditorAc.setToolTip(self.tr('Edit video captions: cut, edit text, frame-accurate timing, export SRT/ASS/VTT, render with burned-in subtitles.'))
         runMenu.addAction(videoSubtitleEditorAc)

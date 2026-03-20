@@ -1099,6 +1099,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.run_preset_translate_trigger.connect(self.on_run_preset_translate)
         self.titleBar.run_preset_inpaint_trigger.connect(self.on_run_preset_inpaint)
         self.titleBar.video_translator_trigger.connect(self.on_video_translator)
+        self.titleBar.subtitle_file_translator_trigger.connect(self.on_subtitle_file_translator)
         self.titleBar.video_subtitle_editor_trigger.connect(self.on_video_subtitle_editor)
         self.titleBar.keyboard_shortcuts_trigger.connect(self.open_shortcuts_dialog)
         self.titleBar.theme_customizer_trigger.connect(self.open_theme_customizer)
@@ -2116,6 +2117,17 @@ class MainWindow(mainwindow_cls):
         if dlg is None:
             dlg = VideoTranslatorDialog(self)
             self._video_translator_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def on_subtitle_file_translator(self):
+        """Open subtitle file translator (Pipeline → Translate subtitle file…)."""
+        from .subtitle_file_translator_dialog import SubtitleFileTranslatorDialog
+        dlg = getattr(self, "_subtitle_file_translator_dlg", None)
+        if dlg is None:
+            dlg = SubtitleFileTranslatorDialog(self)
+            self._subtitle_file_translator_dlg = dlg
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
