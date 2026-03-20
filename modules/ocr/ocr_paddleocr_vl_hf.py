@@ -21,7 +21,7 @@ from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBl
 
 _PADDLEOCR_VL_AVAILABLE = False
 try:
-    from transformers import AutoProcessor, AutoModelForImageTextToText
+    from transformers import AutoConfig, AutoProcessor, AutoModelForImageTextToText
     from PIL import Image
     import torch
     _PADDLEOCR_VL_AVAILABLE = True
@@ -30,6 +30,24 @@ except ImportError as e:
     logging.getLogger("BallonTranslator").debug(
         f"PaddleOCR-VL (HF) not available: {e}. Install: pip install transformers torch pillow"
     )
+
+
+def _paddleocr_vl_patch_config(config) -> None:
+    """
+    Transformers 5.3+ PaddleOCRVLModel expects config.text_config, but the HF repo's
+    PaddleOCRVLConfig only exposes get_text_config() (no text_config attribute).
+    """
+    if config is None:
+        return
+    if getattr(config, "text_config", None) is not None:
+        return
+    getter = getattr(config, "get_text_config", None)
+    if not callable(getter):
+        return
+    try:
+        config.text_config = getter()
+    except Exception:
+        pass
 
 
 def _cv2_to_pil_rgb(img: np.ndarray) -> "Image.Image":
@@ -132,20 +150,41 @@ if _PADDLEOCR_VL_AVAILABLE:
                                 f"PaddleOCR-VL could not be loaded: no network and model not in cache ({e2}). "
                                 "Connect to the internet once to download, or switch OCR to another module (e.g. mit48px, manga_ocr)."
                             ) from e2
+                    hf_config = AutoConfig.from_pretrained(model_name, **kwargs)
+                    _paddleocr_vl_patch_config(hf_config)
+
                     use_bf16 = self.params.get("use_bf16", {}).get("value", True)
                     dtype = torch.bfloat16 if (use_bf16 and torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()) else torch.float16
                     try:
-                        self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype, **kwargs)
+                        try:
+                            self.model = AutoModelForImageTextToText.from_pretrained(
+                                model_name, config=hf_config, torch_dtype=dtype, **kwargs
+                            )
+                        except TypeError:
+                            self.model = AutoModelForImageTextToText.from_pretrained(
+                                model_name, config=hf_config, dtype=dtype, **kwargs
+                            )
                     except (OSError, RuntimeError) as e:
                         if use_offline:
                             raise
                         self.logger.warning("PaddleOCR-VL: online model load failed (%s); retrying with local cache only.", e)
                         kwargs["local_files_only"] = True
+                        hf_config = AutoConfig.from_pretrained(model_name, **kwargs)
+                        _paddleocr_vl_patch_config(hf_config)
                         try:
-                            self.model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=dtype, **kwargs)
+                            try:
+                                self.model = AutoModelForImageTextToText.from_pretrained(
+                                    model_name, config=hf_config, torch_dtype=dtype, **kwargs
+                                )
+                            except TypeError:
+                                self.model = AutoModelForImageTextToText.from_pretrained(
+                                    model_name, config=hf_config, dtype=dtype, **kwargs
+                                )
                         except Exception:
                             try:
-                                self.model = AutoModelForImageTextToText.from_pretrained(model_name, **kwargs)
+                                self.model = AutoModelForImageTextToText.from_pretrained(
+                                    model_name, config=hf_config, **kwargs
+                                )
                             except Exception as e2:
                                 raise RuntimeError(
                                     f"Can't load PaddleOCR-VL: no network and model not in cache, or {e2}. "
@@ -153,7 +192,9 @@ if _PADDLEOCR_VL_AVAILABLE:
                                 ) from e2
                     except Exception as e:
                         self.logger.warning(f"PaddleOCR-VL load with dtype failed: {e}; trying default dtype.")
-                        self.model = AutoModelForImageTextToText.from_pretrained(model_name, **kwargs)
+                        self.model = AutoModelForImageTextToText.from_pretrained(
+                            model_name, config=hf_config, **kwargs
+                        )
             finally:
                 for name, level in old_levels.items():
                     logging.getLogger(name).setLevel(level)
