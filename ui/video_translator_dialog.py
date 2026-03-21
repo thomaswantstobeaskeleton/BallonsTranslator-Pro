@@ -7,7 +7,12 @@ from __future__ import annotations
 import os
 import os.path as osp
 import tempfile
+import hashlib
 import re
+import threading
+import copy
+import concurrent.futures
+import queue as queue_module
 from typing import Optional
 
 from qtpy.QtWidgets import (
@@ -24,6 +29,28 @@ from utils.config import pcfg, save_config
 from utils.logger import logger as LOGGER
 
 
+def _set_thread_priority_above_normal() -> None:
+    """Raise current thread priority so the pipeline is not starved by I/O threads. Windows only."""
+    try:
+        if hasattr(os, "name") and os.name == "nt":
+            import ctypes
+            # THREAD_PRIORITY_ABOVE_NORMAL = 1
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 1)
+    except Exception:
+        pass
+
+
+def _set_thread_priority_below_normal() -> None:
+    """Lower current thread priority so I/O threads don't starve the pipeline. Windows only."""
+    try:
+        if hasattr(os, "name") and os.name == "nt":
+            import ctypes
+            # THREAD_PRIORITY_BELOW_NORMAL = -1
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), -1)
+    except Exception:
+        pass
+
+
 _REGION_PLACEHOLDER_RE = re.compile(
     r"^\s*(?:\[\s*)?(?:reg(?:i|l|1)on)\s*[:#-]?\s*\d+\s*(?:\]\s*)?$",
     re.IGNORECASE,
@@ -36,6 +63,114 @@ def _is_region_placeholder_text(text: str) -> bool:
         return bool(_REGION_PLACEHOLDER_RE.match((text or "").strip()))
     except Exception:
         return False
+
+
+_SUBTITLE_JUNK_RE = re.compile(
+    r"^\s*(?:\d+\.\s*)?(?:line\s*\d+\s+content|line\s+content|line\s*[a-z0-9]+|text\s*[a-z0-9]*|subtitle\s*[a-z0-9]*|hello(?:\s+world)?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_invalid_subtitle_text(text: str) -> bool:
+    """Filter placeholder/meta/junk lines so they are never added to timed cues."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _is_region_placeholder_text(t):
+        return True
+    tl = t.lower()
+    if tl in (
+        "...",
+        "corrected_text",
+        "corrected text",
+        "no source text or current translation provided for review.",
+    ):
+        return True
+    if _SUBTITLE_JUNK_RE.match(tl):
+        return True
+    return False
+
+
+_SENTENCE_END_RE = re.compile(r"[.!?。！？…]+(?:[\"'”’）\]\s]*)$")
+
+
+def _merge_segments_until_sentence_end(
+    segments: list[tuple[float, float, str]],
+    max_merge_seconds: float = 8.0,
+) -> list[tuple[float, float, str]]:
+    """
+    Rule-based cue merge: accumulate short adjacent cues until sentence-ending punctuation.
+    Helps avoid translating half-sentences line-by-line (Issue-inspired, non-LLM sentence batching).
+    """
+    if not segments:
+        return segments
+    out: list[tuple[float, float, str]] = []
+    cur_start: Optional[float] = None
+    cur_end: Optional[float] = None
+    parts: list[str] = []
+    max_merge_seconds = max(0.5, float(max_merge_seconds or 8.0))
+
+    def _flush():
+        nonlocal cur_start, cur_end, parts
+        if cur_start is None or cur_end is None:
+            cur_start, cur_end, parts = None, None, []
+            return
+        text = " ".join(p.strip() for p in parts if (p or "").strip()).strip()
+        if text:
+            out.append((float(cur_start), float(cur_end), text))
+        cur_start, cur_end, parts = None, None, []
+
+    for s, e, t in segments:
+        txt = (t or "").strip()
+        if not txt:
+            continue
+        if cur_start is None:
+            cur_start, cur_end, parts = float(s), float(e), [txt]
+        else:
+            cur_end = float(e)
+            parts.append(txt)
+        merged_text = " ".join(parts).strip()
+        reached_end = bool(_SENTENCE_END_RE.search(merged_text))
+        duration = float(cur_end) - float(cur_start)
+        if reached_end or duration >= max_merge_seconds:
+            _flush()
+    _flush()
+    return out
+
+
+def _align_blk_list_to_segments(
+    segments: list,
+    blk_list: list,
+    TextBlock_cls: type,
+) -> None:
+    """
+    After translate_textblk_lst, enforce len(blk_list) == len(segments) so timings stay aligned
+    (pad with source-only blocks or trim extras; log mismatches).
+    """
+    n = len(segments)
+    if len(blk_list) == n:
+        return
+    if len(blk_list) < n:
+        LOGGER.warning(
+            "Subtitle blocks (%d) fewer than cues (%d); padding with source-only blocks.",
+            len(blk_list),
+            n,
+        )
+        while len(blk_list) < n:
+            i = len(blk_list)
+            _s, _e, text = segments[i]
+            blk = TextBlock_cls()
+            blk.text = [text or ""]
+            blk.lines = []
+            blk.xyxy = [0, 0, 1, 1]
+            blk_list.append(blk)
+    else:
+        LOGGER.warning(
+            "Subtitle blocks (%d) more than cues (%d); trimming extras to prevent timeline drift.",
+            len(blk_list),
+            n,
+        )
+        del blk_list[n:]
 
 
 def _apply_continuation_comma_fix(revised_prev, revised_new, previous_entries, video_previous_subtitles, srt_entries=None):
@@ -316,17 +451,165 @@ def _normalize_fps(cap, reported_fps: float, total_frames: int, video_path: str 
     return round(fps, 4)
 
 
-def _scene_change(prev_gray, curr_gray, threshold: float) -> bool:
-    """True if histogram diff exceeds threshold (new scene)."""
+def _probe_ffmpeg_hw_encoders(ffmpeg_exe: str) -> dict:
+    """Run ffmpeg -encoders and return which GPU encoders are available. Returns {'nvenc': bool, 'qsv': bool}."""
+    import subprocess
+    exe = (ffmpeg_exe or "ffmpeg").strip()
+    if not exe:
+        return {"nvenc": False, "qsv": False}
+    out = subprocess.run(
+        [exe, "-encoders"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+    )
+    text = (out.stdout or "") + (out.stderr or "")
+    nvenc = "h264_nvenc" in text and "H.264" in text
+    qsv = "h264_qsv" in text and "H.264" in text
+    return {"nvenc": nvenc, "qsv": qsv}
+
+
+def _build_ffmpeg_encode_cmd(
+    ffmpeg_exe: str,
+    w: int,
+    h: int,
+    fps: float,
+    output_path: str,
+    use_bitrate: bool,
+    effective_kbps: int,
+    crf: int,
+    preset: str,
+    hw_encoder: str,
+) -> list:
+    """Build full FFmpeg command list for raw BGR24 pipe input -> encoded output.
+    hw_encoder: 'none' | 'nvenc' | 'qsv' | 'auto'. Preset used for libx264 only; GPU uses internal presets/CQ."""
+    exe = (ffmpeg_exe or "ffmpeg").strip() or "ffmpeg"
+    base = [
+        exe, "-loglevel", "error", "-y",
+        "-f", "rawvideo", "-pix_fmt", "bgr24",
+        "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
+    ]
+    chosen = (hw_encoder or "none").strip().lower()
+    if chosen == "auto":
+        encoders = _probe_ffmpeg_hw_encoders(ffmpeg_exe)
+        chosen = "nvenc" if encoders.get("nvenc") else ("qsv" if encoders.get("qsv") else "none")
+    if chosen == "nvenc":
+        encoders = _probe_ffmpeg_hw_encoders(ffmpeg_exe)
+        if not encoders.get("nvenc"):
+            chosen = "none"
+    elif chosen == "qsv":
+        encoders = _probe_ffmpeg_hw_encoders(ffmpeg_exe)
+        if not encoders.get("qsv"):
+            chosen = "none"
+
+    if chosen == "nvenc":
+        # NVENC: BGR24 -> yuv420p (CPU) -> h264_nvenc. -cq 1-51 (like CRF) or -b:v
+        if use_bitrate and effective_kbps > 0:
+            ext = ["-vf", "format=yuv420p", "-c:v", "h264_nvenc", "-b:v", "%dk" % effective_kbps, "-r", str(fps), "-pix_fmt", "yuv420p"]
+        else:
+            cq = max(1, min(51, crf))
+            ext = ["-vf", "format=yuv420p", "-c:v", "h264_nvenc", "-cq", str(cq), "-r", str(fps), "-pix_fmt", "yuv420p"]
+        base.extend(ext)
+    elif chosen == "qsv":
+        # QSV: BGR24 -> nv12 (CPU) -> h264_qsv. -global_quality 1-51 (like CRF)
+        ext = ["-vf", "format=nv12", "-c:v", "h264_qsv", "-global_quality", str(max(1, min(51, crf))), "-r", str(fps)]
+        if use_bitrate and effective_kbps > 0:
+            ext = ["-vf", "format=nv12", "-c:v", "h264_qsv", "-b:v", "%dk" % effective_kbps, "-r", str(fps)]
+        base.extend(ext)
+    else:
+        # libx264
+        _presets = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", "placebo")
+        effective_preset = (preset or "medium").strip().lower()
+        if effective_preset not in _presets:
+            effective_preset = "medium"
+        if use_bitrate and effective_kbps > 0:
+            base.extend([
+                "-c:v", "libx264", "-preset", effective_preset,
+                "-b:v", "%dk" % effective_kbps, "-minrate", "%dk" % effective_kbps,
+                "-maxrate", "%dk" % effective_kbps, "-bufsize", "%dk" % (effective_kbps * 2),
+                "-x264-params", "nal-hrd=cbr", "-r", str(fps), "-pix_fmt", "yuv420p",
+            ])
+        else:
+            base.extend(["-c:v", "libx264", "-preset", effective_preset, "-crf", str(crf), "-r", str(fps), "-pix_fmt", "yuv420p"])
+    if output_path.lower().endswith((".mp4", ".mov")):
+        base.extend(["-movflags", "+faststart"])
+    base.append(output_path)
+    return base
+
+
+def _scene_change(prev_gray, curr_gray, threshold: float, bottom_frac: float = 1.0) -> bool:
+    """True if histogram diff exceeds threshold (new scene).
+    Cost is kept low by downscaling and by computing histogram only on the subtitle band ROI.
+    """
     if prev_gray is None or curr_gray is None:
         return True
     import cv2
+    try:
+        bottom_frac = float(bottom_frac)
+    except Exception:
+        bottom_frac = 1.0
+    if bottom_frac <= 0:
+        bottom_frac = 1.0
+    bottom_frac = min(1.0, max(0.0, bottom_frac))
+    # Lighter scene detection: downscale to max 320 px before histogram when frame is large
+    max_side = 320
+    h, w = prev_gray.shape[:2]
+    prev_full, curr_full = prev_gray, curr_gray
+    y_start = max(0, int(h * (1.0 - bottom_frac)))
+    if y_start > 0:
+        prev_gray = prev_gray[y_start:h, :]
+        curr_gray = curr_gray[y_start:h, :]
+        # Safety: if crop is empty due to bad params, fall back to full frame
+        if prev_gray is None or curr_gray is None or prev_gray.size == 0 or curr_gray.size == 0:
+            prev_gray = prev_full
+            curr_gray = curr_full
+    if max(h, w) > max_side:
+        scale = max_side / max(h, w)
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        prev_gray = cv2.resize(prev_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        curr_gray = cv2.resize(curr_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
     prev_hist = cv2.calcHist([prev_gray], [0], None, [64], [0, 256])
     curr_hist = cv2.calcHist([curr_gray], [0], None, [64], [0, 256])
     cv2.normalize(prev_hist, prev_hist, 0, 1, cv2.NORM_MINMAX)
     cv2.normalize(curr_hist, curr_hist, 0, 1, cv2.NORM_MINMAX)
     diff = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_BHATTACHARYYA)
     return diff * 100.0 > threshold
+
+
+def _subtitle_region_small_gray(frame: "np.ndarray", bottom_frac: float) -> "np.ndarray | None":
+    """Return a small grayscale thumbnail of the subtitle band ROI for cheap comparisons."""
+    if frame is None or frame.size == 0:
+        return None
+    import cv2
+    try:
+        bottom_frac = float(bottom_frac)
+    except Exception:
+        bottom_frac = 1.0
+    if bottom_frac <= 0:
+        bottom_frac = 1.0
+    bottom_frac = min(1.0, max(0.0, bottom_frac))
+    h, w = frame.shape[:2]
+    y_start = max(0, int(h * (1.0 - bottom_frac)))
+    crop = frame[y_start:h, :]
+    if crop is None or crop.size == 0:
+        return None
+    # Downscale to small size for fast hashing/diff (e.g. 64 px wide)
+    small_w = 64
+    small_h = max(4, int(crop.shape[0] * small_w / max(1, crop.shape[1])))
+    small = cv2.resize(crop, (small_w, small_h), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if small.ndim == 3 else small
+    return gray
+
+
+def _subtitle_region_content_hash(frame: "np.ndarray", bottom_frac: float) -> bytes:
+    """Cheap hash of the subtitle band thumbnail (used by two-stage keyframes)."""
+    import hashlib
+    gray = _subtitle_region_small_gray(frame, bottom_frac)
+    if gray is None:
+        return b""
+    return hashlib.md5(gray.tobytes()).digest()
 
 
 def _temporal_blend(prev: "np.ndarray", curr: "np.ndarray", alpha: float, bottom_frac: float) -> "np.ndarray":
@@ -514,6 +797,10 @@ class VideoTranslateThread(QThread):
         asr_audio_separation: bool = False,
         export_ass: bool = False,
         export_vtt: bool = False,
+        prefetch_frames: int = 0,
+        two_stage_keyframes: bool = False,
+        background_writer: bool = False,
+        use_two_pass_ocr_burn_in: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -547,23 +834,40 @@ class VideoTranslateThread(QThread):
         self.asr_audio_separation = bool(asr_audio_separation)
         self.export_ass = bool(export_ass)
         self.export_vtt = bool(export_vtt)
+        self.prefetch_frames = max(0, min(4, int(prefetch_frames)))
+        self.two_stage_keyframes = bool(two_stage_keyframes)
+        self.background_writer = bool(background_writer)
+        self.use_two_pass_ocr_burn_in = bool(use_two_pass_ocr_burn_in)
+        self._progress_phase = ""
         self._cancel = False
 
     def cancel(self):
         self._cancel = True
 
     def _run_asr_pipeline(self):
-        """Source = Audio (ASR): extract audio, transcribe, translate, then render frames with timed subs or soft SRT only."""
+        """Source = Audio (ASR): strict stages — transcribe → subtitle NLP (correction / translate) → video synthesis.
+
+        Stages: (1) audio extract + optional vocal separation + ASR segments;
+        (2) optional LLM ASR correction, optional sentence break, batched translation (see video_translator_nlp_* for chunk/workers);
+        (3) decode video frames, timed burn-in or soft subs, encode. No translation interleaved with per-frame decode.
+        """
         import cv2
         import subprocess
         import numpy as np
-        from modules.video_translator import _draw_timed_subs_on_image
+        from modules.video_translator import (
+            _draw_timed_subs_on_image,
+            subtitle_black_box_draw_kwargs_from_cfg,
+            configure_translator_video_nlp_parallel,
+            clear_translator_video_nlp_parallel,
+        )
         from modules.audio_transcribe import (
             HAS_FASTER_WHISPER,
             extract_audio_from_video,
             transcribe_audio,
         )
         from utils.textblock import TextBlock
+        from utils.textblock import examine_textblk, remove_contained_boxes, deduplicate_primary_boxes
+        from modules.inpaint.base import build_mask_with_resolved_overlaps
 
         try:
             if not HAS_FASTER_WHISPER:
@@ -590,12 +894,35 @@ class VideoTranslateThread(QThread):
                 except Exception as e:
                     LOGGER.warning("Vocal separation failed: %s. Using original audio.", e)
             try:
+                chunk_s = float(getattr(cfg, "video_translator_asr_chunk_seconds", 0) or 0)
+                threshold_s = float(
+                    getattr(cfg, "video_translator_asr_long_audio_threshold_seconds", 0) or 0
+                )
+                resume_ck = bool(getattr(cfg, "video_translator_asr_checkpoint_resume", True))
+                checkpoint_path = None
+                if chunk_s > 0 and threshold_s > 0 and resume_ck:
+                    vid_key = (self.input_path or audio_path).encode("utf-8", errors="ignore")
+                    h = hashlib.md5(
+                        vid_key
+                        + f"|{chunk_s}|{threshold_s}|{self.asr_model}|{self.asr_device}|{self.asr_language or ''}|{int(self.asr_audio_separation)}".encode(
+                            "utf-8", errors="ignore"
+                        )
+                    ).hexdigest()[:24]
+                    checkpoint_path = os.path.join(
+                        tempfile.gettempdir(), f"bt_asr_ckpt_{h}.json"
+                    )
                 segments = transcribe_audio(
                     audio_path,
                     model_size=self.asr_model,
                     device=self.asr_device,
                     language=self.asr_language or None,
                     vad_filter=self.asr_vad_filter,
+                    chunk_seconds=chunk_s,
+                    long_audio_threshold_seconds=threshold_s,
+                    ffmpeg_path=ffmpeg_exe,
+                    checkpoint_path=checkpoint_path if resume_ck else None,
+                    resume_checkpoint=resume_ck,
+                    source_video_path=(self.input_path or None),
                 )
             finally:
                 for p in (extract_path, vocals_path):
@@ -619,9 +946,57 @@ class VideoTranslateThread(QThread):
                 if getattr(translator, "get_param_value", None) and translator.get_param_value("correct_asr_with_llm"):
                     texts = [t for _s, _e, t in segments]
                     try:
-                        corrected = translator.correct_asr_texts(texts)
-                        if corrected and len(corrected) == len(segments):
-                            segments = [(s, e, c) for (s, e, _), c in zip(segments, corrected)]
+                        use_flow_fixer_for_corrections = bool(getattr(cfg, "video_translator_use_flow_fixer_for_corrections", False))
+                        if use_flow_fixer_for_corrections and getattr(cfg, "video_translator_flow_fixer_enabled", False):
+                            from modules.flow_fixer import get_flow_fixer
+                            from modules.flow_fixer.corrections import correct_asr_via_fixer
+                            fixer_name = (getattr(cfg, "video_translator_flow_fixer", None) or "none").strip().lower()
+                            flow_fixer_asr = None
+                            if fixer_name == "openrouter":
+                                flow_fixer_asr = get_flow_fixer(
+                                    "openrouter",
+                                    api_key=(getattr(cfg, "video_translator_flow_fixer_openrouter_apikey", None) or "").strip(),
+                                    model=(getattr(cfg, "video_translator_flow_fixer_openrouter_model", None) or "google/gemma-3n-e2b-it:free").strip(),
+                                    max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                                    timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                    enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                    reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                                )
+                            elif fixer_name == "openai":
+                                flow_fixer_asr = get_flow_fixer(
+                                    "openai",
+                                    api_key=(getattr(cfg, "video_translator_flow_fixer_openai_apikey", None) or "").strip(),
+                                    model=(getattr(cfg, "video_translator_flow_fixer_openai_model", None) or "gpt-4o-mini").strip(),
+                                    max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                                    timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                    enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                    reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                                )
+                            elif fixer_name == "local_server":
+                                local_model = (getattr(cfg, "video_translator_flow_fixer_model", None) or "").strip()
+                                if local_model:
+                                    flow_fixer_asr = get_flow_fixer(
+                                        fixer_name,
+                                        server_url=(getattr(cfg, "video_translator_flow_fixer_server_url", None) or "http://localhost:1234/v1").strip(),
+                                        model=local_model,
+                                        max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                                        timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                        enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                        reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                                    )
+                            if flow_fixer_asr and getattr(flow_fixer_asr, "request_completion", None):
+                                glossary = (getattr(cfg, "video_translator_glossary", None) or "").strip()
+                                corrected = correct_asr_via_fixer(flow_fixer_asr, texts, glossary=glossary)
+                                if corrected and len(corrected) == len(segments):
+                                    segments = [(s, e, c) for (s, e, _), c in zip(segments, corrected)]
+                            else:
+                                corrected = translator.correct_asr_texts(texts)
+                                if corrected and len(corrected) == len(segments):
+                                    segments = [(s, e, c) for (s, e, _), c in zip(segments, corrected)]
+                        else:
+                            corrected = translator.correct_asr_texts(texts)
+                            if corrected and len(corrected) == len(segments):
+                                segments = [(s, e, c) for (s, e, _), c in zip(segments, corrected)]
                     except Exception as e:
                         LOGGER.warning("ASR correction failed (using original): %s", e)
                 if self.asr_sentence_break and hasattr(translator, "sentence_break_segments"):
@@ -629,6 +1004,14 @@ class VideoTranslateThread(QThread):
                         segments = translator.sentence_break_segments(segments)
                     except Exception as e:
                         LOGGER.warning("Sentence break failed (using original): %s", e)
+            if bool(getattr(cfg, "video_translator_sentence_merge_by_punctuation", True)):
+                try:
+                    segments = _merge_segments_until_sentence_end(
+                        segments,
+                        max_merge_seconds=float(getattr(cfg, "video_translator_sentence_merge_max_seconds", 8.0)),
+                    )
+                except Exception as e:
+                    LOGGER.debug("Rule-based sentence merge failed (using original): %s", e)
             if translator is not None and hasattr(translator, "load_model"):
                 translator.load_model()
             segments_with_trans = []
@@ -640,12 +1023,16 @@ class VideoTranslateThread(QThread):
                     blk.lines = []
                     blk.xyxy = [0, 0, 1, 1]
                     blk_list.append(blk)
+                configure_translator_video_nlp_parallel(translator, cfg)
                 try:
                     setattr(translator, "_current_page_key", "video_asr")
                     setattr(translator, "_current_page_image", None)
                     translator.translate_textblk_lst(blk_list)
                 except Exception as e:
                     LOGGER.warning("ASR translate batch failed: %s", e)
+                finally:
+                    clear_translator_video_nlp_parallel(translator)
+                _align_blk_list_to_segments(segments, blk_list, TextBlock)
                 for (s, e, _), blk in zip(segments, blk_list):
                     trans = (getattr(blk, "translation", None) or blk.get_text() or "").strip()
                     if _is_region_placeholder_text(trans):
@@ -695,29 +1082,14 @@ class VideoTranslateThread(QThread):
                 try:
                     ffmpeg_exe = self.ffmpeg_path or "ffmpeg"
                     effective_kbps = self.video_bitrate_kbps if self.video_bitrate_kbps > 0 else source_bitrate_kbps
-                    if effective_kbps > 0:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium",
-                            "-b:v", "%dk" % effective_kbps,
-                            "-minrate", "%dk" % effective_kbps,
-                            "-maxrate", "%dk" % effective_kbps,
-                            "-bufsize", "%dk" % (effective_kbps * 2),
-                            "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    else:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    if self.output_path.lower().endswith((".mp4", ".mov")):
-                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
-                    ffmpeg_cmd.append(self.output_path)
-                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
+                    effective_preset = (getattr(cfg, "video_translator_ffmpeg_preset", None) or "medium").strip()
+                    hw_encoder = (getattr(cfg, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+                    ffmpeg_cmd = _build_ffmpeg_encode_cmd(
+                        ffmpeg_exe, w, h, fps, self.output_path,
+                        use_bitrate=(effective_kbps > 0), effective_kbps=effective_kbps,
+                        crf=self.ffmpeg_crf, preset=effective_preset, hw_encoder=hw_encoder,
+                    )
+                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     LOGGER.warning("FFmpeg not available for ASR output: %s. Using OpenCV.", e)
                     use_ffmpeg = False
@@ -738,9 +1110,60 @@ class VideoTranslateThread(QThread):
             style = (getattr(cfg, "video_translator_subtitle_style", None) or "default").strip().lower()
             if style not in ("anime", "documentary"):
                 style = "default"
+            asr_guided_detect_inpaint = bool(getattr(cfg, "video_translator_asr_guided_detect_inpaint", False))
+            asr_guided_midpoint_refresh = bool(getattr(cfg, "video_translator_asr_guided_midpoint_refresh", True))
+            guided_detector = None
+            guided_inpainter = None
+            guided_frac = 0.0
+            guided_active_idx = -1
+            guided_mid_refreshed = False
+            guided_blks = []
+            if asr_guided_detect_inpaint and self.enable_inpaint and self.enable_detect and (not self.soft_subs_only):
+                try:
+                    from modules.video_translator import _region_fraction_from_preset
+                    guided_detector = _get_video_module("textdetector", cfg.textdetector)
+                    guided_inpainter = _get_video_module("inpainter", cfg.inpainter)
+                    if guided_detector is not None and hasattr(guided_detector, "load_model"):
+                        guided_detector.load_model()
+                    if guided_inpainter is not None and hasattr(guided_inpainter, "load_model"):
+                        guided_inpainter.load_model()
+                    guided_frac = float(_region_fraction_from_preset(cfg) or 0.0)
+                except Exception as e:
+                    LOGGER.warning("ASR-guided detect/inpaint init failed; using subtitle-only ASR render: %s", e)
+                    guided_detector = None
+                    guided_inpainter = None
+
+            def _detect_guided_blocks(frame_bgr: np.ndarray):
+                if guided_detector is None:
+                    return []
+                try:
+                    h2, w2 = frame_bgr.shape[:2]
+                    _m, bl = guided_detector.detect(frame_bgr, None)
+                    bl = bl or []
+                    if bl:
+                        for b in bl:
+                            if getattr(b, "lines", None) and len(b.lines) > 0:
+                                examine_textblk(b, w2, h2, sort=True)
+                        bl = remove_contained_boxes(bl)
+                        bl = deduplicate_primary_boxes(bl, iou_threshold=0.5)
+                    if guided_frac > 0.0 and h2 > 0:
+                        y_min_region = h2 * (1.0 - guided_frac)
+                        kept = []
+                        for b in bl:
+                            xyxy = getattr(b, "xyxy", None)
+                            if not xyxy or len(xyxy) < 4:
+                                continue
+                            y1, y2 = float(xyxy[1]), float(xyxy[3])
+                            cy = (y1 + y2) * 0.5
+                            if cy >= y_min_region and y1 < h2:
+                                kept.append(b)
+                        bl = kept
+                    return bl
+                except Exception:
+                    return []
             n = 0
             prev_active = []  # list of active subtitle texts on previous frame
-            step = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
+            step = 25 if total <= 10000 else (50 if total <= 100000 else 200)
             while True:
                 if self._cancel:
                     break
@@ -748,13 +1171,44 @@ class VideoTranslateThread(QThread):
                 if not ret or frame is None:
                     break
                 time_sec = n / fps if fps > 0 else 0
+                if guided_detector is not None and guided_inpainter is not None:
+                    active_idx = -1
+                    active_seg = None
+                    for i_seg, (s, e, t) in enumerate(segments_with_trans):
+                        txt = (t or "").strip()
+                        if txt and (not _is_invalid_subtitle_text(txt)) and float(s) <= float(time_sec) < float(e):
+                            active_idx = i_seg
+                            active_seg = (float(s), float(e), txt)
+                            break
+                    if active_idx >= 0 and active_seg is not None:
+                        if active_idx != guided_active_idx:
+                            guided_active_idx = active_idx
+                            guided_mid_refreshed = False
+                            guided_blks = _detect_guided_blocks(frame)
+                        elif asr_guided_midpoint_refresh and (not guided_mid_refreshed):
+                            s0, e0, _t0 = active_seg
+                            if float(time_sec) >= ((s0 + e0) * 0.5):
+                                guided_blks = _detect_guided_blocks(frame)
+                                guided_mid_refreshed = True
+                        if guided_blks:
+                            try:
+                                hh, ww = frame.shape[:2]
+                                msk = build_mask_with_resolved_overlaps(guided_blks, ww, hh, text_blocks_for_nudge=None)
+                                if msk is not None and msk.size > 0 and np.count_nonzero(msk > 127) > 0:
+                                    frame = guided_inpainter.inpaint(frame, msk, guided_blks)
+                            except Exception:
+                                pass
+                    else:
+                        guided_active_idx = -1
+                        guided_mid_refreshed = False
+                        guided_blks = []
                 if not self.soft_subs_only:
                     # Log start/end transitions for hardcoded (burn-in) subtitles (only when active set changes).
                     try:
                         active_now = []
                         for s, e, t in segments_with_trans:
                             txt = (t or "").strip()
-                            if txt and (not _is_region_placeholder_text(txt)) and float(s) <= float(time_sec) < float(e):
+                            if txt and (not _is_invalid_subtitle_text(txt)) and float(s) <= float(time_sec) < float(e):
                                 active_now.append(txt)
                         if active_now != prev_active:
                             ended = [t for t in prev_active if t not in active_now]
@@ -789,7 +1243,14 @@ class VideoTranslateThread(QThread):
                                 segs_for_draw.append((s, e, t))
                         except Exception:
                             segs_for_draw.append((s, e, t))
-                    _draw_timed_subs_on_image(frame, time_sec, segs_for_draw, style=style, stack_multiple_lines=True)
+                    _draw_timed_subs_on_image(
+                        frame,
+                        time_sec,
+                        segs_for_draw,
+                        style=style,
+                        stack_multiple_lines=True,
+                        **subtitle_black_box_draw_kwargs_from_cfg(cfg),
+                    )
                 if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
                     try:
                         ffmpeg_proc.stdin.write(frame.tobytes())
@@ -820,7 +1281,7 @@ class VideoTranslateThread(QThread):
                 srt_entries = [
                     (int(s * fps), int(e * fps), text)
                     for s, e, text in segments_with_trans
-                    if (text or "").strip() and not _is_region_placeholder_text(text)
+                    if (text or "").strip() and not _is_invalid_subtitle_text(text)
                 ]
                 base_path = osp.splitext(self.output_path)[0]
                 if srt_entries:
@@ -842,7 +1303,12 @@ class VideoTranslateThread(QThread):
         """Source = Existing subtitles: load sidecar or embedded subs, translate, then render frames with timed subs or soft SRT only."""
         import cv2
         import subprocess
-        from modules.video_translator import _draw_timed_subs_on_image
+        from modules.video_translator import (
+            _draw_timed_subs_on_image,
+            subtitle_black_box_draw_kwargs_from_cfg,
+            configure_translator_video_nlp_parallel,
+            clear_translator_video_nlp_parallel,
+        )
         from modules.video_subtitle_extract import load_existing_subtitles
         from utils.textblock import TextBlock
 
@@ -853,6 +1319,14 @@ class VideoTranslateThread(QThread):
             if not segments:
                 self.failed.emit("No existing subtitles found (no sidecar .srt/.ass/.vtt and no embedded subtitle stream).")
                 return
+            if bool(getattr(cfg, "video_translator_sentence_merge_by_punctuation", True)):
+                try:
+                    segments = _merge_segments_until_sentence_end(
+                        segments,
+                        max_merge_seconds=float(getattr(cfg, "video_translator_sentence_merge_max_seconds", 8.0)),
+                    )
+                except Exception as e:
+                    LOGGER.debug("Existing subs rule-based sentence merge failed (using original): %s", e)
             if self._cancel:
                 self.failed.emit("Cancelled.")
                 return
@@ -873,12 +1347,16 @@ class VideoTranslateThread(QThread):
                     blk.lines = []
                     blk.xyxy = [0, 0, 1, 1]
                     blk_list.append(blk)
+                configure_translator_video_nlp_parallel(translator, cfg)
                 try:
                     setattr(translator, "_current_page_key", "video_existing_subs")
                     setattr(translator, "_current_page_image", None)
                     translator.translate_textblk_lst(blk_list)
                 except Exception as e:
                     LOGGER.warning("Existing subs translate batch failed: %s", e)
+                finally:
+                    clear_translator_video_nlp_parallel(translator)
+                _align_blk_list_to_segments(segments, blk_list, TextBlock)
                 for (s, e, _), blk in zip(segments, blk_list):
                     trans = (getattr(blk, "translation", None) or blk.get_text() or "").strip()
                     if _is_region_placeholder_text(trans):
@@ -914,29 +1392,14 @@ class VideoTranslateThread(QThread):
                 try:
                     ffmpeg_exe = self.ffmpeg_path or "ffmpeg"
                     effective_kbps = self.video_bitrate_kbps if self.video_bitrate_kbps > 0 else source_bitrate_kbps
-                    if effective_kbps > 0:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium",
-                            "-b:v", "%dk" % effective_kbps,
-                            "-minrate", "%dk" % effective_kbps,
-                            "-maxrate", "%dk" % effective_kbps,
-                            "-bufsize", "%dk" % (effective_kbps * 2),
-                            "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    else:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    if self.output_path.lower().endswith((".mp4", ".mov")):
-                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
-                    ffmpeg_cmd.append(self.output_path)
-                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
+                    effective_preset = (getattr(cfg, "video_translator_ffmpeg_preset", None) or "medium").strip()
+                    hw_encoder = (getattr(cfg, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+                    ffmpeg_cmd = _build_ffmpeg_encode_cmd(
+                        ffmpeg_exe, w, h, fps, self.output_path,
+                        use_bitrate=(effective_kbps > 0), effective_kbps=effective_kbps,
+                        crf=self.ffmpeg_crf, preset=effective_preset, hw_encoder=hw_encoder,
+                    )
+                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     LOGGER.warning("FFmpeg not available for existing subs output: %s. Using OpenCV.", e)
                     use_ffmpeg = False
@@ -959,7 +1422,7 @@ class VideoTranslateThread(QThread):
                 style = "default"
             n = 0
             prev_active = []  # list of active subtitle texts on previous frame
-            step = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
+            step = 25 if total <= 10000 else (50 if total <= 100000 else 200)
             while True:
                 if self._cancel:
                     break
@@ -973,7 +1436,7 @@ class VideoTranslateThread(QThread):
                         active_now = []
                         for s, e, t in segments_with_trans:
                             txt = (t or "").strip()
-                            if txt and (not _is_region_placeholder_text(txt)) and float(s) <= float(time_sec) < float(e):
+                            if txt and (not _is_invalid_subtitle_text(txt)) and float(s) <= float(time_sec) < float(e):
                                 active_now.append(txt)
                         if active_now != prev_active:
                             ended = [t for t in prev_active if t not in active_now]
@@ -1007,7 +1470,14 @@ class VideoTranslateThread(QThread):
                                 segs_for_draw.append((s, e, t))
                         except Exception:
                             segs_for_draw.append((s, e, t))
-                    _draw_timed_subs_on_image(frame, time_sec, segs_for_draw, style=style, stack_multiple_lines=True)
+                    _draw_timed_subs_on_image(
+                        frame,
+                        time_sec,
+                        segs_for_draw,
+                        style=style,
+                        stack_multiple_lines=True,
+                        **subtitle_black_box_draw_kwargs_from_cfg(cfg),
+                    )
                 if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
                     try:
                         ffmpeg_proc.stdin.write(frame.tobytes())
@@ -1038,7 +1508,7 @@ class VideoTranslateThread(QThread):
                 srt_entries = [
                     (int(s * fps), int(e * fps), text)
                     for s, e, text in segments_with_trans
-                    if (text or "").strip() and not _is_region_placeholder_text(text)
+                    if (text or "").strip() and not _is_invalid_subtitle_text(text)
                 ]
                 base_path = osp.splitext(self.output_path)[0]
                 if srt_entries:
@@ -1056,11 +1526,594 @@ class VideoTranslateThread(QThread):
             LOGGER.exception("Existing subtitles pipeline failed")
             self.failed.emit(str(e))
 
+    def _run_ocr_two_pass_pipeline(self):
+        """
+        OCR hardcoded subtitles, two-pass:
+        1) detect/OCR/inpaint + async translation collection (no burn-in draw in pass 1)
+        2) burn-in timed subtitles on the inpainted intermediate video
+        """
+        import cv2
+        import subprocess
+        import numpy as np
+        from utils.textblock import TextBlock
+        from modules.video_translator import (
+            run_one_frame_pipeline,
+            _draw_timed_subs_on_image,
+            subtitle_black_box_draw_kwargs_from_cfg,
+            _region_fraction_from_preset,
+            translate_video_textblk_list,
+        )
+
+        try:
+            self._progress_phase = "Pass 1/2 (scan + inpaint)"
+            cfg = pcfg.module
+            cap = cv2.VideoCapture(self.input_path)
+            if not cap.isOpened():
+                self.failed.emit("Could not open input video.")
+                return
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            fps = _normalize_fps(
+                cap,
+                cap.get(cv2.CAP_PROP_FPS) or 0.0,
+                total,
+                video_path=self.input_path,
+                ffmpeg_exe=self.ffmpeg_path or "",
+            )
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if w <= 0 or h <= 0:
+                cap.release()
+                self.failed.emit("Could not open input video or no frames.")
+                return
+            if total <= 0 and fps > 0:
+                total = -1
+
+            source_bitrate_kbps = _get_source_bitrate_kbps(self.input_path, self.ffmpeg_path) or 0
+
+            detector = _get_video_module("textdetector", cfg.textdetector) if (self.enable_detect and not self.skip_detect) else None
+            ocr = _get_video_module("ocr", cfg.ocr) if self.enable_ocr else None
+            translator = _get_video_module("translator", cfg.translator) if self.enable_translate else None
+            inpainter = _get_video_module("inpainter", cfg.inpainter) if self.enable_inpaint else None
+
+            if self.enable_detect and not self.skip_detect and detector is not None and hasattr(detector, "load_model"):
+                detector.load_model()
+            if self.enable_ocr and ocr is not None and hasattr(ocr, "load_model"):
+                ocr.load_model()
+            if self.enable_inpaint and inpainter is not None and hasattr(inpainter, "load_model"):
+                inpainter.load_model()
+            if self.enable_translate and translator is not None and hasattr(translator, "load_model"):
+                translator.load_model()
+
+            if ocr is not None:
+                setattr(ocr, "_video_frame_ocr_cache", None)
+                setattr(ocr, "_video_frame_ocr_cache_order", None)
+            if translator is not None:
+                setattr(translator, "_video_frame_cache", None)
+                setattr(translator, "_video_recent_text_cache", None)
+                setattr(translator, "_video_glossary_hint", (getattr(cfg, "video_translator_glossary", None) or "").strip())
+                sp = (getattr(cfg, "video_translator_series_context_path", None) or "").strip()
+                if sp and hasattr(translator, "set_translation_context"):
+                    translator.set_translation_context(series_context_path=sp)
+            else:
+                sp = ""
+
+            flow_fixer_review = None
+            if getattr(cfg, "video_translator_flow_fixer_enabled", False):
+                try:
+                    from modules.flow_fixer import get_flow_fixer
+                    fixer_name = (getattr(cfg, "video_translator_flow_fixer", None) or "none").strip().lower()
+                    if fixer_name == "openrouter":
+                        flow_fixer_review = get_flow_fixer(
+                            "openrouter",
+                            api_key=(getattr(cfg, "video_translator_flow_fixer_openrouter_apikey", None) or "").strip(),
+                            model=(getattr(cfg, "video_translator_flow_fixer_openrouter_model", None) or "google/gemma-3n-e2b-it:free").strip(),
+                            max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                            timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                            enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                            reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                        )
+                    elif fixer_name == "openai":
+                        flow_fixer_review = get_flow_fixer(
+                            "openai",
+                            api_key=(getattr(cfg, "video_translator_flow_fixer_openai_apikey", None) or "").strip(),
+                            model=(getattr(cfg, "video_translator_flow_fixer_openai_model", None) or "gpt-4o-mini").strip(),
+                            max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                            timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                            enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                            reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                        )
+                    elif fixer_name == "local_server":
+                        local_model = (getattr(cfg, "video_translator_flow_fixer_model", None) or "").strip()
+                        if local_model:
+                            flow_fixer_review = get_flow_fixer(
+                                "local_server",
+                                server_url=(getattr(cfg, "video_translator_flow_fixer_server_url", None) or "http://localhost:1234/v1").strip(),
+                                model=local_model,
+                                max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
+                                timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
+                            )
+                except Exception:
+                    flow_fixer_review = None
+
+            # Intermediate inpainted video (no burned subtitles).
+            tmp_fd, tmp_inpaint_path = tempfile.mkstemp(prefix="bt_inpaint_", suffix=".mp4")
+            os.close(tmp_fd)
+
+            use_ffmpeg_pass1 = self.use_ffmpeg
+            ffmpeg_proc1 = None
+            if use_ffmpeg_pass1:
+                try:
+                    ffmpeg_exe = self.ffmpeg_path if self.ffmpeg_path else "ffmpeg"
+                    effective_kbps = self.video_bitrate_kbps if self.video_bitrate_kbps > 0 else source_bitrate_kbps
+                    effective_preset = (getattr(cfg, "video_translator_ffmpeg_preset", None) or "medium").strip()
+                    hw_encoder = (getattr(cfg, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+                    ffmpeg_cmd = _build_ffmpeg_encode_cmd(
+                        ffmpeg_exe,
+                        w,
+                        h,
+                        fps,
+                        tmp_inpaint_path,
+                        use_bitrate=(effective_kbps > 0),
+                        effective_kbps=effective_kbps,
+                        crf=self.ffmpeg_crf,
+                        preset=effective_preset,
+                        hw_encoder=hw_encoder,
+                    )
+                    ffmpeg_proc1 = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    LOGGER.warning("Pass1 FFmpeg unavailable (%s), using OpenCV writer.", e)
+                    use_ffmpeg_pass1 = False
+
+            out1 = None
+            if not use_ffmpeg_pass1:
+                codec = (getattr(cfg, "video_translator_output_codec", None) or "mp4v").strip() or "mp4v"
+                if len(codec) != 4:
+                    codec = "mp4v"
+                out1 = cv2.VideoWriter(tmp_inpaint_path, cv2.VideoWriter_fourcc(*codec), fps, (w, h))
+                if not out1.isOpened() and codec != "avc1":
+                    out1 = cv2.VideoWriter(tmp_inpaint_path, cv2.VideoWriter_fourcc(*"avc1"), fps, (w, h))
+                if not out1.isOpened():
+                    cap.release()
+                    self.failed.emit("Could not create intermediate video.")
+                    return
+
+            # Translation worker (single thread): keeps ordering/context stable while decode/pipeline continues.
+            translation_jobs = []  # (frame_idx, future)
+            translation_history = []
+            try:
+                translation_history_max = int(
+                    translator.get_param_value("context_previous_pages")
+                ) if (translator is not None and hasattr(translator, "get_param_value")) else 10
+            except Exception:
+                translation_history_max = 10
+            translation_history_max = max(10, min(50, translation_history_max))
+            trans_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if translator is not None else None
+
+            def _filtered_context_entries(entries: list, max_items: int) -> list:
+                """Keep only useful recent subtitle context entries for flow continuity."""
+                out = []
+                for e in entries or []:
+                    if not isinstance(e, dict):
+                        continue
+                    srcs = [str(s or "").strip() for s in (e.get("sources") or [])]
+                    trans = [str(t or "").strip() for t in (e.get("translations") or [])]
+                    clean_trans = [t for t in trans if t and not _is_invalid_subtitle_text(t)]
+                    if not clean_trans:
+                        continue
+                    clean_srcs = [s for s in srcs if s and not _is_invalid_subtitle_text(s)]
+                    out.append({"sources": clean_srcs, "translations": clean_trans})
+                return out[-max_items:] if len(out) > max_items else out
+
+            def _clone_blk_for_translation(src_blk: TextBlock) -> TextBlock:
+                b = TextBlock()
+                try:
+                    b.xyxy = list(getattr(src_blk, "xyxy", []) or [])
+                except Exception:
+                    b.xyxy = []
+                try:
+                    b.lines = copy.deepcopy(getattr(src_blk, "lines", []) or [])
+                except Exception:
+                    b.lines = []
+                txt = (src_blk.get_text() if hasattr(src_blk, "get_text") else "") or ""
+                b.text = [txt]
+                b.translation = ""
+                return b
+
+            def _translate_job(frame_idx: int, blk_payload: list[TextBlock]):
+                if translator is None or not blk_payload:
+                    return frame_idx, []
+                try:
+                    if hasattr(translator, "set_translation_context"):
+                        translator.set_translation_context(
+                            previous_pages=_filtered_context_entries(translation_history, translation_history_max),
+                            series_context_path=sp if sp else None,
+                        )
+                except Exception:
+                    pass
+                translate_video_textblk_list(
+                    translator=translator,
+                    blk_list=blk_payload,
+                    cfg=cfg,
+                    frame_index=frame_idx,
+                    img=None,
+                    flow_fixer=None,
+                    use_flow_fixer_for_corrections=False,
+                )
+                # Built-in flow continuity (without Flow Fixer):
+                # apply model-provided revised_previous to recent history so subsequent
+                # frames inherit corrected phrasing/tense/pronouns.
+                try:
+                    rev = getattr(translator, "_last_revised_previous", None)
+                    if rev and isinstance(rev, list) and len(rev) > 0 and len(translation_history) >= len(rev):
+                        k = len(rev)
+                        for i in range(k):
+                            idx = -k + i
+                            if i < len(rev) and rev[i]:
+                                translation_history[idx]["translations"] = [str(rev[i]).strip()]
+                        setattr(translator, "_last_revised_previous", None)
+                except Exception:
+                    pass
+                srcs = []
+                trans = []
+                for b in blk_payload:
+                    s = (b.get_text() if hasattr(b, "get_text") else "") or ""
+                    t = (getattr(b, "translation", None) or "").strip()
+                    srcs.append(s)
+                    trans.append(t)
+                if srcs or trans:
+                    translation_history.append({"sources": srcs, "translations": trans})
+                    if len(translation_history) > translation_history_max:
+                        del translation_history[:-translation_history_max]
+                return frame_idx, trans
+
+            cached_result = None
+            cached_blk_list = None
+            cached_source_frame = None
+            prev_gray = None
+            last_pipeline_n = -self.sample_every_frames - 1
+            last_content_hash = None
+            last_band_small_gray = None
+            subtitle_frac = _region_fraction_from_preset(cfg)
+            subtitle_roi_frac = subtitle_frac if subtitle_frac > 0 else 1.0
+            scene_roi_frac = subtitle_roi_frac
+            two_stage_force_every_frames = int(getattr(cfg, "video_translator_two_stage_force_refresh_every_frames", 0) or 0)
+            two_stage_new_line_diff_threshold = float(getattr(cfg, "video_translator_two_stage_new_line_diff_threshold", 8.0) or 8.0)
+            n = 0
+            while True:
+                if self._cancel:
+                    break
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+                pending_two_stage_hash = None
+                pending_two_stage_small_gray = None
+                periodic = n % self.sample_every_frames == 0
+                if self.use_scene_detection:
+                    scene_changed = _scene_change(prev_gray, curr_gray, self.scene_threshold, bottom_frac=scene_roi_frac)
+                    run_pipeline = periodic or (scene_changed and (n - last_pipeline_n) >= self.sample_every_frames)
+                else:
+                    run_pipeline = periodic
+                prev_gray = curr_gray
+
+                if run_pipeline and self.two_stage_keyframes:
+                    curr_small_gray = _subtitle_region_small_gray(frame, subtitle_roi_frac)
+                    if curr_small_gray is not None:
+                        curr_hash = hashlib.md5(curr_small_gray.tobytes()).digest()
+                        forced_due = (
+                            two_stage_force_every_frames > 0
+                            and last_pipeline_n >= 0
+                            and (n - last_pipeline_n) >= two_stage_force_every_frames
+                        )
+                        should_skip = False
+                        if last_content_hash is not None and curr_hash == last_content_hash and not forced_due:
+                            if two_stage_new_line_diff_threshold > 0 and last_band_small_gray is not None:
+                                diff = float(
+                                    np.mean(
+                                        np.abs(
+                                            curr_small_gray.astype(np.int16)
+                                            - last_band_small_gray.astype(np.int16)
+                                        )
+                                    )
+                                )
+                                should_skip = diff <= two_stage_new_line_diff_threshold
+                            else:
+                                should_skip = True
+                        if should_skip:
+                            run_pipeline = False
+                        else:
+                            pending_two_stage_hash = curr_hash
+                            pending_two_stage_small_gray = curr_small_gray
+
+                if run_pipeline:
+                    last_pipeline_n = n
+                    out_frame, blk_list, _ = run_one_frame_pipeline(
+                        frame,
+                        detector,
+                        ocr,
+                        None,  # translation deferred to worker
+                        inpainter,
+                        self.enable_detect,
+                        self.enable_ocr,
+                        False,  # no translation in pass 1
+                        self.enable_inpaint,
+                        cfg=cfg,
+                        skip_detect=self.skip_detect,
+                        draw_subtitles=False,
+                        detect_roi_xyxy=None,
+                        frame_index=n,
+                        flow_fixer=None,
+                        use_flow_fixer_for_corrections=False,
+                    )
+                    cached_result = out_frame
+                    cached_blk_list = blk_list
+                    cached_source_frame = frame.copy()
+                    if pending_two_stage_hash is not None:
+                        last_content_hash = pending_two_stage_hash
+                        last_band_small_gray = pending_two_stage_small_gray
+
+                    if trans_executor is not None and blk_list:
+                        payload = [_clone_blk_for_translation(b) for b in blk_list]
+                        fut = trans_executor.submit(_translate_job, n, payload)
+                        translation_jobs.append((n, fut))
+                if cached_result is not None and cached_blk_list is not None:
+                    comp = _composite_cached_subs_on_frame(
+                        frame,
+                        cached_result,
+                        cached_source_frame,
+                        cached_blk_list,
+                        h,
+                        w,
+                    )
+                    write_fr = comp if comp is not None else frame
+                elif cached_result is not None:
+                    write_fr = cached_result
+                else:
+                    write_fr = frame
+
+                if use_ffmpeg_pass1 and ffmpeg_proc1 and ffmpeg_proc1.stdin:
+                    try:
+                        ffmpeg_proc1.stdin.write(write_fr.tobytes())
+                    except Exception:
+                        pass
+                elif out1 is not None:
+                    out1.write(write_fr)
+
+                if total > 0:
+                    step = 25 if total <= 10000 else (50 if total <= 100000 else 200)
+                    if n % step == 0 or n == total:
+                        self.progress.emit(min(total * 2, n), total * 2)
+                elif n % 30 == 0:
+                    self.progress.emit(n, 0)
+                n += 1
+
+            cap.release()
+            if out1 is not None:
+                out1.release()
+            if use_ffmpeg_pass1 and ffmpeg_proc1 and ffmpeg_proc1.stdin:
+                try:
+                    ffmpeg_proc1.stdin.close()
+                    ffmpeg_proc1.wait(timeout=max(600, (total or 0) // 1000))
+                except Exception:
+                    try:
+                        ffmpeg_proc1.terminate()
+                    except Exception:
+                        pass
+
+            if trans_executor is not None:
+                trans_executor.shutdown(wait=True)
+
+            # Build timed cues after all translations finish.
+            srt_entries = []
+            jobs_sorted = sorted(translation_jobs, key=lambda x: x[0])
+            for frame_idx, fut in jobs_sorted:
+                try:
+                    _, trans = fut.result()
+                except Exception:
+                    trans = []
+                parts = []
+                for t in trans:
+                    tt = (t or "").strip()
+                    if tt and not _is_invalid_subtitle_text(tt):
+                        parts.append(tt)
+                text = " ".join(parts).strip()
+                if not text:
+                    continue
+                seg_end = frame_idx + max(1, self.sample_every_frames)
+                if srt_entries and srt_entries[-1][2] == text:
+                    srt_entries[-1] = (srt_entries[-1][0], seg_end, srt_entries[-1][2])
+                else:
+                    if srt_entries:
+                        srt_entries[-1] = (srt_entries[-1][0], frame_idx, srt_entries[-1][2])
+                    srt_entries.append((frame_idx, seg_end, text))
+            if srt_entries:
+                srt_entries[-1] = (srt_entries[-1][0], max(srt_entries[-1][1], n), srt_entries[-1][2])
+
+            # Optional post-run global subtitle flow review before burn-in pass (dedicated flow fixer or main LLM).
+            post_review_fixer = None
+            try:
+                from modules.flow_fixer.translator_flow_fixer import resolve_post_review_flow_fixer
+
+                post_review_fixer = resolve_post_review_flow_fixer(cfg, translator, flow_fixer_review)
+            except Exception as e:
+                LOGGER.debug("Post-review flow fixer resolve failed: %s", e)
+            if srt_entries and post_review_fixer is not None:
+                post_review_enabled = bool(getattr(cfg, "video_translator_post_review_enabled", True))
+                post_review_on_cancel = bool(getattr(cfg, "video_translator_post_review_apply_on_cancel", True))
+                can_run = post_review_enabled and ((not self._cancel) or post_review_on_cancel)
+                if can_run:
+                    try:
+                        from modules.flow_fixer.corrections import improve_subtitle_timeline_via_fixer
+
+                        original_texts = [str(e[2] or "").strip() for e in srt_entries]
+                        chunk_size = int(getattr(cfg, "video_translator_post_review_chunk_size", 80) or 80)
+                        ctx_lines = int(getattr(cfg, "video_translator_post_review_context_lines", 20) or 20)
+                        _tl = "en"
+                        if translator is not None:
+                            _tl = str(getattr(translator, "lang_target", None) or "en")
+                        revised_texts = improve_subtitle_timeline_via_fixer(
+                            flow_fixer=post_review_fixer,
+                            timeline_texts=original_texts,
+                            target_lang=_tl,
+                            chunk_size=chunk_size,
+                            context_lines=ctx_lines,
+                        )
+                        if revised_texts and len(revised_texts) == len(srt_entries):
+                            n_changed = 0
+                            updated = []
+                            for i, (start_f, end_f, old_text) in enumerate(srt_entries):
+                                new_text = str(revised_texts[i] or "").strip()
+                                if not new_text:
+                                    new_text = str(old_text or "").strip()
+                                if new_text != str(old_text or "").strip():
+                                    n_changed += 1
+                                updated.append((start_f, end_f, new_text))
+                            srt_entries = updated
+                            if n_changed > 0:
+                                LOGGER.info(
+                                    "Post-run subtitle flow review changed %d/%d segment(s) before burn-in.",
+                                    n_changed,
+                                    len(srt_entries),
+                                )
+                    except Exception as e:
+                        LOGGER.debug("Post-run subtitle flow review failed before burn-in: %s", e)
+
+            # Pass 2: burn-in translated timed cues onto inpainted intermediate.
+            self._progress_phase = "Pass 2/2 (burn-in)"
+            cap2 = cv2.VideoCapture(tmp_inpaint_path)
+            if not cap2.isOpened():
+                self.failed.emit("Could not open intermediate video for burn-in.")
+                return
+
+            use_ffmpeg_pass2 = self.use_ffmpeg
+            ffmpeg_proc2 = None
+            if use_ffmpeg_pass2:
+                try:
+                    ffmpeg_exe = self.ffmpeg_path if self.ffmpeg_path else "ffmpeg"
+                    effective_kbps = self.video_bitrate_kbps if self.video_bitrate_kbps > 0 else source_bitrate_kbps
+                    effective_preset = (getattr(cfg, "video_translator_ffmpeg_preset", None) or "medium").strip()
+                    hw_encoder = (getattr(cfg, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+                    ffmpeg_cmd = _build_ffmpeg_encode_cmd(
+                        ffmpeg_exe,
+                        w,
+                        h,
+                        fps,
+                        self.output_path,
+                        use_bitrate=(effective_kbps > 0),
+                        effective_kbps=effective_kbps,
+                        crf=self.ffmpeg_crf,
+                        preset=effective_preset,
+                        hw_encoder=hw_encoder,
+                    )
+                    ffmpeg_proc2 = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    LOGGER.warning("Pass2 FFmpeg unavailable (%s), using OpenCV writer.", e)
+                    use_ffmpeg_pass2 = False
+
+            out2 = None
+            if not use_ffmpeg_pass2:
+                codec = (getattr(cfg, "video_translator_output_codec", None) or "mp4v").strip() or "mp4v"
+                if len(codec) != 4:
+                    codec = "mp4v"
+                out2 = cv2.VideoWriter(self.output_path, cv2.VideoWriter_fourcc(*codec), fps, (w, h))
+                if not out2.isOpened() and codec != "avc1":
+                    out2 = cv2.VideoWriter(self.output_path, cv2.VideoWriter_fourcc(*"avc1"), fps, (w, h))
+                if not out2.isOpened():
+                    cap2.release()
+                    self.failed.emit("Could not create output video.")
+                    return
+
+            m = 0
+            while True:
+                if self._cancel:
+                    break
+                ret2, fr2 = cap2.read()
+                if not ret2 or fr2 is None:
+                    break
+                if srt_entries:
+                    overlap_frames = min(15, max(5, int(fps * 0.5)))
+                    segments_for_draw = []
+                    for (start_f, end_f, text) in srt_entries:
+                        if start_f <= m < end_f:
+                            segments_for_draw.append((start_f / fps, end_f / fps, text))
+                        elif end_f == m and (end_f - start_f) <= overlap_frames:
+                            segments_for_draw.append((start_f / fps, (m + 1) / fps, text))
+                    _draw_timed_subs_on_image(
+                        fr2,
+                        m / fps if fps > 0 else 0.0,
+                        segments_for_draw,
+                        stack_multiple_lines=True,
+                        **subtitle_black_box_draw_kwargs_from_cfg(cfg),
+                    )
+
+                if use_ffmpeg_pass2 and ffmpeg_proc2 and ffmpeg_proc2.stdin:
+                    try:
+                        ffmpeg_proc2.stdin.write(fr2.tobytes())
+                    except Exception:
+                        pass
+                elif out2 is not None:
+                    out2.write(fr2)
+                if total > 0:
+                    step2 = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
+                    if m % step2 == 0 or m == total:
+                        self.progress.emit(min(total * 2, total + m), total * 2)
+                elif m % 30 == 0:
+                    self.progress.emit(m, 0)
+                m += 1
+
+            cap2.release()
+            if out2 is not None:
+                out2.release()
+            if use_ffmpeg_pass2 and ffmpeg_proc2 and ffmpeg_proc2.stdin:
+                try:
+                    ffmpeg_proc2.stdin.close()
+                    ffmpeg_proc2.wait(timeout=max(600, (total or 0) // 1000))
+                except Exception:
+                    try:
+                        ffmpeg_proc2.terminate()
+                    except Exception:
+                        pass
+
+            # Burn-in mode: remove sidecar if exists (avoid double subtitles)
+            base_path = osp.splitext(self.output_path)[0]
+            for ext in (".srt", ".ass", ".vtt"):
+                p = base_path + ext
+                if osp.isfile(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+
+            try:
+                if osp.isfile(tmp_inpaint_path):
+                    os.remove(tmp_inpaint_path)
+            except Exception:
+                pass
+
+            if osp.isfile(self.output_path):
+                self._progress_phase = ""
+                self.finished_ok.emit(self.output_path)
+            else:
+                self._progress_phase = ""
+                self.failed.emit("Cancelled.")
+        except Exception as e:
+            self._progress_phase = ""
+            LOGGER.exception("Two-pass OCR pipeline failed")
+            self.failed.emit(str(e))
+
     def run(self):
         import cv2
         import subprocess
         import numpy as np
-        from modules.video_translator import run_one_frame_pipeline, _region_fraction_from_preset, _draw_text_on_image, _draw_timed_subs_on_image
+        from modules.video_translator import (
+            run_one_frame_pipeline,
+            _region_fraction_from_preset,
+            _draw_text_on_image,
+            _draw_timed_subs_on_image,
+            subtitle_black_box_draw_kwargs_from_cfg,
+        )
 
         try:
             src = getattr(self, "source", "ocr").strip().lower()
@@ -1070,36 +2123,73 @@ class VideoTranslateThread(QThread):
             if src == "existing_subs":
                 self._run_existing_subs_pipeline()
                 return
-
-            cap = cv2.VideoCapture(self.input_path)
-            if not cap.isOpened():
-                self.failed.emit("Could not open input video.")
+            # OCR hardcoded subtitles + burn-in: run fast two-pass pipeline so translation never blocks frame scanning.
+            if (
+                src == "ocr"
+                and (not self.soft_subs_only)
+                and (not self.inpaint_only_soft_subs)
+                and self.enable_translate
+                and self.use_two_pass_ocr_burn_in
+            ):
+                self._run_ocr_two_pass_pipeline()
                 return
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-            fps = _normalize_fps(
-                cap, cap.get(cv2.CAP_PROP_FPS) or 0.0, total,
-                video_path=self.input_path,
-                ffmpeg_exe=self.ffmpeg_path or "",
-            )
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            # Pipeline thread: raise priority so decode/encode threads don't throttle it (Windows).
+            _set_thread_priority_above_normal()
+
+            # Always decode in a separate thread so slow I/O never blocks the pipeline.
+            frame_queue = queue_module.Queue(maxsize=max(2, self.prefetch_frames + 2))
+
+            def _frame_reader():
+                _set_thread_priority_below_normal()
+                cap_r = cv2.VideoCapture(self.input_path)
+                if not cap_r.isOpened():
+                    frame_queue.put(("meta", 0.0, 0, 0, 0))
+                    frame_queue.put((False, None, 0))
+                    return
+                total_r = int(cap_r.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+                fps_r = _normalize_fps(
+                    cap_r, cap_r.get(cv2.CAP_PROP_FPS) or 0.0, total_r,
+                    video_path=self.input_path,
+                    ffmpeg_exe=self.ffmpeg_path or "",
+                )
+                ret, frame = cap_r.read()
+                if ret and frame is not None:
+                    h_r, w_r = frame.shape[:2]
+                    frame_queue.put(("meta", fps_r, total_r, w_r, h_r))
+                    frame_queue.put((True, frame, 0))
+                else:
+                    frame_queue.put(("meta", fps_r, total_r, 0, 0))
+                    frame_queue.put((False, None, 0))
+                    cap_r.release()
+                    return
+                idx = 1
+                while not self._cancel:
+                    ret, frame = cap_r.read()
+                    frame_queue.put((ret, frame, idx))
+                    if not ret:
+                        break
+                    idx += 1
+                cap_r.release()
+
+            reader_thread = threading.Thread(target=_frame_reader, daemon=True, name="VideoDecode")
+            reader_thread.start()
+            meta = frame_queue.get()
+            if not (isinstance(meta, tuple) and len(meta) >= 5 and meta[0] == "meta"):
+                reader_thread.join(timeout=2)
+                self.failed.emit("Could not open input video (prefetch).")
+                return
+            fps, total, w, h = meta[1], meta[2], meta[3], meta[4]
+            total = int(total)
             if w <= 0 or h <= 0:
-                cap.release()
-                self.failed.emit("Invalid video size.")
+                reader_thread.join(timeout=2)
+                self.failed.emit("Could not open input video or no frames.")
                 return
             if total <= 0 and fps > 0:
-                dur = cap.get(cv2.CAP_PROP_POS_MSEC) or 0
-                if dur <= 0:
-                    total = -1
-                else:
-                    total = int(dur * fps / 1000.0) or -1
-            # Source bitrate: OpenCV often returns 0 or wrong low values (e.g. 500); use ffprobe/size-duration when < 1000 kbps
-            src_bps = cap.get(cv2.CAP_PROP_BITRATE) or 0
-            ocv_kbps = int(src_bps / 1000) if src_bps > 0 else 0
-            source_bitrate_kbps = max(500, min(50000, ocv_kbps)) if ocv_kbps >= 1000 else 0
-            if source_bitrate_kbps <= 0:
-                source_bitrate_kbps = _get_source_bitrate_kbps(self.input_path, self.ffmpeg_path)
+                total = -1
+            source_bitrate_kbps = _get_source_bitrate_kbps(self.input_path, self.ffmpeg_path) or 0
 
+            cap = None  # Decode is in reader thread; main loop never reads from cap
             cfg = pcfg.module
             detector = _get_video_module("textdetector", cfg.textdetector) if (self.enable_detect and not self.skip_detect) else None
             ocr = _get_video_module("ocr", cfg.ocr) if self.enable_ocr else None
@@ -1136,6 +2226,8 @@ class VideoTranslateThread(QThread):
                                 model=(getattr(cfg, "video_translator_flow_fixer_openrouter_model", None) or "google/gemma-3n-e2b-it:free").strip(),
                                 max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
                                 timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
                             )
                         elif fixer_name == "openai":
                             flow_fixer = get_flow_fixer(
@@ -1144,6 +2236,8 @@ class VideoTranslateThread(QThread):
                                 model=(getattr(cfg, "video_translator_flow_fixer_openai_model", None) or "gpt-4o-mini").strip(),
                                 max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
                                 timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
                             )
                         else:
                             # Local (Ollama / LM Studio): require non-empty model name so user picks the right one
@@ -1159,6 +2253,8 @@ class VideoTranslateThread(QThread):
                                     model=local_model,
                                     max_tokens=int(getattr(cfg, "video_translator_flow_fixer_max_tokens", 256)),
                                     timeout=float(getattr(cfg, "video_translator_flow_fixer_timeout", 30.0)),
+                                    enable_reasoning=bool(getattr(cfg, "video_translator_flow_fixer_enable_reasoning", False)),
+                                    reasoning_effort=(getattr(cfg, "video_translator_flow_fixer_reasoning_effort", None) or "medium"),
                                 )
                     except Exception as e:
                         LOGGER.warning("Flow fixer not available: %s", e)
@@ -1174,29 +2270,17 @@ class VideoTranslateThread(QThread):
                 try:
                     ffmpeg_exe = self.ffmpeg_path if self.ffmpeg_path else "ffmpeg"
                     effective_kbps = self.video_bitrate_kbps if self.video_bitrate_kbps > 0 else source_bitrate_kbps
-                    if effective_kbps > 0:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium",
-                            "-b:v", "%dk" % effective_kbps,
-                            "-minrate", "%dk" % effective_kbps,
-                            "-maxrate", "%dk" % effective_kbps,
-                            "-bufsize", "%dk" % (effective_kbps * 2),
-                            "-x264-params", "nal-hrd=cbr",
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    else:
-                        ffmpeg_cmd = [
-                            ffmpeg_exe, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                            "-s", "%dx%d" % (w, h), "-framerate", str(fps), "-i", "pipe:0",
-                            "-c:v", "libx264", "-preset", "medium", "-crf", str(self.ffmpeg_crf),
-                            "-r", str(fps), "-pix_fmt", "yuv420p",
-                        ]
-                    if self.output_path.lower().endswith((".mp4", ".mov")):
-                        ffmpeg_cmd.extend(["-movflags", "+faststart"])
-                    ffmpeg_cmd.append(self.output_path)
-                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
+                    effective_preset = (getattr(cfg, "video_translator_ffmpeg_preset", None) or "medium").strip()
+                    hw_encoder = (getattr(cfg, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+                    ffmpeg_cmd = _build_ffmpeg_encode_cmd(
+                        ffmpeg_exe, w, h, fps, self.output_path,
+                        use_bitrate=(effective_kbps > 0),
+                        effective_kbps=effective_kbps,
+                        crf=self.ffmpeg_crf,
+                        preset=effective_preset,
+                        hw_encoder=hw_encoder,
+                    )
+                    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     LOGGER.warning(
                         "FFmpeg not available: %s. Either uncheck 'Use FFmpeg' in Video translator Advanced to use OpenCV, or install FFmpeg and add it to PATH, or set 'FFmpeg path' to the full path to ffmpeg.exe (e.g. C:\\ffmpeg\\bin\\ffmpeg.exe). Using OpenCV for output.",
@@ -1214,20 +2298,45 @@ class VideoTranslateThread(QThread):
                     fourcc = cv2.VideoWriter_fourcc(*"avc1")
                     out = cv2.VideoWriter(self.output_path, fourcc, fps, (w, h))
                 if not out.isOpened():
-                    cap.release()
+                    reader_thread.join(timeout=2)
                     self.failed.emit("Could not create output video (try different output path or codec).")
                     return
             else:
                 out = None
 
-            def write_frame(frame):
-                if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
-                    try:
-                        ffmpeg_proc.stdin.write(frame.tobytes())
-                    except Exception:
-                        pass
-                elif out is not None:
-                    out.write(frame)
+            # Always encode in a separate thread so slow I/O never blocks the pipeline.
+            write_queue = queue_module.Queue(maxsize=90)
+
+            def _writer_loop():
+                _set_thread_priority_below_normal()
+                pending = {}
+                next_index = 0
+                while True:
+                    item = write_queue.get()
+                    if item[0] is None:
+                        break
+                    idx, fr = item
+                    if fr is not None:
+                        pending[idx] = fr
+                    while next_index in pending:
+                        f = pending.pop(next_index)
+                        if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
+                            try:
+                                ffmpeg_proc.stdin.write(f.tobytes())
+                            except Exception:
+                                pass
+                        elif out is not None:
+                            out.write(f)
+                        next_index += 1
+
+            writer_thread = threading.Thread(target=_writer_loop, daemon=True, name="VideoEncode")
+            writer_thread.start()
+
+            def write_frame(frame_index, frame):
+                try:
+                    write_queue.put((frame_index, frame.copy() if frame is not None else None), block=True, timeout=300)
+                except Exception:
+                    pass
 
             # When burning in, remove any existing sidecar SRT/ASS/VTT so the player does not show double subtitles
             if not self.soft_subs_only and not self.inpaint_only_soft_subs:
@@ -1251,55 +2360,215 @@ class VideoTranslateThread(QThread):
             last_good_cached_inpainted = None
             miss_streak = 0
             cached_hold_until = -1  # frame index until which we keep compositing cached subs
+            last_cache_clear_frame = -9999  # when we last set cached_blk_list = [], for limited last_good fallback
             prev_gray = None
             prev_result = None
             last_pipeline_n = -self.sample_every_frames - 1  # so we run on n=0 and respect "process every N" minimum interval
+            last_content_hash = None  # for two-stage keyframes: skip pipeline when subtitle region unchanged
+            last_band_small_gray = None  # for "new line" detection: cheap band diff
             n = 0
             srt_entries = []
             current_preview_texts = []
             preview_throttle = 5
             video_previous_subtitles = []
             max_video_context = 10
+            # Memoize flow-fixer calls to avoid repeated model latency on identical translation sequences.
+            flow_fixer_cache = {}
+            flow_fixer_cache_order = []
+            flow_fixer_cache_max = max(1, int(getattr(cfg, "video_translator_flow_fixer_cache_size", 200) or 200))
             # Clear per-region OCR cache and translator cache so a new video run doesn't reuse old results
             if ocr is not None:
                 setattr(ocr, "_video_frame_ocr_cache", None)
                 setattr(ocr, "_video_frame_ocr_cache_order", None)
             if translator is not None:
                 setattr(translator, "_video_frame_cache", None)
+                setattr(translator, "_video_recent_text_cache", None)
+
+            subtitle_frac = _region_fraction_from_preset(cfg)
+            subtitle_roi_frac = subtitle_frac if subtitle_frac > 0 else 1.0  # 1.0 => whole frame (preset "full")
+            scene_roi_frac = subtitle_roi_frac
+            two_stage_force_every_frames = int(getattr(cfg, "video_translator_two_stage_force_refresh_every_frames", 0) or 0)
+            two_stage_new_line_diff_threshold = float(getattr(cfg, "video_translator_two_stage_new_line_diff_threshold", 8.0) or 8.0)
+            adaptive_detector_roi = bool(getattr(cfg, "video_translator_adaptive_detector_roi", False))
+            adaptive_detector_roi_padding_frac = float(getattr(cfg, "video_translator_adaptive_detector_roi_padding_frac", 0.15) or 0.15)
+            adaptive_detector_roi_start_seconds = max(
+                0.0,
+                float(getattr(cfg, "video_translator_adaptive_detector_roi_start_seconds", 0.0) or 0.0),
+            )
+            auto_catch_subtitle_on_skipped_frames = bool(
+                getattr(cfg, "video_translator_auto_catch_subtitle_on_skipped_frames", True)
+            )
+            auto_catch_diff_threshold = float(
+                getattr(cfg, "video_translator_auto_catch_diff_threshold", 0.0) or 0.0
+            )
+            prev_auto_catch_small_gray = None
 
             frac = _region_fraction_from_preset(cfg) if self.temporal_smoothing else 0.0
             if frac <= 0:
                 frac = 0.2
 
-            # Frame pacing: one cap.read() per iteration, one write_frame() — output frame count
-            # matches input. Pipeline runs at most every sample_every_frames (so "Process every N" is never exceeded).
+            # Frame pacing: one frame per iteration, one write_frame() — output frame count
+            # matches input. Decode and encode run in separate threads so the pipeline is never blocked by I/O.
             while True:
                 if self._cancel:
                     break
-                ret, frame = cap.read()
+                item = frame_queue.get()
+                ret, frame = item[0], item[1]
+                n = item[2] if len(item) >= 3 else n
                 if not ret or frame is None:
                     break
                 curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+                pending_two_stage_hash = None
+                pending_two_stage_small_gray = None
                 # Run pipeline every sample_every_frames, or on scene change (throttled: at least sample_every_frames since last run)
                 periodic = n % self.sample_every_frames == 0
                 if self.use_scene_detection:
-                    scene_changed = _scene_change(prev_gray, curr_gray, self.scene_threshold)
+                    scene_changed = _scene_change(prev_gray, curr_gray, self.scene_threshold, bottom_frac=scene_roi_frac)
                     run_pipeline = periodic or (scene_changed and (n - last_pipeline_n) >= self.sample_every_frames)
                 else:
                     run_pipeline = periodic
                 prev_gray = curr_gray
+                if (
+                    not run_pipeline
+                    and auto_catch_subtitle_on_skipped_frames
+                    and self.enable_detect
+                    and self.enable_ocr
+                    and detector is not None
+                ):
+                    try:
+                        small_gray = _subtitle_region_small_gray(frame, subtitle_roi_frac)
+                        if small_gray is not None:
+                            if prev_auto_catch_small_gray is not None:
+                                import numpy as np
+                                # Auto threshold scales with sampling interval (sample_every/fps):
+                                # larger intervals need more aggressive "catch first appearance".
+                                if fps > 0:
+                                    interval_s = float(self.sample_every_frames) / float(fps)
+                                else:
+                                    interval_s = float(self.sample_every_frames) / 24.0
+                                auto_thr = max(3.5, min(18.0, 4.0 + interval_s * 6.0))
+                                thr = auto_catch_diff_threshold if auto_catch_diff_threshold > 0 else auto_thr
+                                diff = float(
+                                    np.mean(
+                                        np.abs(
+                                            small_gray.astype(np.int16)
+                                            - prev_auto_catch_small_gray.astype(np.int16)
+                                        )
+                                    )
+                                )
+                                if diff >= thr:
+                                    run_pipeline = True
+                            prev_auto_catch_small_gray = small_gray
+                    except Exception:
+                        pass
+                # Two-stage keyframes: skip full pipeline when subtitle region content hash unchanged,
+                # with an additional "new line" pixel-diff guard + optional forced refresh.
+                if run_pipeline and self.two_stage_keyframes:
+                    curr_small_gray = _subtitle_region_small_gray(frame, subtitle_roi_frac)
+                    if curr_small_gray is not None:
+                        import hashlib
+                        curr_hash = hashlib.md5(curr_small_gray.tobytes()).digest()
+
+                        forced_due = (
+                            two_stage_force_every_frames > 0
+                            and last_pipeline_n >= 0
+                            and (n - last_pipeline_n) >= two_stage_force_every_frames
+                        )
+
+                        should_skip = False
+                        if last_content_hash is not None and curr_hash == last_content_hash and not forced_due:
+                            if two_stage_new_line_diff_threshold > 0 and last_band_small_gray is not None:
+                                import numpy as np
+                                diff = float(
+                                    np.mean(
+                                        np.abs(
+                                            curr_small_gray.astype(np.int16)
+                                            - last_band_small_gray.astype(np.int16)
+                                        )
+                                    )
+                                )
+                                should_skip = diff <= two_stage_new_line_diff_threshold
+                            else:
+                                should_skip = True
+
+                        if should_skip:
+                            run_pipeline = False
+                        else:
+                            pending_two_stage_hash = curr_hash
+                            pending_two_stage_small_gray = curr_small_gray
 
                 if run_pipeline:
                     last_pipeline_n = n
                     try:
                         if translator is not None and hasattr(translator, "set_translation_context"):
                             translator.set_translation_context(
-                                previous_pages=video_previous_subtitles,
+                                previous_pages=[
+                                    {
+                                        "sources": [s for s in (e.get("sources") or []) if str(s or "").strip()],
+                                        "translations": [
+                                            t
+                                            for t in (e.get("translations") or [])
+                                            if str(t or "").strip() and not _is_invalid_subtitle_text(str(t or "").strip())
+                                        ],
+                                    }
+                                    for e in (video_previous_subtitles or [])
+                                    if isinstance(e, dict)
+                                    and any(
+                                        str(t or "").strip() and not _is_invalid_subtitle_text(str(t or "").strip())
+                                        for t in (e.get("translations") or [])
+                                    )
+                                ],
                                 series_context_path=sp if sp else None,
                             )
                         # When inpaint_only_soft_subs, do not draw subtitles on frames (video gets SRT only)
                         draw_subs = not self.inpaint_only_soft_subs
                         # Single draw path: never draw in pipeline; always draw once in dialog so we never get double/layered subtitles
+                        detect_roi_xyxy = None
+                        curr_seconds = (float(n) / float(fps)) if fps and float(fps) > 0.0 else 0.0
+                        adaptive_roi_ready = curr_seconds >= adaptive_detector_roi_start_seconds
+                        if (
+                            adaptive_detector_roi
+                            and adaptive_roi_ready
+                            and not self.skip_detect
+                            and self.enable_detect
+                            and detector is not None
+                            and cached_blk_list
+                        ):
+                            try:
+                                # Crop detector to a padded union of last subtitle boxes
+                                roi_x1, roi_y1, roi_x2, roi_y2 = w, h, 0, 0
+                                for b in cached_blk_list:
+                                    xyxy = getattr(b, "xyxy", None)
+                                    if not xyxy or len(xyxy) < 4:
+                                        continue
+                                    x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+                                    roi_x1 = min(roi_x1, x1)
+                                    roi_y1 = min(roi_y1, y1)
+                                    roi_x2 = max(roi_x2, x2)
+                                    roi_y2 = max(roi_y2, y2)
+                                if roi_x2 > roi_x1 and roi_y2 > roi_y1:
+                                    roi_x1 = int(max(0, roi_x1))
+                                    roi_y1 = int(max(0, roi_y1))
+                                    roi_x2 = int(min(w, roi_x2))
+                                    roi_y2 = int(min(h, roi_y2))
+                                    # Clamp to subtitle band when ROI preset is not "full"
+                                    if subtitle_roi_frac < 1.0:
+                                        band_y_min = int(h * (1.0 - subtitle_roi_frac))
+                                        roi_y1 = max(roi_y1, band_y_min)
+                                    pad_x = int((roi_x2 - roi_x1) * adaptive_detector_roi_padding_frac)
+                                    pad_y = int((roi_y2 - roi_y1) * adaptive_detector_roi_padding_frac)
+                                    roi_x1 = max(0, roi_x1 - pad_x)
+                                    roi_y1 = max(0, roi_y1 - pad_y)
+                                    roi_x2 = min(w, roi_x2 + pad_x)
+                                    roi_y2 = min(h, roi_y2 + pad_y)
+                                    roi_w = roi_x2 - roi_x1
+                                    roi_h = roi_y2 - roi_y1
+                                    # Avoid tiny ROIs that might miss new subtitles
+                                    if roi_w >= int(w * 0.15) and roi_h >= int(h * 0.07):
+                                        detect_roi_xyxy = [roi_x1, roi_y1, roi_x2, roi_y2]
+                            except Exception:
+                                detect_roi_xyxy = None
+                        use_flow_fixer_for_corrections = bool(getattr(cfg, "video_translator_use_flow_fixer_for_corrections", False))
                         out_frame, blk_list, _ = run_one_frame_pipeline(
                             frame,
                             detector, ocr, translator, inpainter,
@@ -1307,9 +2576,14 @@ class VideoTranslateThread(QThread):
                             cfg=cfg,
                             skip_detect=self.skip_detect,
                             draw_subtitles=False,
+                            detect_roi_xyxy=detect_roi_xyxy,
+                            frame_index=n,
+                            flow_fixer=flow_fixer,
+                            use_flow_fixer_for_corrections=use_flow_fixer_for_corrections,
                         )
                         # Snapshot inpainted frame before we draw text (for srt-based burn-in with stacking).
                         cached_inpainted = out_frame.copy() if out_frame is not None else None
+                        did_append = False
                         if translator is not None and blk_list:
                             new_entry = {
                                 "sources": [b.get_text() if hasattr(b, "get_text") else (b.text or [""])[0] for b in blk_list],
@@ -1330,19 +2604,21 @@ class VideoTranslateThread(QThread):
                                     idx = -k + i
                                     if i < len(rev) and rev[i]:
                                         video_previous_subtitles[idx]["translations"] = [rev[i].strip()]
-                                # Update SRT/ASS/VTT text for the revised segments (rev[0]=oldest of k, rev[k-1]=newest)
-                                if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and len(srt_entries) >= k:
-                                    for i in range(k):
-                                        if i < len(rev) and rev[i]:
-                                            srt_entries[-(k - i)] = (srt_entries[-(k - i)][0], srt_entries[-(k - i)][1], rev[i].strip())
-                                # Update translation cache so future reuse uses revised text
+                                # IMPORTANT:
+                                # Do NOT write revised_previous into srt_entries by index.
+                                # srt_entries merges consecutive same-text segments, so its indices do not map 1:1
+                                # with video_previous_subtitles. Index-updating can put flow-fixer versions on the
+                                # wrong cue (1-frame pop / wrong-frame "dominance").
+                                # Update translation cache so future reuse uses revised text (same key as pipeline: segment + texts)
                                 cache = getattr(translator, "_video_frame_cache", None)
                                 if cache is not None:
+                                    segment_size = 300
+                                    seg_idx = n // segment_size
                                     for i in range(k):
                                         seg = video_previous_subtitles[-k + i]
                                         srcs = seg.get("sources") or []
                                         if i < len(rev) and rev[i] and srcs:
-                                            cache[tuple(srcs)] = [rev[i].strip()]
+                                            cache[(seg_idx, tuple(srcs))] = [rev[i].strip()]
                                 setattr(translator, "_last_revised_previous", None)
                         # Flow fixer: only run after actual translation (not when reused cached translations)
                         if flow_fixer is not None and blk_list and getattr(flow_fixer, "improve_flow", None) and did_append:
@@ -1353,11 +2629,39 @@ class VideoTranslateThread(QThread):
                                     previous_entries = video_previous_subtitles[-flow_fixer_context:-1]
                                 else:
                                     previous_entries = []
-                                revised_prev, revised_new = flow_fixer.improve_flow(
-                                    [dict(e) for e in previous_entries],
-                                    new_translations,
-                                    target_lang="en",
+                                key_prev = tuple(
+                                    [" ".join((e.get("translations") or [])).strip() for e in previous_entries]
                                 )
+                                key_new = tuple(new_translations)
+                                cache_key = ("v1", key_prev, key_new, "en")
+                                cached = flow_fixer_cache.get(cache_key)
+                                strict_single = bool(getattr(cfg, "video_translator_flow_fixer_strict_single_line_review", False))
+                                if cached is not None:
+                                    cached_prev, cached_new = cached
+                                    revised_prev = [dict(e) for e in cached_prev] if cached_prev is not None else None
+                                    revised_new = list(cached_new) if cached_new is not None else None
+                                elif (not strict_single) and (not previous_entries) and len(new_translations) == 1:
+                                    # No context to smooth; skip API call and keep translation as-is.
+                                    revised_prev, revised_new = None, list(new_translations)
+                                else:
+                                    revised_prev, revised_new = flow_fixer.improve_flow(
+                                        [dict(e) for e in previous_entries],
+                                        new_translations,
+                                        target_lang="en",
+                                    )
+                                # Store in cache when we computed (including skip-case) and not already cached
+                                if cached is None and revised_new is not None:
+                                    try:
+                                        flow_fixer_cache[cache_key] = (
+                                            [dict(e) for e in revised_prev] if revised_prev is not None else None,
+                                            list(revised_new) if revised_new is not None else None,
+                                        )
+                                        flow_fixer_cache_order.append(cache_key)
+                                        if len(flow_fixer_cache_order) > flow_fixer_cache_max:
+                                            old_key = flow_fixer_cache_order.pop(0)
+                                            flow_fixer_cache.pop(old_key, None)
+                                    except Exception:
+                                        pass
                                 # Rule-based continuity fix when flow fixer returns unchanged text (e.g. local model echoes)
                                 if revised_new and len(revised_new) == len(blk_list):
                                     comma_prev, comma_new = _apply_continuation_comma_fix(
@@ -1399,21 +2703,20 @@ class VideoTranslateThread(QThread):
                                         if len(video_previous_subtitles) >= need:
                                             for i in range(k):
                                                 video_previous_subtitles[-(k + 1) + i] = revised_prev[i]
-                                            if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and len(srt_entries) >= k + 1:
-                                                for i in range(k):
-                                                    ent = revised_prev[i]
-                                                    txt = " ".join((ent.get("translations") or [])).strip()
-                                                    if txt:
-                                                        idx = -(k + 1) + i
-                                                        srt_entries[idx] = (srt_entries[idx][0], srt_entries[idx][1], txt)
+                                            # Do not write revised_prev into srt_entries: srt_entries merges
+                                            # same-text segments so its indices do not match video_previous_subtitles.
+                                            # Updating by index would put revised text into the wrong segment and cause
+                                            # "flow fixer version" of a subtitle to appear on wrong frames (one-frame pop).
                                             cache = getattr(translator, "_video_frame_cache", None) if translator else None
                                             if cache is not None:
+                                                segment_size = 300
+                                                seg_idx = n // segment_size
                                                 for i in range(k):
                                                     seg = video_previous_subtitles[-(k + 1) + i]
                                                     srcs = seg.get("sources") or []
                                                     trans = (seg.get("translations") or [])
                                                     if srcs and trans:
-                                                        cache[tuple(srcs)] = [str(t).strip() for t in trans]
+                                                        cache[(seg_idx, tuple(srcs))] = [str(t).strip() for t in trans]
                                     if n_prev_changed or n_new_changed:
                                         LOGGER.info(
                                             "Flow fixer changed %d previous and %d new line(s)",
@@ -1458,7 +2761,25 @@ class VideoTranslateThread(QThread):
                             style = (getattr(cfg, "video_translator_subtitle_style", None) or "default").strip().lower()
                             if style not in ("anime", "documentary"):
                                 style = "default"
-                            _draw_text_on_image(out_frame, blk_list, style=style)
+                            bb_mode = bool(getattr(cfg, "video_translator_subtitle_black_box_mode", False))
+                            try:
+                                bb_pad = int(getattr(cfg, "video_translator_subtitle_black_box_padding", 6) or 0)
+                            except (TypeError, ValueError):
+                                bb_pad = 6
+                            bb_pad = max(0, min(64, bb_pad))
+                            bb_bgr = (
+                                int(getattr(cfg, "video_translator_subtitle_black_box_b", 0)),
+                                int(getattr(cfg, "video_translator_subtitle_black_box_g", 0)),
+                                int(getattr(cfg, "video_translator_subtitle_black_box_r", 0)),
+                            )
+                            _draw_text_on_image(
+                                out_frame,
+                                blk_list,
+                                style=style,
+                                black_box_behind_text=bb_mode,
+                                black_box_padding=bb_pad,
+                                black_box_bgr=bb_bgr,
+                            )
                         if self.temporal_smoothing and prev_result is not None:
                             out_frame = _temporal_blend(prev_result, out_frame, self.temporal_alpha, frac)
                         # If we got no blocks (or empty translations), don't wipe cached subtitles — keep last good.
@@ -1467,6 +2788,7 @@ class VideoTranslateThread(QThread):
                             has_text = bool(blk_list) and any((getattr(b, "translation", None) or "").strip() for b in blk_list)
                         except Exception:
                             has_text = bool(blk_list)
+                        hold_window = max(2, self.sample_every_frames * 2)
                         if has_text:
                             miss_streak = 0
                             cached_result = out_frame
@@ -1478,28 +2800,42 @@ class VideoTranslateThread(QThread):
                             last_good_cached_inpainted = cached_inpainted
                             prev_result = out_frame.copy()
                             # Hold the cached subtitle state for a short time so brief detector dropouts don't flicker.
-                            cached_hold_until = n + max(1, self.sample_every_frames)
+                            # cached_hold_until is inclusive (we stop compositing when n > cached_hold_until).
+                            # Align with SRT semantics where segment end is exclusive: visible on [start, end-1].
+                            cached_hold_until = n + hold_window - 1
+                            if pending_two_stage_hash is not None:
+                                last_content_hash = pending_two_stage_hash
+                                last_band_small_gray = pending_two_stage_small_gray
                         else:
                             # If detection missed once, we can keep last good to avoid flicker.
-                            # But if it keeps missing, clear cached blocks so old inpaint doesn't "stick" after subtitles disappear/move.
+                            # Keep last good for a few misses to avoid flicker when sample_every_frames is higher.
                             miss_streak += 1
-                            if miss_streak <= 2 and last_good_cached_result is not None:
+                            keep_miss_limit = max(3, self.sample_every_frames + 1)
+                            if miss_streak <= keep_miss_limit and last_good_cached_result is not None:
                                 cached_result = last_good_cached_result
                                 cached_blk_list = last_good_cached_blk_list
                                 cached_source_frame = last_good_cached_source_frame
                                 cached_inpainted = last_good_cached_inpainted
                                 prev_result = last_good_cached_result.copy() if hasattr(last_good_cached_result, "copy") else last_good_cached_result
+                                # Also extend compositing TTL; otherwise subtitles can flicker off briefly
+                                # when we reuse cached subtitles after a detector miss.
+                                cached_hold_until = max(
+                                    cached_hold_until,
+                                    n + hold_window - 1,
+                                )
                             else:
+                                # After many misses, stop compositing — but keep last_good_* so we can still fall back when writing (avoids raw flash).
                                 cached_result = out_frame
                                 cached_blk_list = []  # stop compositing old subtitle regions
                                 cached_source_frame = None
                                 cached_inpainted = None
                                 prev_result = out_frame.copy()
+                                last_cache_clear_frame = n
                         if (self.export_srt or self.soft_subs_only or self.inpaint_only_soft_subs) and blk_list:
                             parts = []
                             for b in blk_list:
                                 t = (getattr(b, "translation", None) or "").strip()
-                                if t and not _is_region_placeholder_text(t):
+                                if t and not _is_invalid_subtitle_text(t):
                                     parts.append(t)
                             text = " ".join(parts).strip()
                             if text:
@@ -1535,6 +2871,7 @@ class VideoTranslateThread(QThread):
                         self.frame_preview_updated.emit(n, out_frame.copy(), current_preview_texts)
                     except Exception as e:
                         LOGGER.warning("Frame %d pipeline failed: %s", n, e)
+                        LOGGER.exception("Frame %d pipeline traceback", n)
                         # On failure, keep last good cached result if any, so subtitles don't blink off.
                         if last_good_cached_result is not None:
                             cached_result = last_good_cached_result
@@ -1563,26 +2900,111 @@ class VideoTranslateThread(QThread):
 
                 if self.soft_subs_only:
                     # Original video only; subs in SRT/ASS/VTT (no inpainting, no burn-in)
-                    write_frame(frame)
+                    write_frame(n, frame)
                 elif self.inpaint_only_soft_subs and cached_result is not None:
                     # Inpainted video, no text drawn; subs in SRT/ASS/VTT only (no double subs in video)
                     if cached_result.shape[1] != w or cached_result.shape[0] != h:
                         cached_result = cv2.resize(cached_result, (w, h), interpolation=cv2.INTER_LINEAR)
-                    write_frame(cached_result)
+                    write_frame(n, cached_result)
                 elif cached_result is not None:
-                    # Full-fps motion: on non-pipeline frames paste cached subtitle regions onto current frame
-                    # Stop pasting after TTL to avoid "stuck inpaint" when subtitles disappear/move.
-                    if (not run_pipeline) and (n > cached_hold_until):
-                        write_frame(frame)
-                    elif srt_entries and (cached_inpainted is not None or cached_result is not None) and (run_pipeline or (cached_blk_list is not None and n <= cached_hold_until)):
-                        # SRT-based burn-in: draw active segments from srt_entries so back-to-back close segments stack (e.g. short "I" above next line).
+                    prefer_timed_burn_in = bool(
+                        getattr(cfg, "video_translator_prefer_timed_burn_in", True)
+                    )
+                    # Full-fps motion: on non-pipeline frames paste cached subtitle regions onto current frame.
+                    # Extend cache TTL when we use it so we don't flicker (subs off/on) when pipeline is skipped at keyframes (e.g. two-stage).
+                    if not run_pipeline and cached_blk_list is not None:
+                        cached_hold_until = max(
+                            cached_hold_until,
+                            n + max(2, self.sample_every_frames * 2) - 1,
+                        )
+                    # When we would write raw (no subs), use last good composited for a short fallback to avoid jitter.
+                    # Keep stale subtitles only for about one "segment window" so wrong/old text can't leak.
+                    fallback_hold = max(2, self.sample_every_frames * 2)
+                    if prefer_timed_burn_in and srt_entries:
+                        # Deterministic two-step burn-in:
+                        # 1) build cue timeline (srt_entries) from OCR/translation keyframes
+                        # 2) render active timed cues per frame (stack overlaps) on top of inpainted base
+                        # This avoids cached text-region priority fights and one-frame text pops.
                         overlap_frames = min(15, max(5, int(fps * 0.5)))
                         segments_for_draw = []
                         for (start_f, end_f, text) in srt_entries:
-                            if end_f == n and (end_f - start_f) <= overlap_frames:
-                                segments_for_draw.append((start_f / fps, (n + 1) / fps, text))
-                            else:
+                            if start_f <= n < end_f:
                                 segments_for_draw.append((start_f / fps, end_f / fps, text))
+                            elif end_f == n and (end_f - start_f) <= overlap_frames:
+                                segments_for_draw.append((start_f / fps, (n + 1) / fps, text))
+                        base = frame.copy()
+                        if cached_blk_list and (run_pipeline or n <= cached_hold_until):
+                            comp = _composite_cached_subs_on_frame(
+                                frame,
+                                cached_inpainted if cached_inpainted is not None else cached_result,
+                                cached_source_frame,
+                                cached_blk_list,
+                                h,
+                                w,
+                            )
+                            if comp is not None:
+                                base = comp
+                        elif (
+                            (not run_pipeline)
+                            and (n > cached_hold_until)
+                            and last_good_cached_blk_list
+                            and last_good_cached_result is not None
+                            and (n <= last_cache_clear_frame + fallback_hold)
+                        ):
+                            comp = _composite_cached_subs_on_frame(
+                                frame,
+                                last_good_cached_inpainted if last_good_cached_inpainted is not None else last_good_cached_result,
+                                last_good_cached_source_frame,
+                                last_good_cached_blk_list,
+                                h,
+                                w,
+                            )
+                            if comp is not None:
+                                base = comp
+                        _draw_timed_subs_on_image(
+                            base,
+                            n / fps,
+                            segments_for_draw,
+                            stack_multiple_lines=True,
+                            **subtitle_black_box_draw_kwargs_from_cfg(cfg),
+                        )
+                        write_frame(n, base)
+                    elif (
+                        (not run_pipeline)
+                        and (n > cached_hold_until)
+                        and last_good_cached_blk_list
+                        and last_good_cached_result is not None
+                        and (n <= last_cache_clear_frame + fallback_hold)
+                    ):
+                        comp = _composite_cached_subs_on_frame(
+                            frame,
+                            last_good_cached_result,
+                            last_good_cached_source_frame,
+                            last_good_cached_blk_list,
+                            h,
+                            w,
+                        )
+                        if comp is not None:
+                            cached_hold_until = max(
+                                cached_hold_until,
+                                n + max(2, self.sample_every_frames * 2) - 1,
+                            )
+                            write_frame(n, comp)
+                        else:
+                            write_frame(n, frame)
+                    # Stop pasting after TTL to avoid "stuck inpaint" when subtitles disappear/move.
+                    elif (not run_pipeline) and (n > cached_hold_until):
+                        write_frame(n, frame)
+                    elif srt_entries and (cached_inpainted is not None or cached_result is not None) and (run_pipeline or (cached_blk_list is not None and n <= cached_hold_until)):
+                        # SRT-based burn-in: only draw segments active at this frame (by integer frame index) to avoid wrong-frame/float-boundary subtitles.
+                        overlap_frames = min(15, max(5, int(fps * 0.5)))
+                        segments_for_draw = []
+                        for (start_f, end_f, text) in srt_entries:
+                            # Active at frame n: start_f <= n < end_f, or short segment ending exactly at n (extend by 1 frame for overlap).
+                            if start_f <= n < end_f:
+                                segments_for_draw.append((start_f / fps, end_f / fps, text))
+                            elif end_f == n and (end_f - start_f) <= overlap_frames:
+                                segments_for_draw.append((start_f / fps, (n + 1) / fps, text))
                         base = frame.copy()
                         if cached_blk_list:
                             comp = _composite_cached_subs_on_frame(
@@ -1595,34 +3017,44 @@ class VideoTranslateThread(QThread):
                             )
                             if comp is not None:
                                 base = comp
-                        _draw_timed_subs_on_image(base, n / fps, segments_for_draw, stack_multiple_lines=True)
-                        write_frame(base)
+                        _draw_timed_subs_on_image(
+                            base,
+                            n / fps,
+                            segments_for_draw,
+                            stack_multiple_lines=True,
+                            **subtitle_black_box_draw_kwargs_from_cfg(cfg),
+                        )
+                        write_frame(n, base)
                     elif not run_pipeline and cached_blk_list is not None:
                         comp = _composite_cached_subs_on_frame(
                             frame, cached_result, cached_source_frame, cached_blk_list, h, w
                         )
                         if comp is not None:
-                            write_frame(comp)
+                            write_frame(n, comp)
                         else:
                             # Fallback: never write the full cached frame (it freezes motion and looks like low FPS).
-                            write_frame(frame)
+                            write_frame(n, frame)
                     else:
                         if cached_result.shape[1] != w or cached_result.shape[0] != h:
                             cached_result = cv2.resize(cached_result, (w, h), interpolation=cv2.INTER_LINEAR)
-                        write_frame(cached_result)
+                        write_frame(n, cached_result)
                 else:
-                    write_frame(frame)
+                    write_frame(n, frame)
 
-                n += 1
                 # Throttle progress for long videos to avoid UI overload (e.g. 17h = 1.5M+ frames)
                 if total > 0:
-                    step = 10 if total <= 10000 else (500 if total <= 100000 else 2000)
+                    step = 25 if total <= 10000 else (50 if total <= 100000 else 200)
                     if n % step == 0 or n == total:
                         self.progress.emit(n, total)
                 elif total <= 0 and n % 30 == 0:
                     self.progress.emit(n, 0)
 
-            cap.release()
+            reader_thread.join(timeout=10)
+            try:
+                write_queue.put((None, None), block=True, timeout=60)
+                writer_thread.join(timeout=max(180, (total or 0) // 300))
+            except Exception:
+                pass
             if not use_ffmpeg and out is not None:
                 out.release()
             if use_ffmpeg and ffmpeg_proc and ffmpeg_proc.stdin:
@@ -1642,6 +3074,56 @@ class VideoTranslateThread(QThread):
                         ffmpeg_proc.terminate()
                     except Exception:
                         pass
+
+            # Optional post-run global subtitle flow review (timeline-level), applied before final sidecar write.
+            post_review_fixer = None
+            try:
+                from modules.flow_fixer.translator_flow_fixer import resolve_post_review_flow_fixer
+
+                post_review_fixer = resolve_post_review_flow_fixer(cfg, translator, flow_fixer)
+            except Exception as e:
+                LOGGER.debug("Post-review flow fixer resolve failed: %s", e)
+            if srt_entries and post_review_fixer is not None:
+                post_review_enabled = bool(getattr(cfg, "video_translator_post_review_enabled", True))
+                post_review_on_cancel = bool(getattr(cfg, "video_translator_post_review_apply_on_cancel", True))
+                can_run = post_review_enabled and ((not self._cancel) or post_review_on_cancel)
+                if can_run:
+                    try:
+                        from modules.flow_fixer.corrections import improve_subtitle_timeline_via_fixer
+
+                        original_texts = [str(e[2] or "").strip() for e in srt_entries]
+                        if original_texts:
+                            chunk_size = int(getattr(cfg, "video_translator_post_review_chunk_size", 80) or 80)
+                            ctx_lines = int(getattr(cfg, "video_translator_post_review_context_lines", 20) or 20)
+                            _tl = "en"
+                            if translator is not None:
+                                _tl = str(getattr(translator, "lang_target", None) or "en")
+                            revised_texts = improve_subtitle_timeline_via_fixer(
+                                flow_fixer=post_review_fixer,
+                                timeline_texts=original_texts,
+                                target_lang=_tl,
+                                chunk_size=chunk_size,
+                                context_lines=ctx_lines,
+                            )
+                            if revised_texts and len(revised_texts) == len(srt_entries):
+                                n_changed = 0
+                                updated = []
+                                for i, (start_f, end_f, old_text) in enumerate(srt_entries):
+                                    new_text = str(revised_texts[i] or "").strip()
+                                    if not new_text:
+                                        new_text = str(old_text or "").strip()
+                                    if new_text != str(old_text or "").strip():
+                                        n_changed += 1
+                                    updated.append((start_f, end_f, new_text))
+                                srt_entries = updated
+                                if n_changed > 0:
+                                    LOGGER.info(
+                                        "Post-run subtitle flow review changed %d/%d segment(s).",
+                                        n_changed,
+                                        len(srt_entries),
+                                    )
+                    except Exception as e:
+                        LOGGER.debug("Post-run subtitle flow review failed: %s", e)
 
             # Only write sidecar SRT/ASS/VTT when not burning in (avoids double subtitles when player auto-loads SRT)
             if (self.soft_subs_only or self.inpaint_only_soft_subs) and srt_entries:
@@ -1821,12 +3303,118 @@ class VideoTranslatorDialog(QDialog):
         self.check_asr_sentence_break.stateChanged.connect(self._save_options)
         self.check_asr_sentence_break.setToolTip(self.tr("Use LLM to merge/split ASR segments into natural sentences. Requires translator. VideoCaptioner-style 智能断句."))
         asr_row.addWidget(self.check_asr_sentence_break, 4, 0, 1, 2)
+        self.check_sentence_merge_punct = QCheckBox(self.tr("Merge cues until sentence punctuation (rule-based)"))
+        self.check_sentence_merge_punct.setChecked(bool(getattr(pcfg.module, "video_translator_sentence_merge_by_punctuation", True)))
+        self.check_sentence_merge_punct.stateChanged.connect(self._save_options)
+        self.check_sentence_merge_punct.setToolTip(self.tr("Merge short adjacent cues until sentence-ending punctuation (., ?, !, 。！？). Reduces half-sentence mistranslations and request count without extra LLM calls."))
+        asr_row.addWidget(self.check_sentence_merge_punct, 5, 0, 1, 2)
+        asr_row.addWidget(QLabel(self.tr("Max merge duration (sec):")), 6, 0)
+        self.sentence_merge_max_sec_spin = QDoubleSpinBox()
+        self.sentence_merge_max_sec_spin.setRange(0.5, 30.0)
+        self.sentence_merge_max_sec_spin.setSingleStep(0.5)
+        self.sentence_merge_max_sec_spin.setValue(float(getattr(pcfg.module, "video_translator_sentence_merge_max_seconds", 8.0)))
+        self.sentence_merge_max_sec_spin.valueChanged.connect(self._save_options)
+        asr_row.addWidget(self.sentence_merge_max_sec_spin, 6, 1)
         self.check_asr_audio_separation = QCheckBox(self.tr("Separate vocals (reduce music noise)"))
         self.check_asr_audio_separation.setChecked(bool(getattr(pcfg.module, "video_translator_asr_audio_separation", False)))
         self.check_asr_audio_separation.stateChanged.connect(self._save_options)
         self.check_asr_audio_separation.setToolTip(self.tr("Use demucs to separate vocals before ASR. Improves accuracy on noisy audio. Optional: pip install demucs."))
-        asr_row.addWidget(self.check_asr_audio_separation, 5, 0, 1, 2)
+        asr_row.addWidget(self.check_asr_audio_separation, 7, 0, 1, 2)
+        self.check_asr_guided_detect_inpaint = QCheckBox(self.tr("ASR-guided detect/inpaint (experimental)"))
+        self.check_asr_guided_detect_inpaint.setChecked(bool(getattr(pcfg.module, "video_translator_asr_guided_detect_inpaint", False)))
+        self.check_asr_guided_detect_inpaint.stateChanged.connect(self._save_options)
+        self.check_asr_guided_detect_inpaint.setToolTip(self.tr("Use ASR timings to drive vision: detect once at each subtitle segment start and reuse boxes until segment end, then inpaint only during active segments."))
+        asr_row.addWidget(self.check_asr_guided_detect_inpaint, 8, 0, 1, 2)
+        self.check_asr_guided_midpoint_refresh = QCheckBox(self.tr("Midpoint refresh in ASR-guided mode"))
+        self.check_asr_guided_midpoint_refresh.setChecked(bool(getattr(pcfg.module, "video_translator_asr_guided_midpoint_refresh", True)))
+        self.check_asr_guided_midpoint_refresh.stateChanged.connect(self._save_options)
+        self.check_asr_guided_midpoint_refresh.setToolTip(self.tr("Refresh text detection once around the middle of each active subtitle segment to handle moving subtitles."))
+        asr_row.addWidget(self.check_asr_guided_midpoint_refresh, 9, 0, 1, 2)
+        asr_row.addWidget(QLabel(self.tr("Long-audio chunk size (sec, 0=off):")), 10, 0)
+        self.asr_chunk_seconds_spin = QDoubleSpinBox()
+        self.asr_chunk_seconds_spin.setRange(0.0, 14400.0)
+        self.asr_chunk_seconds_spin.setDecimals(0)
+        self.asr_chunk_seconds_spin.setSingleStep(60.0)
+        self.asr_chunk_seconds_spin.setSpecialValueText(self.tr("Off"))
+        self.asr_chunk_seconds_spin.setValue(
+            max(
+                0.0,
+                float(getattr(pcfg.module, "video_translator_asr_chunk_seconds", 2400.0) or 0.0),
+            )
+        )
+        self.asr_chunk_seconds_spin.valueChanged.connect(self._save_options)
+        self.asr_chunk_seconds_spin.setToolTip(
+            self.tr(
+                "When > 0 and duration >= the threshold below, ASR runs in time slices (seconds per slice). "
+                "Helps very long files and enables checkpoint resume. 0 = transcribe whole extract in one pass."
+            )
+        )
+        asr_row.addWidget(self.asr_chunk_seconds_spin, 10, 1)
+        asr_row.addWidget(QLabel(self.tr("Chunking min duration (sec, 0=never):")), 11, 0)
+        self.asr_long_audio_threshold_spin = QDoubleSpinBox()
+        self.asr_long_audio_threshold_spin.setRange(0.0, 864000.0)
+        self.asr_long_audio_threshold_spin.setDecimals(0)
+        self.asr_long_audio_threshold_spin.setSingleStep(60.0)
+        self.asr_long_audio_threshold_spin.setSpecialValueText(self.tr("Never"))
+        self.asr_long_audio_threshold_spin.setValue(
+            max(
+                0.0,
+                float(
+                    getattr(
+                        pcfg.module, "video_translator_asr_long_audio_threshold_seconds", 5400.0
+                    )
+                    or 0.0
+                ),
+            )
+        )
+        self.asr_long_audio_threshold_spin.valueChanged.connect(self._save_options)
+        self.asr_long_audio_threshold_spin.setToolTip(
+            self.tr(
+                "Minimum audio length (seconds) before chunking activates. 0 = never chunk by duration. "
+                "Requires chunk size > 0."
+            )
+        )
+        asr_row.addWidget(self.asr_long_audio_threshold_spin, 11, 1)
+        self.check_asr_checkpoint_resume = QCheckBox(
+            self.tr("Save/resume ASR chunk checkpoint (temp JSON)")
+        )
+        self.check_asr_checkpoint_resume.setChecked(
+            bool(getattr(pcfg.module, "video_translator_asr_checkpoint_resume", True))
+        )
+        self.check_asr_checkpoint_resume.stateChanged.connect(self._save_options)
+        self.check_asr_checkpoint_resume.setToolTip(
+            self.tr(
+                "When chunking is active, progress is saved after each slice so a failed run can resume. "
+                "Checkpoint is tied to the input video path and ASR settings."
+            )
+        )
+        asr_row.addWidget(self.check_asr_checkpoint_resume, 12, 0, 1, 2)
         g2l.addWidget(self.asr_options_widget)
+        # Usage preset: one-click profiles for different video types and speed/quality trade-offs
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel(self.tr("Usage preset:")))
+        self.usage_preset_combo = QComboBox()
+        self.usage_preset_combo.addItems([
+            self.tr("Custom (no change)"),
+            self.tr("Don't miss text (quality)"),
+            self.tr("Balanced (recommended)"),
+            self.tr("Maximum speed"),
+            self.tr("Anime / long series"),
+            self.tr("Documentary / captions"),
+        ])
+        _usage = (getattr(pcfg.module, "video_translator_usage_preset", None) or "balanced").strip().lower()
+        _usage_to_idx = {"custom": 0, "dont_miss_text": 1, "balanced": 2, "max_speed": 3, "anime": 4, "documentary": 5}
+        self.usage_preset_combo.blockSignals(True)
+        self.usage_preset_combo.setCurrentIndex(_usage_to_idx.get(_usage, 2))
+        self.usage_preset_combo.blockSignals(False)
+        self.usage_preset_combo.setToolTip(self.tr(
+            "Apply a bundle of settings for different use cases. Custom leaves your current settings unchanged. "
+            "Don't miss text = catch every subtitle (slower). Balanced = good default. Maximum speed = fastest. "
+            "Anime = long series with bottom subs. Documentary = captions anywhere on screen."
+        ))
+        self.usage_preset_combo.currentIndexChanged.connect(self._on_usage_preset_changed)
+        preset_row.addWidget(self.usage_preset_combo, 1)
+        g2l.addLayout(preset_row)
         row = QHBoxLayout()
         _process_every_label = QLabel(self.tr("Process every:") or "Process every:")
         _process_every_label.setToolTip(self.tr(
@@ -1864,6 +3452,24 @@ class VideoTranslatorDialog(QDialog):
         row2.addWidget(self.check_translate)
         row2.addWidget(self.check_inpaint)
         g2l.addLayout(row2)
+        self.check_subtitle_black_box = QCheckBox(
+            self.tr("Subtitle bar: solid box behind text (no inpaint)")
+        )
+        self.check_subtitle_black_box.setChecked(
+            bool(getattr(pcfg.module, "video_translator_subtitle_black_box_mode", False))
+        )
+        self.check_subtitle_black_box.stateChanged.connect(self._save_options)
+        self.check_subtitle_black_box.setToolTip(
+            self.tr(
+                "Skips inpainting. Draws a filled rectangle behind each detected subtitle using the same "
+                "line wrap as burn-in, so multi-line translations expand the bar. Only the text area is covered, "
+                "not the whole bottom band. Color/padding: config keys video_translator_subtitle_black_box_*."
+            )
+        )
+        row2b = QHBoxLayout()
+        row2b.addWidget(self.check_subtitle_black_box)
+        row2b.addStretch()
+        g2l.addLayout(row2b)
         main_col.addWidget(g2)
 
         # Region & output codec (inspired by subtitle ROI in video-subtitle-extractor / subtitle-quality tools)
@@ -1898,7 +3504,12 @@ class VideoTranslatorDialog(QDialog):
         _style = (getattr(pcfg.module, "video_translator_subtitle_style", None) or "default").strip().lower()
         self.style_combo.setCurrentIndex({"anime": 1, "documentary": 2}.get(_style, 0))
         self.style_combo.currentIndexChanged.connect(self._save_options)
-        self.style_combo.setToolTip(self.tr("Subtitle look when burning in. Anime = larger text; Documentary = smaller. Inspired by VideoCaptioner."))
+        self.style_combo.setToolTip(
+            self.tr(
+                "Burn-in only: font size/position on the video. SRT sidecar files do not carry these styles; "
+                "use ASS export + a player that reads styling, or burn-in for a fixed look."
+            )
+        )
         g3l.addWidget(self.style_combo, 2, 1)
         g3l.addWidget(QLabel(self.tr("Subtitle font:")), 3, 0)
         self.subtitle_font_edit = QLineEdit()
@@ -1915,7 +3526,12 @@ class VideoTranslatorDialog(QDialog):
         self.check_soft_subs = QCheckBox(self.tr("Soft subtitles only (no burn-in; output video + SRT, very fast)"))
         self.check_soft_subs.setChecked(bool(getattr(pcfg.module, "video_translator_soft_subs_only", False)))
         self.check_soft_subs.stateChanged.connect(self._on_soft_subs_changed)
-        self.check_soft_subs.setToolTip(self.tr("Output original video unchanged and translated subtitles in SRT. No inpainting or text drawn on video; play with a player that loads the SRT. Much faster (VideoCaptioner-style)."))
+        self.check_soft_subs.setToolTip(
+            self.tr(
+                "Soft subs: original video pixels unchanged; timing + text go to SRT (plain text/timing only). "
+                "The player chooses font/size/color. Fast path; not the same as burn-in style above."
+            )
+        )
         g3l.addWidget(self.check_soft_subs, 4, 0, 1, 2)
         self.check_inpaint_only_soft = QCheckBox(self.tr("Inpaint only (no burn-in; SRT/ASS/VTT only)"))
         self.check_inpaint_only_soft.setChecked(bool(getattr(pcfg.module, "video_translator_inpaint_only_soft_subs", False)))
@@ -1957,6 +3573,113 @@ class VideoTranslatorDialog(QDialog):
         self.temporal_alpha_spin.setValue(float(getattr(pcfg.module, "video_translator_temporal_alpha", 0.25)))
         self.temporal_alpha_spin.valueChanged.connect(self._save_options)
         g4al.addWidget(self.temporal_alpha_spin, 3, 1)
+        g4al.addWidget(QLabel(self.tr("Prefetch frames:")), 4, 0)
+        self.prefetch_spin = QSpinBox()
+        self.prefetch_spin.setRange(0, 4)
+        self.prefetch_spin.setValue(int(getattr(pcfg.module, "video_translator_prefetch_frames", 2)))
+        self.prefetch_spin.setSpecialValueText("0 (off)")
+        self.prefetch_spin.setToolTip(self.tr("Decode next frames in a separate thread (2–3 recommended) so I/O doesn't block the pipeline. 0 = off. OCR path only."))
+        self.prefetch_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.prefetch_spin, 4, 1)
+        self.check_two_stage = QCheckBox(self.tr("Two-stage keyframes (skip pipeline when subtitle region unchanged)"))
+        self.check_two_stage.setChecked(bool(getattr(pcfg.module, "video_translator_two_stage_keyframes", False)))
+        self.check_two_stage.stateChanged.connect(self._save_options)
+        self.check_two_stage.setToolTip(self.tr("Cheap content hash of the subtitle band; skip full pipeline when unchanged. Saves work when the same subtitle holds across many frames. OCR path only."))
+        g4al.addWidget(self.check_two_stage, 5, 0, 1, 2)
+        self.check_background_writer = QCheckBox(self.tr("Background writer (encode in separate thread)"))
+        self.check_background_writer.setChecked(bool(getattr(pcfg.module, "video_translator_background_writer", True)))
+        self.check_background_writer.stateChanged.connect(self._save_options)
+        self.check_background_writer.setToolTip(self.tr("Saved for compatibility. OCR path always runs decode and encode in separate threads so the pipeline is never throttled by I/O."))
+        g4al.addWidget(self.check_background_writer, 5, 2, 1, 2)
+        self.check_two_pass_ocr_burn_in = QCheckBox(self.tr("Two-pass OCR burn-in (faster when translation is slow)"))
+        self.check_two_pass_ocr_burn_in.setChecked(bool(getattr(pcfg.module, "video_translator_use_two_pass_ocr_burn_in", True)))
+        self.check_two_pass_ocr_burn_in.stateChanged.connect(self._save_options)
+        self.check_two_pass_ocr_burn_in.setToolTip(self.tr("Pass 1 runs detect/OCR/inpaint while collecting translations asynchronously; pass 2 burns timed subtitles. Increases throughput on slow translators. OCR hardcoded burn-in mode only."))
+        g4al.addWidget(self.check_two_pass_ocr_burn_in, 6, 2, 1, 2)
+
+        g4al.addWidget(QLabel(self.tr("Forced refresh (frames):")), 6, 0)
+        self.two_stage_force_spin = QSpinBox()
+        self.two_stage_force_spin.setRange(0, 5000)
+        self.two_stage_force_spin.setValue(int(getattr(pcfg.module, "video_translator_two_stage_force_refresh_every_frames", 0)))
+        self.two_stage_force_spin.setToolTip(self.tr("0 = off. If enabled, never skip two-stage indefinitely: force a full pipeline run at least every N frames."))
+        self.two_stage_force_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.two_stage_force_spin, 6, 1)
+
+        g4al.addWidget(QLabel(self.tr("New-line diff threshold:")), 7, 0)
+        self.two_stage_newline_diff_spin = QDoubleSpinBox()
+        self.two_stage_newline_diff_spin.setRange(0.0, 60.0)
+        self.two_stage_newline_diff_spin.setSingleStep(0.5)
+        self.two_stage_newline_diff_spin.setValue(float(getattr(pcfg.module, "video_translator_two_stage_new_line_diff_threshold", 8.0)))
+        self.two_stage_newline_diff_spin.setToolTip(self.tr("Used with two-stage keyframes. If the subtitle band pixel-diff indicates a new line, we run the pipeline even when the hash matches. Higher = fewer forced runs."))
+        self.two_stage_newline_diff_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.two_stage_newline_diff_spin, 7, 1)
+
+        self.check_adaptive_detector_roi = QCheckBox(self.tr("Adaptive detector ROI (crop around last subs)"))
+        self.check_adaptive_detector_roi.setChecked(bool(getattr(pcfg.module, "video_translator_adaptive_detector_roi", False)))
+        self.check_adaptive_detector_roi.stateChanged.connect(self._save_options)
+        self.check_adaptive_detector_roi.setToolTip(self.tr("When enabled and ROI is known from the last pipeline run, the detector runs on a cropped region to speed it up."))
+        g4al.addWidget(self.check_adaptive_detector_roi, 8, 0, 1, 2)
+        self.check_auto_catch_subs = QCheckBox(self.tr("Auto-catch subtitle appearance on skipped frames"))
+        self.check_auto_catch_subs.setChecked(bool(getattr(pcfg.module, "video_translator_auto_catch_subtitle_on_skipped_frames", True)))
+        self.check_auto_catch_subs.stateChanged.connect(self._save_options)
+        self.check_auto_catch_subs.setToolTip(self.tr("When sample_every_frames skips a frame, monitor subtitle-band pixel changes and force a full pipeline run if a new subtitle likely appeared."))
+        g4al.addWidget(self.check_auto_catch_subs, 8, 2, 1, 2)
+
+        g4al.addWidget(QLabel(self.tr("Detector ROI padding:")), 9, 0)
+        self.adaptive_roi_padding_spin = QDoubleSpinBox()
+        self.adaptive_roi_padding_spin.setRange(0.0, 0.5)
+        self.adaptive_roi_padding_spin.setSingleStep(0.05)
+        self.adaptive_roi_padding_spin.setValue(float(getattr(pcfg.module, "video_translator_adaptive_detector_roi_padding_frac", 0.15)))
+        self.adaptive_roi_padding_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.adaptive_roi_padding_spin, 9, 1)
+        g4al.addWidget(QLabel(self.tr("Adaptive ROI start (seconds):")), 10, 0)
+        self.adaptive_roi_start_seconds_spin = QDoubleSpinBox()
+        self.adaptive_roi_start_seconds_spin.setRange(0.0, 60.0)
+        self.adaptive_roi_start_seconds_spin.setSingleStep(0.5)
+        self.adaptive_roi_start_seconds_spin.setValue(float(getattr(pcfg.module, "video_translator_adaptive_detector_roi_start_seconds", 0.0)))
+        self.adaptive_roi_start_seconds_spin.setToolTip(self.tr("Delay adaptive ROI until this time in the video. Useful to ignore early corner watermarks/registration text."))
+        self.adaptive_roi_start_seconds_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.adaptive_roi_start_seconds_spin, 10, 1)
+        g4al.addWidget(QLabel(self.tr("Auto-catch diff threshold:")), 10, 2)
+        self.auto_catch_diff_threshold_spin = QDoubleSpinBox()
+        self.auto_catch_diff_threshold_spin.setRange(0.0, 30.0)
+        self.auto_catch_diff_threshold_spin.setSingleStep(0.5)
+        self.auto_catch_diff_threshold_spin.setValue(float(getattr(pcfg.module, "video_translator_auto_catch_diff_threshold", 0.0)))
+        self.auto_catch_diff_threshold_spin.setSpecialValueText(self.tr("0 (auto)"))
+        self.auto_catch_diff_threshold_spin.setToolTip(self.tr("0 = auto from sample_every_frames/fps. Higher values trigger fewer catch-up runs; lower values trigger more often."))
+        self.auto_catch_diff_threshold_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.auto_catch_diff_threshold_spin, 10, 3)
+
+        self.check_overlap_inpaint = QCheckBox(self.tr("Overlap inpaint with OCR/translation"))
+        self.check_overlap_inpaint.setChecked(bool(getattr(pcfg.module, "video_translator_overlap_inpaint", False)))
+        self.check_overlap_inpaint.stateChanged.connect(self._save_options)
+        self.check_overlap_inpaint.setToolTip(self.tr("Run inpainting in parallel with OCR/translation within the same pipeline tick (only when safe). May increase GPU contention."))
+        g4al.addWidget(self.check_overlap_inpaint, 11, 0, 1, 2)
+        self.check_ocr_temporal_stability = QCheckBox(self.tr("OCR temporal stability (reduce OCR jitter)"))
+        self.check_ocr_temporal_stability.setChecked(bool(getattr(pcfg.module, "video_translator_ocr_temporal_stability", True)))
+        self.check_ocr_temporal_stability.stateChanged.connect(self._save_options)
+        self.check_ocr_temporal_stability.setToolTip(self.tr("Vote over recent frames for the same subtitle region before translation. Helps stop per-frame character flicker."))
+        g4al.addWidget(self.check_ocr_temporal_stability, 12, 0, 1, 2)
+        g4al.addWidget(QLabel(self.tr("OCR temporal window:")), 13, 0)
+        self.ocr_temporal_window_spin = QSpinBox()
+        self.ocr_temporal_window_spin.setRange(2, 12)
+        self.ocr_temporal_window_spin.setValue(int(getattr(pcfg.module, "video_translator_ocr_temporal_window", 5)))
+        self.ocr_temporal_window_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.ocr_temporal_window_spin, 13, 1)
+        g4al.addWidget(QLabel(self.tr("OCR temporal min votes:")), 14, 0)
+        self.ocr_temporal_min_votes_spin = QSpinBox()
+        self.ocr_temporal_min_votes_spin.setRange(2, 12)
+        self.ocr_temporal_min_votes_spin.setValue(int(getattr(pcfg.module, "video_translator_ocr_temporal_min_votes", 2)))
+        self.ocr_temporal_min_votes_spin.valueChanged.connect(self._save_options)
+        g4al.addWidget(self.ocr_temporal_min_votes_spin, 14, 1)
+        g4al.addWidget(QLabel(self.tr("OCR temporal geo quantization:")), 15, 0)
+        self.ocr_temporal_geo_quant_spin = QSpinBox()
+        self.ocr_temporal_geo_quant_spin.setRange(4, 64)
+        self.ocr_temporal_geo_quant_spin.setValue(int(getattr(pcfg.module, "video_translator_ocr_temporal_geo_quantization", 24)))
+        self.ocr_temporal_geo_quant_spin.valueChanged.connect(self._save_options)
+        self.ocr_temporal_geo_quant_spin.setToolTip(self.tr("Region matching tolerance in pixels across frames. Higher = more stable matching; too high can over-merge nearby subtitle regions."))
+        g4al.addWidget(self.ocr_temporal_geo_quant_spin, 15, 1)
+
         g4_row.addWidget(g4a, 1)
         # Right: FFmpeg & export
         g4b = QGroupBox(self.tr("FFmpeg & export"))
@@ -1984,34 +3707,90 @@ class VideoTranslatorDialog(QDialog):
         self.ffmpeg_crf_spin.setToolTip(self.tr("Lower = better quality (18 = high; 23 = medium). Ignored when Target bitrate is set."))
         self.ffmpeg_crf_spin.valueChanged.connect(self._save_options)
         g4bl.addWidget(self.ffmpeg_crf_spin, 2, 1)
-        g4bl.addWidget(QLabel(self.tr("Target bitrate (kbps, 0=CRF only):")), 2, 2)
+        g4bl.addWidget(QLabel(self.tr("Encoding preset:")), 2, 2)
+        self.ffmpeg_preset_combo = QComboBox()
+        self.ffmpeg_preset_combo.addItems([
+            "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", "placebo"
+        ])
+        _preset = (getattr(pcfg.module, "video_translator_ffmpeg_preset", None) or "medium").strip().lower()
+        idx = self.ffmpeg_preset_combo.findText(_preset)
+        self.ffmpeg_preset_combo.setCurrentIndex(idx if idx >= 0 else 5)  # 5 = medium
+        self.ffmpeg_preset_combo.setToolTip(self.tr("Faster presets = quicker encoding, slightly larger file. veryfast/faster = good speed/quality trade-off."))
+        self.ffmpeg_preset_combo.currentTextChanged.connect(self._save_options)
+        g4bl.addWidget(self.ffmpeg_preset_combo, 2, 3)
+        g4bl.addWidget(QLabel(self.tr("Hardware encoder:")), 3, 0)
+        self.ffmpeg_hw_encoder_combo = QComboBox()
+        self.ffmpeg_hw_encoder_combo.addItems([
+            self.tr("None (libx264)"),
+            "NVIDIA (NVENC)",
+            "Intel (QSV)",
+            self.tr("Auto (NVENC or QSV if available)"),
+        ])
+        _hw = (getattr(pcfg.module, "video_translator_ffmpeg_hw_encoder", None) or "none").strip().lower()
+        self.ffmpeg_hw_encoder_combo.setCurrentIndex(
+            3 if _hw == "auto" else (2 if _hw == "qsv" else (1 if _hw == "nvenc" else 0))
+        )
+        self.ffmpeg_hw_encoder_combo.setToolTip(self.tr("Use GPU encoder for faster encoding. Requires FFmpeg built with NVENC (NVIDIA) or QSV (Intel). Auto picks first available."))
+        self.ffmpeg_hw_encoder_combo.currentIndexChanged.connect(self._save_options)
+        g4bl.addWidget(self.ffmpeg_hw_encoder_combo, 3, 1, 1, 2)
+        g4bl.addWidget(QLabel(self.tr("Target bitrate (kbps, 0=CRF only):")), 4, 0)
         self.video_bitrate_spin = QSpinBox()
         self.video_bitrate_spin.setRange(0, 50000)
         self.video_bitrate_spin.setValue(int(getattr(pcfg.module, "video_translator_video_bitrate_kbps", 0)))
         self.video_bitrate_spin.setSpecialValueText("0 (CRF)")
         self.video_bitrate_spin.setToolTip(self.tr("0 = use source video bitrate when detectable (same as original), else use CRF. Set a value (e.g. 9600) to override. Only when FFmpeg is enabled."))
         self.video_bitrate_spin.valueChanged.connect(self._save_options)
-        g4bl.addWidget(self.video_bitrate_spin, 2, 3)
+        g4bl.addWidget(self.video_bitrate_spin, 4, 1)
         self.check_skip_detect = QCheckBox(self.tr("Skip detection (fixed region only)"))
         self.check_skip_detect.setChecked(bool(getattr(pcfg.module, "video_translator_skip_detect", False)))
         self.check_skip_detect.setToolTip(self.tr("Use one block for subtitle region; no text detection. Set region above (e.g. Bottom 20%%)."))
         self.check_skip_detect.stateChanged.connect(self._on_skip_detect_changed)
-        g4bl.addWidget(self.check_skip_detect, 3, 0, 1, 2)
+        g4bl.addWidget(self.check_skip_detect, 5, 0, 1, 2)
+        self.check_detect_no_inpaint = QCheckBox(self.tr("Detect-only mode (skip inpainting)"))
+        self.check_detect_no_inpaint.setChecked(bool(getattr(pcfg.module, "video_translator_detect_no_inpaint", False)))
+        self.check_detect_no_inpaint.setToolTip(self.tr("Run detection/OCR/translation normally, but do not run inpainting. Useful when you only want subtitle burn-in and no background cleanup."))
+        self.check_detect_no_inpaint.stateChanged.connect(self._on_detect_no_inpaint_changed)
+        g4bl.addWidget(self.check_detect_no_inpaint, 6, 0, 1, 2)
+        self.check_bottom_band_native_mode = QCheckBox(self.tr("Bottom-band native mode (skip-detect)"))
+        self.check_bottom_band_native_mode.setChecked(bool(getattr(pcfg.module, "video_translator_bottom_band_native_mode", False)))
+        self.check_bottom_band_native_mode.stateChanged.connect(self._save_options)
+        self.check_bottom_band_native_mode.setToolTip(self.tr("When Skip detection is on, use native bottom-band behavior for OCR/inpaint handling instead of fixed-block shortcuts."))
+        g4bl.addWidget(self.check_bottom_band_native_mode, 5, 2, 1, 2)
         self.check_export_srt = QCheckBox(self.tr("Export SRT"))
         self.check_export_srt.setChecked(bool(getattr(pcfg.module, "video_translator_export_srt", False)))
         self.check_export_srt.stateChanged.connect(self._save_options)
-        self.check_export_srt.setToolTip(self.tr("Write SRT file. Only available when using Soft subs only or Inpaint only (no burn-in); disabled when burning in to avoid double subtitles in players."))
-        g4bl.addWidget(self.check_export_srt, 4, 0, 1, 2)
+        self.check_export_srt.setToolTip(
+            self.tr(
+                "SRT: standard sidecar format (cues + plain text). No advanced styling. "
+                "Only when not burning in, to avoid double subtitles in players."
+            )
+        )
+        g4bl.addWidget(self.check_export_srt, 7, 0, 1, 2)
         self.check_export_ass = QCheckBox(self.tr("Export ASS"))
         self.check_export_ass.setChecked(bool(getattr(pcfg.module, "video_translator_export_ass", False)))
         self.check_export_ass.stateChanged.connect(self._save_options)
-        self.check_export_ass.setToolTip(self.tr("Write ASS subtitle file (same timing as SRT)."))
-        g4bl.addWidget(self.check_export_ass, 5, 0, 1, 2)
+        self.check_export_ass.setToolTip(
+            self.tr(
+                "ASS includes styling (font, size, colors). SRT/VTT are mostly timing + plain text. "
+                "Use ASS if you need styles without burn-in."
+            )
+        )
+        g4bl.addWidget(self.check_export_ass, 8, 0, 1, 2)
         self.check_export_vtt = QCheckBox(self.tr("Export WebVTT"))
         self.check_export_vtt.setChecked(bool(getattr(pcfg.module, "video_translator_export_vtt", False)))
         self.check_export_vtt.stateChanged.connect(self._save_options)
         self.check_export_vtt.setToolTip(self.tr("Write WebVTT subtitle file (same timing as SRT)."))
-        g4bl.addWidget(self.check_export_vtt, 6, 0, 1, 2)
+        g4bl.addWidget(self.check_export_vtt, 9, 0, 1, 2)
+        self.subtitle_mode_note = QLabel(
+            self.tr(
+                "Note: Burn-in style (Default / Anime / Documentary) only affects text drawn on the video. "
+                "Soft subtitles and exported SRT/ASS/VTT are separate: the player uses its own font for soft subs; "
+                "ASS may include styling if the player supports it."
+            )
+        )
+        self.subtitle_mode_note.setWordWrap(True)
+        self.subtitle_mode_note.setObjectName("subtitleModeNote")
+        g4bl.addWidget(self.subtitle_mode_note, 10, 0, 1, 3)
         g4_row.addWidget(g4b, 1)
         main_col.addLayout(g4_row)
         self._update_export_subs_enabled()
@@ -2027,6 +3806,56 @@ class VideoTranslatorDialog(QDialog):
         self.glossary_edit.setPlainText((getattr(pcfg.module, "video_translator_glossary", None) or "").strip())
         self.glossary_edit.textChanged.connect(self._save_options)
         g_ctx_l.addWidget(self.glossary_edit)
+        self.check_llm_per_line_quality_fix = QCheckBox(self.tr("LLM per-line quality fix (empty/echo rescue)"))
+        self.check_llm_per_line_quality_fix.setChecked(bool(getattr(pcfg.module, "video_translator_llm_per_line_quality_fix", True)))
+        self.check_llm_per_line_quality_fix.stateChanged.connect(self._save_options)
+        self.check_llm_per_line_quality_fix.setToolTip(self.tr("When enabled, retries problematic lines (empty or source-echo) with focused prompts. Improves quality but may add extra LLM calls."))
+        g_ctx_l.addWidget(self.check_llm_per_line_quality_fix)
+        nlp_batch_row = QHBoxLayout()
+        nlp_batch_row.addWidget(QLabel(self.tr("LLM translation chunk size:")))
+        self.nlp_chunk_spin = QSpinBox()
+        self.nlp_chunk_spin.setRange(0, 500)
+        self.nlp_chunk_spin.setMinimum(0)
+        self.nlp_chunk_spin.setSpecialValueText(self.tr("Off (one request)"))
+        self.nlp_chunk_spin.setValue(int(getattr(pcfg.module, "video_translator_nlp_chunk_size", 32) or 0))
+        self.nlp_chunk_spin.setToolTip(
+            self.tr(
+                "Max subtitle lines per LLM API call for video ASR/existing subs and subtitle-file translate. "
+                "0 = send all lines in one request (can be slow or hit limits). 20–40 is a practical range."
+            )
+        )
+        self.nlp_chunk_spin.valueChanged.connect(self._save_options)
+        nlp_batch_row.addWidget(self.nlp_chunk_spin)
+        nlp_batch_row.addWidget(QLabel(self.tr("Parallel workers:")))
+        self.nlp_max_workers_spin = QSpinBox()
+        self.nlp_max_workers_spin.setRange(1, 16)
+        self.nlp_max_workers_spin.setValue(max(1, int(getattr(pcfg.module, "video_translator_nlp_max_workers", 1) or 1)))
+        self.nlp_max_workers_spin.setToolTip(
+            self.tr(
+                "When chunking produces multiple batches, run up to this many LLM requests at once. "
+                "Increase only if your API allows concurrent calls (watch rate limits)."
+            )
+        )
+        self.nlp_max_workers_spin.valueChanged.connect(self._save_options)
+        nlp_batch_row.addWidget(self.nlp_max_workers_spin)
+        nlp_batch_row.addStretch(1)
+        g_ctx_l.addLayout(nlp_batch_row)
+        self.check_qwen_aux_passes = QCheckBox(self.tr("Qwen3.5-4B: allow OCR-correction and reflection passes"))
+        self.check_qwen_aux_passes.setChecked(bool(getattr(pcfg.module, "video_translator_qwen35_allow_aux_passes", False)))
+        self.check_qwen_aux_passes.stateChanged.connect(self._save_options)
+        self.check_qwen_aux_passes.setToolTip(self.tr("When enabled, do not skip Qwen3.5-4B LM Studio auxiliary passes (OCR correction/reflection). Can improve quality but may trigger verbose-thinking JSON failures and extra latency."))
+        g_ctx_l.addWidget(self.check_qwen_aux_passes)
+        self.check_lock_watermark_lines = QCheckBox(self.tr("Lock/ignore watermark-like lines by regex"))
+        self.check_lock_watermark_lines.setChecked(bool(getattr(pcfg.module, "video_translator_lock_watermark_lines", False)))
+        self.check_lock_watermark_lines.stateChanged.connect(self._save_options)
+        self.check_lock_watermark_lines.setToolTip(self.tr("Do not translate lines matching the regex below (keeps source text). Useful for备案号/watermarks."))
+        g_ctx_l.addWidget(self.check_lock_watermark_lines)
+        g_ctx_l.addWidget(QLabel(self.tr("Watermark lock regex:")))
+        self.lock_watermark_regex_edit = QLineEdit()
+        self.lock_watermark_regex_edit.setText((getattr(pcfg.module, "video_translator_lock_watermark_regex", None) or r"备案号[:：]?\s*\d{8,}").strip())
+        self.lock_watermark_regex_edit.setToolTip(self.tr("Python regex. Example: 备案号[:：]?\\s*\\d{8,}"))
+        self.lock_watermark_regex_edit.textChanged.connect(self._save_options)
+        g_ctx_l.addWidget(self.lock_watermark_regex_edit)
         ctx_row = QHBoxLayout()
         ctx_row.addWidget(QLabel(self.tr("Series context path:")))
         self.series_context_edit = QLineEdit()
@@ -2121,6 +3950,91 @@ class VideoTranslatorDialog(QDialog):
         self.flow_fixer_context_spin.setToolTip(self.tr("How many previous subtitle lines to send for flow (1–50). Higher = more context; may trigger summarization when long. Default 20."))
         self.flow_fixer_context_spin.valueChanged.connect(self._save_options)
         g_flow_l.addWidget(self.flow_fixer_context_spin, 9, 1)
+        self.check_flow_fixer_reasoning = QCheckBox(self.tr("Enable reasoning/thinking (if supported)"))
+        self.check_flow_fixer_reasoning.setChecked(bool(getattr(pcfg.module, "video_translator_flow_fixer_enable_reasoning", False)))
+        self.check_flow_fixer_reasoning.setToolTip(self.tr("Uses model reasoning controls for flow-fixer requests. If unsupported by a model/provider, it automatically retries without reasoning params."))
+        self.check_flow_fixer_reasoning.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_flow_fixer_reasoning, 10, 0, 1, 2)
+        g_flow_l.addWidget(QLabel(self.tr("Reasoning effort:")), 11, 0)
+        self.flow_fixer_reasoning_effort_combo = QComboBox()
+        self.flow_fixer_reasoning_effort_combo.addItems(["low", "medium", "high"])
+        _eff = (getattr(pcfg.module, "video_translator_flow_fixer_reasoning_effort", None) or "medium").strip().lower()
+        self.flow_fixer_reasoning_effort_combo.setCurrentIndex(2 if _eff == "high" else (0 if _eff == "low" else 1))
+        self.flow_fixer_reasoning_effort_combo.currentIndexChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.flow_fixer_reasoning_effort_combo, 11, 1)
+        self.check_flow_fixer_for_corrections = QCheckBox(self.tr("Use flow fixer model for OCR/ASR correction and reflection"))
+        self.check_flow_fixer_for_corrections.setChecked(bool(getattr(pcfg.module, "video_translator_use_flow_fixer_for_corrections", False)))
+        self.check_flow_fixer_for_corrections.setToolTip(self.tr("When enabled, Correct OCR with LLM, Correct ASR with LLM, and Reflect translation use the same model as the flow fixer (local/OpenRouter/OpenAI) instead of the main translator."))
+        self.check_flow_fixer_for_corrections.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_flow_fixer_for_corrections, 12, 0, 1, 2)
+        self.check_flow_fixer_strict_single = QCheckBox(self.tr("Strict flow fixer: always review single-line updates"))
+        self.check_flow_fixer_strict_single.setChecked(bool(getattr(pcfg.module, "video_translator_flow_fixer_strict_single_line_review", False)))
+        self.check_flow_fixer_strict_single.stateChanged.connect(self._save_options)
+        self.check_flow_fixer_strict_single.setToolTip(self.tr("If enabled, flow fixer API is called even when there is no previous context and only one new line."))
+        g_flow_l.addWidget(self.check_flow_fixer_strict_single, 12, 2, 1, 2)
+        self.check_post_review = QCheckBox(self.tr("Post-run global subtitle flow review"))
+        self.check_post_review.setChecked(bool(getattr(pcfg.module, "video_translator_post_review_enabled", True)))
+        self.check_post_review.setToolTip(
+            self.tr(
+                "After translation, one pass over the full subtitle timeline for flow (pronouns, continuity, punctuation). "
+                "Uses the dedicated flow-fixer model when configured; otherwise the main translator (LLM_API), if enabled below."
+            )
+        )
+        self.check_post_review.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_post_review, 13, 0, 1, 2)
+        self.check_post_review_use_main_llm = QCheckBox(
+            self.tr("Allow post-review via main translator when flow fixer is off")
+        )
+        self.check_post_review_use_main_llm.setChecked(
+            bool(getattr(pcfg.module, "video_translator_post_review_use_main_translator", True))
+        )
+        self.check_post_review_use_main_llm.setToolTip(
+            self.tr(
+                "When no dedicated flow-fixer backend is set (or it is “none”), run the same timeline review using your "
+                "normal translation model (extra API calls). Turn off to only review when a flow-fixer model is configured."
+            )
+        )
+        self.check_post_review_use_main_llm.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_post_review_use_main_llm, 14, 0, 1, 2)
+        self.check_post_review_on_cancel = QCheckBox(self.tr("Apply post-run review on cancel (partial output)"))
+        self.check_post_review_on_cancel.setChecked(bool(getattr(pcfg.module, "video_translator_post_review_apply_on_cancel", True)))
+        self.check_post_review_on_cancel.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_post_review_on_cancel, 15, 0, 1, 2)
+        g_flow_l.addWidget(QLabel(self.tr("Post-review chunk size:")), 16, 0)
+        self.post_review_chunk_spin = QSpinBox()
+        self.post_review_chunk_spin.setRange(10, 500)
+        self.post_review_chunk_spin.setValue(int(getattr(pcfg.module, "video_translator_post_review_chunk_size", 80)))
+        self.post_review_chunk_spin.valueChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.post_review_chunk_spin, 16, 1)
+        g_flow_l.addWidget(QLabel(self.tr("Post-review context lines:")), 17, 0)
+        self.post_review_context_spin = QSpinBox()
+        self.post_review_context_spin.setRange(1, 80)
+        self.post_review_context_spin.setValue(int(getattr(pcfg.module, "video_translator_post_review_context_lines", 20)))
+        self.post_review_context_spin.valueChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.post_review_context_spin, 17, 1)
+        self.check_post_review_reasoning = QCheckBox(
+            self.tr("Post-review / main-LLM flow pass: enable reasoning")
+        )
+        self.check_post_review_reasoning.setChecked(
+            bool(getattr(pcfg.module, "video_translator_post_review_enable_reasoning", True))
+        )
+        self.check_post_review_reasoning.setToolTip(
+            self.tr(
+                "When the main translation model runs the timeline flow review, allow reasoning (thinking) tokens. "
+                "Batched subtitle translation always runs without reasoning for reliable JSON."
+            )
+        )
+        self.check_post_review_reasoning.stateChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.check_post_review_reasoning, 18, 0, 1, 2)
+        g_flow_l.addWidget(QLabel(self.tr("Post-review reasoning effort:")), 19, 0)
+        self.post_review_reasoning_effort_combo = QComboBox()
+        self.post_review_reasoning_effort_combo.addItems(["low", "medium", "high"])
+        _pre = (getattr(pcfg.module, "video_translator_post_review_reasoning_effort", None) or "medium").strip().lower()
+        self.post_review_reasoning_effort_combo.setCurrentIndex(
+            2 if _pre == "high" else (0 if _pre == "low" else 1)
+        )
+        self.post_review_reasoning_effort_combo.currentIndexChanged.connect(self._save_options)
+        g_flow_l.addWidget(self.post_review_reasoning_effort_combo, 19, 1)
         g_flow_l.setColumnStretch(1, 1)
         main_col.addWidget(g_flow)
 
@@ -2140,8 +4054,8 @@ class VideoTranslatorDialog(QDialog):
             )
         )
         tips_row.addWidget(self.tips_label)
-        self.apply_long_anime_btn = QPushButton(self.tr("Apply recommended (long anime)"))
-        self.apply_long_anime_btn.setToolTip(self.tr("Set options optimized for long anime (e.g. Rebirth of the Urban Immortal Cultivator)."))
+        self.apply_long_anime_btn = QPushButton(self.tr("Apply Anime preset"))
+        self.apply_long_anime_btn.setToolTip(self.tr("Same as selecting 'Anime / long series' in the Usage preset dropdown above."))
         self.apply_long_anime_btn.clicked.connect(self._apply_recommended_long_anime)
         tips_row.addWidget(self.apply_long_anime_btn)
         content.addLayout(tips_row)
@@ -2173,7 +4087,11 @@ class VideoTranslatorDialog(QDialog):
         self.preview_history_btn = QPushButton(self.tr("View history…"))
         self.preview_history_btn.setToolTip(self.tr("Open a list of previous source text and translations so you can read how they flow together."))
         self.preview_history_btn.clicked.connect(self._show_preview_history)
+        self.preview_ab_btn = QPushButton(self.tr("A/B compare models…"))
+        self.preview_ab_btn.setToolTip(self.tr("Compare two translator models on sampled subtitle lines from this run."))
+        self.preview_ab_btn.clicked.connect(self._show_ab_compare_dialog)
         preview_text_header.addStretch()
+        preview_text_header.addWidget(self.preview_ab_btn)
         preview_text_header.addWidget(self.preview_history_btn)
         preview_text_col.addLayout(preview_text_header)
         self.preview_text_edit = QPlainTextEdit()
@@ -2220,6 +4138,10 @@ class VideoTranslatorDialog(QDialog):
         content.addLayout(btn_layout)
 
         self.cancel_btn.setEnabled(False)
+        # Progress context: normal vs two-pass OCR burn-in.
+        self._progress_mode = "normal"
+        self._two_pass_stage_guess = 1
+        self._last_progress_current = -1
         self._on_source_changed()  # Initial visibility/enabled state (after all widgets exist)
         self._load_paths()
 
@@ -2276,13 +4198,19 @@ class VideoTranslatorDialog(QDialog):
         self.sample_spin.setEnabled(not is_timed)
         self.check_detect.setEnabled(not is_timed and not self.check_skip_detect.isChecked())
         self.check_ocr.setEnabled(not is_timed)
-        self.check_inpaint.setEnabled(not is_timed)
+        self.check_inpaint.setEnabled((not is_timed) and (not self.check_detect_no_inpaint.isChecked()))
         self._save_options()
 
     def _on_skip_detect_changed(self):
         """When Skip detection is checked, disable Detection checkbox (detector not used)."""
         skip = self.check_skip_detect.isChecked()
         self.check_detect.setEnabled(not skip and self.source_combo.currentIndex() == 0)
+        self._save_options()
+
+    def _on_detect_no_inpaint_changed(self):
+        no_inpaint = self.check_detect_no_inpaint.isChecked()
+        # Keep the explicit inpaint checkbox value, but disable editing while override is active.
+        self.check_inpaint.setEnabled((not no_inpaint) and self.source_combo.currentIndex() != 2)
         self._save_options()
 
     def _update_export_subs_enabled(self):
@@ -2311,40 +4239,126 @@ class VideoTranslatorDialog(QDialog):
         self._update_export_subs_enabled()
         self._save_options()
 
-    def _apply_recommended_long_anime(self):
-        """Apply settings recommended for long anime (e.g. 10–17h): scene detection, skip detect + bottom region, FFmpeg, temporal smoothing."""
-        self.sample_spin.setValue(30)
-        self.region_combo.setCurrentIndex(2)  # Bottom 20%
-        self.check_scene.setChecked(True)
-        self.scene_threshold_spin.setValue(30)
-        self.check_temporal.setChecked(True)
-        self.temporal_alpha_spin.setValue(0.25)
-        self.check_ffmpeg.setChecked(True)
-        self.ffmpeg_crf_spin.setValue(18)
-        self.check_skip_detect.setChecked(True)  # Also disables Detection via _on_skip_detect_changed
-        self.check_ocr.setChecked(True)
-        self.check_translate.setChecked(True)
-        self.check_inpaint.setChecked(True)
+    def _usage_preset_values(self, key: str) -> dict:
+        """Return widget values for a usage preset. Keys: sample_every, region_idx, scene, scene_threshold, temporal, temporal_alpha, skip_detect, two_stage, two_stage_force, two_stage_diff, prefetch, ffmpeg, crf."""
+        # region_idx: 0=full, 1=bottom_15, 2=bottom_20, 3=bottom_25, 4=bottom_30
+        presets = {
+            "dont_miss_text": {
+                "sample_every": 2, "region_idx": 2, "scene": True, "scene_threshold": 28,
+                "temporal": True, "temporal_alpha": 0.25, "skip_detect": False,
+                "two_stage": True, "two_stage_force": 45, "two_stage_diff": 6.0,
+                "prefetch": 3, "ffmpeg": True, "crf": 18,
+            },
+            "balanced": {
+                "sample_every": 6, "region_idx": 2, "scene": True, "scene_threshold": 35,
+                "temporal": True, "temporal_alpha": 0.25, "skip_detect": True,
+                "two_stage": True, "two_stage_force": 72, "two_stage_diff": 7.0,
+                "prefetch": 3, "ffmpeg": True, "crf": 23,
+            },
+            "max_speed": {
+                "sample_every": 30, "region_idx": 2, "scene": True, "scene_threshold": 45,
+                "temporal": True, "temporal_alpha": 0.28, "skip_detect": True,
+                "two_stage": True, "two_stage_force": 90, "two_stage_diff": 10.0,
+                "prefetch": 3, "ffmpeg": True, "crf": 23,
+            },
+            "anime": {
+                "sample_every": 30, "region_idx": 2, "scene": True, "scene_threshold": 30,
+                "temporal": True, "temporal_alpha": 0.25, "skip_detect": True,
+                "two_stage": True, "two_stage_force": 60, "two_stage_diff": 8.0,
+                "prefetch": 3, "ffmpeg": True, "crf": 18,
+            },
+            "documentary": {
+                "sample_every": 6, "region_idx": 0, "scene": True, "scene_threshold": 35,
+                "temporal": True, "temporal_alpha": 0.25, "skip_detect": False,
+                "two_stage": True, "two_stage_force": 72, "two_stage_diff": 7.0,
+                "prefetch": 3, "ffmpeg": True, "crf": 20,
+            },
+        }
+        return presets.get(key, {})
+
+    def _on_usage_preset_changed(self):
+        idx = self.usage_preset_combo.currentIndex()
+        key = ("custom", "dont_miss_text", "balanced", "max_speed", "anime", "documentary")[min(idx, 5)]
+        if key == "custom":
+            self._save_options()
+            return
+        vals = self._usage_preset_values(key)
+        if not vals:
+            self._save_options()
+            return
+        widgets = [
+            self.sample_spin, self.region_combo, self.scene_threshold_spin,
+            self.temporal_alpha_spin, self.two_stage_force_spin, self.two_stage_newline_diff_spin,
+            self.prefetch_spin, self.ffmpeg_crf_spin,
+        ]
+        for w in widgets:
+            w.blockSignals(True)
+        self.sample_spin.setValue(vals.get("sample_every", self.sample_spin.value()))
+        self.region_combo.setCurrentIndex(vals.get("region_idx", self.region_combo.currentIndex()))
+        self.check_scene.setChecked(vals.get("scene", self.check_scene.isChecked()))
+        self.scene_threshold_spin.setValue(vals.get("scene_threshold", self.scene_threshold_spin.value()))
+        self.check_temporal.setChecked(vals.get("temporal", self.check_temporal.isChecked()))
+        self.temporal_alpha_spin.setValue(vals.get("temporal_alpha", self.temporal_alpha_spin.value()))
+        self.check_skip_detect.setChecked(vals.get("skip_detect", self.check_skip_detect.isChecked()))
+        self._on_skip_detect_changed()
+        self.check_two_stage.setChecked(vals.get("two_stage", self.check_two_stage.isChecked()))
+        self.two_stage_force_spin.setValue(vals.get("two_stage_force", self.two_stage_force_spin.value()))
+        self.two_stage_newline_diff_spin.setValue(vals.get("two_stage_diff", self.two_stage_newline_diff_spin.value()))
+        self.prefetch_spin.setValue(vals.get("prefetch", self.prefetch_spin.value()))
+        self.check_ffmpeg.setChecked(vals.get("ffmpeg", self.check_ffmpeg.isChecked()))
+        self.ffmpeg_crf_spin.setValue(vals.get("crf", self.ffmpeg_crf_spin.value()))
+        for w in widgets:
+            w.blockSignals(False)
+        self.check_detect.setEnabled(not self.check_skip_detect.isChecked())
         self._save_options()
+
+    def _apply_recommended_long_anime(self):
+        """Apply Anime preset (kept for compatibility; prefer Usage preset dropdown)."""
+        self.usage_preset_combo.setCurrentIndex(4)  # Anime / long series
+        self._on_usage_preset_changed()
 
     def _save_options(self):
         """Persist pipeline options to config and save."""
+        _preset_idx = min(self.usage_preset_combo.currentIndex(), 5)
+        pcfg.module.video_translator_usage_preset = ("custom", "dont_miss_text", "balanced", "max_speed", "anime", "documentary")[_preset_idx]
         pcfg.module.video_translator_sample_every_frames = self.sample_spin.value()
         pcfg.module.video_translator_enable_detect = self.check_detect.isChecked()
         pcfg.module.video_translator_enable_ocr = self.check_ocr.isChecked()
         pcfg.module.video_translator_enable_translate = self.check_translate.isChecked()
         pcfg.module.video_translator_enable_inpaint = self.check_inpaint.isChecked()
+        pcfg.module.video_translator_subtitle_black_box_mode = self.check_subtitle_black_box.isChecked()
         pcfg.module.video_translator_region_preset = self._region_preset_value()
         pcfg.module.video_translator_output_codec = (self.codec_edit.text() or "").strip() or "mp4v"
         pcfg.module.video_translator_use_scene_detection = self.check_scene.isChecked()
         pcfg.module.video_translator_scene_threshold = float(self.scene_threshold_spin.value())
         pcfg.module.video_translator_temporal_smoothing = self.check_temporal.isChecked()
         pcfg.module.video_translator_temporal_alpha = float(self.temporal_alpha_spin.value())
+        pcfg.module.video_translator_prefetch_frames = self.prefetch_spin.value()
+        pcfg.module.video_translator_two_stage_keyframes = self.check_two_stage.isChecked()
+        pcfg.module.video_translator_background_writer = self.check_background_writer.isChecked()
+        pcfg.module.video_translator_use_two_pass_ocr_burn_in = self.check_two_pass_ocr_burn_in.isChecked()
+        pcfg.module.video_translator_two_stage_force_refresh_every_frames = int(self.two_stage_force_spin.value())
+        pcfg.module.video_translator_two_stage_new_line_diff_threshold = float(self.two_stage_newline_diff_spin.value())
+        pcfg.module.video_translator_adaptive_detector_roi = self.check_adaptive_detector_roi.isChecked()
+        pcfg.module.video_translator_adaptive_detector_roi_padding_frac = float(self.adaptive_roi_padding_spin.value())
+        pcfg.module.video_translator_adaptive_detector_roi_start_seconds = float(self.adaptive_roi_start_seconds_spin.value())
+        pcfg.module.video_translator_auto_catch_subtitle_on_skipped_frames = self.check_auto_catch_subs.isChecked()
+        pcfg.module.video_translator_auto_catch_diff_threshold = float(self.auto_catch_diff_threshold_spin.value())
+        pcfg.module.video_translator_overlap_inpaint = self.check_overlap_inpaint.isChecked()
+        pcfg.module.video_translator_ocr_temporal_stability = self.check_ocr_temporal_stability.isChecked()
+        pcfg.module.video_translator_ocr_temporal_window = int(self.ocr_temporal_window_spin.value())
+        pcfg.module.video_translator_ocr_temporal_min_votes = int(self.ocr_temporal_min_votes_spin.value())
+        pcfg.module.video_translator_ocr_temporal_geo_quantization = int(self.ocr_temporal_geo_quant_spin.value())
         pcfg.module.video_translator_use_ffmpeg = self.check_ffmpeg.isChecked()
         pcfg.module.video_translator_ffmpeg_path = (self.ffmpeg_path_edit.text() or "").strip()
         pcfg.module.video_translator_ffmpeg_crf = int(self.ffmpeg_crf_spin.value())
+        pcfg.module.video_translator_ffmpeg_preset = (self.ffmpeg_preset_combo.currentText() or "medium").strip()
+        _hw_idx = self.ffmpeg_hw_encoder_combo.currentIndex()
+        pcfg.module.video_translator_ffmpeg_hw_encoder = ("auto" if _hw_idx == 3 else "qsv" if _hw_idx == 2 else "nvenc" if _hw_idx == 1 else "none")
         pcfg.module.video_translator_video_bitrate_kbps = int(self.video_bitrate_spin.value())
         pcfg.module.video_translator_skip_detect = self.check_skip_detect.isChecked()
+        pcfg.module.video_translator_detect_no_inpaint = self.check_detect_no_inpaint.isChecked()
+        pcfg.module.video_translator_bottom_band_native_mode = self.check_bottom_band_native_mode.isChecked()
         pcfg.module.video_translator_export_srt = self.check_export_srt.isChecked()
         style_idx = self.style_combo.currentIndex()
         pcfg.module.video_translator_subtitle_style = ("default", "anime", "documentary")[min(style_idx, 2)]
@@ -2356,27 +4370,57 @@ class VideoTranslatorDialog(QDialog):
         pcfg.module.video_translator_asr_language = (self.asr_lang_edit.text() or "").strip()
         pcfg.module.video_translator_asr_vad_filter = self.check_asr_vad.isChecked()
         pcfg.module.video_translator_asr_sentence_break = self.check_asr_sentence_break.isChecked()
+        pcfg.module.video_translator_sentence_merge_by_punctuation = self.check_sentence_merge_punct.isChecked()
+        pcfg.module.video_translator_sentence_merge_max_seconds = float(self.sentence_merge_max_sec_spin.value())
         pcfg.module.video_translator_asr_audio_separation = self.check_asr_audio_separation.isChecked()
+        pcfg.module.video_translator_asr_guided_detect_inpaint = self.check_asr_guided_detect_inpaint.isChecked()
+        pcfg.module.video_translator_asr_guided_midpoint_refresh = self.check_asr_guided_midpoint_refresh.isChecked()
+        pcfg.module.video_translator_asr_chunk_seconds = float(self.asr_chunk_seconds_spin.value())
+        pcfg.module.video_translator_asr_long_audio_threshold_seconds = float(
+            self.asr_long_audio_threshold_spin.value()
+        )
+        pcfg.module.video_translator_asr_checkpoint_resume = self.check_asr_checkpoint_resume.isChecked()
         pcfg.module.video_translator_export_ass = self.check_export_ass.isChecked()
         pcfg.module.video_translator_export_vtt = self.check_export_vtt.isChecked()
         pcfg.module.video_translator_glossary = (self.glossary_edit.toPlainText() or "").strip()
+        pcfg.module.video_translator_nlp_chunk_size = int(self.nlp_chunk_spin.value())
+        pcfg.module.video_translator_nlp_max_workers = int(self.nlp_max_workers_spin.value())
+        pcfg.module.video_translator_llm_per_line_quality_fix = self.check_llm_per_line_quality_fix.isChecked()
+        pcfg.module.video_translator_qwen35_allow_aux_passes = self.check_qwen_aux_passes.isChecked()
+        pcfg.module.video_translator_lock_watermark_lines = self.check_lock_watermark_lines.isChecked()
+        pcfg.module.video_translator_lock_watermark_regex = (self.lock_watermark_regex_edit.text() or "").strip() or r"备案号[:：]?\s*\d{8,}"
         pcfg.module.video_translator_series_context_path = (self.series_context_edit.text() or "").strip()
         pcfg.module.video_translator_last_batch_output_dir = (self.batch_output_edit.text() or "").strip()
         pcfg.module.video_translator_soft_subs_only = self.check_soft_subs.isChecked()
         pcfg.module.video_translator_inpaint_only_soft_subs = self.check_inpaint_only_soft.isChecked()
         pcfg.module.video_translator_mux_srt_into_video = self.check_mux_srt.isChecked()
         pcfg.module.video_translator_flow_fixer_enabled = self.check_flow_fixer.isChecked()
+        pcfg.module.video_translator_use_flow_fixer_for_corrections = self.check_flow_fixer_for_corrections.isChecked()
         idx = self.flow_fixer_combo.currentIndex()
         pcfg.module.video_translator_flow_fixer = "openai" if idx == 3 else ("openrouter" if idx == 2 else ("local_server" if idx == 1 else "none"))
         pcfg.module.video_translator_flow_fixer_server_url = (self.flow_fixer_url_edit.text() or "").strip() or "http://localhost:1234/v1"
         pcfg.module.video_translator_flow_fixer_model = (self.flow_fixer_model_edit.text() or "").strip()
         pcfg.module.video_translator_flow_fixer_max_tokens = self.flow_fixer_max_tokens_spin.value()
         pcfg.module.video_translator_flow_fixer_context_lines = self.flow_fixer_context_spin.value()
+        pcfg.module.video_translator_flow_fixer_strict_single_line_review = self.check_flow_fixer_strict_single.isChecked()
         pcfg.module.video_translator_flow_fixer_timeout = float(getattr(pcfg.module, "video_translator_flow_fixer_timeout", 30.0))
+        pcfg.module.video_translator_flow_fixer_enable_reasoning = self.check_flow_fixer_reasoning.isChecked()
+        _idx_eff = self.flow_fixer_reasoning_effort_combo.currentIndex()
+        pcfg.module.video_translator_flow_fixer_reasoning_effort = "high" if _idx_eff == 2 else ("low" if _idx_eff == 0 else "medium")
         pcfg.module.video_translator_flow_fixer_openrouter_apikey = (self.flow_fixer_openrouter_apikey_edit.text() or "").strip()
         pcfg.module.video_translator_flow_fixer_openrouter_model = (self.flow_fixer_openrouter_model_edit.text() or "").strip() or "google/gemma-3n-e2b-it:free"
         pcfg.module.video_translator_flow_fixer_openai_apikey = (self.flow_fixer_openai_apikey_edit.text() or "").strip()
         pcfg.module.video_translator_flow_fixer_openai_model = (self.flow_fixer_openai_model_edit.text() or "").strip() or "gpt-4o-mini"
+        pcfg.module.video_translator_post_review_enabled = self.check_post_review.isChecked()
+        pcfg.module.video_translator_post_review_use_main_translator = self.check_post_review_use_main_llm.isChecked()
+        pcfg.module.video_translator_post_review_apply_on_cancel = self.check_post_review_on_cancel.isChecked()
+        pcfg.module.video_translator_post_review_chunk_size = int(self.post_review_chunk_spin.value())
+        pcfg.module.video_translator_post_review_context_lines = int(self.post_review_context_spin.value())
+        pcfg.module.video_translator_post_review_enable_reasoning = self.check_post_review_reasoning.isChecked()
+        _pre_idx = self.post_review_reasoning_effort_combo.currentIndex()
+        pcfg.module.video_translator_post_review_reasoning_effort = (
+            "high" if _pre_idx == 2 else ("low" if _pre_idx == 0 else "medium")
+        )
         save_config()
 
     def _save_paths(self, inp: str, out: str):
@@ -2514,6 +4558,19 @@ class VideoTranslatorDialog(QDialog):
         soft_subs = self.check_soft_subs.isChecked()
         _idx = self.source_combo.currentIndex()
         src = "asr" if _idx == 1 else "existing_subs" if _idx == 2 else "ocr"
+        self._progress_mode = (
+            "two_pass_ocr"
+            if (
+                src == "ocr"
+                and self.check_translate.isChecked()
+                and (not soft_subs)
+                and (not self.check_inpaint_only_soft.isChecked())
+                and self.check_two_pass_ocr_burn_in.isChecked()
+            )
+            else "normal"
+        )
+        self._two_pass_stage_guess = 1
+        self._last_progress_current = -1
         self.thread = VideoTranslateThread(
             inp,
             out,
@@ -2521,7 +4578,7 @@ class VideoTranslatorDialog(QDialog):
             self.check_detect.isChecked(),
             self.check_ocr.isChecked(),
             self.check_translate.isChecked(),
-            False if soft_subs else self.check_inpaint.isChecked(),
+            False if (soft_subs or self.check_detect_no_inpaint.isChecked()) else self.check_inpaint.isChecked(),
             use_scene_detection=self.check_scene.isChecked(),
             scene_threshold=float(self.scene_threshold_spin.value()),
             temporal_smoothing=self.check_temporal.isChecked(),
@@ -2545,6 +4602,10 @@ class VideoTranslatorDialog(QDialog):
             asr_audio_separation=self.check_asr_audio_separation.isChecked(),
             export_ass=self.check_export_ass.isChecked(),
             export_vtt=self.check_export_vtt.isChecked(),
+            prefetch_frames=self.prefetch_spin.value(),
+            two_stage_keyframes=self.check_two_stage.isChecked(),
+            background_writer=self.check_background_writer.isChecked(),
+            use_two_pass_ocr_burn_in=self.check_two_pass_ocr_burn_in.isChecked(),
         )
         self.thread.progress.connect(self._on_progress)
         self.thread.finished_ok.connect(self._on_finished_ok)
@@ -2567,13 +4628,26 @@ class VideoTranslatorDialog(QDialog):
         soft_subs = self.check_soft_subs.isChecked()
         _idx = self.source_combo.currentIndex()
         src = "asr" if _idx == 1 else "existing_subs" if _idx == 2 else "ocr"
+        self._progress_mode = (
+            "two_pass_ocr"
+            if (
+                src == "ocr"
+                and self.check_translate.isChecked()
+                and (not soft_subs)
+                and (not self.check_inpaint_only_soft.isChecked())
+                and self.check_two_pass_ocr_burn_in.isChecked()
+            )
+            else "normal"
+        )
+        self._two_pass_stage_guess = 1
+        self._last_progress_current = -1
         self.thread = VideoTranslateThread(
             inp, out,
             self.sample_spin.value(),
             self.check_detect.isChecked(),
             self.check_ocr.isChecked(),
             self.check_translate.isChecked(),
-            False if soft_subs else self.check_inpaint.isChecked(),
+            False if (soft_subs or self.check_detect_no_inpaint.isChecked()) else self.check_inpaint.isChecked(),
             use_scene_detection=self.check_scene.isChecked(),
             scene_threshold=float(self.scene_threshold_spin.value()),
             temporal_smoothing=self.check_temporal.isChecked(),
@@ -2597,6 +4671,10 @@ class VideoTranslatorDialog(QDialog):
             asr_audio_separation=self.check_asr_audio_separation.isChecked(),
             export_ass=self.check_export_ass.isChecked(),
             export_vtt=self.check_export_vtt.isChecked(),
+            prefetch_frames=self.prefetch_spin.value(),
+            two_stage_keyframes=self.check_two_stage.isChecked(),
+            background_writer=self.check_background_writer.isChecked(),
+            use_two_pass_ocr_burn_in=self.check_two_pass_ocr_burn_in.isChecked(),
         )
         self.thread.progress.connect(self._on_progress)
         self.thread.finished_ok.connect(self._on_finished_ok)
@@ -2610,6 +4688,9 @@ class VideoTranslatorDialog(QDialog):
         if self._batch_index < len(self._batch_jobs) and not getattr(self.thread, "_cancel", False):
             self._start_next_batch_job()
         else:
+            self._progress_mode = "normal"
+            self._two_pass_stage_guess = 1
+            self._last_progress_current = -1
             self.run_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
             self.status_label.setText(self.tr("Batch done."))
@@ -2719,23 +4800,334 @@ class VideoTranslatorDialog(QDialog):
         layout.addWidget(close_btn)
         d.exec()
 
+    def _show_ab_compare_dialog(self):
+        """A/B compare two models on sampled subtitle lines from current run history."""
+        samples = []
+        seen = set()
+        for _frame_index, pairs in (self.preview_subtitle_history or []):
+            for src, _trans in (pairs or []):
+                s = str(src or "").strip()
+                if not s or _is_invalid_subtitle_text(s) or s in seen:
+                    continue
+                seen.add(s)
+                samples.append(s)
+        preset_sets = {
+            "zh_cn_terms": [
+                "备案号：11904073220604077",
+                "宗门大比开始！",
+                "你先别急，听我解释。",
+                "三日之后，山门见。",
+                "此人修为深不可测。",
+                "师尊，我已突破筑基。",
+                "若有来生，再与你相见。",
+                "快走！他们追上来了！",
+                "你敢动她一下试试。",
+                "天道无情，人有情。",
+            ],
+            "ja_anime_terms": [
+                "行くぞ！",
+                "ここは俺に任せろ。",
+                "先輩、ありがとうございます。",
+                "このままじゃ間に合わない。",
+                "約束は守るって言っただろ。",
+                "信じてるよ。",
+                "本気で来い。",
+                "終わりにしよう。",
+                "絶対に負けない。",
+                "また会おう。",
+            ],
+            "ko_terms": [
+                "지금 가면 늦어.",
+                "내가 막을게.",
+                "약속은 지켜야지.",
+                "정말 고마워.",
+                "여기서 끝내자.",
+                "절대 포기하지 마.",
+                "그 사람을 믿어.",
+                "시간이 없어.",
+                "다 같이 가자.",
+                "다음에 또 보자.",
+            ],
+            "en_dialog_terms": [
+                "We don't have much time.",
+                "Trust me on this one.",
+                "I'll hold them off.",
+                "Don't look back.",
+                "You promised you'd come.",
+                "This is our last chance.",
+                "We're not done yet.",
+                "Stay with me.",
+                "Let's finish this together.",
+                "See you on the other side.",
+            ],
+        }
+
+        d = QDialog(self)
+        d.setWindowTitle(self.tr("A/B compare translator models"))
+        d.setMinimumSize(540, 280)
+        lay = QVBoxLayout(d)
+        grid = QGridLayout()
+        grid.addWidget(QLabel(self.tr("Model A:")), 0, 0)
+        model_a_edit = QLineEdit((getattr(pcfg.module, "video_translator_ab_model_a", None) or "").strip())
+        model_a_edit.setPlaceholderText(self.tr("e.g. qwen/qwen3.5-4b-instruct"))
+        grid.addWidget(model_a_edit, 0, 1)
+        grid.addWidget(QLabel(self.tr("Model B:")), 1, 0)
+        model_b_edit = QLineEdit((getattr(pcfg.module, "video_translator_ab_model_b", None) or "").strip())
+        model_b_edit.setPlaceholderText(self.tr("e.g. mextrans-7b"))
+        grid.addWidget(model_b_edit, 1, 1)
+        grid.addWidget(QLabel(self.tr("Sample lines:")), 2, 0)
+        sample_spin = QSpinBox()
+        sample_spin.setRange(20, 1000)
+        sample_spin.setValue(int(getattr(pcfg.module, "video_translator_ab_sample_size", 200) or 200))
+        grid.addWidget(sample_spin, 2, 1)
+        grid.addWidget(QLabel(self.tr("Test source:")), 3, 0)
+        source_combo = QComboBox()
+        source_combo.addItems([
+            self.tr("Current run history"),
+            self.tr("Preset: Chinese subtitle terms"),
+            self.tr("Preset: Japanese anime lines"),
+            self.tr("Preset: Korean dialogue lines"),
+            self.tr("Preset: English dialogue lines"),
+            self.tr("Custom pasted lines"),
+        ])
+        grid.addWidget(source_combo, 3, 1)
+        lay.addLayout(grid)
+        lay.addWidget(QLabel(self.tr("Custom lines (one per line):")))
+        custom_edit = QPlainTextEdit(d)
+        custom_edit.setPlaceholderText(self.tr("Paste your own terms/lines here, one per line."))
+        custom_edit.setMaximumHeight(120)
+        custom_edit.setPlainText((getattr(pcfg.module, "video_translator_ab_custom_lines", None) or "").strip())
+        lay.addWidget(custom_edit)
+        log = QPlainTextEdit(d)
+        log.setReadOnly(True)
+        log.setPlainText(self.tr("Click Run compare to generate side-by-side output."))
+        lay.addWidget(log, 1)
+        btn_row = QHBoxLayout()
+        run_btn = QPushButton(self.tr("Run compare"))
+        use_a_btn = QPushButton(self.tr("Use Model A"))
+        use_b_btn = QPushButton(self.tr("Use Model B"))
+        close_btn = QPushButton(self.tr("Close"))
+        btn_row.addStretch()
+        btn_row.addWidget(run_btn)
+        btn_row.addWidget(use_a_btn)
+        btn_row.addWidget(use_b_btn)
+        save_custom_btn = QPushButton(self.tr("Save custom list"))
+        btn_row.addWidget(save_custom_btn)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+        close_btn.clicked.connect(d.accept)
+        save_custom_btn.clicked.connect(
+            lambda: (
+                setattr(pcfg.module, "video_translator_ab_custom_lines", (custom_edit.toPlainText() or "").strip()),
+                save_config(),
+                self.status_label.setText(self.tr("Saved custom A/B list."))
+            )
+        )
+
+        def _apply_winner(which: str):
+            picked = (model_a_edit.text() if which == "a" else model_b_edit.text() or "").strip()
+            if not picked:
+                self.status_label.setText(self.tr("A/B compare: set model first."))
+                return
+            # Prefer setting translator override; fallback to model field if needed.
+            try:
+                tcfg = getattr(pcfg.module, "translator_params", None)
+                tname = getattr(pcfg.module, "translator", None)
+                if isinstance(tcfg, dict) and tname in tcfg and isinstance(tcfg[tname], dict):
+                    tcfg[tname]["override model"] = picked
+            except Exception:
+                pass
+            self.status_label.setText(self.tr("A/B compare: set winner model to {}").format(picked))
+            save_config()
+
+        use_a_btn.clicked.connect(lambda: _apply_winner("a"))
+        use_b_btn.clicked.connect(lambda: _apply_winner("b"))
+
+        def _run_compare():
+            from qtpy.QtWidgets import QApplication
+            from utils.textblock import TextBlock
+
+            model_a = (model_a_edit.text() or "").strip()
+            model_b = (model_b_edit.text() or "").strip()
+            if not model_a or not model_b:
+                log.setPlainText(self.tr("Please set both Model A and Model B."))
+                return
+            count = max(20, int(sample_spin.value()))
+            source_idx = source_combo.currentIndex()
+            if source_idx == 0:
+                if not samples:
+                    log.setPlainText(self.tr("No current run history yet. Choose a preset test source or run a translation first."))
+                    return
+                base_samples = samples
+            elif source_idx == 1:
+                base_samples = preset_sets["zh_cn_terms"]
+            elif source_idx == 2:
+                base_samples = preset_sets["ja_anime_terms"]
+            elif source_idx == 3:
+                base_samples = preset_sets["ko_terms"]
+            elif source_idx == 4:
+                base_samples = preset_sets["en_dialog_terms"]
+            else:
+                raw_custom = (custom_edit.toPlainText() or "").strip()
+                base_samples = [ln.strip() for ln in raw_custom.splitlines() if ln.strip()]
+                if not base_samples:
+                    log.setPlainText(self.tr("Custom list is empty. Paste lines first or choose another source."))
+                    return
+            if len(base_samples) > count:
+                step = max(1, len(base_samples) // count)
+                eval_samples = [base_samples[i] for i in range(0, len(base_samples), step)][:count]
+            else:
+                eval_samples = list(base_samples)
+
+            pcfg.module.video_translator_ab_model_a = model_a
+            pcfg.module.video_translator_ab_model_b = model_b
+            pcfg.module.video_translator_ab_sample_size = int(count)
+            save_config()
+
+            cfg = pcfg.module
+            translator = _get_video_module("translator", cfg.translator)
+            if translator is None:
+                log.setPlainText(self.tr("Could not initialize translator module for A/B compare."))
+                return
+            if hasattr(translator, "load_model"):
+                translator.load_model()
+
+            orig_override = None
+            try:
+                if hasattr(translator, "get_param_value"):
+                    orig_override = translator.get_param_value("override model")
+            except Exception:
+                orig_override = None
+
+            def _translate_with_model(model_name: str):
+                out = []
+                try:
+                    if hasattr(translator, "set_param_value"):
+                        translator.set_param_value("override model", model_name)
+                except Exception:
+                    pass
+                batch_size = 20
+                for i in range(0, len(eval_samples), batch_size):
+                    chunk = eval_samples[i : i + batch_size]
+                    blks = []
+                    for s in chunk:
+                        b = TextBlock()
+                        b.text = [s]
+                        b.translation = ""
+                        blks.append(b)
+                    try:
+                        translator.translate_textblk_lst(blks)
+                    except Exception:
+                        for _ in chunk:
+                            out.append("")
+                        continue
+                    for b in blks:
+                        out.append(str(getattr(b, "translation", "") or "").strip())
+                    QApplication.processEvents()
+                return out
+
+            self.status_label.setText(self.tr("A/B compare running..."))
+            QApplication.processEvents()
+            trans_a = _translate_with_model(model_a)
+            trans_b = _translate_with_model(model_b)
+            try:
+                if hasattr(translator, "set_param_value"):
+                    translator.set_param_value("override model", orig_override or "")
+            except Exception:
+                pass
+
+            disagreements = 0
+            lines = []
+            for i, src in enumerate(eval_samples):
+                a = trans_a[i] if i < len(trans_a) else ""
+                b = trans_b[i] if i < len(trans_b) else ""
+                if a != b:
+                    disagreements += 1
+                lines.append(f"[{i+1}] SOURCE: {src}")
+                lines.append(f"    A ({model_a}): {a}")
+                lines.append(f"    B ({model_b}): {b}")
+                lines.append("")
+            agree = max(0, len(eval_samples) - disagreements)
+            header = [
+                f"Samples: {len(eval_samples)}",
+                f"Agree: {agree}",
+                f"Disagree: {disagreements}",
+                f"Disagreement rate: {(100.0 * disagreements / max(1, len(eval_samples))):.1f}%",
+                "",
+            ]
+            text = "\n".join(header + lines)
+            log.setPlainText(text)
+            out_base = (self.output_edit.text() or "").strip() or (self.input_edit.text() or "").strip()
+            if out_base:
+                try:
+                    base = osp.splitext(out_base)[0]
+                    out_path = base + ".ab_compare.txt"
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(text)
+                    self.status_label.setText(self.tr("A/B compare done. Saved: {}").format(out_path))
+                except Exception:
+                    self.status_label.setText(self.tr("A/B compare done."))
+            else:
+                self.status_label.setText(self.tr("A/B compare done."))
+
+        run_btn.clicked.connect(_run_compare)
+        d.exec()
+
     def _on_progress(self, current: int, total: int):
         if total > 0:
             self.progress_bar.setValue(int(100 * current / total))
             self.progress_bar.setRange(0, 100)
         else:
             self.progress_bar.setRange(0, 0)
+        stage_prefix = ""
+        disp_current = current
+        disp_total = total if total > 0 else "?"
+        if self._progress_mode == "two_pass_ocr":
+            if total > 0:
+                half = max(1, int(total // 2))
+                if current <= half:
+                    stage_prefix = self.tr("Pass 1/2")
+                    disp_current = current
+                    disp_total = half
+                else:
+                    stage_prefix = self.tr("Pass 2/2")
+                    disp_current = max(0, current - half)
+                    disp_total = max(1, total - half)
+            else:
+                # Unknown total: infer stage switch when progress counter restarts in pass 2.
+                if self._last_progress_current >= 0 and current < self._last_progress_current:
+                    self._two_pass_stage_guess = 2
+                stage_prefix = self.tr("Pass 1/2") if self._two_pass_stage_guess == 1 else self.tr("Pass 2/2")
+                self._last_progress_current = current
         if self._batch_jobs and self._batch_index < len(self._batch_jobs):
-            self.status_label.setText(self.tr("File {} / {}: frame {} / {}").format(
-                self._batch_index + 1, len(self._batch_jobs), current, total if total > 0 else "?"))
+            if stage_prefix:
+                self.status_label.setText(self.tr("File {} / {}: {} frame {} / {}").format(
+                    self._batch_index + 1,
+                    len(self._batch_jobs),
+                    stage_prefix,
+                    disp_current,
+                    disp_total,
+                ))
+            else:
+                self.status_label.setText(self.tr("File {} / {}: frame {} / {}").format(
+                    self._batch_index + 1, len(self._batch_jobs), current, total if total > 0 else "?"))
         else:
-            self.status_label.setText(self.tr("Frame {} / {}").format(current, total if total > 0 else "?"))
+            if stage_prefix:
+                self.status_label.setText(self.tr("{} frame {} / {}").format(stage_prefix, disp_current, disp_total))
+            else:
+                self.status_label.setText(self.tr("Frame {} / {}").format(current, total if total > 0 else "?"))
 
     def _on_finished_ok(self, path: str):
+        self._progress_mode = "normal"
+        self._two_pass_stage_guess = 1
+        self._last_progress_current = -1
         if not (self._batch_jobs and self._batch_index <= len(self._batch_jobs)):
             self.status_label.setText(self.tr("Done. Output: {}").format(path))
 
     def _on_failed(self, msg: str):
+        self._progress_mode = "normal"
+        self._two_pass_stage_guess = 1
+        self._last_progress_current = -1
         self.status_label.setText(self.tr("Error: {}").format(msg))
 
     def _on_thread_finished(self):

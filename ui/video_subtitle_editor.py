@@ -781,7 +781,8 @@ class VideoSubtitleEditorWindow(QMainWindow):
         cl, ct, cr, cb = self.crop_l.value(), self.crop_t.value(), self.crop_r.value(), self.crop_b.value()
         try:
             import cv2
-            from modules.video_translator import _draw_timed_subs_on_image
+            from modules.video_translator import _draw_timed_subs_on_image, subtitle_black_box_draw_kwargs_from_cfg
+            from utils.config import pcfg as _pcfg_sub
             cap = cv2.VideoCapture(self._video_path)
             if not cap.isOpened():
                 QMessageBox.warning(self, self.tr("Error"), self.tr("Could not open video for rendering."))
@@ -817,7 +818,13 @@ class VideoSubtitleEditorWindow(QMainWindow):
                 time_sec = (n - in_frame) / fps if fps > 0 else 0
                 if cl or ct or cr or cb:
                     frame = frame[y1:y2, x1:x2]
-                _draw_timed_subs_on_image(frame, time_sec, segments_for_draw, style=style)
+                _draw_timed_subs_on_image(
+                    frame,
+                    time_sec,
+                    segments_for_draw,
+                    style=style,
+                    **subtitle_black_box_draw_kwargs_from_cfg(_pcfg_sub.module),
+                )
                 out.write(frame)
                 n += 1
                 if (n - in_frame) % step == 0:

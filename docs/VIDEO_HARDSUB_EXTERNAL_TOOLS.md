@@ -93,6 +93,8 @@ In the **Video translator** pipeline, **CTD** (or any detector) supplies **masks
 
 **`inpaint_enlarge_ratio` near the bottom of the frame:** `enlarge_window` in `utils/imgproc_utils.py` **clips the crop to the image**—it cannot extend past the bottom edge. So for bottom subtitles, extra ratio mostly adds context **above** the line (there is little or no room below). A **very large** ratio can (1) **slow** each block (bigger crops), (2) pull in **more scene** above the sub, which sometimes causes **visible structure or color bleed** into the bar if the shot is busy, and (3) make **feathered paste seams** span a wider blend zone. For typical bottom bands, **~2.0** is a good default; raise it mainly when punctuation/halos are still missed at the **sides** or **top** of the box, not “as high as possible” by default.
 
+**Subtitle bar (no inpaint):** Enable **“Subtitle bar: solid box behind text (no inpaint)”** in the Video translator UI (`video_translator_subtitle_black_box_mode`). Detection/OCR/translation run as usual; **inpainting is skipped**. Burn-in draws a **filled rectangle** per detected block using the same **wrap/layout** as the white subtitle text (`_compute_subtitle_block_draw_bbox` / `_draw_text_on_image`), so **multi-line translations grow the bar** behind all lines—not a full-width bottom 20% blackout. Padding and BGR color: `video_translator_subtitle_black_box_padding`, `video_translator_subtitle_black_box_b/g/r`. Timed burn-in (two-pass / SRT timeline) uses the same bar when the option is on (`_draw_timed_subs_on_image` + `_draw_single_style_subtitle`).
+
 ---
 
 ## References
