@@ -10,6 +10,7 @@ import cv2
 from typing import List
 
 from .base import InpainterBase, register_inpainter, TextBlock
+from .onnxruntime_utils import inference_session, onnx_image_output_to_uint8_hwc
 from utils.imgproc_utils import resize_keepasp
 
 _LAMA_ONNX_AVAILABLE = False
@@ -23,6 +24,50 @@ except ImportError:
     )
 
 LAMA_ONNX_SIZE = 512
+
+
+def _lama_onnx_letterbox_square(
+    img: np.ndarray, mask_f: np.ndarray, side: int
+) -> tuple:
+    """
+    Uniform scale to fit inside side×side, pad to square. Avoids stretching wide subtitle
+    strips to square (which badly warps characters, especially vertically).
+    """
+    h, w = img.shape[:2]
+    if h < 1 or w < 1:
+        return img, mask_f, (0, 0, h, w, h, w)
+    scale = min(side / h, side / w)
+    nh = max(1, int(round(h * scale)))
+    nw = max(1, int(round(w * scale)))
+    img_r = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LANCZOS4)
+    mf_u8 = (np.clip(mask_f, 0.0, 1.0) * 255.0).astype(np.uint8)
+    mf_r = cv2.resize(mf_u8, (nw, nh), interpolation=cv2.INTER_NEAREST).astype(np.float32) / 255.0
+    ph = side - nh
+    pw = side - nw
+    top, bottom = ph // 2, ph - ph // 2
+    left, right = pw // 2, pw - pw // 2
+    img_sq = cv2.copyMakeBorder(img_r, top, bottom, left, right, cv2.BORDER_REFLECT101)
+    mf_sq_u8 = cv2.copyMakeBorder(
+        (mf_r * 255.0).astype(np.uint8), top, bottom, left, right, cv2.BORDER_CONSTANT, 0
+    )
+    mf_sq = mf_sq_u8.astype(np.float32) / 255.0
+    meta = (top, left, nh, nw, h, w)
+    return img_sq, mf_sq, meta
+
+
+def _lama_onnx_unletterbox_square(
+    result_sq: np.ndarray, meta: tuple, out_h: int, out_w: int
+) -> np.ndarray:
+    top, left, nh, nw, _, _ = meta
+    ch, cw = result_sq.shape[:2]
+    top = max(0, min(int(top), ch - 1))
+    left = max(0, min(int(left), cw - 1))
+    nh = min(int(nh), ch - top)
+    nw = min(int(nw), cw - left)
+    if nh < 1 or nw < 1:
+        return cv2.resize(result_sq, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+    cropped = result_sq[top : top + nh, left : left + nw]
+    return cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
 
 
 if _LAMA_ONNX_AVAILABLE:
@@ -49,7 +94,7 @@ if _LAMA_ONNX_AVAILABLE:
                 "type": "selector",
                 "options": [512, 768, 1024],
                 "value": 512,
-                "description": "Model expects 512×512; max side for input before resize.",
+                "description": "Max side before letterboxing to 512² (aspect preserved; avoids stretched subtitle strips).",
             },
         }
         _load_model_keys = {"session"}
@@ -69,13 +114,13 @@ if _LAMA_ONNX_AVAILABLE:
                     "Download from https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx"
                 )
                 return
-            self.session = ort.InferenceSession(
-                path,
-                providers=(
-                    ["CUDAExecutionProvider", "CPUExecutionProvider"]
-                    if "CUDAExecutionProvider" in ort.get_available_providers()
-                    else ["CPUExecutionProvider"]
-                ),
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if "CUDAExecutionProvider" in ort.get_available_providers()
+                else ["CPUExecutionProvider"]
+            )
+            self.session = inference_session(
+                ort, path, providers=providers, use_inpaint_onnx_opts=True
             )
             self._input_names = [inp.name for inp in self.session.get_inputs()]
 
@@ -100,10 +145,11 @@ if _LAMA_ONNX_AVAILABLE:
                 img_resized = img
                 mask_resized = mask_bin
             h, w = img_resized.shape[:2]
-            img_512 = cv2.resize(img_resized, (LAMA_ONNX_SIZE, LAMA_ONNX_SIZE), interpolation=cv2.INTER_LANCZOS4)
-            mask_512 = cv2.resize(mask_resized, (LAMA_ONNX_SIZE, LAMA_ONNX_SIZE), interpolation=cv2.INTER_NEAREST)
-            img_chw = np.transpose(img_512.astype(np.float32) / 255.0, (2, 0, 1))[np.newaxis, ...]
-            mask_chw = mask_512.astype(np.float32).reshape(1, 1, LAMA_ONNX_SIZE, LAMA_ONNX_SIZE)
+            img_sq, mask_sq, lb_meta = _lama_onnx_letterbox_square(
+                img_resized, mask_resized, LAMA_ONNX_SIZE
+            )
+            img_chw = np.transpose(img_sq.astype(np.float32) / 255.0, (2, 0, 1))[np.newaxis, ...]
+            mask_chw = mask_sq.astype(np.float32).reshape(1, 1, LAMA_ONNX_SIZE, LAMA_ONNX_SIZE)
             feeds = {}
             for name in self._input_names:
                 if "mask" in name.lower():
@@ -112,12 +158,8 @@ if _LAMA_ONNX_AVAILABLE:
                     feeds[name] = img_chw
             out = self.session.run(None, feeds)
             result = out[0]
-            if result.ndim == 4:
-                result = result[0]
-            if result.shape[0] == 3:
-                result = np.transpose(result, (1, 2, 0))
-            result = (np.clip(result, 0, 1) * 255).astype(np.uint8)
-            result = cv2.resize(result, (w, h), interpolation=cv2.INTER_LANCZOS4)
+            result = onnx_image_output_to_uint8_hwc(result)
+            result = _lama_onnx_unletterbox_square(result, lb_meta, h, w)
             if (h, w) != (im_h, im_w):
                 result = cv2.resize(result, (im_w, im_h), interpolation=cv2.INTER_LANCZOS4)
             return (result.astype(np.float32) * mask_orig + img.astype(np.float32) * (1 - mask_orig)).astype(np.uint8)

@@ -56,6 +56,15 @@ class ModuleConfig(Config):
     inpaint_exclude_labels: str = ''  # comma-separated, case-insensitive (e.g. "other,scene")
     # When True, inpaint the whole image at once (no per-block crops). Uses more VRAM/slower but avoids per-block issues; try if Lama gives bad results.
     inpaint_full_image: bool = False
+    # When True, wrap lama_mpe / lama_large_512px / AOT PyTorch models with torch.compile (CUDA only; first runs pay compile cost; variable crop shapes use dynamic=True).
+    inpaint_torch_compile: bool = False
+    # ONNX Runtime session options for lama_onnx / lama_manga_onnx (graph opts, memory; intra_op threads 0 = ORT default).
+    inpaint_onnx_ort_graph_optimization_level: str = "all"  # all | extended | basic | disable
+    inpaint_onnx_ort_enable_mem_pattern: bool = True
+    inpaint_onnx_ort_enable_cpu_mem_arena: bool = True
+    inpaint_onnx_ort_intra_op_num_threads: int = 0
+    # Per-block inpainting: expand polygon mask vertically (descenders, halos). Critical for video subs + CTD; turn off if bubble edges look eaten.
+    inpaint_block_mask_vertical_expand: bool = True
     load_model_on_demand: bool = False
     empty_runcache: bool = False
     # Optional: panel-aware reading order for block sorting (affects translation prompt order & typesetting sequence).
@@ -189,6 +198,7 @@ class ModuleConfig(Config):
     pipeline_cache_enabled: bool = False  # When True, in-memory pipeline cache can be used (get_pipeline_cache(True))
     inpaint_spill_to_disk_after_blocks: int = 0  # When >0, write intermediate inpainted image to temp file every N blocks to reduce peak RAM/VRAM (e.g. 8 or 12)
     # --- Video translator (Pipeline → Video translator...) ---
+    video_translator_usage_preset: str = "balanced"  # Preset name applied from Usage preset dropdown: custom | dont_miss_text | balanced | max_speed | anime | documentary.
     video_translator_sample_every_frames: int = 30  # Process every N frames; in-between frames reuse last result (reduces flicker, faster).
     video_translator_enable_detect: bool = True
     video_translator_enable_ocr: bool = True
@@ -205,9 +215,43 @@ class ModuleConfig(Config):
     video_translator_use_ffmpeg: bool = False  # Encode output with FFmpeg (libx264) for better compatibility than OpenCV.
     video_translator_ffmpeg_path: str = ''  # Path to ffmpeg.exe if not on PATH (e.g. C:\ffmpeg\bin\ffmpeg.exe).
     video_translator_ffmpeg_crf: int = 18  # FFmpeg CRF (0–51, lower=better quality); 18 = higher quality than 23, avoids very low bitrate.
+    video_translator_ffmpeg_preset: str = "medium"  # libx264 preset: ultrafast, superfast, veryfast, faster, fast, medium, slow; faster = encode speed.
+    video_translator_ffmpeg_hw_encoder: str = "none"  # GPU encoder: none | nvenc | qsv | auto (NVIDIA NVENC or Intel QSV when available).
     video_translator_video_bitrate_kbps: int = 0  # Target bitrate in kbps when using FFmpeg; 0 = use CRF only. Set e.g. 9600 to match source.
     video_translator_skip_detect: bool = False  # Use fixed subtitle region only (no detector); region_preset defines the band.
+    video_translator_detect_no_inpaint: bool = False  # Run detection/OCR/translation but skip inpainting (burn subtitles directly).
+    # When skip_detect is on, use native bottom-band OCR/inpaint semantics:
+    # keep OCR/inpaint focused on the whole subtitle band instead of skipping inpaint for the fixed block.
+    video_translator_bottom_band_native_mode: bool = False
+    video_translator_prefetch_frames: int = 2  # 0 = off; 2–3 = decode next frames in a separate thread to avoid I/O blocking (OCR path only).
+    video_translator_background_writer: bool = True  # OCR path always uses a separate encode thread; option kept for compatibility.
+    video_translator_use_two_pass_ocr_burn_in: bool = True  # OCR burn-in path: pass 1 detect/OCR/inpaint + async translate, pass 2 burn timed cues.
+    video_translator_two_stage_keyframes: bool = False  # Skip full pipeline when subtitle region content hash unchanged (OCR path only).
+    video_translator_two_stage_force_refresh_every_frames: int = 0  # 0 = off; otherwise force a full pipeline run at least every N frames.
+    video_translator_two_stage_new_line_diff_threshold: float = 8.0  # ROI band mean abs-diff threshold to detect "new line" changes.
+    video_translator_auto_catch_subtitle_on_skipped_frames: bool = True  # On skipped frames, auto-run pipeline when subtitle band changes enough (helps first-appearance capture).
+    video_translator_auto_catch_diff_threshold: float = 0.0  # 0 = auto from sample_every_frames/fps; else fixed pixel-diff threshold.
+    video_translator_adaptive_detector_roi: bool = False  # Crop detector to ROI around last subtitle blocks (when available) to speed up detection.
+    video_translator_adaptive_detector_roi_padding_frac: float = 0.15  # ROI padding fraction around last subtitle union bbox.
+    video_translator_adaptive_detector_roi_start_seconds: float = 0.0  # Delay adaptive ROI activation until this timestamp (sec) to avoid early-frame bias.
+    video_translator_overlap_inpaint: bool = False  # Overlap inpainting with OCR/translation within a single pipeline run (may increase GPU contention).
+    video_translator_overlap_inpaint_require_cpu: bool = True  # If true, only overlap when inpainter is on CPU.
+    # Video frames from OpenCV are BGR; LaMa and most neural inpainters expect RGB. Turning off restores legacy behavior.
+    video_translator_inpaint_bgr_to_rgb: bool = True
+    # Extra vertical dilation + slight downward shift on the inpaint mask so descenders, outlines, and soft edges are included.
+    video_translator_inpaint_subtitle_mask_expand: bool = True
+    video_translator_ocr_cache_geo_quantization: int = 8  # Quantization grid (px) for OCR cache geometry keys; higher = more hits but more reuse risk.
+    # Temporal OCR stabilization (video OCR): vote over recent frames to reduce per-frame character jitter.
+    video_translator_ocr_temporal_stability: bool = True
+    video_translator_ocr_temporal_window: int = 5  # Number of recent frames considered for OCR text vote.
+    video_translator_ocr_temporal_min_votes: int = 2  # Minimum agreeing frames required to replace current OCR text.
+    video_translator_ocr_temporal_geo_quantization: int = 24  # Region quantization (px) for matching the same subtitle region across frames.
+    video_translator_flow_fixer_cache_size: int = 200  # Max flow-fixer memoization entries per run (prev+new translation pairs).
     video_translator_export_srt: bool = False  # Write an SRT file alongside the output video with timed subtitles.
+    # When True (recommended), burn-in uses timed cue timeline rendering per frame
+    # instead of relying on cached text-region composites. More deterministic, supports
+    # stacked overlaps, and avoids cached-text priority flicker.
+    video_translator_prefer_timed_burn_in: bool = True
     video_translator_subtitle_style: str = "default"  # Burn-in style: default | anime | documentary (VideoCaptioner-inspired).
     video_translator_subtitle_font: str = ""  # Optional path to .ttf/.otf for burn-in subtitles; empty = Arial/DejaVu/fallback.
     video_translator_soft_subs_only: bool = False  # When True, output original video + SRT only (no burn-in); fast, player-controlled subs.
@@ -218,21 +262,60 @@ class ModuleConfig(Config):
     video_translator_asr_device: str = "cuda"  # cuda or cpu for ASR.
     video_translator_asr_language: str = ""  # Empty = auto-detect; e.g. ja, en, zh.
     video_translator_asr_vad_filter: bool = True  # VAD filter to reduce ASR hallucinations (VideoCaptioner-style).
+    video_translator_asr_chunk_seconds: float = 2400.0  # When >0 and duration >= threshold, transcribe in time chunks (seconds per slice).
+    video_translator_asr_long_audio_threshold_seconds: float = 5400.0  # Minimum duration (sec) to enable chunked ASR; 0 = never chunk by duration.
+    video_translator_asr_checkpoint_resume: bool = True  # Save/resume chunk progress to temp JSON when chunking is active.
     video_translator_export_ass: bool = False  # Export ASS subtitle file alongside video.
     video_translator_export_vtt: bool = False  # Export WebVTT subtitle file alongside video.
     video_translator_glossary: str = ""  # Optional glossary/script hint for LLM (OCR/ASR correction and translation).
+    video_translator_lock_watermark_lines: bool = False  # If true, lines matching regex are not translated (kept as source text).
+    video_translator_lock_watermark_regex: str = r"备案号[:：]?\s*\d{8,}"  # Regex for watermark-like lines to lock/ignore in translation.
+    # VideoCaptioner-style subtitle NLP throughput (LLM_API only): split one translate batch into multiple API calls
+    # and optionally run them in parallel. Does not add extra vision/OCR threads — translation stage only.
+    # 0 = one API request per translate_textblk_lst (all cues in one JSON batch; can be hundreds of lines).
+    # 20–40 is a practical range for ASR / existing-subs so prompts stay small; also used for subtitle-file translate.
+    video_translator_nlp_chunk_size: int = 32
+    video_translator_nlp_max_workers: int = 1  # Parallel LLM requests when chunking produces multiple chunks (2–4 typical). Watch API rate limits.
+    # When a batched LLM reply has wrong id/count after retries, re-translate each cue one-by-one (video_* only).
+    video_translator_llm_strict_alignment_fallback: bool = True
+    # Fix empty lines and obvious source-echo (CJK/JP/KR) with a few per-cue calls before post-check per-line retries.
+    video_translator_llm_per_line_quality_fix: bool = True
+    # Re-translate cues whose English largely repeats the previous cue (split-ASR / batch “flow” echo).
+    video_translator_llm_redundant_continuation_fix: bool = True
+    video_translator_qwen35_allow_aux_passes: bool = False  # Allow Qwen3.5-4B LM Studio OCR-correction/reflection passes (can be slower/less stable JSON).
     video_translator_series_context_path: str = ""  # Optional series context path (folder or ID) for glossary/context; same as project series context.
     video_translator_asr_sentence_break: bool = False  # LLM merges/splits ASR segments into natural sentences.
+    video_translator_sentence_merge_by_punctuation: bool = True  # Rule-based: merge adjacent short cues until sentence punctuation before translation.
+    video_translator_sentence_merge_max_seconds: float = 8.0  # Upper bound for one merged cue duration to avoid over-long subtitle chunks.
     video_translator_asr_audio_separation: bool = False  # Separate vocals before ASR (demucs; reduces music noise).
+    video_translator_asr_guided_detect_inpaint: bool = False  # ASR-guided detect/inpaint: detect at subtitle segment boundaries, reuse boxes during active segment.
+    video_translator_asr_guided_midpoint_refresh: bool = True  # In ASR-guided mode, refresh detection once near segment midpoint.
     video_translator_last_batch_output_dir: str = ""  # Last used output directory for batch video processing.
     # Flow fixer: local model (Ollama/LM Studio) to improve subtitle flow without extra cloud API calls.
     video_translator_flow_fixer_enabled: bool = False
+    video_translator_use_flow_fixer_for_corrections: bool = False  # Use flow fixer model for OCR correction, ASR correction, and reflection (same model as flow fixer).
     video_translator_flow_fixer: str = "none"  # none | local_server | openrouter | openai
     video_translator_flow_fixer_context_lines: int = 20  # Max previous subtitle lines sent to flow fixer (1–50). Revisions apply this far back.
+    video_translator_flow_fixer_strict_single_line_review: bool = False  # If true, do not skip flow-fixer API on single-line/no-context updates.
     video_translator_flow_fixer_server_url: str = "http://localhost:1234/v1"  # LM Studio default; Ollama: http://localhost:11434/v1
     video_translator_flow_fixer_model: str = ""  # Model name for local_server (required: type exact name for LM Studio/Ollama)
     video_translator_flow_fixer_max_tokens: int = 512
     video_translator_flow_fixer_timeout: float = 30.0
+    video_translator_flow_fixer_enable_reasoning: bool = True  # Flow fixer / timeline review: reasoning when supported (JSON still extracted after think).
+    video_translator_flow_fixer_reasoning_effort: str = "medium"  # low | medium | high
+    video_translator_post_review_enabled: bool = True  # After run/cancel, run one global subtitle flow review before final sidecar output.
+    video_translator_post_review_apply_on_cancel: bool = True  # Also run post review when run is cancelled (partial timeline).
+    # When no dedicated flow-fixer model is set (or it is no-op), use the main translator for the same flow JSON pass.
+    video_translator_post_review_use_main_translator: bool = True
+    video_translator_post_review_main_llm_max_tokens: int = 8192  # Flow-fix chunks need room for JSON (reasoning models may use prose first).
+    video_translator_post_review_enable_reasoning: bool = True  # Main-LLM post-review: use reasoning (batched translation forces reasoning off separately).
+    video_translator_post_review_reasoning_effort: str = "medium"  # low | medium | high for post-review when reasoning is on.
+    video_translator_post_review_chunk_size: int = 80  # Timeline lines per post-review call.
+    video_translator_post_review_context_lines: int = 20  # Previous lines provided as context for each post-review chunk.
+    video_translator_ab_model_a: str = ""  # Optional saved model A for subtitle A/B compare tool.
+    video_translator_ab_model_b: str = ""  # Optional saved model B for subtitle A/B compare tool.
+    video_translator_ab_sample_size: int = 200  # Sample size for subtitle A/B compare tool.
+    video_translator_ab_custom_lines: str = ""  # Newline-separated custom lines for subtitle A/B compare presets.
     # OpenRouter flow fixer (when flow_fixer == "openrouter"): second model for flow only
     video_translator_flow_fixer_openrouter_apikey: str = ""
     video_translator_flow_fixer_openrouter_model: str = "google/gemma-3n-e2b-it:free"

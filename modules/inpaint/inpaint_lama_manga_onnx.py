@@ -7,6 +7,7 @@ import cv2
 from typing import List
 
 from .base import InpainterBase, register_inpainter, TextBlock
+from .onnxruntime_utils import inference_session, onnx_image_output_to_uint8_hwc
 from utils.imgproc_utils import resize_keepasp
 
 _LAMA_ONNX_AVAILABLE = False
@@ -66,11 +67,13 @@ if _LAMA_ONNX_AVAILABLE:
                     "Download from https://huggingface.co/mayocream/lama-manga-onnx and set model_path."
                 )
                 return
-            self.session = ort.InferenceSession(
-                path,
-                providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
                 if "CUDAExecutionProvider" in ort.get_available_providers()
-                else ["CPUExecutionProvider"],
+                else ["CPUExecutionProvider"]
+            )
+            self.session = inference_session(
+                ort, path, providers=providers, use_inpaint_onnx_opts=True
             )
             self._input_names = [inp.name for inp in self.session.get_inputs()]
             self._output_names = [out.name for out in self.session.get_outputs()]
@@ -103,11 +106,7 @@ if _LAMA_ONNX_AVAILABLE:
                     feeds[name] = img_chw.astype(np.float32)
             out = self.session.run(self._output_names, feeds)
             result = out[0]
-            if result.ndim == 4:
-                result = result[0]
-            if result.shape[0] == 3:
-                result = np.transpose(result, (1, 2, 0))
-            result = (np.clip(result, 0, 1) * 255).astype(np.uint8)
+            result = onnx_image_output_to_uint8_hwc(result)
             if result.shape[:2] != (im_h, im_w):
                 result = cv2.resize(result, (im_w, im_h), interpolation=cv2.INTER_LINEAR)
             mask_3 = (mask > 127).astype(np.float32)[:, :, np.newaxis]

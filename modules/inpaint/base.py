@@ -74,6 +74,37 @@ def _resample_inpainted_brightness(result_crop: np.ndarray, text_mask: np.ndarra
         )
 
 
+def expand_block_inpaint_mask_vertical(msk: np.ndarray) -> np.ndarray:
+    """
+    Widen the per-block inpaint mask (after polygon fill) mostly in Y and slightly downward.
+
+    Detectors (e.g. CTD) often fit quads tightly; anti-aliased edges, outlines, and descenders
+    sit outside the polygon. Per-block inpainting ignores a separately dilated full-frame mask,
+    so we must expand each crop mask here or the bottom of glyphs stays un-inpainted / looks
+    corrupted after neural fill.
+    """
+    if msk is None or msk.size == 0:
+        return msk
+    m = (msk > 127).astype(np.uint8)
+    if not np.any(m):
+        return msk
+    ch, cw = m.shape[:2]
+    k0 = max(2, min(8, min(ch, cw) // 20))
+    v_h = max(5, min(33, k0 * 2 + 9))
+    v_w = max(3, min(25, k0 * 2 + 5))
+    if v_h % 2 == 0:
+        v_h += 1
+    if v_w % 2 == 0:
+        v_w += 1
+    kv = cv2.getStructuringElement(cv2.MORPH_RECT, (v_w, v_h))
+    m2 = cv2.dilate(m, kv, iterations=1)
+    shift = max(1, min(6, ch // 45))
+    m_down = np.zeros_like(m2)
+    m_down[shift:, :] = m2[:-shift, :]
+    m2 = np.maximum(m2, m_down)
+    return ((m2 > 0).astype(np.uint8) * 255).astype(np.uint8)
+
+
 def _clip_xyxy_to_image(xyxy, im_w: int, im_h: int):
     """Return [x1, y1, x2, y2] as integers clipped to image bounds; None if degenerate.
     Use for per-block inpainting so dual-detection merged blocks (possibly float or OOB) are safe."""
@@ -168,6 +199,19 @@ def _block_mask_polygons(blk, im_w: int, im_h: int):
         except (TypeError, ValueError, IndexError):
             out.append(default_pts)
     return out if out else [default_pts]
+
+
+def _rect_mask_from_blocks(textblock_list: List[TextBlock], im_w: int, im_h: int) -> np.ndarray:
+    """Build conservative rectangular mask from block xyxy only."""
+    m = np.zeros((im_h, im_w), dtype=np.uint8)
+    for blk in textblock_list or []:
+        xyxy = _clip_xyxy_to_image(getattr(blk, "xyxy", None), im_w, im_h)
+        if xyxy is None:
+            continue
+        x1, y1, x2, y2 = xyxy
+        if x2 > x1 and y2 > y1:
+            m[y1:y2, x1:x2] = 255
+    return m
 
 
 def _block_center_xyxy(xyxy) -> tuple:
@@ -394,6 +438,32 @@ class InpainterBase(BaseModule):
         # Binary mask: 255 = region to inpaint (hole); force strict 0/255 for C backends (OpenCV, PatchMatch)
         binary = (mask > 127).astype(np.uint8) * 255
         mask = np.where(binary > 0, 255, 0).astype(np.uint8)
+
+        # Guard against malformed detector polygons causing huge random inpaint areas.
+        # If incoming mask is far larger than block rectangles, fallback to xyxy-rect mask.
+        if textblock_list:
+            try:
+                frame_area = float(im_h * im_w)
+                mask_area = float(np.count_nonzero(mask > 127))
+                rect_area = 0.0
+                for blk in textblock_list:
+                    xyxy = _clip_xyxy_to_image(getattr(blk, "xyxy", None), im_w, im_h)
+                    if xyxy is None:
+                        continue
+                    x1, y1, x2, y2 = xyxy
+                    rect_area += float(max(0, x2 - x1) * max(0, y2 - y1))
+                too_large_vs_rects = rect_area > 0 and mask_area > (rect_area * 3.0)
+                too_large_vs_frame = frame_area > 0 and (mask_area / frame_area) > 0.35
+                if too_large_vs_rects and too_large_vs_frame:
+                    self.logger.debug(
+                        "Inpaint mask fallback: suspicious mask area %.0f vs rect area %.0f (blocks=%d).",
+                        mask_area,
+                        rect_area,
+                        int(len(textblock_list)),
+                    )
+                    mask = _rect_mask_from_blocks(textblock_list, im_w, im_h)
+            except Exception:
+                pass
         # Subclasses (e.g. LamaLarge) can set mask_dilation_iterations if they need a small margin
         dilate_iter = getattr(self, 'mask_dilation_iterations', 0)
         if dilate_iter > 0:
@@ -505,6 +575,8 @@ class InpainterBase(BaseModule):
                     pts_crop[:, 0] = np.clip(pts_crop[:, 0], 0, crop_w - 1)
                     pts_crop[:, 1] = np.clip(pts_crop[:, 1], 0, crop_h - 1)
                     cv2.fillPoly(msk, [pts_crop], 255)
+                if bool(getattr(pcfg.module, "inpaint_block_mask_vertical_expand", True)):
+                    msk = expand_block_inpaint_mask_vertical(msk)
                 # Skip if this block has no visible area in crop (degenerate after clip)
                 if np.sum(msk > 127) == 0:
                     continue
@@ -633,15 +705,82 @@ class InpainterBase(BaseModule):
         raise not NotImplementedError
 
 
+def _opencv_classic_inpaint(
+    img: np.ndarray,
+    mask: np.ndarray,
+    radius: int,
+    dilate_px: int,
+    passes: int,
+    cv2_flag: int,
+) -> np.ndarray:
+    """
+    Shared path for cv2.INPAINT_TELEA / INPAINT_NS. Optional mask dilation catches outlines/halos
+    that detectors miss; larger radius samples a wider neighborhood (slower but fewer gaps).
+    """
+    if img is None or mask is None or img.size == 0:
+        return img
+    m = np.asarray(mask, dtype=np.uint8)
+    if m.ndim == 3:
+        m = cv2.cvtColor(m, cv2.COLOR_BGR2GRAY)
+    if m.shape[:2] != img.shape[:2]:
+        m = cv2.resize(m, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+    m = ((m > 127).astype(np.uint8) * 255)
+    dp = max(0, min(32, int(dilate_px)))
+    if dp > 0:
+        k = 2 * dp + 1
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        m = cv2.dilate(m, ker, iterations=1)
+    r = max(1, min(64, int(radius)))
+    p = max(1, min(3, int(passes)))
+    out = cv2.inpaint(img, m, r, cv2_flag)
+    for _ in range(1, p):
+        out = cv2.inpaint(out, m, max(1, r // 2), cv2_flag)
+    return out
+
+
+_OPENCV_INPAINT_RADIUS_OPTS = [2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 19, 23]
+_OPENCV_MASK_DILATE_OPTS = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12]
+
+
 @register_inpainter('opencv-tela')
 class OpenCVInpainter(InpainterBase):
 
+    params = {
+        'inpaint_radius': {
+            'type': 'selector',
+            'options': list(_OPENCV_INPAINT_RADIUS_OPTS),
+            'value': 5,
+            'description': (
+                'cv2.inpaint neighborhood radius (px). Default was 3; 5–9 helps thick subs / soft edges '
+                '(slower).'
+            ),
+        },
+        'mask_dilate_px': {
+            'type': 'selector',
+            'options': list(_OPENCV_MASK_DILATE_OPTS),
+            'value': 2,
+            'description': (
+                'Extra mask dilation before inpaint. Fills missed halos/outlines; 0 = off if mask is already generous.'
+            ),
+        },
+        'inpaint_passes': {
+            'type': 'selector',
+            'options': [1, 2, 3],
+            'value': 1,
+            'description': (
+                'Extra cv2.inpaint passes on the same mask can reduce leftover fringe (slower).'
+            ),
+        },
+    }
+
     def __init__(self, **params) -> None:
         super().__init__(**params)
-        self.inpaint_method = lambda img, mask, *args, **kwargs: cv2.inpaint(img, mask, 3, cv2.INPAINT_NS)
 
     def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
-        return self.inpaint_method(img, mask)
+        r = int(self.get_param_value('inpaint_radius'))
+        d = int(self.get_param_value('mask_dilate_px'))
+        p = int(self.get_param_value('inpaint_passes'))
+        return _opencv_classic_inpaint(img, mask, r, d, p, cv2.INPAINT_NS)
 
     def is_computational_intensive(self) -> bool:
         return True
@@ -654,12 +793,42 @@ class OpenCVInpainter(InpainterBase):
 class OpenCVTeleaInpainter(InpainterBase):
     """OpenCV Telea inpainting (#126). Fast, CPU-only, no model download."""
 
+    params = {
+        'inpaint_radius': {
+            'type': 'selector',
+            'options': list(_OPENCV_INPAINT_RADIUS_OPTS),
+            'value': 5,
+            'description': (
+                'cv2.inpaint neighborhood radius (px). Default was 3; 5–9 helps thick subs / soft edges '
+                '(slower).'
+            ),
+        },
+        'mask_dilate_px': {
+            'type': 'selector',
+            'options': list(_OPENCV_MASK_DILATE_OPTS),
+            'value': 2,
+            'description': (
+                'Extra mask dilation before inpaint. Fills missed halos/outlines; 0 = off if mask is already generous.'
+            ),
+        },
+        'inpaint_passes': {
+            'type': 'selector',
+            'options': [1, 2, 3],
+            'value': 1,
+            'description': (
+                'Extra cv2.inpaint passes on the same mask can reduce leftover fringe (slower).'
+            ),
+        },
+    }
+
     def __init__(self, **params) -> None:
         super().__init__(**params)
-        self.inpaint_method = lambda img, mask, *args, **kwargs: cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
 
     def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
-        return self.inpaint_method(img, mask)
+        r = int(self.get_param_value('inpaint_radius'))
+        d = int(self.get_param_value('mask_dilate_px'))
+        p = int(self.get_param_value('inpaint_passes'))
+        return _opencv_classic_inpaint(img, mask, r, d, p, cv2.INPAINT_TELEA)
 
     def is_computational_intensive(self) -> bool:
         return True
@@ -712,6 +881,28 @@ from utils.imgproc_utils import resize_keepasp
 from .aot import AOTGenerator, load_aot_model
 
 
+def _maybe_torch_compile_inpaint_model(model, device: str, logger):
+    """
+    Optionally wrap PyTorch inpaint models with torch.compile (module-level inpaint_torch_compile).
+    CUDA only; dynamic=True for variable per-block crop sizes. First inference incurs compile cost.
+    """
+    if model is None:
+        return None
+    if not bool(getattr(pcfg.module, "inpaint_torch_compile", False)):
+        return model
+    dev = str(device or "").lower()
+    if dev != "cuda":
+        logger.info("inpaint_torch_compile: skipped (device is not cuda).")
+        return model
+    try:
+        compiled = torch.compile(model, dynamic=True, mode="default")
+        logger.info("inpaint_torch_compile: torch.compile enabled for this inpainter (CUDA).")
+        return compiled
+    except Exception as e:
+        logger.warning("inpaint_torch_compile failed (%s); using eager model.", e)
+        return model
+
+
 @register_inpainter('aot')
 class AOTInpainter(InpainterBase):
 
@@ -748,6 +939,7 @@ class AOTInpainter(InpainterBase):
     def _load_model(self):
         AOTMODEL_PATH = 'data/models/aot_inpainter.ckpt'
         self.model = load_aot_model(AOTMODEL_PATH, self.device)
+        self.model = _maybe_torch_compile_inpaint_model(self.model, self.device, self.logger)
 
     def moveToDevice(self, device: str, precision: str = None):
         self.model.to(device)
@@ -824,10 +1016,28 @@ class LamaInpainterMPE(InpainterBase):
         'inpaint_size': {
             'type': 'selector',
             'options': [
-                1024, 
-                2048
-            ], 
-            'value': 2048
+                256,
+                384,
+                512,
+                768,
+                1024,
+                1536,
+                2048,
+            ],
+            'value': 2048,
+            'description': (
+                'Max side (px) for inpaint input; image is resized with stride 64. '
+                'Smaller values use less VRAM—often enough for subtitle-sized regions.'
+            ),
+        },
+        'inpaint_enlarge_ratio': {
+            'type': 'selector',
+            'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7, 2.0, 2.2, 2.5],
+            'value': 2.0,
+            'description': (
+                'Per-block crop margin ratio (1.1–2.5). Larger = more context around each block for LaMa. '
+                'Same as lama_large_512px; helps punctuation/halos at block edges.'
+            ),
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone'])
     }
@@ -845,9 +1055,18 @@ class LamaInpainterMPE(InpainterBase):
         self.inpaint_size = int(self.params['inpaint_size']['value'])
         self.precision = 'fp32'
         self.model: LamaFourier = None
+        self._update_inpaint_enlarge_ratio()
+
+    def _update_inpaint_enlarge_ratio(self):
+        val = self.params.get('inpaint_enlarge_ratio', {}).get('value', 2.0)
+        try:
+            self.inpaint_enlarge_ratio = float(val) if val is not None else 2.0
+        except (TypeError, ValueError):
+            self.inpaint_enlarge_ratio = 2.0
 
     def _load_model(self):
         self.model = load_lama_mpe(r'data/models/lama_mpe.ckpt', self.device)
+        self.model = _maybe_torch_compile_inpaint_model(self.model, self.device, self.logger)
 
     def inpaint_preprocess(self, img: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
@@ -941,9 +1160,13 @@ class LamaInpainterMPE(InpainterBase):
         elif param_key == 'inpaint_size':
             self.inpaint_size = int(self.params['inpaint_size']['value'])
 
+        elif param_key == 'inpaint_enlarge_ratio':
+            self._update_inpaint_enlarge_ratio()
+
         elif param_key == 'precision':
-            precision = self.params['precision']['value']
-            self.precision = precision
+            p = self.params.get('precision')
+            if isinstance(p, dict) and 'value' in p:
+                self.precision = p['value']
 
     def moveToDevice(self, device: str, precision: str = None):
         self.model.to(device)
@@ -963,15 +1186,21 @@ class LamaLarge(LamaInpainterMPE):
         'inpaint_size': {
             'type': 'selector',
             'options': [
+                256,
+                384,
                 512,
                 768,
                 1024,
                 1536,
                 1920,
-                2048
+                2048,
             ],
             'value': 1024,
-            'description': 'Max side (px) for each bubble crop before feeding to model. Match detect_max_side (e.g. 1920) for high-res pages; lower saves VRAM.',
+            'description': (
+                'Max side (px) for each bubble crop before feeding to model (stride 64). '
+                'Match detect_max_side (e.g. 1920) for high-res pages. '
+                '256–512 use less VRAM—often enough for subtitle-sized regions.'
+            ),
         },
         'mask_dilation': {
             'type': 'selector',
@@ -989,7 +1218,11 @@ class LamaLarge(LamaInpainterMPE):
             'type': 'selector',
             'options': [1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.7, 2.0, 2.2, 2.5],
             'value': 2.0,
-            'description': 'Crop margin ratio (1.1–2.5). Larger = more context around each block; helps cover small missed detections (e.g. punctuation) when combined with mask dilation. 2.0 = default.',
+            'description': (
+                'Crop margin ratio (1.1–2.5). Larger = more context around each block; helps cover small '
+                'missed detections (e.g. punctuation) when combined with mask dilation. 2.0 = default. '
+                '(Same option as lama_mpe.)'
+            ),
         },
         'device': DEVICE_SELECTOR(not_supported=['privateuseone']),
         'precision': {
@@ -1013,17 +1246,12 @@ class LamaLarge(LamaInpainterMPE):
         self.precision = self.params['precision']['value']
         self._update_mask_dilation()
         self._update_mask_dilation_kernel()
-        self._update_inpaint_enlarge_ratio()
 
     def _update_mask_dilation(self):
         self.mask_dilation_iterations = int(self.params.get('mask_dilation', {}).get('value', 2))
 
     def _update_mask_dilation_kernel(self):
         self.mask_dilation_kernel_size = int(self.params.get('mask_dilation_kernel', {}).get('value', 2))
-
-    def _update_inpaint_enlarge_ratio(self):
-        val = self.params.get('inpaint_enlarge_ratio', {}).get('value', 2.0)
-        self.inpaint_enlarge_ratio = float(val) if val is not None else 2.0
 
     def _load_model(self):
         device = self.params['device']['value']
@@ -1034,6 +1262,7 @@ class LamaLarge(LamaInpainterMPE):
 
         self.model = load_lama_mpe(r'data/models/lama_large_512px.ckpt', device='cpu', use_mpe=False, large_arch=True)
         self.moveToDevice(device, precision=precision)
+        self.model = _maybe_torch_compile_inpaint_model(self.model, self.device, self.logger)
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
@@ -1041,8 +1270,6 @@ class LamaLarge(LamaInpainterMPE):
             self._update_mask_dilation()
         elif param_key == 'mask_dilation_kernel':
             self._update_mask_dilation_kernel()
-        elif param_key == 'inpaint_enlarge_ratio':
-            self._update_inpaint_enlarge_ratio()
 
 
 # LAMA_ORI: LamaFourier = None
