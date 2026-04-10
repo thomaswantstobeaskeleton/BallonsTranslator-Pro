@@ -2,7 +2,9 @@
 
 **Repository:** [https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) · **Version:** 1.7.0
 
-Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted.
+Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted. 
+
+If anyone would like to, i made this project simply to translate Rebirth Of The Urban Immortal Cultivator, the manhwa, and now that ive done that i want to focus on translating the anime of it, i have fully implemented a video translator module with a completely working ui, and models that work well and are fast with it. https://www.youtube.com/watch?v=HHvQd2uoGik its on youtube and you can download it yourselves, subtitles are hardcoded. if someone ever sees this and wanna help me translate it with good subtitles feel free to; ill pay a certain amount depending on how much youve translaated, thank you for reading.. im to lazy to do anymore work on this fork.
 
 **Recent Changes Highlights:** I reworked the whole auto layout feature, added some customizable options for it, and fixed text sizing, lines, constraints, clamping to and only moving the text box geometrically.
 
