@@ -119,19 +119,22 @@ class RunBlkTransCommand(QUndoCommand):
         self.op_counter = -1
         self.blkitems = blkitems
         self.transpairw_list = transpairw_list
-
-        if mode < 3:
-            for blkitem, transpairw in zip(self.blkitems, self.transpairw_list):
-                if mode != 0:
-                    trs = blkitem.blk.translation
-                    transpairw.e_trans.setPlainTextAndKeepUndoStack(trs)
-                    blkitem.setPlainTextAndKeepUndoStack(trs)
-                blkitem.blk.rich_text = ''
-                if mode >= 0:
-                    transpairw.e_source.setPlainTextAndKeepUndoStack(blkitem.blk.get_text())
-
         self.canvas = canvas
         self.mode = mode
+
+        # QUndoCommand constructors should be side-effect free. Previously this
+        # constructor immediately rewrote e_trans, e_source, and blkitem text,
+        # then the first redo() no-op'd to compensate. Capture the desired state
+        # here and perform the mutation in redo(), which keeps command creation
+        # predictable and prevents surprising UI/model rewrites before the command
+        # is actually pushed/executed.
+        self._redo_translation_texts = []
+        self._redo_source_texts = []
+        if mode < 3:
+            for blkitem in self.blkitems:
+                self._redo_translation_texts.append(blkitem.blk.translation)
+                self._redo_source_texts.append(blkitem.blk.get_text())
+
         if mode > 1:
             self.undo_img_list = []
             self.undo_mask_list = []
@@ -160,6 +163,8 @@ class RunBlkTransCommand(QUndoCommand):
                     self.redo_mask_list.append(inpainted_dict['mask'])
                     self.inpaint_rect_lst.append(inpaint_rect)
                     self.num_inpainted += 1
+        else:
+            self.num_inpainted = 0
 
     def redo(self) -> None:
 
@@ -179,6 +184,15 @@ class RunBlkTransCommand(QUndoCommand):
             self.canvas.updateLayers()
 
         if self.op_counter < 0:
+            if self.mode < 3:
+                for i, (blkitem, transpairw) in enumerate(zip(self.blkitems, self.transpairw_list)):
+                    if self.mode != 0:
+                        trs = self._redo_translation_texts[i]
+                        transpairw.e_trans.setPlainTextAndKeepUndoStack(trs)
+                        blkitem.setPlainTextAndKeepUndoStack(trs)
+                    blkitem.blk.rich_text = ''
+                    if self.mode >= 0:
+                        transpairw.e_source.setPlainTextAndKeepUndoStack(self._redo_source_texts[i])
             self.op_counter += 1
             return
 
