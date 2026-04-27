@@ -126,7 +126,7 @@ def load_req_file(requirements_file: str) -> List[str]:
         >>> load_req_file('requirements.txt')
         ['packaging>=21.3', 'setuptools>=50.0']
     """
-    with pathlib.Path(requirements_file).open() as reqfile:
+    with pathlib.Path(requirements_file).open(encoding='utf-8') as reqfile:
         return list(map(
             lambda x: str(Requirement(x)),
             join_continuation(map(drop_comment, yield_lines(reqfile)))
@@ -256,7 +256,7 @@ def pip_install(reqs: List[str], silent: bool = False, force: bool = False, user
         >>> pip_install(['scikit-learn'])  # not installed
         Looking in indexes: https://xxx/simple
         Collecting scikit-learn
-          Using cached https://xxx/scikit_learn-1.0.2-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (24.8 MB)
+          Using cached https://xxx/scikit_learn-1.0.2-cp37-cp37m-manylinux_2_17_x86_64.whl (24.8 MB)
         Installing collected packages: threadpoolctl, scipy, joblib, scikit-learn
         Successfully installed joblib-1.2.0 scikit-learn-1.0.2 scipy-1.7.3 threadpoolctl-3.1.0
         >>> pip_install(['numpy>=1.10.0'])  # installed
