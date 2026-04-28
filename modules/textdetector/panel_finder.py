@@ -1,4 +1,4 @@
-"""
+r"""
 Finds panel order for manga page.
 >> python .\modules\textdetector\panel_finder.py <path-to-images>
 """
