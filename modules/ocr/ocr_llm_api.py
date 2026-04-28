@@ -10,6 +10,12 @@ import openai
 import httpx
 
 from .base import register_OCR, OCRBase, TextBlock
+from utils.llm_provider import (
+    effective_provider,
+    is_local_provider,
+    normalize_model_name,
+    resolve_endpoint,
+)
 from utils.ocr_preprocess import preprocess_for_ocr
 
 
@@ -269,17 +275,8 @@ class LLM_OCR(OCRBase):
         self.current_key_index = 0
 
     def _initialize_client(self, api_key_to_use: str):
-        endpoint = self.endpoint
         provider = self._effective_provider_for_model()
-        if not endpoint:
-            if provider == "OpenAI":
-                endpoint = "https://api.openai.com/v1"
-            elif provider == "Google":
-                endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
-            elif provider == "OpenRouter":
-                endpoint = "https://openrouter.ai/api/v1"
-            elif provider == "Ollama":
-                endpoint = "http://localhost:11434/v1"
+        endpoint = resolve_endpoint(provider, self.endpoint)
 
         http_client = None
         if self.proxy:
@@ -304,19 +301,8 @@ class LLM_OCR(OCRBase):
 
     def _effective_provider_for_model(self) -> str:
         try:
-            if self.override_model:
-                return self.provider
-            m = (self.model or "").strip()
-            if ": " in m:
-                prefix = m.split(": ", 1)[0].strip().upper()
-                if prefix == "OAI":
-                    return "OpenAI"
-                if prefix == "GGL":
-                    return "Google"
-                if prefix == "OPENROUTER":
-                    return "OpenRouter"
-                if prefix == "OLL":
-                    return "Ollama"
+            return effective_provider(self.provider, self.model, self.override_model)
+        except ValueError:
             return self.provider
         except Exception:
             return self.provider
@@ -445,7 +431,7 @@ class LLM_OCR(OCRBase):
 
     def _select_api_key(self) -> Optional[str]:
         # This logic is identical to the one in LLM_API_Translator
-        if self._effective_provider_for_model() == "Ollama":
+        if is_local_provider(self._effective_provider_for_model()):
             return "local-llm"
         api_keys = self.multiple_keys_list
         single_key = self.api_key
@@ -477,7 +463,7 @@ class LLM_OCR(OCRBase):
     def ocr(self, img_base64: str, prompt_override: str = None) -> str:
         provider = self._effective_provider_for_model()
         api_key_to_use = self._select_api_key()
-        if not api_key_to_use and provider != "Ollama":
+        if not api_key_to_use and not is_local_provider(provider):
             return "[ERROR: No available API key]"
 
         # Re-initialize client if key is different from the last one used
@@ -511,9 +497,7 @@ class LLM_OCR(OCRBase):
             if self.system_prompt:
                 messages.insert(0, {"role": "system", "content": self.system_prompt})
 
-            model_name = self.override_model or self.model
-            if ": " in model_name:
-                model_name = model_name.split(": ", 1)[1]
+            model_name = normalize_model_name(self.model, self.override_model)
 
             self.logger.debug(f"OCR request with model: {model_name}")
 

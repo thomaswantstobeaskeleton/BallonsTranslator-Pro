@@ -10,6 +10,12 @@ import httpx
 import openai
 from pydantic import BaseModel, Field, ValidationError
 
+from utils.llm_provider import (
+    effective_provider,
+    is_local_provider,
+    normalize_model_name,
+    resolve_endpoint,
+)
 from utils.proxy_utils import create_httpx_client
 from utils.series_context_store import (
     get_series_context_dir,
@@ -923,20 +929,7 @@ class LLM_API_Translator(BaseTranslator):
 
     def _initialize_client(self, api_key_to_use: str, provider_override: Optional[str] = None) -> bool:
         provider = provider_override or self.provider
-        endpoint = self.endpoint
-        if not endpoint:
-            if provider == "Google":
-                endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
-            elif provider == "OpenAI":
-                endpoint = "https://api.openai.com/v1"
-            elif provider == "OpenRouter":
-                endpoint = "https://openrouter.ai/api/v1"
-            elif provider == "Grok":
-                endpoint = "https://api.x.ai/v1"
-            elif provider == "LLM Studio":
-                endpoint = "http://localhost:1234/v1"
-            elif provider == "Ollama":
-                endpoint = "http://localhost:11434/v1"
+        endpoint = resolve_endpoint(provider, self.endpoint)
 
         proxy = self.proxy
         # Reuse existing client when connection config is unchanged.
@@ -992,21 +985,8 @@ class LLM_API_Translator(BaseTranslator):
         route to the implied provider to avoid sending Gemini model names to OpenAI endpoints, etc.
         """
         try:
-            if self.override_model:
-                return self.provider
-            m = (self.model or "").strip()
-            if ": " in m:
-                prefix = m.split(": ", 1)[0].strip().upper()
-                if prefix == "OAI":
-                    return "OpenAI"
-                if prefix == "GGL":
-                    return "Google"
-                if prefix == "XAI":
-                    return "Grok"
-                if prefix == "OPENROUTER":
-                    return "OpenRouter"
-                if prefix == "OLL":
-                    return "Ollama"
+            return effective_provider(self.provider, self.model, self.override_model)
+        except ValueError:
             return self.provider
         except Exception:
             return self.provider
@@ -2200,6 +2180,9 @@ class LLM_API_Translator(BaseTranslator):
         return True
 
     def _select_api_key(self) -> Optional[str]:
+        provider = self._effective_provider_for_model()
+        if is_local_provider(provider):
+            return "local-llm"
         api_keys = self.multiple_keys_list
         single_key = self.apikey
         if not api_keys and not single_key:
@@ -2214,8 +2197,6 @@ class LLM_API_Translator(BaseTranslator):
                     self.logger.warning("API key validation: %s", msg)
             except Exception:
                 pass
-
-        provider = self._effective_provider_for_model()
 
         if not api_keys:
             if self._respect_key_limit(single_key):
@@ -2568,8 +2549,8 @@ class LLM_API_Translator(BaseTranslator):
         Uses same API key/client as normal translation. Returns content string or None.
         """
         provider = self._effective_provider_for_model()
-        current_api_key = "local-llm" if provider in {"LLM Studio", "Ollama"} else self._select_api_key()
-        if not current_api_key and provider not in {"LLM Studio", "Ollama"}:
+        current_api_key = "local-llm" if is_local_provider(provider) else self._select_api_key()
+        if not current_api_key and not is_local_provider(provider):
             self.logger.warning("No API key for custom completion.")
             return None
         if not self._initialize_client(current_api_key, provider_override=provider):
@@ -2590,7 +2571,7 @@ class LLM_API_Translator(BaseTranslator):
         """Ask the model to summarize long_context to under max_chars; on failure, truncate."""
         current_api_key = "local-llm"
         provider = self._effective_provider_for_model()
-        if provider not in {"LLM Studio", "Ollama"}:
+        if not is_local_provider(provider):
             current_api_key = self._select_api_key()
             if not current_api_key:
                 self.logger.warning("No API key for context summary; truncating.")
@@ -2762,12 +2743,12 @@ class LLM_API_Translator(BaseTranslator):
     def _request_translation(self, prompt: str, expected_count: Optional[int] = None) -> Optional[TranslationResponse]:
         provider = self._effective_provider_for_model()
         current_api_key = "local-llm"
-        if provider not in {"LLM Studio", "Ollama"}:
+        if not is_local_provider(provider):
             current_api_key = self._select_api_key()
             if not current_api_key:
                 raise ConnectionError("No available API key found.")
 
-        if provider in {"LLM Studio", "Ollama"} and not self.endpoint:
+        if is_local_provider(provider) and not self.endpoint:
             if not getattr(self, "_logged_lm_studio_default_endpoint", False):
                 self._logged_lm_studio_default_endpoint = True
                 default_endpoint = "http://localhost:1234/v1" if provider == "LLM Studio" else "http://localhost:11434/v1"
@@ -2782,9 +2763,7 @@ class LLM_API_Translator(BaseTranslator):
 
         self._respect_delay()
 
-        model_name = self.override_model or self.model
-        if ": " in model_name:
-            model_name = model_name.split(": ", 1)[1]
+        model_name = normalize_model_name(self.model, self.override_model)
 
         # Section 9: remember last-used model per provider for config / UI
         try:
