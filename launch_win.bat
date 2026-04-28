@@ -1,4 +1,4 @@
-@REM Launch BallonsTranslator on Windows (uses ballontrans_pylibs_win or system Python)
+@REM Launch BallonsTranslator for Windows portable bundle layout (prefers bundled ballontrans_pylibs_win Python on PATH).
 @REM @echo %PATH%
 
 cd %~dp0

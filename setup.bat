@@ -1,5 +1,5 @@
 @echo off
-REM Section 11: Portable one-click setup (Windows)
+REM Windows source-clone setup helper (installs requirements for current Python or existing venv).
 REM Installs dependencies. PyTorch is auto-installed on first "python launch.py" run.
 
 setlocal
