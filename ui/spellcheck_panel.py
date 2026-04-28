@@ -101,7 +101,8 @@ class SpellCheckPanel(QWidget):
         self.list_widget.clear()
         for tup in self._issues:
             block_idx, line_idx, word, start, end, suggs, text, _ = tup
-            item = QListWidgetItem(f'Block {block_idx + 1} · "{word}" → {", ".join(suggs[:5])}')
+            sugg_text = ", ".join(suggs[:5]) if suggs else self.tr("(no suggestions)")
+            item = QListWidgetItem(f'Block {block_idx + 1} · "{word}" → {sugg_text}')
             item.setData(Qt.ItemDataRole.UserRole, tup)
             self.list_widget.addItem(item)
         self.replace_btn.setEnabled(len(self._issues) > 0)
@@ -119,7 +120,11 @@ class SpellCheckPanel(QWidget):
             tup = self._issues[row]
             suggs = tup[5]
             self.suggestion_combo.addItems(suggs[:20])
-            self.suggestion_combo.setCurrentIndex(0)
+            self.suggestion_combo.setEnabled(bool(suggs))
+            if suggs:
+                self.suggestion_combo.setCurrentIndex(0)
+        else:
+            self.suggestion_combo.setEnabled(False)
 
     def _on_replace(self):
         row = self.list_widget.currentRow()

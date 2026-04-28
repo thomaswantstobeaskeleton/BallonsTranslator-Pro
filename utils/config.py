@@ -48,6 +48,7 @@ class ModuleConfig(Config):
     inpainter_params: Dict = field(default_factory=lambda: dict())
     translate_source: str = '日本語'
     translate_target: str = '简体中文'
+    translate_by_textblock: bool = False
     check_need_inpaint: bool = True
     inpaint_tile_size: int = 0   # 0 = no tiling (recommended); set 512–1024 only if OOM
     inpaint_tile_overlap: int = 64   # overlap between tiles (px); only used when tile_size > 0

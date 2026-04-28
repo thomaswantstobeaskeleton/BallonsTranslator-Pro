@@ -166,12 +166,13 @@ class LLM_OCR(OCRBase):
         "OpenRouter: anthropic/claude-sonnet-4",
         "OpenRouter: anthropic/claude-3-5-sonnet",
         "OpenRouter: meta-llama/llama-3.2-11b-vision-instruct",
+        "OLL: (override model field)",
     ]
 
     params = {
         "provider": {
             "type": "selector",
-            "options": ["OpenAI", "Google", "OpenRouter"],
+            "options": ["OpenAI", "Google", "OpenRouter", "Ollama"],
             "value": "OpenAI",
             "description": "Select the LLM provider.",
         },
@@ -277,6 +278,8 @@ class LLM_OCR(OCRBase):
                 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
             elif provider == "OpenRouter":
                 endpoint = "https://openrouter.ai/api/v1"
+            elif provider == "Ollama":
+                endpoint = "http://localhost:11434/v1"
 
         http_client = None
         if self.proxy:
@@ -312,6 +315,8 @@ class LLM_OCR(OCRBase):
                     return "Google"
                 if prefix == "OPENROUTER":
                     return "OpenRouter"
+                if prefix == "OLL":
+                    return "Ollama"
             return self.provider
         except Exception:
             return self.provider
@@ -440,6 +445,8 @@ class LLM_OCR(OCRBase):
 
     def _select_api_key(self) -> Optional[str]:
         # This logic is identical to the one in LLM_API_Translator
+        if self._effective_provider_for_model() == "Ollama":
+            return "local-llm"
         api_keys = self.multiple_keys_list
         single_key = self.api_key
         if not api_keys and not single_key:
@@ -468,8 +475,9 @@ class LLM_OCR(OCRBase):
         return None
 
     def ocr(self, img_base64: str, prompt_override: str = None) -> str:
+        provider = self._effective_provider_for_model()
         api_key_to_use = self._select_api_key()
-        if not api_key_to_use:
+        if not api_key_to_use and provider != "Ollama":
             return "[ERROR: No available API key]"
 
         # Re-initialize client if key is different from the last one used
@@ -486,8 +494,7 @@ class LLM_OCR(OCRBase):
                 "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
             }
 
-            provider = self._effective_provider_for_model()
-            if provider in ["OpenAI", "Google", "OpenRouter"]:
+            if provider in ["OpenAI", "Google", "OpenRouter", "Ollama"]:
                 detail_setting = self.detail_level
                 if detail_setting in ["low", "high"]:
                     image_content_part["image_url"]["detail"] = detail_setting

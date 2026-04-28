@@ -89,6 +89,7 @@ def get_spell_issues(text: str) -> list:
         if not clean or _spell_checker.check(clean):
             continue
         suggs = _spell_checker.suggest(clean)
-        if suggs:
-            issues.append((word, m.start(), m.end(), suggs))
+        # Keep misspellings even when dictionary returns no suggestions,
+        # so the Spell Check panel can still highlight/report the word.
+        issues.append((word, m.start(), m.end(), suggs or []))
     return issues

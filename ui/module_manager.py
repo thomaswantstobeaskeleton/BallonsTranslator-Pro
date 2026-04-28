@@ -693,7 +693,8 @@ class ImgtransThread(QThread):
     
     def requestStop(self):
         """请求停止当前任务"""
-        self.stop_requested = True
+        if self.isRunning():
+            self.stop_requested = True
         if getattr(self, 'cancel_flag', None) is not None:
             self.cancel_flag.request()
         self._pause_requested = False
@@ -1652,6 +1653,9 @@ class ModuleManager(QObject):
         translator_panel.addModulesParamWidgets(translator_params)
         translator_panel.translator_changed.connect(self.setTranslator)
         translator_panel.paramwidget_edited.connect(self.on_translatorparam_edited)
+        translator_panel.translateByTextblockBox.checker_changed.connect(self.on_translatebyblock_checker_changed)
+        translator_panel.translateByTextblockBox.checker.setChecked(cfg_module.translate_by_textblock)
+        BaseTranslator.translate_by_textblock = cfg_module.translate_by_textblock
         translator_panel.test_translator_clicked.connect(self.on_test_translator)
         translator_panel.copy_manual_prompt_requested.connect(self.on_copy_manual_prompt)
         translator_panel.paste_manual_response_requested.connect(self.on_paste_manual_response)
@@ -1815,8 +1819,7 @@ class ModuleManager(QObject):
     def stopImgtransPipeline(self):
         """停止图像翻译流程"""
         LOGGER.info('Stopping image translation pipeline...')
-        if self.imgtrans_thread.isRunning():
-            self.imgtrans_thread.requestStop()
+        self.imgtrans_thread.requestStop()
 
     def forceStopImgtransPipeline(self):
         """Force-stop the image translation pipeline when the progress window is closed."""
@@ -2290,3 +2293,7 @@ class ModuleManager(QObject):
     def on_inpainter_checker_changed(self, is_checked: bool):
         cfg_module.check_need_inpaint = is_checked
         InpainterBase.check_need_inpaint = is_checked
+
+    def on_translatebyblock_checker_changed(self, is_checked: bool):
+        cfg_module.translate_by_textblock = is_checked
+        BaseTranslator.translate_by_textblock = is_checked

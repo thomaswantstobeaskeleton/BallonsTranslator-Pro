@@ -1111,17 +1111,20 @@ class MainWindow(mainwindow_cls):
         sc = getattr(pcfg, "shortcuts", None) or {}
         self._shortcuts_list = []  # (action_id, default_key, QShortcut)
 
-        def _mk_shortcut(action_id: str, default_key: str, slot):
+        def _mk_shortcut(action_id: str, default_key: str, slot, context: Qt.ShortcutContext = Qt.ShortcutContext.WindowShortcut):
             key = get_shortcut(action_id, sc) or default_key
             q = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
+            q.setContext(context)
             q.activated.connect(slot)
             self._shortcuts_list.append((action_id, default_key, q))
             return q
 
-        _mk_shortcut("go.prev_page_alt", "A", self.shortcutBefore)
-        _mk_shortcut("go.prev_page", "PgUp", self.shortcutBefore)
-        _mk_shortcut("go.next_page_alt", "D", self.shortcutNext)
-        _mk_shortcut("go.next_page", "PgDown", self.shortcutNext)
+        _mk_shortcut("view.text_edit", "T", self.shortcutTextedit, Qt.ShortcutContext.ApplicationShortcut)
+        _mk_shortcut("view.draw_board", "P", self.shortcutDrawboard, Qt.ShortcutContext.ApplicationShortcut)
+        _mk_shortcut("go.prev_page_alt", "A", self.shortcutBefore, Qt.ShortcutContext.ApplicationShortcut)
+        _mk_shortcut("go.prev_page", "PageUp", self.shortcutBefore, Qt.ShortcutContext.ApplicationShortcut)
+        _mk_shortcut("go.next_page_alt", "D", self.shortcutNext, Qt.ShortcutContext.ApplicationShortcut)
+        _mk_shortcut("go.next_page", "PageDown", self.shortcutNext, Qt.ShortcutContext.ApplicationShortcut)
         _mk_shortcut("canvas.textblock_mode", "W", self.shortcutTextblock)
         _mk_shortcut("canvas.zoom_in", "Ctrl++", self.canvas.gv.scale_up_signal.emit)
         _mk_shortcut("canvas.zoom_out", "Ctrl+-", self.canvas.gv.scale_down_signal.emit)

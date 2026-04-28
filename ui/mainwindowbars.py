@@ -599,15 +599,29 @@ class TitleBar(Widget):
         self.goToolBtn = TitleBarToolBtn(self)
         self.goToolBtn.setText(self.tr('Go'))
         prevPageAction = QAction(self.tr('Previous Page'), self)
-        # prevPageAction.setShortcuts([QKeySequence.StandardKey.MoveToPreviousPage, QKeySequence('A')])
+        prevPageAction.setShortcut(QKeySequence.fromString(get_shortcut("go.prev_page", getattr(pcfg, "shortcuts", None))))
         nextPageAction = QAction(self.tr('Next Page'), self)
-        # nextPageAction.setShortcuts([QKeySequence.StandardKey.MoveToNextPage, QKeySequence('D')])
+        nextPageAction.setShortcut(QKeySequence.fromString(get_shortcut("go.next_page", getattr(pcfg, "shortcuts", None))))
+        prevPageAltAction = QAction(self.tr('Previous Page (alternate)'), self)
+        prevPageAltAction.setShortcut(QKeySequence.fromString(get_shortcut("go.prev_page_alt", getattr(pcfg, "shortcuts", None))))
+        nextPageAltAction = QAction(self.tr('Next Page (alternate)'), self)
+        nextPageAltAction.setShortcut(QKeySequence.fromString(get_shortcut("go.next_page_alt", getattr(pcfg, "shortcuts", None))))
         goMenu = QMenu(self.goToolBtn)
         goMenu.addActions([prevPageAction, nextPageAction])
+        goMenu.addSeparator()
+        goMenu.addActions([prevPageAltAction, nextPageAltAction])
         self.goToolBtn.setMenu(goMenu)
         self.goToolBtn.setPopupMode(QToolButton.InstantPopup)
         self.prevpage_trigger = prevPageAction.triggered
         self.nextpage_trigger = nextPageAction.triggered
+        prevPageAltAction.triggered.connect(self.prevpage_trigger)
+        nextPageAltAction.triggered.connect(self.nextpage_trigger)
+        self._shortcut_actions_title.extend([
+            ("go.prev_page", "PageUp", prevPageAction),
+            ("go.next_page", "PageDown", nextPageAction),
+            ("go.prev_page_alt", "A", prevPageAltAction),
+            ("go.next_page_alt", "D", nextPageAltAction),
+        ])
 
         # Tools menu
         self.toolsToolBtn = TitleBarToolBtn(self)

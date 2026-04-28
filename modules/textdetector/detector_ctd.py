@@ -39,7 +39,17 @@ class ComicTextDetector(TextDetectorBase):
         'merge font size tolerance': {
             'type': 'line_editor',
             'value': 3.0,
-            'description': 'Merge scattered lines with similar font size. Higher = fewer boxes per bubble (e.g. 3.0).',
+            'description': 'Legacy fallback for merge tolerances. If horizontal/vertical values are set, those take priority.',
+        },
+        'merge font size tolerance horizontal': {
+            'type': 'line_editor',
+            'value': 3.0,
+            'description': 'Merge tolerance for horizontal lines. Higher = fewer boxes per bubble.',
+        },
+        'merge font size tolerance vertical': {
+            'type': 'line_editor',
+            'value': 3.0,
+            'description': 'Merge tolerance for vertical lines. Higher = fewer boxes per bubble.',
         },
         'box score threshold': {
             'type': 'line_editor',
@@ -158,17 +168,27 @@ class ComicTextDetector(TextDetectorBase):
                 work = np.power(work.astype(np.float32) / 255.0, gamma).clip(0, 1)
                 work = (work * 255).astype(np.uint8)
 
-        merge_tol = self.get_param_value('merge font size tolerance')
-        if merge_tol is None or (isinstance(merge_tol, str) and not merge_tol.strip()):
-            merge_tol = 3.0
-        else:
-            try:
-                merge_tol = float(merge_tol)
-            except (TypeError, ValueError):
-                merge_tol = 3.0
+        legacy_merge_tol = self.get_param_value('merge font size tolerance')
+        try:
+            legacy_merge_tol = float(legacy_merge_tol) if legacy_merge_tol not in (None, '') else 3.0
+        except (TypeError, ValueError):
+            legacy_merge_tol = 3.0
+
+        merge_tol_hor = self.get_param_value('merge font size tolerance horizontal')
+        try:
+            merge_tol_hor = float(merge_tol_hor) if merge_tol_hor not in (None, '') else legacy_merge_tol
+        except (TypeError, ValueError):
+            merge_tol_hor = legacy_merge_tol
+
+        merge_tol_ver = self.get_param_value('merge font size tolerance vertical')
+        try:
+            merge_tol_ver = float(merge_tol_ver) if merge_tol_ver not in (None, '') else legacy_merge_tol
+        except (TypeError, ValueError):
+            merge_tol_ver = legacy_merge_tol
+
         # Passed to model and used in group_output() when merging lines by font size (see ctd/inference.py).
-        self.model.merge_fntsize_tol_hor = merge_tol
-        self.model.merge_fntsize_tol_ver = merge_tol
+        self.model.merge_fntsize_tol_hor = merge_tol_hor
+        self.model.merge_fntsize_tol_ver = merge_tol_ver
         box_thresh = self.get_param_value('box score threshold')
         try:
             box_thresh = float(box_thresh) if box_thresh not in (None, '') else 0.45

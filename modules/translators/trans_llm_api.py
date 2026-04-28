@@ -65,7 +65,7 @@ class LLM_API_Translator(BaseTranslator):
     params: Dict = {
         "provider": {
             "type": "selector",
-            "options": ["OpenAI", "Google", "Grok", "OpenRouter", "LLM Studio"],
+            "options": ["OpenAI", "Google", "Grok", "OpenRouter", "LLM Studio", "Ollama"],
             "value": "OpenAI",
             "description": "Select the LLM provider.",
         },
@@ -114,6 +114,7 @@ class LLM_API_Translator(BaseTranslator):
                 "OpenRouter: qwen/qwen3-coder:free",
                 "OpenRouter: cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
                 "LLMS: (override model field)",
+                "OLL: (override model field)",
             ],
             "value": "OAI: gpt-4o",
             "description": "Select a model that supports JSON Mode for structured output.",
@@ -295,6 +296,11 @@ class LLM_API_Translator(BaseTranslator):
             "description": "Frequency penalty (OpenAI).",
         },
         "presence penalty": {"value": 0.0, "description": "Presence penalty (OpenAI)."},
+        "low vram mode": {
+            "type": "checkbox",
+            "value": False,
+            "description": "Enable for local/OpenAI-compatible providers on low-VRAM devices to disable parallel page translation and avoid OOM.",
+        },
         "include_page_image": {
             "type": "checkbox",
             "value": False,
@@ -929,6 +935,8 @@ class LLM_API_Translator(BaseTranslator):
                 endpoint = "https://api.x.ai/v1"
             elif provider == "LLM Studio":
                 endpoint = "http://localhost:1234/v1"
+            elif provider == "Ollama":
+                endpoint = "http://localhost:11434/v1"
 
         proxy = self.proxy
         # Reuse existing client when connection config is unchanged.
@@ -997,6 +1005,8 @@ class LLM_API_Translator(BaseTranslator):
                     return "Grok"
                 if prefix == "OPENROUTER":
                     return "OpenRouter"
+                if prefix == "OLL":
+                    return "Ollama"
             return self.provider
         except Exception:
             return self.provider
@@ -1031,7 +1041,7 @@ class LLM_API_Translator(BaseTranslator):
             return
         effort = self._reasoning_effort()
         try:
-            if provider in {"OpenAI", "Grok", "OpenRouter", "LLM Studio"}:
+            if provider in {"OpenAI", "Grok", "OpenRouter", "LLM Studio", "Ollama"}:
                 # Use extra_body passthrough for broad OpenAI SDK compatibility.
                 extra = api_args.get("extra_body")
                 if not isinstance(extra, dict):
@@ -1447,7 +1457,7 @@ class LLM_API_Translator(BaseTranslator):
         Cloud APIs benefit from ``delay``; a local LM Studio server typically does not, and sleeping
         here makes video runs feel much slower when many cues need a fix.
         """
-        if getattr(self, "provider", None) == "LLM Studio":
+        if getattr(self, "provider", None) in {"LLM Studio", "Ollama"}:
             return 0.0
         return max(0.0, self.global_delay)
 
@@ -1615,7 +1625,7 @@ class LLM_API_Translator(BaseTranslator):
         if not trans_list or not src_list or len(trans_list) != len(src_list):
             return trans_list
         provider = self._effective_provider_for_model()
-        use_json_schema = provider == "LLM Studio"
+        use_json_schema = provider in {"LLM Studio", "Ollama"}
         # Qwen 3.5 4B (common LM Studio local deployment) frequently emits very verbose
         # "Thinking Process" during the reviewer step and truncates before valid JSON,
         # which leads to useless outputs. Skip reflection for this specific model.
@@ -1875,7 +1885,7 @@ class LLM_API_Translator(BaseTranslator):
                 and ("4b" in model_name or "4-b" in model_name or "4 b" in model_name)
             )
             allow_qwen_aux = bool(getattr(_pc.module, "video_translator_qwen35_allow_aux_passes", False))
-            if provider == "LLM Studio" and is_qwen_35_4b and (not allow_qwen_aux):
+            if provider in {"LLM Studio", "Ollama"} and is_qwen_35_4b and (not allow_qwen_aux):
                 # Video calls this once per subtitle frame; log once per session, not per frame.
                 if not getattr(self, "_skip_ocr_correct_qwen_lmstudio_logged", False):
                     setattr(self, "_skip_ocr_correct_qwen_lmstudio_logged", True)
@@ -2558,8 +2568,8 @@ class LLM_API_Translator(BaseTranslator):
         Uses same API key/client as normal translation. Returns content string or None.
         """
         provider = self._effective_provider_for_model()
-        current_api_key = "lm-studio" if provider == "LLM Studio" else self._select_api_key()
-        if not current_api_key and provider != "LLM Studio":
+        current_api_key = "local-llm" if provider in {"LLM Studio", "Ollama"} else self._select_api_key()
+        if not current_api_key and provider not in {"LLM Studio", "Ollama"}:
             self.logger.warning("No API key for custom completion.")
             return None
         if not self._initialize_client(current_api_key, provider_override=provider):
@@ -2578,9 +2588,9 @@ class LLM_API_Translator(BaseTranslator):
 
     def _request_context_summary(self, long_context: str, max_chars: int) -> str:
         """Ask the model to summarize long_context to under max_chars; on failure, truncate."""
-        current_api_key = "lm-studio"
+        current_api_key = "local-llm"
         provider = self._effective_provider_for_model()
-        if provider != "LLM Studio":
+        if provider not in {"LLM Studio", "Ollama"}:
             current_api_key = self._select_api_key()
             if not current_api_key:
                 self.logger.warning("No API key for context summary; truncating.")
@@ -2649,7 +2659,7 @@ class LLM_API_Translator(BaseTranslator):
         is_video = self._page_key_subtitle_batch_pipeline(page_key)
         # JSON wrapper, braces, optional revised_previous array (video).
         overhead = 220 if is_video else 140
-        per_line = 200 if provider == "LLM Studio" else 320
+        per_line = 200 if provider in {"LLM Studio", "Ollama"} else 320
         computed = overhead + n * per_line
         computed = max(256, min(computed, 12000))
         return min(user_cap, computed)
@@ -2751,17 +2761,20 @@ class LLM_API_Translator(BaseTranslator):
 
     def _request_translation(self, prompt: str, expected_count: Optional[int] = None) -> Optional[TranslationResponse]:
         provider = self._effective_provider_for_model()
-        current_api_key = "lm-studio"
-        if provider != "LLM Studio":
+        current_api_key = "local-llm"
+        if provider not in {"LLM Studio", "Ollama"}:
             current_api_key = self._select_api_key()
             if not current_api_key:
                 raise ConnectionError("No available API key found.")
 
-        if provider == "LLM Studio" and not self.endpoint:
+        if provider in {"LLM Studio", "Ollama"} and not self.endpoint:
             if not getattr(self, "_logged_lm_studio_default_endpoint", False):
                 self._logged_lm_studio_default_endpoint = True
+                default_endpoint = "http://localhost:1234/v1" if provider == "LLM Studio" else "http://localhost:11434/v1"
                 self.logger.debug(
-                    "LLM Studio provider: endpoint not set, using default http://localhost:1234/v1. Set endpoint in translator options if your server uses a different URL."
+                    "%s provider: endpoint not set, using default %s. Set endpoint in translator options if your server uses a different URL.",
+                    provider,
+                    default_endpoint,
                 )
 
         if not self._initialize_client(current_api_key, provider_override=provider):
@@ -2825,8 +2838,8 @@ class LLM_API_Translator(BaseTranslator):
             except Exception:
                 pass
 
-        if provider == "LLM Studio":
-            self.logger.debug("Using 'json_schema' mode for LLM Studio.")
+        if provider in {"LLM Studio", "Ollama"}:
+            self.logger.debug("Using 'json_schema' mode for %s.", provider)
             api_args["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"schema": TranslationResponse.model_json_schema()},
@@ -2871,7 +2884,7 @@ class LLM_API_Translator(BaseTranslator):
                     raise
             # Some models (e.g. StepFun via OpenRouter) don't support response_format json_object; retry without it
             elif (
-                provider in ["OpenAI", "Grok", "Google", "OpenRouter"]
+                provider in ["OpenAI", "Grok", "Google", "OpenRouter", "Ollama"]
                 and "response_format" in err_str
                 and "not supported" in err_str
                 and "response_format" in api_args
