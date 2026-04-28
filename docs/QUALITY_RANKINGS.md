@@ -1,6 +1,7 @@
 # Quality & Accuracy Rankings: Detection, OCR, Translation
 
 **Criteria:** Quality and accuracy only. Speed is ignored. This document ranks every text detection, OCR, and translation model/implementation in BallonsTranslator. Where benchmarks show **performance clusters** rather than clear 1→N separation, **tier-based rankings** are used instead of strict linear order, so the list is easier to defend against published benchmarks and community consensus (see sanity-check notes below).
+For operational stability tiers used by UI/docs (**Stable / Beta / Experimental / External dependency heavy**), see **[docs/MODULE_COMPATIBILITY_MATRIX.md](MODULE_COMPATIBILITY_MATRIX.md)**.
 
 **Scope:** Detection → finding text regions (boxes/masks). OCR → recognizing text inside regions. Translation → converting source text to target language. Inpainting is out of scope here; see the [Diffusion vs non-diffusion](#4-diffusion-vs-non-diffusion-note) note for how diffusion-based inpainting compares for text removal.
 

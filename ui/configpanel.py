@@ -480,6 +480,12 @@ class ConfigPanel(Widget):
         )
         dlConfigPanel.vlayout.addWidget(ocr_auto_sublock)
         self.ocr_auto_by_language_checker.stateChanged.connect(self._on_ocr_auto_by_language_changed)
+        self.show_module_tier_badges_checker, tier_sublock = checkbox_with_label(
+            self.tr('Show module tier badge in selector tooltip'),
+            discription=self.tr('Show Stable/Beta/Experimental/External-heavy badge in detector/OCR/inpainter/translator dropdown tooltips.')
+        )
+        dlConfigPanel.vlayout.addWidget(tier_sublock)
+        self.show_module_tier_badges_checker.stateChanged.connect(self._on_show_module_tier_badges_changed)
         self.merge_nearby_blocks_checker, merge_sublock = checkbox_with_label(
             self.tr('Merge nearby blocks (collision)'),
             discription=self.tr('Merge detection boxes that are close (collision-based). Use when OCR returns many small boxes.')
@@ -1177,6 +1183,9 @@ class ConfigPanel(Widget):
     def _on_skip_already_translated_changed(self):
         pcfg.module.skip_already_translated = self.skip_already_translated_checker.isChecked()
 
+    def _on_show_module_tier_badges_changed(self):
+        pcfg.show_module_tier_badges_in_tooltips = self.show_module_tier_badges_checker.isChecked()
+
     def _on_merge_nearby_blocks_changed(self):
         pcfg.module.merge_nearby_blocks_collision = self.merge_nearby_blocks_checker.isChecked()
 
@@ -1719,6 +1728,8 @@ class ConfigPanel(Widget):
             self.ocr_cache_enabled_checker.setChecked(getattr(pcfg.module, 'ocr_cache_enabled', True))
         if hasattr(self, 'ocr_auto_by_language_checker'):
             self.ocr_auto_by_language_checker.setChecked(getattr(pcfg.module, 'ocr_auto_by_language', False))
+        if hasattr(self, 'show_module_tier_badges_checker'):
+            self.show_module_tier_badges_checker.setChecked(getattr(pcfg, 'show_module_tier_badges_in_tooltips', True))
         if hasattr(self, 'skip_already_translated_checker'):
             self.skip_already_translated_checker.setChecked(getattr(pcfg.module, 'skip_already_translated', False))
         if hasattr(self, 'merge_nearby_blocks_checker'):
