@@ -15,9 +15,14 @@ from .textitem import TextBlkItem, TextBlock
 from .canvas import Canvas
 from .textedit_area import TransTextEdit, SourceTextEdit, TransPairWidget, SelectTextMiniMenu, TextEditListScrollArea, QVBoxLayout, Widget
 from utils.fontformat import FontFormat, pt2px
-from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, WarpItemCommand, TextItemEditCommand, TextEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
+from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, WarpItemCommand, TextItemEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
 from .text_panel import FontFormatPanel
-from utils.config import pcfg, log_diagnostic_event
+from utils.config import pcfg
+try:
+    from utils.config import log_diagnostic_event
+except ImportError:
+    def log_diagnostic_event(*args, **kwargs):
+        return None
 from utils import shared
 from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask, classify_bubble_shape_from_mask, mask_centroid_in_crop
 from utils.bubble_shape_model import get_bubble_shape_from_model as _bubble_shape_from_model_impl

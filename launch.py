@@ -5,6 +5,7 @@ import os.path as osp
 import os
 import importlib
 import subprocess
+import shlex
 import warnings
 from platform import platform
 
@@ -100,8 +101,10 @@ def run(command, desc=None, errdesc=None, custom_env=None, live=False):
     if desc is not None:
         print(desc)
 
+    argv = shlex.split(command) if isinstance(command, str) else command
+
     if live:
-        result = subprocess.run(command, shell=True, env=os.environ if custom_env is None else custom_env)
+        result = subprocess.run(argv, env=os.environ if custom_env is None else custom_env)
         if result.returncode != 0:
             raise RuntimeError(f"""{errdesc or 'Error running command'}.
 Command: {command}
@@ -109,7 +112,7 @@ Error code: {result.returncode}""")
 
         return ""
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, env=os.environ if custom_env is None else custom_env)
+    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ if custom_env is None else custom_env)
 
     if result.returncode != 0:
 
@@ -513,8 +516,8 @@ def is_amd_gpu():
     try:
         if sys.platform == 'win32':
             # Windows: use wmic
-            cmd = 'wmic path win32_VideoController get name'
-            output = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
+            cmd = ['wmic', 'path', 'win32_VideoController', 'get', 'name']
+            output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
             return any(keyword in output for keyword in ["AMD", "Radeon"])
 
         else:
@@ -527,8 +530,8 @@ def supported_amd_nightly_gpu():
     try:
         if sys.platform == 'win32':
             # Windows: use wmic
-            cmd = 'wmic path win32_VideoController get name'
-            output = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
+            cmd = ['wmic', 'path', 'win32_VideoController', 'get', 'name']
+            output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
 
             if any(keyword in output for keyword in
                    ["RX 7900", "RX 7800", "RX 7700", "RX 7600", "PRO W7900", "PRO W7800", "PRO W7700"]):

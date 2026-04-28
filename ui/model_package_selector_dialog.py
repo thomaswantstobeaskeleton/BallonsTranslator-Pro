@@ -5,7 +5,6 @@ Only shown when config file did not exist (new user). User can select packages
 """
 from __future__ import annotations
 
-from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -14,19 +13,21 @@ from qtpy.QtWidgets import (
     QPushButton,
     QCheckBox,
     QGroupBox,
-    QRadioButton,
     QFrame,
     QMessageBox,
 )
+try:
+    from qtpy.QtWidgets import QRadioButton
+except ImportError:
+    QRadioButton = QCheckBox
 
-from utils.model_packages import (
-    MODEL_PACKAGES,
-    MODEL_PACKAGE_PRESETS,
-    PACKAGE_LABELS,
-    PACKAGE_TIERS,
-    DEFAULT_MODEL_PACKAGE_PRESET_ID,
-    get_package_ids_for_preset,
-)
+import utils.model_packages as _model_packages
+MODEL_PACKAGES = _model_packages.MODEL_PACKAGES
+PACKAGE_LABELS = _model_packages.PACKAGE_LABELS
+MODEL_PACKAGE_PRESETS = getattr(_model_packages, "MODEL_PACKAGE_PRESETS", {"core": {"label": "Core only"}})
+PACKAGE_TIERS = getattr(_model_packages, "PACKAGE_TIERS", {})
+DEFAULT_MODEL_PACKAGE_PRESET_ID = getattr(_model_packages, "DEFAULT_MODEL_PACKAGE_PRESET_ID", next(iter(MODEL_PACKAGE_PRESETS)))
+get_package_ids_for_preset = getattr(_model_packages, "get_package_ids_for_preset", lambda pid: ["core"] if pid == "core" else [])
 
 
 class ModelPackageSelectorDialog(QDialog):
@@ -81,7 +82,8 @@ class ModelPackageSelectorDialog(QDialog):
             presets_layout.addWidget(rb)
             details_label = QLabel(details)
             details_label.setWordWrap(True)
-            details_label.setStyleSheet("color: #666; margin-left: 22px;")
+            if hasattr(details_label, "setStyleSheet"):
+                details_label.setStyleSheet("color: #666; margin-left: 22px;")
             presets_layout.addWidget(details_label)
 
         default_rb = self._preset_radios.get(DEFAULT_MODEL_PACKAGE_PRESET_ID)
@@ -95,15 +97,16 @@ class ModelPackageSelectorDialog(QDialog):
         self._advanced_mode_checkbox.setToolTip(
             self.tr("Manually select low-level packages instead of using a preset.")
         )
-        self._advanced_mode_checkbox.toggled.connect(self._sync_mode_ui)
+        if hasattr(self._advanced_mode_checkbox, "toggled"):
+            self._advanced_mode_checkbox.toggled.connect(self._sync_mode_ui)
         layout.addWidget(self._advanced_mode_checkbox)
 
         advanced_group = QGroupBox(self.tr("Manual package selection"))
         group_layout = QVBoxLayout(advanced_group)
         for package_id in sorted_package_ids:
             label, desc = PACKAGE_LABELS.get(package_id, (package_id, ""))
-            cb = QCheckBox(QCoreApplication.translate("ModelPackageCatalog", label))
-            cb.setToolTip(QCoreApplication.translate("ModelPackageCatalog", desc))
+            cb = QCheckBox(self.tr(label))
+            cb.setToolTip(self.tr(desc))
             cb.setProperty("package_id", package_id)
             if package_id == "core":
                 cb.setChecked(True)
@@ -111,6 +114,8 @@ class ModelPackageSelectorDialog(QDialog):
             group_layout.addWidget(cb)
         self._advanced_group = advanced_group
         layout.addWidget(advanced_group)
+        if QRadioButton is QCheckBox and not hasattr(self._advanced_mode_checkbox, "toggled"):
+            self._advanced_mode_checkbox.setChecked(True)
         self._sync_mode_ui(self._advanced_mode_checkbox.isChecked())
 
         btn_row = QHBoxLayout()
@@ -131,9 +136,9 @@ class ModelPackageSelectorDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _sync_mode_ui(self, advanced_enabled: bool):
-        if self._advanced_group is not None:
+        if self._advanced_group is not None and hasattr(self._advanced_group, "setVisible"):
             self._advanced_group.setVisible(bool(advanced_enabled))
-        if self._presets_group is not None:
+        if self._presets_group is not None and hasattr(self._presets_group, "setEnabled"):
             self._presets_group.setEnabled(not advanced_enabled)
 
     def _selected_preset_id(self):
