@@ -360,13 +360,27 @@ if _HF_DET_AVAILABLE:
             s = (model_id or "").strip()
             if not s or s.startswith("http"):
                 return s
-            if osp.isfile(s):
+            if osp.isfile(s) or osp.isdir(s):
                 return s
             root = self._repo_root()
             candidate = osp.normpath(osp.join(root, s))
-            if osp.isfile(candidate):
+            if osp.isfile(candidate) or osp.isdir(candidate):
                 return candidate
             return s
+
+        @staticmethod
+        def _looks_like_local_model_ref(model_ref: str) -> bool:
+            """Heuristic: local filesystem path-like ref (not an HF repo id)."""
+            s = (model_ref or "").strip()
+            if not s:
+                return False
+            if osp.isabs(s) or s.startswith(("./", "../", "~")):
+                return True
+            if "\\" in s:
+                return True
+            if len(s) >= 3 and s[1] == ":" and s[2] in ("/", "\\"):
+                return True
+            return False
 
         def _is_yolo_primary_path(self, model_id: str) -> bool:
             """True if model_id looks like a path to a YOLO .pt file that exists."""
@@ -594,23 +608,35 @@ if _HF_DET_AVAILABLE:
                     self._device = device
                     self.model_primary = None
                     resolved = self._resolve_model_path(model_id)
-                    # Treat as a local path only when it clearly looks like one (extension or backslash),
-                    # so HF ids with "/" such as "ogkalu/comic-text-and-bubble-detector" are passed
-                    # directly to transformers.pipeline.
-                    looks_like_path = resolved.endswith((".pt", ".pth")) or "\\" in resolved
-                    if looks_like_path and not osp.isfile(resolved):
-                        self.logger.warning("model_id looks like a path but file not found; primary disabled. Set model_id to an HF id or a valid .pt path.")
+                    model_exists_local = osp.isfile(resolved) or osp.isdir(resolved)
+                    looks_like_path = self._looks_like_local_model_ref(model_id) or resolved.endswith((".pt", ".pth"))
+                    if looks_like_path and not model_exists_local:
+                        self.logger.warning(
+                            "model_id looks like a local path but was not found: %s. "
+                            "Set model_id to an HF id (e.g. ogkalu/comic-text-and-bubble-detector) "
+                            "or a valid local model directory/file.",
+                            resolved,
+                        )
                         self.pipe = None
                     else:
+                        if osp.isfile(resolved) and resolved.lower().endswith((".onnx", ".safetensors", ".bin")):
+                            self.logger.warning(
+                                "HF object detector expects a HuggingFace repo id or model directory. "
+                                "Got model file: %s. Please set model_id to the model folder (containing config) or an HF repo id.",
+                                resolved,
+                            )
+                            self.pipe = None
+                            return
+                        model_ref = resolved if model_exists_local else model_id
                         try:
                             self.pipe = pipeline(
                                 "object-detection",
-                                model=model_id,
+                                model=model_ref,
                                 device=0 if device == "cuda" else -1,
                             )
-                            self.logger.info("Primary detector: HF pipeline %s", model_id)
+                            self.logger.info("Primary detector: HF pipeline %s", model_ref)
                         except Exception as e:
-                            self.logger.warning("Failed to load HF model %s: %s", model_id, e)
+                            self.logger.warning("Failed to load HF model %s: %s", model_ref, e)
 
             # Optional conjoined model(s): multiple YOLO and/or HF
             enable_conj = bool((self.params.get("enable_conjoined_secondary") or {}).get("value", False))
@@ -691,15 +717,23 @@ if _HF_DET_AVAILABLE:
                     mid = self._normalize_model_id(mid) if mid else ""
                     if not mid:
                         continue
+                    resolved_mid = self._resolve_model_path(mid)
+                    mid_ref = resolved_mid if (osp.isfile(resolved_mid) or osp.isdir(resolved_mid)) else mid
+                    if osp.isfile(resolved_mid) and resolved_mid.lower().endswith((".onnx", ".safetensors", ".bin")):
+                        self.logger.warning(
+                            "Conjoined HF model must be a repo id or model directory, not a single model file: %s",
+                            resolved_mid,
+                        )
+                        continue
                     try:
                         pipe = pipeline(
                             "object-detection",
-                            model=mid,
+                            model=mid_ref,
                             device=0 if device == "cuda" else -1,
                         )
                         self.pipe_conjoined_list.append(pipe)
                     except Exception as e:
-                        self.logger.warning("Conjoined HF load failed for %s: %s", mid, e)
+                        self.logger.warning("Conjoined HF load failed for %s: %s", mid_ref, e)
                 self.pipe_conjoined = self.pipe_conjoined_list[0] if len(self.pipe_conjoined_list) == 1 else None
             else:
                 self.pipe_conjoined_list = []

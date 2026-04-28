@@ -130,7 +130,7 @@ class GoogleTranslateProviderPython:
 @register_translator("google")
 class TransGoogle(BaseTranslator):
 
-    concate_text = False
+    concate_text = True
     params: Dict = {
         "api_key": {
             "value": "",

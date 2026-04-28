@@ -24,8 +24,8 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("view.keyboard_shortcuts", "Ctrl+K", "View", "Keyboard Shortcuts"),
     ("view.context_menu_options", "Ctrl+Shift+O", "View", "Context menu options"),
     # Go / Navigation
-    ("go.prev_page", "PgUp", "Go", "Previous Page"),
-    ("go.next_page", "PgDown", "Go", "Next Page"),
+    ("go.prev_page", "PageUp", "Go", "Previous Page"),
+    ("go.next_page", "PageDown", "Go", "Next Page"),
     ("go.prev_page_alt", "A", "Go", "Previous Page (alternate)"),
     ("go.next_page_alt", "D", "Go", "Next Page (alternate)"),
     # Canvas / General
