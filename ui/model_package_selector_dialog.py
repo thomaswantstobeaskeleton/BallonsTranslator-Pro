@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
     QGroupBox,
     QFrame,
+    QMessageBox,
 )
 
 from utils.model_packages import MODEL_PACKAGES, PACKAGE_LABELS, PACKAGE_TIERS
@@ -86,6 +87,19 @@ class ModelPackageSelectorDialog(QDialog):
         self._result = self._selected_package_ids()
         if not self._result:
             self._result = ["core"]
+        elif "core" not in self._result:
+            answer = QMessageBox.warning(
+                self,
+                self.tr("Core package not selected"),
+                self.tr(
+                    "You did not select the Core package. Default modules may be unavailable until you download them.\n\n"
+                    "Continue with advanced-only packages?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self.accept()
 
     def get_selected_package_ids(self):
