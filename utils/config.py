@@ -490,6 +490,8 @@ class ProgramConfig(Config):
     manga_source_translate_raw_search: bool = True  # For raw sources: translate search query to Japanese/Korean/Chinese
     # Model packages to download at startup (None = legacy "all"; ["core"] = minimal). See utils.model_packages.
     model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
+    # User-facing preset IDs selected on first run (or ["custom"] for manual package selection).
+    model_package_preset_ids: List[str] = field(default_factory=lambda: ["balanced_default"])
     # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
     dev_mode: bool = False
     # Temporary: when enabled, emit structured diagnostic logs for UI actions and pipeline stage transitions.
@@ -563,6 +565,8 @@ class ProgramConfig(Config):
         # Legacy: configs that lack this key or have null used to download all models. Default to core-only (Issue #15).
         if config_dict.get("model_packages_enabled") is None:
             config_dict["model_packages_enabled"] = ["core"]
+        if not config_dict.get("model_package_preset_ids"):
+            config_dict["model_package_preset_ids"] = ["balanced_default"]
 
         return ProgramConfig(**config_dict)
     
@@ -608,7 +612,7 @@ CONFIG_KEY_ORDER = (
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
     "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
     "manga_source_translate_raw_search",
-    "model_packages_enabled",
+    "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",

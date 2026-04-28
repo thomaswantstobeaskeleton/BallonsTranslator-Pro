@@ -335,6 +335,7 @@ def main():
         dialog = ModelPackageSelectorDialog()
         dialog.exec()
         config.model_packages_enabled = dialog.get_selected_package_ids()
+        config.model_package_preset_ids = dialog.get_selected_preset_ids()
         try:
             from utils.config import save_config
             save_config()
