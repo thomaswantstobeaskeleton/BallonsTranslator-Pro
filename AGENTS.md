@@ -27,6 +27,7 @@ Guidance for coding agents working in this repository.
 - Avoid eager imports of heavyweight optional dependencies unless required for execution.
 - Keep stop/pause/cancel semantics race-safe (`isRunning()`, cancel flags, resume events).
 - Do not silently swallow critical failures; log context (page/module) when continuing softly.
+- Developer note: silent fallback (`except ...: pass`) is acceptable only for non-critical UI polish paths (for example optional theme accents/icons), and should include debug-level logging with function context and exception details.
 
 ## Testing expectations
 
