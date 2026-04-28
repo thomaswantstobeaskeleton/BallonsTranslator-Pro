@@ -248,6 +248,10 @@
   "manga_source_download_dir": "",
   "manga_source_request_delay": 0.3,
   "manga_source_open_after_download": false,
+  "model_packages_enabled": [
+    "core"
+  ],
+  "model_download_last_status": {},
   "shortcuts": {},
   "auto_region_merge_after_run": "never",
   "region_merge_settings": {},
