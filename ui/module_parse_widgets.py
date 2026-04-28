@@ -8,6 +8,7 @@ from .custom_widget import ConfigComboBox, ParamComboBox, NoBorderPushBtn, Param
 from .custom_widget.hover_animation import install_hover_opacity_animation, install_hover_scale_animation
 from utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from utils.config import pcfg
+from utils.module_tiers import format_module_tier_tooltip
 
 from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox, QSpinBox
 from qtpy.QtCore import Qt, Signal, QTimer
@@ -353,6 +354,16 @@ class ModuleConfigParseWidget(QWidget):
                 continue
 
             self.module_combobox.addItem(module)
+            tip = format_module_tier_tooltip(
+                module,
+                show_badge=bool(getattr(pcfg, "show_module_tier_badges_in_tooltips", True)),
+            )
+            if tip:
+                self.module_combobox.setItemData(
+                    self.module_combobox.count() - 1,
+                    tip,
+                    Qt.ItemDataRole.ToolTipRole,
+                )
             params = module_dict[module]
             if params is not None:
                 self.param_widget_map[module] = None

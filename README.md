@@ -697,6 +697,19 @@ On **AMD** GPUs you can use either **ZLUDA** (translation layer, works with the 
 
 ---
 
+## Module tiers & compatibility
+
+Tier definitions used across docs/UI:
+
+| Tier | Meaning |
+|---|---|
+| **Stable** | Best-tested defaults and first-run presets. |
+| **Beta** | Good coverage, but less battle-tested across environments. |
+| **Experimental** | New/stub/high-variance modules. |
+| **External dependency heavy** | Requires heavier optional stacks or external repos/APIs. |
+
+Canonical matrix: **[docs/MODULE_COMPATIBILITY_MATRIX.md](docs/MODULE_COMPATIBILITY_MATRIX.md)**.
+
 ## 3. Text detection – all modules and how to run
 
 Select the detector from the **Text detection** dropdown in the settings panel. Pair detection-only modules with an OCR (see [INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md) for which work with **none_ocr**).
@@ -705,29 +718,29 @@ Select the detector from the **Text detection** dropdown in the settings panel. 
 
 ### Original / built-in
 
-| Module | How to run | Notes |
-|--------|-------------|--------|
-| **ctd** | Select **ctd**; set device, detect_size, box score threshold, merge tolerance, etc. | ComicTextDetector; primary manga detector. See [Settings](#71-ctd-comictextdetector) below. |
-| **paddle_det** | Select **paddle_det**; needs `paddlepaddle`, `paddleocr`. | Paddle OCR detection; pair with paddle_ocr or paddle_rec_v5. |
-| **easyocr_det** | Select **easyocr_det**; needs `easyocr`. | CRAFT-based; pair with easyocr_ocr. |
-| **ysgyolo** | Select **ysgyolo**; put YOLO `.pt` in `data/models/` with name starting with `ysgyolo` (e.g. ogkalu's `ysgyolo_comic_speech_bubble_v8m.pt`, or YSG 淫書館 models from [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector)). | For comic bubble detection; pair with any OCR. **YSG series** = YSGforMTL only; other .pt (ogkalu, Kiuyha, etc.) are not YSG. |
-| **stariver_ocr** | Select **stariver_ocr**; fill User/Password in params. | API returns boxes+text; set OCR to **none_ocr**. |
+| Module | Tier | How to run | Notes |
+|--------|------|-------------|--------|
+| **ctd** | **Stable** | Select **ctd**; set device, detect_size, box score threshold, merge tolerance, etc. | ComicTextDetector; primary manga detector. See [Settings](#71-ctd-comictextdetector) below. |
+| **paddle_det** | **Stable** | Select **paddle_det**; needs `paddlepaddle`, `paddleocr`. | Paddle OCR detection; pair with paddle_ocr or paddle_rec_v5. |
+| **easyocr_det** | **Beta** | Select **easyocr_det**; needs `easyocr`. | CRAFT-based; pair with easyocr_ocr. |
+| **ysgyolo** | **Beta** | Select **ysgyolo**; put YOLO `.pt` in `data/models/` with name starting with `ysgyolo` (e.g. ogkalu's `ysgyolo_comic_speech_bubble_v8m.pt`, or YSG 淫書館 models from [YSGforMTL/YSGYoloDetector](https://huggingface.co/YSGforMTL/YSGYoloDetector)). | For comic bubble detection; pair with any OCR. **YSG series** = YSGforMTL only; other .pt (ogkalu, Kiuyha, etc.) are not YSG. |
+| **stariver_ocr** | **External dependency heavy** | Select **stariver_ocr**; fill User/Password in params. | API returns boxes+text; set OCR to **none_ocr**. |
 
 ### New in this fork
 
-| Module | Dependencies | How to run |
-|--------|--------------|------------|
-| **hf_object_det** | `pip install transformers torch` | Select **hf_object_det**. Default **model_id** is `ogkalu/comic-text-and-bubble-detector` (bubble, text_bubble, text_free). Change **model_id** for other HF object-detection models; use **score_threshold** and **labels_include** (comma-separated) to filter. |
-| **mmocr_det** | `pip install openmim` then `mim install mmengine mmcv mmdet mmocr` (see `doc/INSTALL_MMOCR.md` for Windows). | Select **mmocr_det**; pair with mmocr_ocr. |
-| **paddle_det_v5** | `pip install paddlepaddle paddleocr` (3.x). | Select **paddle_det_v5**; pair with paddle_rec_v5. |
-| **surya_det** | `pip install surya-ocr` | Select **surya_det**; pair with surya_ocr. |
-| **magi_det** | `pip install transformers torch einops` | Select **magi_det**; model downloads from HF (ragavsachdeva/magi) on first use; pair with any OCR. |
-| **craft_det** | `pip install craft-text-detector torch` | Select **craft_det**; outputs 4-point quads for merge; pair with any OCR. **Conflict:** needs opencv<4.5.4.62; see [Optional dependencies](#8-optional-dependency-conflicts-and-workarounds). |
-| **rapidocr_det** | `pip install rapidocr-onnxruntime` | Select **rapidocr_det**; lightweight ONNX detection; pair with **rapidocr** OCR for EasyScanlate-like pipeline. Optional models in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
-| **dptext_detr** | Clone [DPText-DETR](https://github.com/ymy-k/DPText-DETR), install its deps. | Select **dptext_detr**; set **repo_path** to your clone; pair with any OCR. |
-| **swintextspotter_v2** | Clone [SwinTextSpotterv2](https://github.com/mxin262/SwinTextSpotterv2), install its deps. | Select **swintextspotter_v2**; set **repo_path**; use **none_ocr** if demo outputs text. |
-| **hunyuan_ocr_det** | Same as hunyuan_ocr (transformers, etc.). | Select **hunyuan_ocr_det**; set OCR to **none_ocr** to keep spotter text. |
-| **textmamba_det** | None (stub) | Selecting it raises an error until official code is released; use mmocr_det or surya_det meanwhile. |
+| Module | Tier | Dependencies | How to run |
+|--------|------|--------------|------------|
+| **hf_object_det** | **Beta** | `pip install transformers torch` | Select **hf_object_det**. Default **model_id** is `ogkalu/comic-text-and-bubble-detector` (bubble, text_bubble, text_free). Change **model_id** for other HF object-detection models; use **score_threshold** and **labels_include** (comma-separated) to filter. |
+| **mmocr_det** | **External dependency heavy** | `pip install openmim` then `mim install mmengine mmcv mmdet mmocr` (see `doc/INSTALL_MMOCR.md` for Windows). | Select **mmocr_det**; pair with mmocr_ocr. |
+| **paddle_det_v5** | **Beta** | `pip install paddlepaddle paddleocr` (3.x). | Select **paddle_det_v5**; pair with paddle_rec_v5. |
+| **surya_det** | **Beta** | `pip install surya-ocr` | Select **surya_det**; pair with surya_ocr. |
+| **magi_det** | **Beta** | `pip install transformers torch einops` | Select **magi_det**; model downloads from HF (ragavsachdeva/magi) on first use; pair with any OCR. |
+| **craft_det** | **External dependency heavy** | `pip install craft-text-detector torch` | Select **craft_det**; outputs 4-point quads for merge; pair with any OCR. **Conflict:** needs opencv<4.5.4.62; see [Optional dependencies](#8-optional-dependency-conflicts-and-workarounds). |
+| **rapidocr_det** | **Beta** | `pip install rapidocr-onnxruntime` | Select **rapidocr_det**; lightweight ONNX detection; pair with **rapidocr** OCR for EasyScanlate-like pipeline. Optional models in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
+| **dptext_detr** | **External dependency heavy** | Clone [DPText-DETR](https://github.com/ymy-k/DPText-DETR), install its deps. | Select **dptext_detr**; set **repo_path** to your clone; pair with any OCR. |
+| **swintextspotter_v2** | **External dependency heavy** | Clone [SwinTextSpotterv2](https://github.com/mxin262/SwinTextSpotterv2), install its deps. | Select **swintextspotter_v2**; set **repo_path**; use **none_ocr** if demo outputs text. |
+| **hunyuan_ocr_det** | **Experimental** | Same as hunyuan_ocr (transformers, etc.). | Select **hunyuan_ocr_det**; set OCR to **none_ocr** to keep spotter text. |
+| **textmamba_det** | **Experimental** | None (stub) | Selecting it raises an error until official code is released; use mmocr_det or surya_det meanwhile. |
 
 ---
 
@@ -739,41 +752,41 @@ Select the OCR from the **OCR** dropdown. Install only the dependencies for the 
 
 ### Original / built-in
 
-| Module | How to run |
-|--------|-------------|
-| **paddle_ocr** | Paddle stack; select and set language, device. Pair with paddle_det. |
-| **manga_ocr** | Select **manga_ocr**; model in `data/models/manga-ocr-base` (auto-download). |
-| **easyocr_ocr**, **mmocr_ocr** | Pair with corresponding detector. |
-| **mit32px**, **mit48px**, **mit48px_ctc** | From manga-image-translator; select as needed. |
-| **google_vision**, **bing_ocr**, **one_ocr**, **windows_ocr**, **macos_ocr**, **llm_ocr**, **stariver_ocr**, **none_ocr** | Select and configure (API keys, etc.). **llm_ocr** with provider **OpenRouter** offers free vision models in the dropdown (e.g. `openrouter/free`, Gemma/Gemini/Qwen VL). **none_ocr** = no OCR (use with spotters). |
+| Module | Tier | How to run |
+|--------|------|-------------|
+| **paddle_ocr** | **Stable** | Paddle stack; select and set language, device. Pair with paddle_det. |
+| **manga_ocr** | **Stable** | Select **manga_ocr**; model in `data/models/manga-ocr-base` (auto-download). |
+| **easyocr_ocr**, **mmocr_ocr** | **Beta / External dependency heavy** | Pair with corresponding detector. |
+| **mit32px**, **mit48px**, **mit48px_ctc** | **Stable** | From manga-image-translator; select as needed. |
+| **google_vision**, **bing_ocr**, **one_ocr**, **windows_ocr**, **macos_ocr**, **llm_ocr**, **stariver_ocr**, **none_ocr** | **Mixed (API/platform/none)** | Select and configure (API keys, etc.). **llm_ocr** with provider **OpenRouter** offers free vision models in the dropdown (e.g. `openrouter/free`, Gemma/Gemini/Qwen VL). **none_ocr** = no OCR (use with spotters). |
 
 ### New in this fork
 
-| Module | Dependencies | How to run |
-|--------|--------------|------------|
-| **paddle_rec_v5** | `pip install paddlepaddle paddleocr` (3.x). | PP-OCRv5 recognition; pair with paddle_det_v5. Select and set language, device. |
-| **rapidocr** | `pip install rapidocr-onnxruntime` | Select **rapidocr**; lightweight ONNX recognition; pair with **rapidocr_det** for EasyScanlate-like pipeline. Optional rec/dict in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
-| **PaddleOCRVLManga**, **paddle_vl** | PaddleOCR-VL (manga or local server). | VLM manga or server; select and configure. |
-| **paddleocr_vl_hf** | `transformers` 5.x | Select **paddleocr_vl_hf**; use prompt "OCR:"; 109 languages, SOTA document. |
-| **surya_ocr** | `pip install surya-ocr` | Select **surya_ocr**; set language (e.g. Chinese (Simplified)), **Fix Latin misread** True for CJK; crop_padding 6–8. |
-| **trocr** | `transformers`, `torch`, `PIL` | Select **trocr**; good for printed/handwritten English. |
-| **got_ocr2** | `transformers`, `torch` | Select **got_ocr2**; unified OCR, tables/formulas. |
-| **glm_ocr** | `transformers` (e.g. 5.x) | Select **glm_ocr**; 0.9B document. |
-| **donut** | `transformers`, `torch` | Select **donut**; DocVQA/CORD task prompts. |
-| **qwen2vl_7b** | `transformers`, `torch`, `accelerate` | Select **qwen2vl_7b**; ~16GB+ VRAM. |
-| **deepseek_ocr** | `transformers`, `trust_remote_code` | Select **deepseek_ocr**; document, layout. |
-| **lighton_ocr** | `transformers`, `torch` | Select **lighton_ocr**; 1B, strong per-parameter. |
-| **chandra_ocr** | `pip install chandra-ocr` | Select **chandra_ocr**; 9B, layout/tables. |
-| **docowl2_ocr** | `transformers`, `trust_remote_code` | Select **docowl2_ocr**; document understanding. |
-| **nanonets_ocr** | `transformers`, `torch` | Select **nanonets_ocr**; 3B VLM, chat-style. |
-| **ocean_ocr** | `transformers`, `torch`, `einops` | Select **ocean_ocr**; 3B MLLM, quality-focused. |
-| **internvl2_ocr**, **internvl3_ocr** | `transformers`, `torch` | Select and choose model size (2B/8B etc.); trust_remote_code. |
-| **hunyuan_ocr** | `transformers`, `torch` (see HunyuanOCR repo) | Select **hunyuan_ocr**; SOTA <3B class. |
-| **florence2_ocr** | `transformers`, `torch` | Select **florence2_ocr**; Microsoft vision, base/large. |
-| **minicpm_ocr** | `transformers`, `torch` | Select **minicpm_ocr**; compact VLM. |
-| **ocrflux** | `transformers`, `torch` | Select **ocrflux**; document OCR. |
-| **manga_ocr_mobile** | `pip install tflite-runtime huggingface_hub transformers` (optional) | Select **manga_ocr_mobile**; TFLite Japanese manga; lighter than manga_ocr. |
-| **nemotron_ocr** | `transformers`, `accelerate`, `torch`, `albumentations`, `timm`; postprocessing from HF repo. | Select **nemotron_ocr**; full-page document parsing; assigns text to blocks by bbox overlap; set **min_resolution** (e.g. 1024), **iou_threshold**. |
+| Module | Tier | Dependencies | How to run |
+|--------|------|--------------|------------|
+| **paddle_rec_v5** | **Beta** | `pip install paddlepaddle paddleocr` (3.x). | PP-OCRv5 recognition; pair with paddle_det_v5. Select and set language, device. |
+| **rapidocr** | **Beta** | `pip install rapidocr-onnxruntime` | Select **rapidocr**; lightweight ONNX recognition; pair with **rapidocr_det** for EasyScanlate-like pipeline. Optional rec/dict in `data/models/rapidocr/`. See docs/OPTIONAL_DEPENDENCIES.md. |
+| **PaddleOCRVLManga**, **paddle_vl** | **External dependency heavy** | PaddleOCR-VL (manga or local server). | VLM manga or server; select and configure. |
+| **paddleocr_vl_hf** | **External dependency heavy** | `transformers` 5.x | Select **paddleocr_vl_hf**; use prompt "OCR:"; 109 languages, SOTA document. |
+| **surya_ocr** | **Beta** | `pip install surya-ocr` | Select **surya_ocr**; set language (e.g. Chinese (Simplified)), **Fix Latin misread** True for CJK; crop_padding 6–8. |
+| **trocr** | **Beta** | `transformers`, `torch`, `PIL` | Select **trocr**; good for printed/handwritten English. |
+| **got_ocr2** | **External dependency heavy** | `transformers`, `torch` | Select **got_ocr2**; unified OCR, tables/formulas. |
+| **glm_ocr** | **External dependency heavy** | `transformers` (e.g. 5.x) | Select **glm_ocr**; 0.9B document. |
+| **donut** | **External dependency heavy** | `transformers`, `torch` | Select **donut**; DocVQA/CORD task prompts. |
+| **qwen2vl_7b** | **External dependency heavy** | `transformers`, `torch`, `accelerate` | Select **qwen2vl_7b**; ~16GB+ VRAM. |
+| **deepseek_ocr** | **External dependency heavy** | `transformers`, `trust_remote_code` | Select **deepseek_ocr**; document, layout. |
+| **lighton_ocr** | **External dependency heavy** | `transformers`, `torch` | Select **lighton_ocr**; 1B, strong per-parameter. |
+| **chandra_ocr** | **External dependency heavy** | `pip install chandra-ocr` | Select **chandra_ocr**; 9B, layout/tables. |
+| **docowl2_ocr** | **External dependency heavy** | `transformers`, `trust_remote_code` | Select **docowl2_ocr**; document understanding. |
+| **nanonets_ocr** | **External dependency heavy** | `transformers`, `torch` | Select **nanonets_ocr**; 3B VLM, chat-style. |
+| **ocean_ocr** | **External dependency heavy** | `transformers`, `torch`, `einops` | Select **ocean_ocr**; 3B MLLM, quality-focused. |
+| **internvl2_ocr**, **internvl3_ocr** | **External dependency heavy** | `transformers`, `torch` | Select and choose model size (2B/8B etc.); trust_remote_code. |
+| **hunyuan_ocr** | **External dependency heavy** | `transformers`, `torch` (see HunyuanOCR repo) | Select **hunyuan_ocr**; SOTA <3B class. |
+| **florence2_ocr** | **External dependency heavy** | `transformers`, `torch` | Select **florence2_ocr**; Microsoft vision, base/large. |
+| **minicpm_ocr** | **External dependency heavy** | `transformers`, `torch` | Select **minicpm_ocr**; compact VLM. |
+| **ocrflux** | **External dependency heavy** | `transformers`, `torch` | Select **ocrflux**; document OCR. |
+| **manga_ocr_mobile** | **Beta** | `pip install tflite-runtime huggingface_hub transformers` (optional) | Select **manga_ocr_mobile**; TFLite Japanese manga; lighter than manga_ocr. |
+| **nemotron_ocr** | **External dependency heavy** | `transformers`, `accelerate`, `torch`, `albumentations`, `timm`; postprocessing from HF repo. | Select **nemotron_ocr**; full-page document parsing; assigns text to blocks by bbox overlap; set **min_resolution** (e.g. 1024), **iou_threshold**. |
 
 ---
 

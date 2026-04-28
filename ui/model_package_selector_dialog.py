@@ -19,7 +19,7 @@ from qtpy.QtWidgets import (
     QFrame,
 )
 
-from utils.model_packages import MODEL_PACKAGES, PACKAGE_LABELS
+from utils.model_packages import MODEL_PACKAGES, PACKAGE_LABELS, PACKAGE_TIERS
 
 
 class ModelPackageSelectorDialog(QDialog):
@@ -46,7 +46,12 @@ class ModelPackageSelectorDialog(QDialog):
 
         group = QGroupBox(self.tr("Model packages"))
         group_layout = QVBoxLayout(group)
-        for package_id in MODEL_PACKAGES:
+        tier_order = {"Stable": 0, "Beta": 1, "Experimental": 2, "External dependency heavy": 3}
+        sorted_package_ids = sorted(
+            MODEL_PACKAGES.keys(),
+            key=lambda pid: (tier_order.get(PACKAGE_TIERS.get(pid, "Stable"), 99), pid),
+        )
+        for package_id in sorted_package_ids:
             label, desc = PACKAGE_LABELS.get(package_id, (package_id, ""))
             cb = QCheckBox(self.tr(label))
             cb.setToolTip(self.tr(desc))

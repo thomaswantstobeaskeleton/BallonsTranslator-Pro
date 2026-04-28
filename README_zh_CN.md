@@ -6,6 +6,17 @@
 
 ---
 
+## 模块分级与兼容矩阵
+
+| 分级 | 含义 |
+|---|---|
+| **Stable** | 默认与首跑预设优先使用，验证最充分。 |
+| **Beta** | 大多数场景可用，但跨环境验证少于 Stable。 |
+| **Experimental** | 新功能/占位实现/高波动模块。 |
+| **External dependency heavy** | 依赖较重（大模型、额外仓库或外部服务）。 |
+
+统一兼容矩阵请见：**[docs/MODULE_COMPATIBILITY_MATRIX.md](docs/MODULE_COMPATIBILITY_MATRIX.md)**。
+
 ## 简介
 
 | 项目 | 说明 |
@@ -60,11 +71,11 @@
 
 ## 国漫 / 简体中文推荐设置
 
-| 阶段 | 推荐 | 关键设置 |
-|------|------|----------|
-| **检测** | CTD | detect_size 1280，box score 0.42–0.48，box_padding 4–6 |
-| **OCR** | Surya OCR | 语言：简体中文，Fix Latin misread：True，crop_padding 6–8 |
-| **修复** | lama_large_512px | mask_dilation 1–2，inpaint_size 1024 |
+| 阶段 | 推荐 | 分级 | 关键设置 |
+|------|------|------|----------|
+| **检测** | CTD | **Stable** | detect_size 1280，box score 0.42–0.48，box_padding 4–6 |
+| **OCR** | Surya OCR | **Beta** | 语言：简体中文，Fix Latin misread：True，crop_padding 6–8 |
+| **修复** | lama_large_512px | **Beta** | mask_dilation 1–2，inpaint_size 1024 |
 
 更多质量分级与设置见 [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md)、[docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)。
 
