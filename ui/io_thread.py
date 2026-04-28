@@ -321,17 +321,29 @@ class MergeThread(ThreadBase):
 
 class ModelDownloadThread(QThread):
     """Background thread for retrying model package downloads (Tools → Retry model downloads)."""
-    finished_with_result = Signal(bool, str)  # success, error_message
+    finished_with_result = Signal(str, str, object)  # status: success|partial|failed, message, summary_dict
 
     def run(self):
         try:
-            from modules.prepare_local_files import prepare_local_files_forall
-            prepare_local_files_forall()
-            self.finished_with_result.emit(True, '')
+            from modules.prepare_local_files import prepare_local_files_forall_with_summary
+            summary = prepare_local_files_forall_with_summary()
+            failed = int(summary.get('failed', 0))
+            downloaded = int(summary.get('downloaded', 0))
+            skipped = int(summary.get('skipped', 0))
+            if failed == 0:
+                status = 'success'
+                msg = ''
+            elif (downloaded + skipped) > 0:
+                status = 'partial'
+                msg = f"Model download completed with partial failures ({failed} failed)."
+            else:
+                status = 'failed'
+                msg = f"Model download failed ({failed} failed)."
+            self.finished_with_result.emit(status, msg, summary)
         except Exception as e:
             import traceback
             msg = traceback.format_exc()
-            self.finished_with_result.emit(False, str(e) + '\n\n' + msg)
+            self.finished_with_result.emit('failed', str(e) + '\n\n' + msg, {})
 
 
 class GitUpdateThread(QThread):

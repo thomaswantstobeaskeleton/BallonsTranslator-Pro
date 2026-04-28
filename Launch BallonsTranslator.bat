@@ -1,5 +1,5 @@
 @echo off
-REM Double-click this file to run the app with the project venv (not global Python).
+REM Source-clone launcher: run app with project venv only (venv\Scripts\python.exe, not global Python).
 REM For setup: py -3.10 -m venv venv  then  venv\Scripts\python.exe -m pip install -r requirements.txt
 setlocal
 cd /d "%~dp0"

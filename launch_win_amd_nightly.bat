@@ -1,4 +1,4 @@
-@REM Launch BallonsTranslator on Windows (AMD/nightly)
+@REM Launch BallonsTranslator for Windows portable bundle layout with --nightly (AMD ROCm nightly mode).
 @REM @echo %PATH%
 
 cd %~dp0
