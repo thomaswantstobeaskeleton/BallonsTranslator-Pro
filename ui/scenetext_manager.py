@@ -17,7 +17,7 @@ from .textedit_area import TransTextEdit, SourceTextEdit, TransPairWidget, Selec
 from utils.fontformat import FontFormat, pt2px
 from .textedit_commands import propagate_user_edit, TextEditCommand, ReshapeItemCommand, MoveBlkItemsCommand, AutoLayoutCommand, ApplyFontformatCommand, RotateItemCommand, WarpItemCommand, TextItemEditCommand, TextEditCommand, PageReplaceOneCommand, PageReplaceAllCommand, MultiPasteCommand, ResetAngleCommand, SqueezeCommand
 from .text_panel import FontFormatPanel
-from utils.config import pcfg
+from utils.config import pcfg, log_diagnostic_event
 from utils import shared
 from utils.imgproc_utils import extract_ballon_region, rotate_polygons, get_block_mask, classify_bubble_shape_from_mask, mask_centroid_in_crop
 from utils.bubble_shape_model import get_bubble_shape_from_model as _bubble_shape_from_model_impl
@@ -841,6 +841,18 @@ class SceneTextManager(QObject):
         return textblk_item
 
     def deleteTextblkItemList(self, blkitem_list: List[TextBlkItem], p_widget_list: List[TransPairWidget]):
+        page_name = getattr(self.canvas.imgtrans_proj, 'current_img', None) if self.canvas.imgtrans_proj is not None else None
+        page_index = -1
+        if self.canvas.imgtrans_proj is not None and page_name in self.canvas.imgtrans_proj.pages:
+            page_keys = list(self.canvas.imgtrans_proj.pages.keys())
+            page_index = page_keys.index(page_name)
+        log_diagnostic_event(
+            "ui.blocks_delete",
+            page_name=page_name,
+            page_index=page_index,
+            block_ids=[blkitem.idx for blkitem in blkitem_list],
+            block_count=len(blkitem_list),
+        )
         selection_changed = False
         for blkitem, p_widget in zip(blkitem_list, p_widget_list):
             if blkitem.isSelected():
@@ -878,6 +890,18 @@ class SceneTextManager(QObject):
         self.textEditList.insertPairWidget(self.pairwidget_list[j], j)
 
     def recoverTextblkItemList(self, blkitem_list: List[TextBlkItem], p_widget_list: List[TransPairWidget]):
+        page_name = getattr(self.canvas.imgtrans_proj, 'current_img', None) if self.canvas.imgtrans_proj is not None else None
+        page_index = -1
+        if self.canvas.imgtrans_proj is not None and page_name in self.canvas.imgtrans_proj.pages:
+            page_keys = list(self.canvas.imgtrans_proj.pages.keys())
+            page_index = page_keys.index(page_name)
+        log_diagnostic_event(
+            "ui.blocks_recover",
+            page_name=page_name,
+            page_index=page_index,
+            block_ids=[blkitem.idx for blkitem in blkitem_list],
+            block_count=len(blkitem_list),
+        )
         self.canvas.block_selection_signal = True
         for blkitem, p_widget in zip(blkitem_list, p_widget_list):
             self.textblk_item_list.insert(blkitem.idx, blkitem)
@@ -2665,4 +2689,3 @@ def get_text_size(fm: QFontMetricsF, text: str) -> Tuple[int, int]:
     
 def get_words_length_list(fm: QFontMetricsF, words: List[str]) -> List[int]:
     return [int(np.ceil(fm.horizontalAdvance(word))) for word in words]
-

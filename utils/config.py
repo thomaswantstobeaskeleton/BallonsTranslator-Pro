@@ -492,6 +492,8 @@ class ProgramConfig(Config):
     model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
     # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
     dev_mode: bool = False
+    # Temporary: when enabled, emit structured diagnostic logs for UI actions and pipeline stage transitions.
+    diagnostic_mode: bool = False
     shortcuts: Dict = field(default_factory=dict)
     auto_region_merge_after_run: str = 'never'  # 'never' | 'all_pages' | 'current_page'
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
@@ -608,6 +610,7 @@ CONFIG_KEY_ORDER = (
     "manga_source_translate_raw_search",
     "model_packages_enabled",
     "dev_mode",
+    "diagnostic_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned",
@@ -620,6 +623,21 @@ def context_menu_visible(key: str) -> bool:
     if not hasattr(pcfg, 'context_menu') or not isinstance(pcfg.context_menu, dict):
         return True
     return pcfg.context_menu.get(key, True)
+
+
+def diagnostic_logging_enabled() -> bool:
+    return bool(getattr(pcfg, 'diagnostic_mode', False))
+
+
+def log_diagnostic_event(event: str, **payload):
+    """Emit one structured diagnostic log line when diagnostic mode is enabled."""
+    if not diagnostic_logging_enabled():
+        return
+    try:
+        formatted = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        formatted = str(payload)
+    LOGGER.info("DIAG|%s|%s", event, formatted)
 
 
 def load_textstyle_from(p: str, raise_exception = False):

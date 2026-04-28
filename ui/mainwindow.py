@@ -27,7 +27,7 @@ from modules.translators.base import lang_display_to_key
 from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
-from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat
+from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat, log_diagnostic_event
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from utils.zip_batch import ZipBatchManager
@@ -1644,9 +1644,21 @@ class MainWindow(mainwindow_cls):
             self.canvas.resize_to_fit_content_signal.emit()
 
     def on_redo(self):
+        log_diagnostic_event(
+            "ui.redo",
+            page_index=self.pageList.currentRow(),
+            page_name=getattr(self.imgtrans_proj, 'current_img', None) if self.imgtrans_proj is not None else None,
+            block_count=len(getattr(self.st_manager, 'textblk_item_list', [])) if self.st_manager is not None else 0,
+        )
         self.canvas.redo()
 
     def on_undo(self):
+        log_diagnostic_event(
+            "ui.undo",
+            page_index=self.pageList.currentRow(),
+            page_name=getattr(self.imgtrans_proj, 'current_img', None) if self.imgtrans_proj is not None else None,
+            block_count=len(getattr(self.st_manager, 'textblk_item_list', [])) if self.st_manager is not None else 0,
+        )
         self.canvas.undo()
 
     def on_page_search(self):

@@ -35,7 +35,7 @@ from utils.series_context_store import DEFAULT_SERIES_ID, get_series_context_dir
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox
 from .configpanel import ConfigPanel
 from utils.proj_imgtrans import ProjImgTrans
-from utils.config import pcfg, RunStatus
+from utils.config import pcfg, RunStatus, log_diagnostic_event
 from utils.image_upscale import (
     apply_initial_upscale,
     downscale_to_size,
@@ -920,6 +920,12 @@ class ImgtransThread(QThread):
             if self.stop_requested or (getattr(self, 'cancel_flag', None) is not None and self.cancel_flag.is_set()):
                 break
             LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)} ({imgname}): starting')
+            log_diagnostic_event(
+                "pipeline.page_start",
+                page_index=page_num - 1,
+                page_name=imgname,
+                total_pages=len(pages_to_iterate),
+            )
             if cfg_module.enable_ocr and hasattr(self.ocr, 'restore_to_device'):
                 try:
                     self.ocr.restore_to_device()
@@ -941,6 +947,12 @@ class ImgtransThread(QThread):
             need_save_mask = False
             blk_removed: List[TextBlock] = []
             if cfg_module.enable_detect:
+                log_diagnostic_event(
+                    "pipeline.detect_start",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else len(self.imgtrans_proj.pages.get(imgname, []) or []),
+                )
                 if self.textdetector is None:
                     create_error_dialog(
                         RuntimeError("Text detector module is not set or failed to load."),
@@ -1089,6 +1101,12 @@ class ImgtransThread(QThread):
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
                 self.update_detect_progress.emit(self.detect_counter)
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: detection done')
+                log_diagnostic_event(
+                    "pipeline.detect_finish",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else 0,
+                )
 
             # Replace translation mode: load translated image, detect+OCR on it, match blocks, set raw blk.translation (manga-translator-ui style)
             if (getattr(cfg_module, "replace_translation_mode", False) and
@@ -1157,6 +1175,12 @@ class ImgtransThread(QThread):
 
             if cfg_module.enable_ocr:
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR running')
+                log_diagnostic_event(
+                    "pipeline.ocr_start",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else 0,
+                )
                 ocr_runner = getattr(self, '_auto_ocr_instance', None) if getattr(cfg_module, 'ocr_auto_by_language', False) else None
                 if ocr_runner is None:
                     ocr_runner = self.ocr
@@ -1302,6 +1326,12 @@ class ImgtransThread(QThread):
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
                 self.update_ocr_progress.emit(self.ocr_counter)
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: OCR done')
+                log_diagnostic_event(
+                    "pipeline.ocr_finish",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else 0,
+                )
                 if cfg_module.enable_inpaint and getattr(self.ocr, 'device', None) in GPUINTENSIVE_SET and hasattr(self.ocr, 'offload_to_cpu'):
                     self.ocr.offload_to_cpu()
                     soft_empty_cache()
@@ -1312,17 +1342,41 @@ class ImgtransThread(QThread):
                 need_save_mask = False
 
             if cfg_module.enable_translate:
+                log_diagnostic_event(
+                    "pipeline.translate_start",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else 0,
+                )
                 # Skip translator stage for one-step VLM flow (already wrote blk.translation).
                 if getattr(cfg_module, "translation_mode", "two_step") == "one_step_vlm":
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
+                    log_diagnostic_event(
+                        "pipeline.translate_finish",
+                        page_index=page_num - 1,
+                        page_name=imgname,
+                        block_count=len(blk_list) if blk_list is not None else 0,
+                    )
                 elif getattr(cfg_module, 'skip_already_translated', False) and blk_list and all(
                     getattr(b, 'translation', None) and str(b.translation).strip() for b in blk_list
                 ):
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
+                    log_diagnostic_event(
+                        "pipeline.translate_finish",
+                        page_index=page_num - 1,
+                        page_name=imgname,
+                        block_count=len(blk_list) if blk_list is not None else 0,
+                    )
                 elif self.parallel_trans:
                     self.translate_thread.push_pagekey_queue(imgname)
+                    log_diagnostic_event(
+                        "pipeline.translate_queued",
+                        page_index=page_num - 1,
+                        page_name=imgname,
+                        block_count=len(blk_list) if blk_list is not None else 0,
+                    )
                 elif not low_vram_trans:
                     self._set_translation_context_for_page(imgname, pages_to_iterate)
                     _series_path = (getattr(self.imgtrans_proj, "series_context_path", None) or "").strip()
@@ -1397,6 +1451,12 @@ class ImgtransThread(QThread):
                     self._append_page_to_series_context(imgname, blk_list)
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
+                    log_diagnostic_event(
+                        "pipeline.translate_finish",
+                        page_index=page_num - 1,
+                        page_name=imgname,
+                        block_count=len(blk_list) if blk_list is not None else 0,
+                    )
                         
             if cfg_module.enable_inpaint:
                 LOGGER.info(f'Page {page_num}/{len(pages_to_iterate)}: inpainting (loading model if needed)')
@@ -1512,6 +1572,12 @@ class ImgtransThread(QThread):
                 self.translate_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_TRANSLATE)
                 self.update_translate_progress.emit(self.translate_counter)
+                log_diagnostic_event(
+                    "pipeline.translate_finish",
+                    page_index=page_num - 1,
+                    page_name=imgname,
+                    block_count=len(blk_list) if blk_list is not None else 0,
+                )
 
         try:
             from utils.batch_report import finalize_batch_report
@@ -2090,6 +2156,19 @@ class ModuleManager(QObject):
         self.ocr_thread.setOCR(ocr)
 
     def on_finish_translate_page(self, page_key: str):
+        page_index = -1
+        block_count = 0
+        if self.imgtrans_thread.imgtrans_proj is not None:
+            page_keys = list(self.imgtrans_thread.imgtrans_proj.pages.keys())
+            if page_key in page_keys:
+                page_index = page_keys.index(page_key)
+            block_count = len(self.imgtrans_thread.imgtrans_proj.pages.get(page_key, []) or [])
+        log_diagnostic_event(
+            "pipeline.translate_finish",
+            page_index=page_index,
+            page_name=page_key,
+            block_count=block_count,
+        )
         self.finish_translate_page.emit(page_key)
     
     def on_finish_inpaint(self, inpaint_dict: dict):
