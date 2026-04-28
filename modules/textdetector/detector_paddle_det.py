@@ -9,6 +9,7 @@ import sys
 import json
 import tempfile
 import subprocess
+import time
 import numpy as np
 import cv2
 from typing import Tuple, List
@@ -210,6 +211,26 @@ if _PADDLE_AVAILABLE:
             super().__init__(**params)
             self.model = None
             self._use_subprocess = False  # True when torch already loaded to avoid paddle/torch CUDA type conflict
+            self._warning_state = {}
+
+        def _warn_soft_fail(self, stage: str, error: Exception = None, proj: ProjImgTrans = None):
+            page_id = getattr(proj, "current_img", None) if proj is not None else None
+            model_ref = "PaddleOCR-det"
+            err_text = f"{type(error).__name__}: {error}" if error is not None else "unknown"
+            key = ("paddle_det", stage, model_ref, str(page_id), err_text)
+            now = time.monotonic()
+            last_ts = self._warning_state.get(key, 0.0)
+            if now - last_ts < 60:
+                return
+            self._warning_state[key] = now
+            self.logger.warning(
+                "detector_soft_fail detector=%s stage=%s model=%s page=%s error=%s",
+                "paddle_det",
+                stage,
+                model_ref,
+                page_id or "unknown",
+                err_text,
+            )
 
         def _load_model(self):
             if self.model is not None:
@@ -237,6 +258,7 @@ if _PADDLE_AVAILABLE:
                     self._use_subprocess = True
                     self.model = True
                     return
+                self._warn_soft_fail(stage="load_model", error=e, proj=None)
                 raise
 
         def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
@@ -282,11 +304,19 @@ if _PADDLE_AVAILABLE:
                             env={**os.environ, "FLAGS_use_mkldnn": "0", "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK": "1"},
                         )
                         if result.returncode != 0:
-                            self.logger.error(f"Paddle det subprocess failed: {result.stderr or result.stdout}")
+                            self._warn_soft_fail(
+                                stage="subprocess_run",
+                                error=RuntimeError(result.stderr or result.stdout or "non-zero return"),
+                                proj=proj,
+                            )
                             return mask, blk_list
                         out = json.loads(result.stdout)
                         if "error" in out:
-                            self.logger.error(out["error"])
+                            self._warn_soft_fail(
+                                stage="subprocess_output",
+                                error=RuntimeError(out["error"]),
+                                proj=proj,
+                            )
                             return mask, blk_list
                         strict = self.params.get("strict_bubble_mode", {}).get("value", True)
                         min_area = 200
@@ -320,7 +350,7 @@ if _PADDLE_AVAILABLE:
                                 pts = np.array(line_pts, dtype=np.int32)
                                 cv2.fillPoly(mask, [pts], 255)
                 except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError) as e:
-                    self.logger.error(f"Paddle det subprocess error: {e}")
+                    self._warn_soft_fail(stage="subprocess_parse", error=e, proj=proj)
                     return mask, blk_list
                 if not blk_list:
                     return mask, blk_list
@@ -398,7 +428,7 @@ if _PADDLE_AVAILABLE:
                     text_det_box_thresh=box_thresh,
                 )
             except Exception as e:
-                self.logger.error(f"Paddle det failed: {e}")
+                self._warn_soft_fail(stage="predict", error=e, proj=proj)
                 return mask, blk_list
 
             if not result or len(result) == 0:

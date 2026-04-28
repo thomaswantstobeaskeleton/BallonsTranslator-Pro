@@ -6,6 +6,8 @@ Requires: paddleocr (3.x for PP-OCRv5), paddlepaddle.
 """
 import os
 import tempfile
+import time
+import logging
 import numpy as np
 import cv2
 from typing import Tuple, List
@@ -25,6 +27,33 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 # Disable oneDNN/MKLDNN to avoid "ConvertPirAttribute2RuntimeAttribute not support" with PP-OCRv5_server_det on some Paddle versions
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_use_mkldnn_in_fc"] = "0"
+_MODULE_LOGGER = logging.getLogger("BallonTranslator")
+_WARNING_STATE = {}
+
+
+def _warn_rate_limited(
+    detector_name: str,
+    stage: str,
+    model_ref: str,
+    page_id: str,
+    error: Exception = None,
+    interval_seconds: int = 60,
+) -> None:
+    err_text = f"{type(error).__name__}: {error}" if error is not None else "unknown"
+    key = (detector_name, stage, str(model_ref), str(page_id), err_text)
+    now = time.monotonic()
+    last_ts = _WARNING_STATE.get(key, 0.0)
+    if now - last_ts < interval_seconds:
+        return
+    _WARNING_STATE[key] = now
+    _MODULE_LOGGER.warning(
+        "detector_soft_fail detector=%s stage=%s model=%s page=%s error=%s",
+        detector_name,
+        stage,
+        model_ref or "unknown",
+        page_id or "unknown",
+        err_text,
+    )
 
 
 def _bbox_distance_px(blk_a: TextBlock, blk_b: TextBlock) -> float:
@@ -120,7 +149,14 @@ def _split_block_by_image_gap(
             new_blk._detected_font_size = max(bottom_im - top_im, 12)
             out.append(new_blk)
         return out if len(out) >= 2 else [blk]
-    except Exception:
+    except Exception as e:
+        _warn_rate_limited(
+            detector_name="paddle_det_v5",
+            stage="split_cross_bubble_lines",
+            model_ref="PP-OCRv5",
+            page_id="unknown",
+            error=e,
+        )
         return [blk]
 
 
@@ -211,6 +247,26 @@ if _PADDLE_V5_AVAILABLE:
             self.model = None
             self._model_name = None
             self._device = None
+            self._warning_state = {}
+
+        def _warn_soft_fail(self, stage: str, error: Exception = None, proj: ProjImgTrans = None):
+            page_id = getattr(proj, "current_img", None) if proj is not None else None
+            model_ref = self._model_name or (self.params.get("model_name") or {}).get("value", "PP-OCRv5_mobile_det")
+            err_text = f"{type(error).__name__}: {error}" if error is not None else "unknown"
+            key = ("paddle_det_v5", stage, str(model_ref), str(page_id), err_text)
+            now = time.monotonic()
+            last_ts = self._warning_state.get(key, 0.0)
+            if now - last_ts < 60:
+                return
+            self._warning_state[key] = now
+            self.logger.warning(
+                "detector_soft_fail detector=%s stage=%s model=%s page=%s error=%s",
+                "paddle_det_v5",
+                stage,
+                model_ref,
+                page_id or "unknown",
+                err_text,
+            )
 
         def _load_model(self):
             model_name = (self.params.get("model_name") or {}).get("value", "PP-OCRv5_mobile_det") or "PP-OCRv5_mobile_det"
@@ -224,8 +280,8 @@ if _PADDLE_V5_AVAILABLE:
                 try:
                     import paddle
                     paddle.set_flags({"FLAGS_use_mkldnn": False})
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._warn_soft_fail(stage="set_paddle_flags", error=e, proj=None)
                 self.model = TextDetection(model_name=model_name, device=device)
             except ImportError as e:
                 if "already registered" in str(e) or "_gpuDeviceProperties" in str(e):
@@ -275,7 +331,7 @@ if _PADDLE_V5_AVAILABLE:
                 output = list(output) if output is not None else []
             except Exception as e:
                 err_msg = str(e)
-                self.logger.error(f"Paddle v5 det failed: {e}")
+                self._warn_soft_fail(stage="predict", error=e, proj=proj)
                 if "ConvertPirAttribute2RuntimeAttribute" in err_msg or "onednn_instruction" in err_msg:
                     self.logger.warning(
                         "PP-OCRv5 hit Paddle/oneDNN bug (both mobile and server). Fix: pip install paddlepaddle==3.2.0 paddleocr==3.3.0 then restart. See PaddleOCR discussion #17350."
@@ -285,8 +341,8 @@ if _PADDLE_V5_AVAILABLE:
                 if tmp_path and os.path.exists(tmp_path):
                     try:
                         os.unlink(tmp_path)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        self._warn_soft_fail(stage="cleanup_temp_file", error=e, proj=proj)
             if not output:
                 return mask, blk_list
             for item in output:
