@@ -28,7 +28,7 @@ RECENT_CONTEXT_FILENAME = "recent_context.json"
 
 
 def get_series_context_dir(series_id_or_path: str) -> str:
-    """
+    r"""
     Resolve to an absolute directory path for the series context.
     - If series_id_or_path contains a path separator (/ or \), treat as path
       (relative to PROGRAM_PATH if not absolute).
