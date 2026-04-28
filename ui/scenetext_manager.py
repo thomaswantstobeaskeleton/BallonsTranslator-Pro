@@ -1142,6 +1142,33 @@ class SceneTextManager(QObject):
             pcfg.let_autolayout_flag = old_autolayout
             self.auto_textlayout_flag = old_flag
 
+    def run_detect_post_autofit_on_current_page_once(self, block_indices: List[int]):
+        """Apply the same auto-fit routine as shortcut Format→Auto fit to selected detected blocks."""
+        from utils.config import pcfg
+        if not block_indices:
+            return
+        selected_blks = []
+        for idx in block_indices:
+            if 0 <= idx < len(self.textblk_item_list):
+                blkitem = self.textblk_item_list[idx]
+                if not getattr(blkitem.fontformat, 'vertical', False):
+                    selected_blks.append(blkitem)
+        if not selected_blks:
+            return
+        old_autolayout = getattr(pcfg, 'let_autolayout_flag', True)
+        old_flag = self.auto_textlayout_flag
+        try:
+            pcfg.let_autolayout_flag = True
+            self.auto_textlayout_flag = True
+            for blkitem in selected_blks:
+                self.layout_textblk(blkitem)
+                self.layout_textblk(blkitem)
+                self._scale_font_to_fit_box(blkitem)
+            self.canvas.setProjSaveState(True)
+        finally:
+            pcfg.let_autolayout_flag = old_autolayout
+            self.auto_textlayout_flag = old_flag
+
     def onAutoLayoutTextblks(self):
         selected_blks = self.canvas.selected_text_items()
         old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
@@ -2665,4 +2692,3 @@ def get_text_size(fm: QFontMetricsF, text: str) -> Tuple[int, int]:
     
 def get_words_length_list(fm: QFontMetricsF, words: List[str]) -> List[int]:
     return [int(np.ceil(fm.horizontalAdvance(word))) for word in words]
-
