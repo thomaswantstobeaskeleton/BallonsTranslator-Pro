@@ -1,4 +1,4 @@
-@REM Launch BallonsTranslator on Windows with auto-update
+@REM Launch BallonsTranslator for Windows portable bundle layout with --update.
 @REM @echo %PATH%
 
 cd %~dp0

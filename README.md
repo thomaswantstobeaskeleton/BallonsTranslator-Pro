@@ -57,6 +57,24 @@ This fork adds **many new optional modules** (detectors, OCR engines, inpainters
 
 ---
 
+## Supported startup entrypoints
+
+Use one of these **official startup entrypoints**:
+
+1. `python launch.py`
+   - **Use for:** source clone on Windows/Linux/macOS, developer workflows, and CI-like diagnostics.
+   - **Behavior:** uses your current Python interpreter (`sys.executable`) and installs missing base dependencies on first run.
+
+2. `Launch BallonsTranslator.bat`
+   - **Use for:** source clone on Windows **after creating a local `venv`** in the repo root.
+   - **Behavior:** always runs `venv\Scripts\python.exe launch.py` so installs and runtime stay inside the project venv (avoids mixing with global Python).
+
+3. `launch_win*.bat` (`launch_win.bat`, `launch_win_with_autoupdate.bat`, `launch_win_amd_nightly.bat`)
+   - **Use for:** Windows **portable bundle layout** that includes `ballontrans_pylibs_win` (+ optional `PortableGit`).
+   - **Behavior:** prepends bundled portable Python paths, validates `python`/`pip`, then runs `launch.py` (optionally with `--update` or `--nightly`).
+
+> Rule of thumb: if you cloned the repo, start with `python launch.py` (or `Launch BallonsTranslator.bat` once venv exists). If you received a prepacked portable Windows bundle, use the matching `launch_win*.bat` script.
+
 ## Quick start
 
 1. **Clone and run:** `git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git && cd BallonsTranslator-Pro && python launch.py`
@@ -90,6 +108,53 @@ For a **portable-style** install (e.g. copy folder and run elsewhere):
    See **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for GPU OOM, HuggingFace gated models, provider keys, and dependency conflicts.
 
 ---
+
+## Startup troubleshooting (entrypoint-level)
+
+| Symptom | Likely cause | What to run |
+|---|---|---|
+| `python` is not recognized | Python not installed or not on `PATH` | Install Python 3.10+ and verify with `python --version` (Windows may also use `py -V`). Then retry `python launch.py`. |
+| `No module named pip` / pip command fails | Broken or missing pip in selected interpreter | Run `python -m ensurepip --upgrade` then `python -m pip install --upgrade pip`. Retry startup command. |
+| `Launch BallonsTranslator.bat` says venv missing | `venv\Scripts\python.exe` does not exist | From repo root: `py -3.10 -m venv venv` then `venv\Scripts\python.exe -m pip install -r requirements.txt`, then rerun `Launch BallonsTranslator.bat`. |
+| Torch install fails on first launch | Network/index issue, incompatible wheel, or GPU stack mismatch | Retry with: `python launch.py --reinstall-torch`. If needed, set `TORCH_COMMAND` to a known-good install command, then rerun. See `docs/TROUBLESHOOTING.md` for CUDA/ROCm notes. |
+
+## Diagnostics mode (for startup failure reports)
+
+When reporting startup failures, include **exact command + full console output**.
+
+### A) Source clone (cross-platform)
+
+```bash
+python --version
+python -m pip --version
+python launch.py --debug --reinstall-torch
+```
+
+If launch fails, rerun with logging:
+
+```bash
+python launch.py --debug --reinstall-torch > startup_debug.log 2>&1
+```
+
+Attach `startup_debug.log` to the issue.
+
+### B) Windows source clone with venv launcher
+
+```bat
+venv\Scripts\python.exe --version
+venv\Scripts\python.exe -m pip --version
+Launch BallonsTranslator.bat --debug --reinstall-torch
+```
+
+### C) Windows portable bundle (`launch_win*.bat`)
+
+```bat
+launch_win.bat --debug > startup_portable.log 2>&1
+```
+
+(Or use `launch_win_with_autoupdate.bat` / `launch_win_amd_nightly.bat` for that specific bundle mode.)
+
+Include the generated log file plus OS + GPU information in the report.
 
 ## Key highlights (point by point)
 
