@@ -38,3 +38,26 @@ If you see `QFont::setPointSize: Point size <= 0 (-1)` in the log when using 简
 | `scripts/update_translation.py` | Scans UI Python files and updates .ts with new/updated source strings. |
 | `utils/shared.py` | `DISPLAY_LANGUAGE_MAP`, `DEFAULT_DISPLAY_LANG`. |
 | `launch.py` | Loads translator and .qm for the configured display language. |
+
+## Startup / model-management localization workflow
+
+When adding or changing first-run model package UI (for example `ui/model_package_selector_dialog.py`, `ui/model_manager_dialog.py`, and related startup actions in `ui/mainwindow.py` / `ui/mainwindowbars.py`):
+
+1. Add or update the user-facing string in code with `self.tr(...)`.
+2. For model package catalog entries coming from `utils/model_packages.py`, register strings with `QT_TRANSLATE_NOOP("ModelPackageCatalog", ...)` so extraction tools can detect them.
+3. Keep startup/model key resources in sync:
+   - `translate/startup_model_ui.en_US.json`
+   - `translate/startup_model_ui.zh_CN.json`
+4. Ensure the same strings exist in `translate/zh_CN.ts` (source text + Chinese translation).
+5. Run the localization check:
+   - `python scripts/check_startup_model_ui_i18n.py`
+
+### First-run model package dialog screenshots
+
+English:
+
+![First-run model package dialog (English)](images/first-run-model-packages-en.svg)
+
+Chinese (简体中文):
+
+![First-run model package dialog (Chinese)](images/first-run-model-packages-zh.svg)

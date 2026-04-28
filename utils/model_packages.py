@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple, Any
 
+from qtpy.QtCore import QT_TRANSLATE_NOOP
+
 # Registry name -> module_key. pkuseg is a special key (handled in prepare_local_files).
 MODEL_PACKAGES = {
     "core": [
@@ -38,10 +40,22 @@ MODEL_PACKAGES = {
 
 # Human-readable labels and short descriptions for the first-launch dialog
 PACKAGE_LABELS = {
-    "core": ("Core (recommended)", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
-    "advanced_ocr": ("Advanced OCR", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
-    "advanced_inpaint": ("Advanced inpainting", "LaMa variants, ONNX, PatchMatch"),
-    "optional_onnx": ("Optional ONNX inpainting", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+    "core": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Core (recommended)"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+    ),
+    "advanced_ocr": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Advanced OCR"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
+    ),
+    "advanced_inpaint": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Advanced inpainting"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "LaMa variants, ONNX, PatchMatch"),
+    ),
+    "optional_onnx": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Optional ONNX inpainting"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+    ),
 }
 
 
