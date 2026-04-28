@@ -176,6 +176,7 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
     Returns a list of dicts: category_label, display_name, module_class, can_download.
     """
     from modules import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
+    from .model_packages import get_module_manifest_metadata
 
     categories = [
         (TEXTDETECTORS, "Detect"),
@@ -193,11 +194,13 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
             on_load = getattr(module_class, "download_file_on_load", False)
             display_name = module_key
             can_download = has_list and not on_load
+            manifest_meta = get_module_manifest_metadata(module_key)
             result.append({
                 "category_label": category_label,
                 "display_name": display_name,
                 "module_class": module_class,
                 "can_download": can_download,
+                "manifest_meta": manifest_meta,
             })
     return result
 

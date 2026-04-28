@@ -219,6 +219,7 @@ def main():
     from utils.logger import setup_logging, logger as LOGGER
     from utils.io_utils import find_all_files_recursive
     from utils import config as program_config
+    from utils.model_packages import validate_manifest_on_startup
 
     from qtpy.QtCore import QTranslator, QLocale, Qt
     shared.args = args
@@ -287,6 +288,8 @@ def main():
     os.chdir(shared.PROGRAM_PATH)
 
     setup_logging(shared.LOGGING_PATH)
+    if not validate_manifest_on_startup():
+        LOGGER.warning('Model manifest validation failed; falling back to built-in model package definitions.')
 
     from utils.logger import apply_dev_mode_logging
     apply_dev_mode_logging(getattr(config, 'dev_mode', False))
