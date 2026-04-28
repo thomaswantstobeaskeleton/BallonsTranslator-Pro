@@ -25,6 +25,8 @@ from qtpy.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QGridLayout,
+    QLineEdit,
+    QComboBox,
 )
 
 from utils.model_manager import (
@@ -100,6 +102,7 @@ class ModelManagerDialog(QDialog):
         self._download_thread = None
         self._download_worker = None
         self._module_infos = []
+        self._check_results: List[Dict[str, Any]] = []
         self._check_boxes: List[QCheckBox] = []
         self._build_ui()
 
@@ -123,6 +126,20 @@ class ModelManagerDialog(QDialog):
         self.checkProgress.setRange(0, 0)
         self.checkProgress.setVisible(False)
         check_layout.addWidget(self.checkProgress)
+        filter_row = QHBoxLayout()
+        self.searchEdit = QLineEdit()
+        self.searchEdit.setPlaceholderText(self.tr('Search module key/name/description…'))
+        self.searchEdit.textChanged.connect(self._apply_result_filters)
+        filter_row.addWidget(self.searchEdit, 2)
+        self.categoryFilter = QComboBox()
+        self.categoryFilter.addItem(self.tr('All categories'), '')
+        self.categoryFilter.currentIndexChanged.connect(self._apply_result_filters)
+        filter_row.addWidget(self.categoryFilter, 1)
+        self.statusFilter = QComboBox()
+        self.statusFilter.addItem(self.tr('All statuses'), '')
+        self.statusFilter.currentIndexChanged.connect(self._apply_result_filters)
+        filter_row.addWidget(self.statusFilter, 1)
+        check_layout.addLayout(filter_row)
         self.resultTable = QTableWidget()
         self.resultTable.setColumnCount(4)
         self.resultTable.setHorizontalHeaderLabels([
@@ -183,6 +200,7 @@ class ModelManagerDialog(QDialog):
             if not mod['can_download']:
                 continue
             cb = QCheckBox(mod['display_name'])
+            cb.setToolTip(self._build_module_tooltip(mod))
             cb.setProperty('module_info', mod)
             self.downloadCheckboxLayout.addWidget(cb, row, col)
             self._check_boxes.append(cb)
@@ -225,24 +243,9 @@ class ModelManagerDialog(QDialog):
             'no_download_list': self.tr('No file list'),
             'download_on_load': self.tr('Download on load'),
         }
-        self.resultTable.setRowCount(len(results))
-        for row, r in enumerate(results):
-            mod = r['module_info']
-            self.resultTable.setItem(row, 0, QTableWidgetItem(mod['category_label']))
-            self.resultTable.setItem(row, 1, QTableWidgetItem(mod['display_name']))
-            st = r['status']
-            status_str = status_text.get(st, st)
-            if st == 'no_download_list' and r.get('details') and any(r['details']):
-                status_str = self.tr('Optional')
-            if r.get('import_error'):
-                status_str = self.tr('Incompatible')
-            self.resultTable.setItem(row, 2, QTableWidgetItem(status_str))
-            details = '; '.join(r['details'][:5])
-            if r.get('import_error'):
-                details = r['import_error'][:200] + ('…' if len(r['import_error']) > 200 else '')
-            elif len(r['details']) > 5:
-                details += '…'
-            self.resultTable.setItem(row, 3, QTableWidgetItem(details))
+        self._check_results = results
+        self._refresh_filter_options()
+        self._apply_result_filters()
 
     def _on_check_error(self, msg: str):
         if self._check_thread and self._check_thread.isRunning():
@@ -307,3 +310,128 @@ class ModelManagerDialog(QDialog):
             self._download_thread.quit()
             self._download_thread.wait(1000)
         super().closeEvent(event)
+
+    def _refresh_filter_options(self):
+        current_category = self.categoryFilter.currentData()
+        current_status = self.statusFilter.currentData()
+        categories = sorted({r['module_info'].get('category_label', '') for r in self._check_results if r.get('module_info')})
+        self.categoryFilter.blockSignals(True)
+        self.categoryFilter.clear()
+        self.categoryFilter.addItem(self.tr('All categories'), '')
+        for c in categories:
+            self.categoryFilter.addItem(c, c)
+        idx = self.categoryFilter.findData(current_category)
+        if idx >= 0:
+            self.categoryFilter.setCurrentIndex(idx)
+        self.categoryFilter.blockSignals(False)
+
+        status_entries = [
+            ('ok', self.tr('Downloaded')),
+            ('missing', self.tr('Missing')),
+            ('hash_mismatch', self.tr('Hash mismatch')),
+            ('no_download_list', self.tr('No file list')),
+            ('download_on_load', self.tr('Download on load')),
+            ('incompatible', self.tr('Incompatible')),
+            ('optional', self.tr('Optional')),
+        ]
+        self.statusFilter.blockSignals(True)
+        self.statusFilter.clear()
+        self.statusFilter.addItem(self.tr('All statuses'), '')
+        for key, label in status_entries:
+            self.statusFilter.addItem(label, key)
+        idx = self.statusFilter.findData(current_status)
+        if idx >= 0:
+            self.statusFilter.setCurrentIndex(idx)
+        self.statusFilter.blockSignals(False)
+
+    def _apply_result_filters(self):
+        text = (self.searchEdit.text() or '').strip().lower()
+        category = self.categoryFilter.currentData() or ''
+        status_filter = self.statusFilter.currentData() or ''
+        status_text = {
+            'ok': self.tr('Downloaded'),
+            'missing': self.tr('Missing'),
+            'hash_mismatch': self.tr('Hash mismatch'),
+            'no_download_list': self.tr('No file list'),
+            'download_on_load': self.tr('Download on load'),
+        }
+        filtered = []
+        for r in self._check_results:
+            mod = r.get('module_info', {})
+            raw_status = r.get('status', '')
+            effective_status = raw_status
+            if raw_status == 'no_download_list' and r.get('details') and any(r.get('details', [])):
+                effective_status = 'optional'
+            if r.get('import_error'):
+                effective_status = 'incompatible'
+            if category and mod.get('category_label') != category:
+                continue
+            if status_filter and effective_status != status_filter:
+                continue
+            haystack = ' '.join([
+                str(mod.get('module_key', '')),
+                str(mod.get('human_name', '')),
+                str(mod.get('display_name', '')),
+                str(mod.get('description', '')),
+                str(mod.get('category_label', '')),
+            ]).lower()
+            if text and text not in haystack:
+                continue
+            filtered.append(r)
+
+        self.resultTable.setRowCount(len(filtered))
+        for row, r in enumerate(filtered):
+            mod = r['module_info']
+            self.resultTable.setItem(row, 0, QTableWidgetItem(mod.get('category_label', '')))
+            module_item = QTableWidgetItem(mod.get('display_name', mod.get('module_key', '')))
+            module_item.setToolTip(self._build_module_tooltip(mod))
+            self.resultTable.setItem(row, 1, module_item)
+            st = r['status']
+            status_str = status_text.get(st, st)
+            if st == 'no_download_list' and r.get('details') and any(r['details']):
+                status_str = self.tr('Optional')
+            if r.get('import_error'):
+                status_str = self.tr('Incompatible')
+            self.resultTable.setItem(row, 2, QTableWidgetItem(status_str))
+            details = '; '.join(r['details'][:5])
+            if r.get('import_error'):
+                details = r['import_error'][:200] + ('…' if len(r['import_error']) > 200 else '')
+            elif len(r['details']) > 5:
+                details += '…'
+            extra = []
+            size_text = self._format_size(mod.get('estimated_download_size_bytes'))
+            if size_text:
+                extra.append(self.tr('Estimated size: {0}').format(size_text))
+            target_paths = mod.get('target_paths') or []
+            if target_paths:
+                extra.append(self.tr('Target: {0}').format(target_paths[0]))
+            if extra:
+                details = (details + ' | ' if details else '') + ' | '.join(extra)
+            self.resultTable.setItem(row, 3, QTableWidgetItem(details))
+
+    def _build_module_tooltip(self, mod: Dict[str, Any]) -> str:
+        tip = [self.tr('Key: {0}').format(mod.get('module_key', ''))]
+        desc = (mod.get('description') or '').strip()
+        if desc:
+            tip.append(desc)
+        size_text = self._format_size(mod.get('estimated_download_size_bytes'))
+        if size_text:
+            tip.append(self.tr('Estimated size: {0}').format(size_text))
+        target_paths = mod.get('target_paths') or []
+        if target_paths:
+            preview = ', '.join(target_paths[:3])
+            if len(target_paths) > 3:
+                preview += ', …'
+            tip.append(self.tr('Target path(s): {0}').format(preview))
+        return '\n'.join([t for t in tip if t])
+
+    def _format_size(self, size_bytes: Any) -> str:
+        if not isinstance(size_bytes, (int, float)) or size_bytes <= 0:
+            return ''
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        size = float(size_bytes)
+        for unit in units:
+            if size < 1024 or unit == units[-1]:
+                return f'{size:.1f} {unit}' if unit != 'B' else f'{int(size)} B'
+            size /= 1024.0
+        return ''
