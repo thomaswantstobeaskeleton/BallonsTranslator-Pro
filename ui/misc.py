@@ -6,6 +6,7 @@ from qtpy.QtGui import QPixmap,  QColor, QImage, QTextDocument, QTextCursor
 from qtpy.QtCore import Qt, QPointF
 
 from utils import shared as C
+from utils.logger import logger as LOGGER
 from utils.structures import Tuple, Union, List, Dict, Config, field, nested_dataclass
 
 
@@ -167,8 +168,12 @@ def parse_stylesheet(theme: str = '', reverse_icon: bool = False) -> str:
             if osp.isfile(bubbly_path):
                 with open(bubbly_path, 'r', encoding='utf-8') as f:
                     stylesheet += '\n' + f.read()
-    except Exception:
-        pass
+    except Exception as e:
+        LOGGER.debug(
+            "parse_stylesheet: bubbly_ui append fallback (%s: %s)",
+            type(e).__name__,
+            e,
+        )
     with open(C.THEME_PATH, 'r', encoding='utf8') as f:
         theme_dict: Dict = json.loads(f.read())
     if not theme or theme not in theme_dict:
@@ -198,8 +203,12 @@ def parse_stylesheet(theme: str = '', reverse_icon: bool = False) -> str:
                 tgt_theme['@accentColorRgba20'] = f"rgba({r}, {g}, {b}, 20%)"
                 tgt_theme['@accentColorRgba35'] = f"rgba({r}, {g}, {b}, 0.35)"
                 tgt_theme['@accentColorRgba80'] = f"rgba({r}, {g}, {b}, 0.8)"
-    except Exception:
-        pass
+    except Exception as e:
+        LOGGER.debug(
+            "parse_stylesheet: accent override fallback (%s: %s)",
+            type(e).__name__,
+            e,
+        )
 
     C.FOREGROUND_FONTCOLOR = hex2rgb(tgt_theme['@qwidgetForegroundColor'])
     C.SLIDERHANDLE_COLOR = hex2rgb(tgt_theme['@sliderHandleColor'])
