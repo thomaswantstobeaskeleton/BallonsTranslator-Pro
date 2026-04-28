@@ -492,6 +492,12 @@ class ProgramConfig(Config):
     model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
     # True when first-run explicitly chose "Skip all downloads, local-only modules".
     offline_local_only_mode: bool = False
+    # When True, module dropdown tooltips show tier badges (Stable/Beta/Experimental/External-heavy).
+    show_module_tier_badges_in_tooltips: bool = True
+    # Last startup/retry model download status for support/debug (timestamp, package ids, and result counts).
+    model_download_last_status: Dict = field(default_factory=dict)
+    # User-facing preset IDs selected on first run (or ["custom"] for manual package selection).
+    model_package_preset_ids: List[str] = field(default_factory=lambda: ["balanced_default"])
     # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
     dev_mode: bool = False
     # Temporary: when enabled, emit structured diagnostic logs for UI actions and pipeline stage transitions.
@@ -567,6 +573,8 @@ class ProgramConfig(Config):
             config_dict["model_packages_enabled"] = ["core"]
         if "offline_local_only_mode" not in config_dict:
             config_dict["offline_local_only_mode"] = False
+        if not config_dict.get("model_package_preset_ids"):
+            config_dict["model_package_preset_ids"] = ["balanced_default"]
 
         return ProgramConfig(**config_dict)
     
@@ -614,6 +622,9 @@ CONFIG_KEY_ORDER = (
     "manga_source_translate_raw_search",
     "model_packages_enabled",
     "offline_local_only_mode",
+    "show_module_tier_badges_in_tooltips",
+    "model_packages_enabled", "model_download_last_status",
+    "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",

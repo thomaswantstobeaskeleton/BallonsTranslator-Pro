@@ -173,9 +173,18 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
     Manage models dialog. Includes every module so optional/pip-only modules (e.g.
     Nemotron) appear in the check table. can_download is True only when the module
     has a download_file_list and not download_file_on_load.
-    Returns a list of dicts: category_label, display_name, module_class, can_download.
+    Returns a list of dicts:
+      - category_label
+      - module_key
+      - display_name
+      - description
+      - module_class
+      - can_download
+      - estimated_download_size_bytes (optional)
+      - target_paths (relative/absolute paths where available)
     """
     from modules import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
+    from .model_packages import get_module_manifest_metadata
 
     categories = [
         (TEXTDETECTORS, "Detect"),
@@ -189,17 +198,102 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
             module_class = registry.get(module_key)
             if module_class is None:
                 continue
+            params = getattr(module_class, "params", None) or {}
+            human_name = _extract_human_name(module_key, module_class, params)
+            description = _extract_module_description(params)
             has_list = getattr(module_class, "download_file_list", None) is not None
             on_load = getattr(module_class, "download_file_on_load", False)
-            display_name = module_key
+            display_name = f"{category_label} · {human_name} ({module_key})"
             can_download = has_list and not on_load
+            manifest_meta = get_module_manifest_metadata(module_key)
+            dl_meta = _extract_download_metadata(module_class)
             result.append({
                 "category_label": category_label,
+                "module_key": module_key,
                 "display_name": display_name,
+                "human_name": human_name,
+                "description": description,
                 "module_class": module_class,
                 "can_download": can_download,
+                "manifest_meta": manifest_meta,
+                "estimated_download_size_bytes": dl_meta["estimated_download_size_bytes"],
+                "target_paths": dl_meta["target_paths"],
             })
     return result
+
+
+def _extract_human_name(module_key: str, module_class: Any, params: Dict[str, Any]) -> str:
+    """Try to extract user-facing module name from params/class metadata."""
+    for key in ("display_name", "name", "title", "label"):
+        val = params.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+        if isinstance(val, dict):
+            v = val.get("value")
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    class_name = getattr(module_class, "__name__", "") or ""
+    return class_name or module_key
+
+
+def _extract_module_description(params: Dict[str, Any]) -> str:
+    desc = params.get("description")
+    if isinstance(desc, str):
+        return desc.strip()
+    if isinstance(desc, dict):
+        v = desc.get("value")
+        if isinstance(v, str):
+            return v.strip()
+    return ""
+
+
+def _extract_download_metadata(module_class: Any) -> Dict[str, Any]:
+    """
+    Extract optional metadata from download_file_list.
+    Supports best-effort keys to keep backward compatibility:
+      estimated_size_bytes / size_bytes / download_size_bytes / estimated_total_size_bytes.
+    """
+    dl_list = getattr(module_class, "download_file_list", None) or []
+    target_paths: List[str] = []
+    total_size = 0
+    has_size = False
+    for entry in dl_list:
+        if not isinstance(entry, dict):
+            continue
+        target_paths.extend(_extract_target_paths_from_entry(entry))
+        for key in ("estimated_size_bytes", "size_bytes", "download_size_bytes", "estimated_total_size_bytes"):
+            value = entry.get(key)
+            if isinstance(value, (int, float)):
+                total_size += int(value)
+                has_size = True
+        file_sizes = entry.get("file_sizes")
+        if isinstance(file_sizes, list):
+            for size in file_sizes:
+                if isinstance(size, (int, float)):
+                    total_size += int(size)
+                    has_size = True
+    return {
+        "estimated_download_size_bytes": total_size if has_size else None,
+        "target_paths": target_paths,
+    }
+
+
+def _extract_target_paths_from_entry(entry: Dict[str, Any]) -> List[str]:
+    files = entry.get("save_files")
+    if files is None:
+        files = entry.get("files")
+    if files is None:
+        return []
+    if isinstance(files, str):
+        file_list = [files]
+    elif isinstance(files, list):
+        file_list = [f for f in files if isinstance(f, str)]
+    else:
+        return []
+    save_dir = entry.get("save_dir")
+    if isinstance(save_dir, str) and save_dir.strip():
+        return [osp.join(save_dir, f) for f in file_list]
+    return file_list
 
 
 def get_available_module_keys(registry) -> List[str]:
