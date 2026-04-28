@@ -45,6 +45,14 @@ from utils.cancellation import CancelFlag
 cfg_module = pcfg.module
 
 
+def _model_missing_guidance(module_label: str, module_name: str = "") -> str:
+    suffix = f" ({module_name})" if module_name else ""
+    return (
+        f"{module_label}{suffix} is not ready: required model files are missing or incompatible.\n"
+        "Open Tools → Manage models to check/download/import local models, then select an available module."
+    )
+
+
 class ModuleThread(QThread):
 
     finish_set_module = Signal()
@@ -105,7 +113,8 @@ class ModuleThread(QThread):
             else:
                 create_error_dialog(
                     KeyError(module_name),
-                    self._failed_set_module_msg + " " + self.tr("No fallback available."),
+                    self._failed_set_module_msg + " " + self.tr("No fallback available.") + "\n"
+                    + self.tr("Open Tools → Manage models to check or import local model files."),
                 )
                 self.finish_set_module.emit()
                 return
@@ -956,7 +965,7 @@ class ImgtransThread(QThread):
                 if self.textdetector is None:
                     create_error_dialog(
                         RuntimeError("Text detector module is not set or failed to load."),
-                        self.tr("Text detector is not available. Switch to a working detector in Config or install the required model."),
+                        self.tr(_model_missing_guidance("Text detector", getattr(cfg_module, "textdetector", ""))),
                         "DetectorNotSet",
                     )
                     self.stop_requested = True
@@ -1008,7 +1017,12 @@ class ImgtransThread(QThread):
                         register_batch_skip(imgname, "detection", str(e))
                     except Exception:
                         pass
-                    create_error_dialog(e, self.tr('Text Detection Failed.') + f' (page: {imgname})', 'TextDetectFailed')
+                    create_error_dialog(
+                        e,
+                        self.tr('Text Detection Failed.') + f' (page: {imgname})\n'
+                        + self.tr(_model_missing_guidance("Text detector", getattr(cfg_module, "textdetector", ""))),
+                        'TextDetectFailed',
+                    )
                     blk_list = []
                 self.detect_counter += 1
                 if pcfg.module.keep_exist_textlines:
@@ -1243,7 +1257,12 @@ class ImgtransThread(QThread):
                         register_batch_skip(imgname, "ocr", str(e))
                     except Exception:
                         pass
-                    create_error_dialog(e, self.tr('OCR Failed.') + f' (page: {imgname})', 'OCRFailed')
+                    create_error_dialog(
+                        e,
+                        self.tr('OCR Failed.') + f' (page: {imgname})\n'
+                        + self.tr(_model_missing_guidance("OCR", getattr(cfg_module, "ocr", ""))),
+                        'OCRFailed',
+                    )
                 self.ocr_counter += 1
 
                 if pcfg.restore_ocr_empty:
@@ -2043,7 +2062,10 @@ class ModuleManager(QObject):
                 translator = fallback
                 cfg_module.translator = fallback
             else:
-                create_error_dialog(ValueError(self.tr("No translator module available.")), self.tr("Failed to set Translator."))
+                create_error_dialog(
+                    ValueError(self.tr("No translator module available.")),
+                    self.tr("Failed to set Translator.") + "\n" + self.tr(_model_missing_guidance("Translator", translator)),
+                )
                 return
         if self.translate_thread.isRunning():
             LOGGER.warning('Terminating a running translation thread.')
@@ -2068,7 +2090,10 @@ class ModuleManager(QObject):
                 inpainter = fallback
                 cfg_module.inpainter = fallback
             else:
-                create_error_dialog(ValueError(self.tr("No inpainter module available.")), self.tr("Failed to set Inpainter."))
+                create_error_dialog(
+                    ValueError(self.tr("No inpainter module available.")),
+                    self.tr("Failed to set Inpainter.") + "\n" + self.tr(_model_missing_guidance("Inpainter", inpainter)),
+                )
                 return
         
         if self.inpaint_thread.isRunning():
@@ -2084,7 +2109,13 @@ class ModuleManager(QObject):
             textdetector = cfg_module.textdetector
         valid = GET_VALID_TEXTDETECTORS()
         if textdetector not in valid:
-            fallback = "ctd" if "ctd" in valid else (valid[0] if valid else "paddle_det")
+            fallback = "ctd" if "ctd" in valid else (valid[0] if valid else None)
+            if fallback is None:
+                create_error_dialog(
+                    ValueError(self.tr("No text detector module available.")),
+                    self.tr("Failed to set Text Detector.") + "\n" + self.tr(_model_missing_guidance("Text detector", textdetector)),
+                )
+                return
             LOGGER.warning(
                 "Text detector '%s' is not available (e.g. not yet integrated). Using '%s'.",
                 textdetector, fallback,
@@ -2148,7 +2179,10 @@ class ModuleManager(QObject):
                 ocr = fallback
                 cfg_module.ocr = fallback
             else:
-                create_error_dialog(ValueError(self.tr("No OCR module available.")), self.tr("Failed to set OCR."))
+                create_error_dialog(
+                    ValueError(self.tr("No OCR module available.")),
+                    self.tr("Failed to set OCR.") + "\n" + self.tr(_model_missing_guidance("OCR", ocr)),
+                )
                 return
         if self.ocr_thread.isRunning():
             LOGGER.warning('Terminating a running OCR thread.')

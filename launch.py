@@ -338,6 +338,9 @@ def main():
         dialog = ModelPackageSelectorDialog()
         dialog.exec()
         config.model_packages_enabled = dialog.get_selected_package_ids()
+        config.offline_local_only_mode = dialog.is_offline_local_only_selected()
+        if config.offline_local_only_mode:
+            LOGGER.info("First-run mode selected: local-only (skip all model downloads).")
         config.model_package_preset_ids = dialog.get_selected_preset_ids()
         try:
             from utils.config import save_config

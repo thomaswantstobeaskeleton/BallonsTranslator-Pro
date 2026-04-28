@@ -5,6 +5,7 @@ and download selected models. Opened from Tools → Manage models...
 from __future__ import annotations
 
 import os
+import shutil
 from typing import List, Dict, Any
 
 from qtpy.QtCore import Qt, Signal, QThread, QObject
@@ -25,6 +26,7 @@ from qtpy.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QGridLayout,
+    QFileDialog,
     QLineEdit,
     QComboBox,
 )
@@ -162,10 +164,14 @@ class ModelManagerDialog(QDialog):
         select_all_btn.clicked.connect(self._select_all_download)
         deselect_all_btn = QPushButton(self.tr('Deselect all'))
         deselect_all_btn.clicked.connect(self._deselect_all_download)
+        import_local_btn = QPushButton(self.tr('Import local model directory...'))
+        import_local_btn.setToolTip(self.tr('Copy model files from an existing local folder into this app\'s data/models directory.'))
+        import_local_btn.clicked.connect(self._on_import_local_model_dir)
         self.downloadSelectedBtn = QPushButton(self.tr('Download selected'))
         self.downloadSelectedBtn.clicked.connect(self._on_download_clicked)
         btn_row.addWidget(select_all_btn)
         btn_row.addWidget(deselect_all_btn)
+        btn_row.addWidget(import_local_btn)
         btn_row.addWidget(self.downloadSelectedBtn)
         btn_row.addStretch()
         download_layout.addLayout(btn_row)
@@ -284,6 +290,38 @@ class ModelManagerDialog(QDialog):
         self._download_worker.finished.connect(self._on_download_finished)
         self._download_worker.error.connect(self._on_download_error)
         self._download_thread.start()
+
+    def _on_import_local_model_dir(self):
+        from utils import shared
+        src_dir = QFileDialog.getExistingDirectory(self, self.tr('Select local model directory'))
+        if not src_dir:
+            return
+        dst_root = os.path.join(getattr(shared, 'PROGRAM_PATH', os.getcwd()), 'data', 'models')
+        os.makedirs(dst_root, exist_ok=True)
+        copied = 0
+        overwritten = 0
+        errors = []
+        for root, _, files in os.walk(src_dir):
+            rel = os.path.relpath(root, src_dir)
+            dst_dir = dst_root if rel == "." else os.path.join(dst_root, rel)
+            os.makedirs(dst_dir, exist_ok=True)
+            for name in files:
+                src_fp = os.path.join(root, name)
+                dst_fp = os.path.join(dst_dir, name)
+                try:
+                    if os.path.exists(dst_fp):
+                        overwritten += 1
+                    else:
+                        copied += 1
+                    shutil.copy2(src_fp, dst_fp)
+                except Exception as e:
+                    errors.append(f"{src_fp}: {e}")
+        msg = self.tr('Import complete.\nNew files: {}\nOverwritten: {}\nDestination: {}').format(copied, overwritten, dst_root)
+        if errors:
+            msg += '\n\n' + self.tr('Some files failed to import (showing first 5):\n{}').format('\n'.join(errors[:5]))
+            QMessageBox.warning(self, self.tr('Import local models'), msg)
+        else:
+            QMessageBox.information(self, self.tr('Import local models'), msg)
 
     def _on_download_finished(self, success: int, failed: int, errors: List[str]):
         if self._download_thread and self._download_thread.isRunning():

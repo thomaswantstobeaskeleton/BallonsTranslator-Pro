@@ -1,7 +1,7 @@
 """
 First-launch dialog to choose which model packages to download (Issue #15).
 Only shown when config file did not exist (new user). User can select packages
-(e.g. Core only, or Core + Advanced OCR) then download; or skip to use Core only.
+(e.g. Core only, or Core + Advanced OCR), skip to Core-only, or run local-only.
 """
 from __future__ import annotations
 
@@ -120,11 +120,15 @@ class ModelPackageSelectorDialog(QDialog):
         skip_btn = QPushButton(self.tr("Skip (Core only)"))
         skip_btn.setToolTip(self.tr("Download only the Core package (recommended minimum)."))
         skip_btn.clicked.connect(self._on_skip)
+        local_only_btn = QPushButton(self.tr("Skip all downloads (local-only)"))
+        local_only_btn.setToolTip(self.tr("Do not download any model package now. Use only already-local modules/files."))
+        local_only_btn.clicked.connect(self._on_local_only)
         download_btn = QPushButton(self.tr("Download selected"))
         download_btn.setDefault(True)
         download_btn.setFocus()
         download_btn.clicked.connect(self._on_download)
         btn_row.addWidget(skip_btn)
+        btn_row.addWidget(local_only_btn)
         btn_row.addWidget(download_btn)
         layout.addLayout(btn_row)
 
@@ -159,6 +163,12 @@ class ModelPackageSelectorDialog(QDialog):
 
     def _on_skip(self):
         self._result = ["core"]
+        self._offline_local_only = False
+        self.accept()
+
+    def _on_local_only(self):
+        self._result = []
+        self._offline_local_only = True
         self._result_preset_ids = ["core_minimal"]
         self.accept()
 
@@ -186,6 +196,9 @@ class ModelPackageSelectorDialog(QDialog):
         """Return selected low-level package IDs (used by downloader)."""
         return getattr(self, "_result", ["core"])
 
+    def is_offline_local_only_selected(self) -> bool:
+        """True if user explicitly selected first-run local-only mode."""
+        return bool(getattr(self, "_offline_local_only", False))
     def get_selected_preset_ids(self):
         """Return selected preset ID(s) for reproducible setup metadata."""
         return getattr(self, "_result_preset_ids", [])

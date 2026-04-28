@@ -105,6 +105,11 @@ Use one of these **official startup entrypoints**:
 3. **Source workflow**: Tools → Manga/Comic source to search/download chapters.
 4. **Export workflow**: Tools → Export all pages (including PDF export options).
 
+1. **Clone and run:** `git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git && cd BallonsTranslator-Pro && python launch.py`
+2. **First run:** Installs base deps. When `config.json` is missing (e.g. fresh install), a **model package selector** appears: choose which packages to download (Core only, or Core + Advanced OCR / Advanced inpainting, etc.). The **main window opens immediately**; model packages then download in the background (so you can retry without restarting if a download fails). First-run dialog now also includes **Skip all downloads, run with local-only modules** for offline use (no startup download). Use **Tools → Models → Retry model downloads** to retry after a failed or interrupted download. After a successful download, detector/OCR/inpainter/translator are set to core defaults (ctd, manga_ocr, aot, google). You can download more later via **Tools → Manage models**. If `config.json` already existed, all models are downloaded as before (legacy). Config loads from `config/config.example.json` when missing; manual download paths are shown in the log.
+3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
+4. **New modules** appear automatically; install only the dependencies for the modules you use
+5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. *This only works if you cloned the repo with git (e.g. `git clone ...`). If you downloaded a ZIP, download the latest ZIP from GitHub and replace the folder to update.* Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
 Related docs:
 - Translation context/glossary: [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
 - InDesign LPtxt export: [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md)
@@ -465,10 +470,20 @@ In **text edit mode**, right-click on the canvas to open a context menu. Items a
 3. **Check** — refresh status; optionally enable **Check compatibility (slow)** to try loading each module and detect missing deps.
 4. Select rows in the download section → **Download selected** — downloads missing models that have a file list to `data/models/`. Modules with no file list (optional pip) are not downloadable here; install them with pip as shown in the check table.
 5. Models are stored per module (e.g. `comictextdetector.pt.onnx`, `lama_large_512px.ckpt`).
+6. **Import local model directory...** lets you copy an existing local model folder into `data/models/` (offline migration helper).
 
 **Module visibility:** Without **Config → General → Dev mode**, detector/OCR/translator dropdowns show only modules that are compatible with your environment (e.g. Python version) and ready to use. With **Dev mode** enabled, all registered modules appear so you can test or install optional ones (e.g. Nemotron OCR v1 requires Python 3.12+; see **docs/OPTIONAL_DEPENDENCIES.md**).
 
 ---
+
+
+### Offline / local-only flow
+
+1. On first run, choose **Skip all downloads, run with local-only modules**.
+2. Open **Tools → Manage models** and use **Import local model directory...** (or Download selected when online).
+3. In Config module selectors, choose only modules marked as downloaded/compatible in Manage models.
+4. If a selected module is missing files, selector/pipeline errors now include direct guidance to **Tools → Manage models**.
+5. Optional local diagnostics: enable **Config → General → Dev mode + diagnostic mode** to log offline-path events (`startup.offline_local_only`) locally.
 
 ### Run presets and pipeline stages
 
