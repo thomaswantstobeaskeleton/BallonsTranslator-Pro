@@ -6,6 +6,7 @@ or a YOLO .pt as primary (no HF). Use model_id: HF id (e.g. ogkalu/...) or path 
 """
 import copy
 import os.path as osp
+import time
 import numpy as np
 import cv2
 from typing import Tuple, List
@@ -324,6 +325,26 @@ if _HF_DET_AVAILABLE:
             self._conjoined_yolo_path = None
             self._conjoined_yolo_paths: List[str] = []
             self._conjoined_device = None
+            self._warning_state = {}
+
+        def _warn_soft_fail(self, stage: str, error: Exception = None, proj=None, model_ref: str = None):
+            page_id = getattr(proj, "current_img", None) if proj is not None else None
+            model_value = model_ref or (self.params.get("model_id") or {}).get("value", self._model_id)
+            err_text = f"{type(error).__name__}: {error}" if error is not None else "unknown"
+            key = ("hf_object_det", stage, str(model_value), str(page_id), err_text)
+            now = time.monotonic()
+            last_ts = self._warning_state.get(key, 0.0)
+            if now - last_ts < 60:
+                return
+            self._warning_state[key] = now
+            self.logger.warning(
+                "detector_soft_fail detector=%s stage=%s model=%s page=%s error=%s",
+                "hf_object_det",
+                stage,
+                model_value or "unknown",
+                page_id or "unknown",
+                err_text,
+            )
 
         @staticmethod
         def _parse_multiline_paths(s) -> List[str]:
@@ -821,7 +842,7 @@ if _HF_DET_AVAILABLE:
                     pil_img = PILImage.fromarray(det_img)
                     results = pipe_to_use(pil_img)
                 except Exception as e:
-                    self.logger.warning(f"HF object-detection failed: {e}")
+                    self._warn_soft_fail(stage="primary_hf_predict", error=e, proj=proj)
                     return out
                 if not results:
                     return out
@@ -1029,9 +1050,9 @@ if _HF_DET_AVAILABLE:
                                 if not overlap:
                                     blk_list.append(o)
                                     existing.append(o)
-            except Exception:
+            except Exception as e:
                 # Never fail detection due to optional secondary pass
-                pass
+                self._warn_soft_fail(stage="conjoined_secondary_merge", error=e, proj=proj)
             inset_ratio = 0.0
             bi = self.params.get("box_inset_ratio", {})
             if isinstance(bi, dict):
