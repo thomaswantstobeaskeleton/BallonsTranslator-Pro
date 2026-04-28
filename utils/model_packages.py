@@ -11,7 +11,6 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from typing import Dict, List, Optional, Any
 
 from qtpy.QtCore import QT_TRANSLATE_NOOP
 
@@ -51,9 +50,17 @@ PACKAGE_TIERS = {
 }
 
 # Human-readable labels and short descriptions for the first-launch dialog
+FALLBACK_PACKAGE_LABELS = {
+    "core": ("Core (recommended)", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+    "advanced_ocr": ("Advanced OCR", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
+    "advanced_inpaint": ("Advanced inpainting", "LaMa variants, ONNX, PatchMatch"),
+    "optional_onnx": ("Optional ONNX inpainting", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+}
+
+# Translation extraction catalog for package labels/descriptions.
 PACKAGE_LABELS = {
     "core": (
-        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Core (recommended)"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Core package"),
         QT_TRANSLATE_NOOP("ModelPackageCatalog", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
     ),
     "advanced_ocr": (
@@ -68,19 +75,6 @@ PACKAGE_LABELS = {
         QT_TRANSLATE_NOOP("ModelPackageCatalog", "Optional ONNX inpainting"),
         QT_TRANSLATE_NOOP("ModelPackageCatalog", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
     ),
-FALLBACK_PACKAGE_LABELS = {
-    "core": ("Core (recommended)", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
-PACKAGE_LABELS = {
-    "core": ("Core (recommended) [Stable]", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
-    "advanced_ocr": ("Advanced OCR [External dependency heavy]", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
-    "advanced_inpaint": ("Advanced inpainting [Beta]", "LaMa variants, ONNX, PatchMatch"),
-    "optional_onnx": ("Optional ONNX inpainting [Experimental]", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
-# Human-readable labels and short descriptions for package-level advanced/custom mode.
-PACKAGE_LABELS = {
-    "core": ("Core package", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
-    "advanced_ocr": ("Advanced OCR", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
-    "advanced_inpaint": ("Advanced inpainting", "LaMa variants, ONNX, PatchMatch"),
-    "optional_onnx": ("Optional ONNX inpainting", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
 }
 
 FALLBACK_MODULE_MANIFEST = {

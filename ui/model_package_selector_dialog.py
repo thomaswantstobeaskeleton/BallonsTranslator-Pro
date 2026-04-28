@@ -19,11 +19,11 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 
-from utils.model_packages import MODEL_PACKAGES, PACKAGE_LABELS, PACKAGE_TIERS
 from utils.model_packages import (
     MODEL_PACKAGES,
     MODEL_PACKAGE_PRESETS,
     PACKAGE_LABELS,
+    PACKAGE_TIERS,
     DEFAULT_MODEL_PACKAGE_PRESET_ID,
     get_package_ids_for_preset,
 )
@@ -57,14 +57,11 @@ class ModelPackageSelectorDialog(QDialog):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        group = QGroupBox(self.tr("Model packages"))
-        group_layout = QVBoxLayout(group)
         tier_order = {"Stable": 0, "Beta": 1, "Experimental": 2, "External dependency heavy": 3}
         sorted_package_ids = sorted(
             MODEL_PACKAGES.keys(),
             key=lambda pid: (tier_order.get(PACKAGE_TIERS.get(pid, "Stable"), 99), pid),
         )
-        for package_id in sorted_package_ids:
         presets_group = QGroupBox(self.tr("Recommended presets"))
         presets_layout = QVBoxLayout(presets_group)
         for preset_id, preset in MODEL_PACKAGE_PRESETS.items():
@@ -103,7 +100,7 @@ class ModelPackageSelectorDialog(QDialog):
 
         advanced_group = QGroupBox(self.tr("Manual package selection"))
         group_layout = QVBoxLayout(advanced_group)
-        for package_id in MODEL_PACKAGES:
+        for package_id in sorted_package_ids:
             label, desc = PACKAGE_LABELS.get(package_id, (package_id, ""))
             cb = QCheckBox(QCoreApplication.translate("ModelPackageCatalog", label))
             cb.setToolTip(QCoreApplication.translate("ModelPackageCatalog", desc))
