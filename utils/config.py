@@ -490,6 +490,8 @@ class ProgramConfig(Config):
     manga_source_translate_raw_search: bool = True  # For raw sources: translate search query to Japanese/Korean/Chinese
     # Model packages to download at startup (None = legacy "all"; ["core"] = minimal). See utils.model_packages.
     model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
+    # Last startup/retry model download status for support/debug (timestamp, package ids, and result counts).
+    model_download_last_status: Dict = field(default_factory=dict)
     # User-facing preset IDs selected on first run (or ["custom"] for manual package selection).
     model_package_preset_ids: List[str] = field(default_factory=lambda: ["balanced_default"])
     # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
@@ -612,6 +614,7 @@ CONFIG_KEY_ORDER = (
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
     "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
     "manga_source_translate_raw_search",
+    "model_packages_enabled", "model_download_last_status",
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",

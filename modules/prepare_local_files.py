@@ -1,11 +1,12 @@
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Dict, Any
+from datetime import datetime, timezone
 import os.path as osp
 import os
 
 from . import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
 from .base import BaseModule, LOGGER
 import utils.shared as shared
-from utils.download_util import download_and_check_files
+from utils.download_util import download_and_check_files, check_local_file
 
 # Optional ONNX inpainter models (modules only registered when onnxruntime is installed)
 OPTIONAL_ONNX_MODELS = [
@@ -114,4 +115,142 @@ def prepare_local_files_forall():
     if shared.CACHE_UPDATED:
         shared.dump_cache()
 
+
+def _as_list(v):
+    if isinstance(v, list):
+        return v
+    return [v]
+
+
+def _resolve_target_files(download_kwargs: Dict[str, Any]) -> tuple[list, list]:
+    files = _as_list(download_kwargs.get('files', []))
+    save_files = download_kwargs.get('save_files')
+    if save_files is None:
+        save_files = files
+    save_files = _as_list(save_files)
+    save_dir = download_kwargs.get('save_dir')
+    if save_dir:
+        save_files = [osp.join(save_dir, sf) for sf in save_files]
+    sha = download_kwargs.get('sha256_pre_calculated')
+    if isinstance(sha, list):
+        sha_list = sha
+    elif sha is None:
+        sha_list = [None] * len(save_files)
+    else:
+        sha_list = [sha]
+    if len(sha_list) < len(save_files):
+        sha_list.extend([None] * (len(save_files) - len(sha_list)))
+    return save_files, sha_list
+
+
+def _all_files_ready(download_kwargs: Dict[str, Any]) -> bool:
+    save_files, sha_list = _resolve_target_files(download_kwargs)
+    if not save_files:
+        return False
+    for savep, sha in zip(save_files, sha_list):
+        exists, valid, _ = check_local_file(savep, sha, cache_hash=True)
+        if not exists or not valid:
+            return False
+    return True
+
+
+def prepare_local_files_forall_with_summary() -> Dict[str, Any]:
+    """
+    Download model files and return a structured summary for UI/logging.
+    """
+    import utils.config as program_config
+    from utils.model_packages import get_module_classes_for_packages, package_ids_include_pkuseg, package_ids_include_optional_onnx
+
+    pcfg = program_config.pcfg
+    package_ids = getattr(pcfg, "model_packages_enabled", None)
+    effective_packages = list(package_ids) if package_ids is not None else ["legacy_all"]
+    module_list = get_module_classes_for_packages(package_ids)
+    if module_list is None:
+        module_list = []
+        for registered in [INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS]:
+            for module_key in registered.module_dict.keys():
+                module_list.append(registered.get(module_key))
+
+    downloadable_modules = []
+    for cls in module_list:
+        if cls is None:
+            continue
+        if getattr(cls, 'download_file_on_load', False) or getattr(cls, 'download_file_list', None) is None:
+            continue
+        downloadable_modules.append(cls)
+
+    LOGGER.info(
+        "Model download start | package_ids=%s | module_count=%d | pkuseg=%s | optional_onnx=%s",
+        effective_packages,
+        len(downloadable_modules),
+        package_ids_include_pkuseg(package_ids),
+        package_ids_include_optional_onnx(package_ids),
+    )
+
+    downloaded = 0
+    failed = 0
+    skipped = 0
+    failed_items: List[str] = []
+
+    for cls in downloadable_modules:
+        module_id = f"{cls.__module__}.{cls.__name__}"
+        before_ready = True
+        for download_kwargs in cls.download_file_list:
+            if not _all_files_ready(download_kwargs):
+                before_ready = False
+                break
+        module_success = True
+        for download_kwargs in cls.download_file_list:
+            ok = download_and_check_files(**download_kwargs)
+            if not ok:
+                module_success = False
+        if module_success and before_ready:
+            skipped += 1
+        elif module_success:
+            downloaded += 1
+        else:
+            failed += 1
+            failed_items.append(module_id)
+            LOGGER.error("Model download failed for module=%s", module_id)
+
+    if package_ids_include_optional_onnx(package_ids):
+        for idx, kw in enumerate(OPTIONAL_ONNX_MODELS):
+            item_id = f"optional_onnx[{idx}]"
+            before_ready = _all_files_ready(kw)
+            ok = download_and_check_files(**kw)
+            if ok and before_ready:
+                skipped += 1
+            elif ok:
+                downloaded += 1
+            else:
+                failed += 1
+                failed_items.append(item_id)
+                LOGGER.error("Model download failed for optional ONNX asset=%s", item_id)
+
+    if package_ids_include_pkuseg(package_ids):
+        try:
+            prepare_pkuseg()
+            downloaded += 1
+        except Exception as e:
+            failed += 1
+            failed_items.append("pkuseg")
+            LOGGER.error("Model download failed for pkuseg: %s", e)
+
+    if shared.CACHE_UPDATED:
+        shared.dump_cache()
+
+    summary = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "package_ids": effective_packages,
+        "module_count": len(downloadable_modules),
+        "downloaded": downloaded,
+        "failed": failed,
+        "skipped": skipped,
+        "failed_items": failed_items,
+    }
+    LOGGER.info(
+        "Model download result | package_ids=%s | module_count=%d | downloaded=%d | failed=%d | skipped=%d | failed_items=%s",
+        summary["package_ids"], summary["module_count"], summary["downloaded"], summary["failed"], summary["skipped"], summary["failed_items"]
+    )
+    return summary
 
