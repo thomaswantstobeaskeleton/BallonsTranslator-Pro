@@ -3915,4 +3915,84 @@ All existing translation results will be cleared!</source>
     <message><source>Optional ONNX inpainting</source><translation>可选 ONNX 图像修复</translation></message>
     <message><source>Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)</source><translation>Lama 2025 / lama-manga ONNX（更小，CPU 更友好）</translation></message>
 </context>
+
+<context>
+    <name>StartupModelCoverage</name>
+    <message>
+        <source>Copy model files from an existing local folder into this app\'s data/models directory.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Core package</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Core package not selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Do not download any model package now. Use only already-local modules/files.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download complete. Defaults updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download partially complete.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import local model directory...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import local models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual package selection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manually select low-level packages instead of using a preset.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model package download complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model package download partially complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model packages have been downloaded. Applied modules:\n</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Manage Models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select local model directory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skip all downloads (local-only)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Some model packages failed. Failed items: {0}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Summary: downloaded {0}, failed {1}, skipped {2}.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
 </TS>
