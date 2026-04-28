@@ -24,7 +24,7 @@
    `git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git && cd BallonsTranslator-Pro && python launch.py`
 
 2. **首次运行：**  
-   自动安装基础依赖。若不存在 `config.json`（全新安装），会弹出 **模型包选择** 对话框：选择要下载的模型包（仅核心包，或核心 + 高级 OCR / 高级修复等）。**主窗口会立即打开**，模型包在后台下载；若下载失败或中断，无需重启，使用 **工具 → 模型 → 重试下载模型** 即可。下载成功后，检测器/OCR/修复/翻译会恢复为核心默认（ctd、manga_ocr、aot、google）。之后可通过 **工具 → 管理模型** 下载更多模型。若已有 `config.json`，则按当前配置下载；缺省仅下载核心包，避免占用多余磁盘（见 [Issue #15](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/issues/15)）。
+   自动安装基础依赖。若不存在 `config.json`（全新安装），会弹出 **模型包选择** 对话框：选择要下载的模型包（仅核心包，或核心 + 高级 OCR / 高级修复等）。**主窗口会立即打开**，模型包在后台下载；若下载失败或中断，无需重启，使用 **工具 → 模型 → 重试下载模型** 即可。首次启动还新增 **跳过所有下载（仅本地模块）** 选项，适合离线场景。下载成功后，检测器/OCR/修复/翻译会恢复为核心默认（ctd、manga_ocr、aot、google）。之后可通过 **工具 → 管理模型** 下载更多模型。若已有 `config.json`，则按当前配置下载；缺省仅下载核心包，避免占用多余磁盘（见 [Issue #15](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/issues/15)）。
 
 3. **配置：** 打开设置面板 → 在 **文本检测**、**OCR**、**图像修复**、**翻译** 下拉框中选择模块。
 
@@ -67,6 +67,15 @@
 | **修复** | lama_large_512px | mask_dilation 1–2，inpaint_size 1024 |
 
 更多质量分级与设置见 [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md)、[docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)。
+
+---
+
+## 离线 / 仅本地模块流程
+
+1. 首次启动时可选择 **跳过所有下载（仅本地模块）**。
+2. 打开 **工具 → 管理模型**，使用 **导入本地模型目录...**（在线时也可“下载所选”）。
+3. 模块下拉框与流水线在模型缺失时，会明确提示前往 **工具 → 管理模型** 处理。
+4. 如需本地诊断日志，可开启 `diagnostic mode`，会记录 `startup.offline_local_only` 等离线路径事件（仅本地日志）。
 
 ---
 

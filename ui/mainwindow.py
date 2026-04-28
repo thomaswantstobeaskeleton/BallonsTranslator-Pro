@@ -1818,6 +1818,12 @@ class MainWindow(mainwindow_cls):
         """Run initial model download after window is shown (set by launch.py so app opens first)."""
         package_ids = getattr(pcfg, 'model_packages_enabled', None)
         if package_ids is not None and len(package_ids) == 0:
+            LOGGER.info("Initial model download skipped (local-only mode selected).")
+            log_diagnostic_event(
+                "startup.offline_local_only",
+                selected=True,
+                package_ids=[],
+            )
             return
         dlg = ModelDownloadProgressDialog(self)
         thread = ModelDownloadThread(self)
@@ -1844,9 +1850,14 @@ class MainWindow(mainwindow_cls):
         """Retry downloading model packages (Tools → Retry model downloads). Useful when first-run download failed."""
         package_ids = getattr(pcfg, 'model_packages_enabled', None)
         if package_ids is not None and len(package_ids) == 0:
+            log_diagnostic_event(
+                "startup.offline_local_only",
+                selected=True,
+                retry_requested=True,
+            )
             create_info_dialog({
                 'title': self.tr('No model packages selected.'),
-                'text': self.tr('Use Tools → Manage models to download individual models, or restart the app to choose packages again.'),
+                'text': self.tr('First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.'),
             })
             return
         dlg = ModelDownloadProgressDialog(self)
