@@ -17,6 +17,7 @@ from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, Q
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
+from utils.detect_layout_flags import should_enable_auto_textlayout, should_run_post_detect_autofit
 from utils.text_layout import _merge_stub_lines_in_string
 from utils.textblock import TextBlock, TextAlignment, examine_textblk
 from utils.split_text_region import split_textblock
@@ -2819,6 +2820,7 @@ class MainWindow(mainwindow_cls):
 
     def on_pagtrans_finished(self, page_index: int):
         blk_list = self.imgtrans_proj.get_blklist_byidx(page_index)
+        detected_block_indices = [ii for ii, blk in enumerate(blk_list) if getattr(blk, 'font_size', -1) < 0]
         ffmt_list = None
         if len(self.backup_blkstyles) == self.imgtrans_proj.num_pages and len(self.backup_blkstyles[page_index]) == len(blk_list):
             ffmt_list: List[FontFormat] = self.backup_blkstyles[page_index]
@@ -2884,10 +2886,12 @@ class MainWindow(mainwindow_cls):
                     if sw > 0 and pcfg.module.enable_ocr and pcfg.module.enable_detect and not override_fnt_size:
                         blk.font_size = blk.font_size / (1 + sw)
 
-            self.st_manager.auto_textlayout_flag = (
-                pcfg.let_autolayout_flag
-                and (pcfg.let_fntsize_flag == 0)
-                and (pcfg.module.enable_detect or pcfg.module.enable_ocr or pcfg.module.enable_translate)
+            self.st_manager.auto_textlayout_flag = should_enable_auto_textlayout(
+                pcfg.let_autolayout_flag,
+                pcfg.let_fntsize_flag,
+                pcfg.module.enable_detect,
+                pcfg.module.enable_ocr,
+                pcfg.module.enable_translate,
             )
         else:
             self.st_manager.auto_textlayout_flag = False
@@ -2902,6 +2906,14 @@ class MainWindow(mainwindow_cls):
         # Run auto layout (and balloon shape Auto) on all blocks so text boxes match bubble shape after Run.
         if self.st_manager.auto_textlayout_flag:
             self.st_manager.run_auto_layout_on_current_page_once()
+            if should_run_post_detect_autofit(
+                pcfg.let_autolayout_flag,
+                pcfg.let_fntsize_flag,
+                pcfg.module.enable_detect,
+                pcfg.module.enable_ocr,
+                pcfg.module.enable_translate,
+            ):
+                self.st_manager.run_detect_post_autofit_on_current_page_once(detected_block_indices)
 
         if not pcfg.module.enable_detect and pcfg.module.enable_translate:
             # Skip squeeze when auto layout ran; layout_textblk already set box size and squeeze would narrow/stretch boxes
