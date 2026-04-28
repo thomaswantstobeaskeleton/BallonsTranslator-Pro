@@ -1,3 +1,4 @@
+import ast
 from packaging.version import parse as package_version_parse
 
 from .yolov5_utils import scale_img
@@ -207,18 +208,40 @@ class Model(nn.Module):
 
 def parse_model(d, ch):  # model_dict, input_channels(3)
     # LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+    module_registry = {
+        "Conv": Conv, "GhostConv": GhostConv, "Bottleneck": Bottleneck, "GhostBottleneck": GhostBottleneck,
+        "SPP": SPP, "SPPF": SPPF, "DWConv": DWConv, "Focus": Focus, "BottleneckCSP": BottleneckCSP,
+        "C3": C3, "C3TR": C3TR, "C3SPP": C3SPP, "C3Ghost": C3Ghost, "Concat": Concat,
+        "Detect": Detect, "Contract": Contract, "Expand": Expand, "nn.BatchNorm2d": nn.BatchNorm2d,
+        "BatchNorm2d": nn.BatchNorm2d,
+    }
+
+    def resolve_module(module):
+        if not isinstance(module, str):
+            return module
+        if module not in module_registry:
+            raise ValueError(f"Unsupported module symbol in model config: {module}")
+        return module_registry[module]
+
+    def parse_arg(value):
+        if not isinstance(value, str):
+            return value
+        if value in module_registry:
+            return module_registry[value]
+        try:
+            return ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return value
+
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m = eval(m) if isinstance(m, str) else m  # eval strings
+        m = resolve_module(m)
         for j, a in enumerate(args):
-            try:
-                args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except NameError:
-                pass
+            args[j] = parse_arg(a)
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
