@@ -1,81 +1,125 @@
-# BallonsTranslatorPro
+# BallonsTranslator-Pro
 
-**Repository:** [https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) · **Version:** 1.7.0
+Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) focused on comic translation workflows with broader detector/OCR/inpainting choices and practical batch tools.
 
-Community fork of [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with extended features. Original behavior and defaults are unchanged unless noted. 
+- 中文文档（与本页同结构）: [README_zh_CN.md](README_zh_CN.md)
+- Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
-If anyone would like to, i made this project simply to translate Rebirth Of The Urban Immortal Cultivator, the manhwa, and now that ive done that i want to focus on translating the anime of it, i have fully implemented a video translator module with a completely working ui, and models that work well and are fast with it. https://www.youtube.com/watch?v=HHvQd2uoGik its on youtube and you can download it yourselves, subtitles are hardcoded. if someone ever sees this and wants to help me translate it with good translations that flow well, feel free to; ill pay a certain amount depending on how much youve translated, thank you for reading.. im to lazy to do anymore work on this fork.
+**What’s new (short):** v1.7.0 refreshed auto-layout behavior and first-run model downloads (non-blocking startup). Details: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-**Recent Changes Highlights:** I reworked the whole auto layout feature, added some customizable options for it, and fixed text sizing, lines, constraints, clamping to and only moving the text box geometrically.
+## Overview
 
-**中文说明：** [README_zh_CN.md](README_zh_CN.md)
+BallonsTranslator-Pro keeps the upstream flow (detect → OCR → translate → inpaint) while adding larger optional module coverage, model management helpers, and manga/comic source utilities.
 
----
+See also:
+- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Model references: [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
+- Quality tiers: [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
 
-## At a glance
+## Install
 
-| Topic | Summary |
-|-------|---------|
-| **What** | Fork with 20+ detectors (incl. dual detection), 30+ OCR engines, 15+ inpainters, translation context & glossary, text eraser, batch queue, **Manga/Comic source** (MangaDex incl. raw/original language, GOMANGA, Manhwa Reader, Comick, MangaForFree, ToonGod, Mangakakalot, NaruRaw, ManhwaRaw, 1kkk, generic chapter URL, Local folder), **batch export to PDF**, **duplicate/overlapping block check**, 370 fonts. Full docs and recommended settings. |
-| **Upstream** | [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) — base project |
-| **Merge** | Suitable for upstream as a separate experimental branch. See [CONTRIBUTING.md](CONTRIBUTING.md). |
+1. Clone repository:
+   ```bash
+   git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git
+   cd BallonsTranslator-Pro
+   ```
+2. Start directly (auto-installs base requirements on first run):
+   ```bash
+   python launch.py
+   ```
+3. Optional setup scripts:
+   - Windows: `setup.bat`
+   - Linux/macOS: `./setup.sh`
 
+## First Run
 
-**Recent additions:** **UI (Issue #7):** Title bar has **File** (open/save/export/import), **Edit** (with Keyword substitution submenu), **View** (grouped: panels, shortcuts, styles, Help), **Pipeline** (renamed from Run; stage toggles and presets), **Tools** (grouped: project, export, sources, queue, models). Left bar Open menu trimmed to open/save only; export/import are in File. Config → General split into Startup, Display, Typesetting, OCR result, Save, Canvas, Integrations. Canvas context menu: Edit has separators; **Run** (renamed from Detect & Run). **Secondary detector — outside bubbles only** (Config → Detector: use primary for bubbles e.g. YSGYolo, secondary e.g. EasyOCR for signs/captions only). **Ensemble (3+1) translator** now shows all translators in candidate/judge dropdowns with improved Zh→En defaults (Google, nllb200, LLM_API_Translator; judge LLM_API_Translator; use OpenRouter in LLM_API params). **Merge settings:** detector merge_gap_px (e.g. EasyOCR) and **Merge nearby blocks (collision)** in Config → DL Module to fix small text boxes. **Delete and Recover:** Deleting text blocks (canvas right-click → Delete and Recover) now syncs with the project so saved files and pipeline runs stay consistent; undo/redo restores or re-removes blocks in project pages. Manual mask/drawing edits are merged into the inpainted image before running Inpaint; per-block text eraser masks are applied when building the inpainting mask so holes are preserved; canvas refreshes after delete/recover to avoid display artifacts. **Google Translate** works without an API key by default (same as original BallonsTranslator); set an API key in Config → Translator → Google only if you need higher limits. **Translation context:** `data/translation_context/default` is created automatically when using series context so translation no longer fails with a missing directory. **Auto fit to box:** When Config → Typesetting is set to “Auto fit to box”, Detect/OCR/Translate runs now trigger auto font scaling for new blocks; you can also re-run via right-click → Format → **Auto fit font size to box** after changing font. **Context menu options** (right-click menu customization) dialog text clarified and grouped by category. **Inpainting with upscale:** When running with initial upscale but without re-running detection, block coordinates are scaled to the upscaled image so inpainting runs correctly. New docs: [TROUBLESHOOTING](docs/TROUBLESHOOTING.md), [STARRIVER](docs/STARRIVER.md), [CONJOINED_MODELS](docs/CONJOINED_MODELS.md), [DANGO_REFERENCE](docs/DANGO_REFERENCE.md). **Config:** Fresh installs use `config/config.example.json` as the template; your `config/config.json` is never overwritten by updates.
+### Quick start (5 steps) / 快速开始（5 步）
 
-**Quick navigation:** The title bar includes an **omni search** box that searches **menu actions**, **settings**, and the **current canvas text**. Shortcut: **Ctrl+P** (customizable in View → Keyboard Shortcuts).
+1. **Run app / 启动应用**: `python launch.py`
+2. **Pick model package / 选择模型包**: choose Core only first for fastest startup.
+3. **Open pages / 打开页面**: File → Open Folder (or Open Images).
+4. **Select modules / 选择模块**: Config panel → Detector/OCR/Inpaint/Translator.
+5. **Run pipeline / 运行流程**: click **Run** in the bottom bar.
 
-**Latest:** **Layout judge** — Nudge text boxes toward bubble center and keep them inside (Config → Typesetting: Layout judge, clamp overflow, optional small model). **Batch queue** — First item's page selection applies to all queue items. **Glossary / LLM API** — Safer term corrections, page in logs, validation retry and JSON repair. **Qwen_MT translator** — New translator option (Config → Translator → Qwen_MT) using Alibaba’s Qwen-MT API (DashScope); set API key or `DASHSCOPE_API_KEY`. Models: qwen-mt-plus, qwen-mt-flash, qwen-mt-lite. **LLM OCR** — Added OpenRouter option **meta-llama/llama-3.2-11b-vision-instruct** for vision-based OCR. **PaddleOCR-VL offline** — When HuggingFace is unreachable, the app retries from local cache and shows a clear error if the model is not cached; see **docs/TROUBLESHOOTING.md** §2.1. **Dev mode toggle** — Fixed crash when turning Dev mode off (combo delegate event filter no longer touches deleted Qt widgets). **Typesetting / Auto layout (fixes):** On project open, the first page is now always loaded and auto layout is applied so text no longer reverts outside bubbles after reopen. **Auto fit font size to box** (right-click → Format) now correctly scales font to fit the selected box. Text box state (after auto layout) is saved on app close. Layout tuning (Config → Typesetting: Height overflow penalty, Short line penalty, Optimal line breaks, Hyphenation, Optimize line breaks, Constrain to bubble) is fully wired; fixed hyphenation so it runs when enabled. See **docs/TROUBLESHOOTING.md** §9 for overflow and layout tips.
+### First-run model picker (explanation) / 首次运行模型选择器说明
 
-**Typesetting / Auto layout (features):** Config → General → Typesetting now includes **Constrain text box to bubble** (keeps box size and position within the detected bubble), **Optimal line breaks**, **Hyphenation**, and **Optimize line breaks (fewer lines)**. When Constrain to bubble is on, the text box is fixed to the bubble region (correct image coordinates); line-breaking uses full bubble width to reduce squeezed/narrow boxes and fewer lines. Layout no longer moves boxes away from bubbles: resizing from the layout preserves bubble alignment and grows the box symmetrically around the center. Post-translate squeeze is skipped when auto layout ran. Document size growth is capped (width 1.2×, height 1.3×) to avoid unbounded stretch while allowing a bit of overflow so text isn’t cut off. Auto layout now runs **two passes per block** (second pass re-optimizes using the new geometry) and its results are persisted automatically when switching pages or saving the project. See **docs/TROUBLESHOOTING.md** §9–§10 for overflow and coordinate issues. **LLM_API_Translator — Include page image:** The "Include page image" option is now a proper checkbox (Config → Translator → LLM_API_Translator). When unchecked (default for text-only models), the app sends only text to the API and does not retry with image. **First-run model download:** The app now opens the main window first, then downloads selected model packages in the background (so a failed or slow download no longer blocks the UI). Use **Tools → Models → Retry model downloads** to retry if the first run failed. After a successful download (first run or retry), detector, OCR, inpainter, and translator are reset to core defaults (ctd, manga_ocr, aot, google). **Translator chain** — New "Chain" translator runs multiple translators in sequence (e.g. Japanese → English → Chinese); set `chain_translators` and `chain_intermediate_langs` in Config → Translator. **Open ACBF/CBZ** — File → Open → **Open ACBF/CBZ...** opens comic archives (`.cbz`/`.zip`); extracts to a folder and opens as project. **Batch translation script** — `python scripts/batch_translate.py --dir ./folder` runs detect/OCR/translate/inpaint from the command line; use `--no-detect`, `--no-ocr`, `--no-translate`, `--no-inpaint` to skip stages. **Auto fit font size to block** — Format panel checkbox "Auto fit to block" (and per-block option) scales font so text fits the bounding box when layout runs; more font size presets (e.g. 24, 52, 64, 80, 200) in the font size list. **UI/stability:** Issue #19 — translator param crash (e.g. text-generation-webui) fixed; module params guarded so unknown keys are skipped. QPainter and QFont spam reduced (scrollbar uses manual opacity instead of QGraphicsOpacityEffect; font sanitization in launch, config panel labels/table, and bar widgets; drag blur effect removed to avoid "paint device can only be painted by one painter" errors). Default UI font: **Microsoft YaHei UI** (see [docs/TRANSLATIONS.md](docs/TRANSLATIONS.md) for UI translations). Bottom bar **Run** button: fixed size (shows "Run" text), hover scale animation, stays enabled when pipeline is visible. **Bottom bar:** Pipeline strip (Text Detector, OCR, Inpaint, Translate) now stretches from the left edge to the Run button; module dropdowns use size-to-content so they are not overly long; hover opacity/scale animations on Run and canvas-mode checkboxes. **Canvas:** With "Show text box borders" on (bottom bar), right-click on empty space now opens the context menu; right-click and drag still creates a new text box. **Font fix:** QFont point size ≤ 0 (e.g. Windows default -1) is sanitized app-wide to avoid console warnings; **QGuiApplication.setFont** is patched so any caller passes a valid font, and scene-text layout sanitizes block fonts. **Theme & UI customizer** (View → Theme and UI customizer...): single-click Apply applies font (workaround for editable combo); button row spacing tightened; menu label uses "and" instead of "&". **Dev mode:** With Config → General → Dev mode enabled, detector/OCR/translator dropdowns now repopulate correctly (no blank selection); module list is fully cleared before refresh so items show and can be changed. **Bug fixes:** Grok and other LLMs that return `{"1": "text"}`-style JSON are now accepted by LLM_API_Translator; pipeline no longer crashes when the text detector module failed to load (shows error and stops instead of `'NoneType' has no attribute 'detect'`); project save failures now preserve the underlying exception for debugging. **Video translator flow fixer:** Context lines 1–50 (default 20); when context is long the selected model can summarize older lines to stay near token limit; previous lines are shown in parts so conversations that are apart are distinct. See [docs/FLOW_FIXER_SETUP.md](docs/FLOW_FIXER_SETUP.md).
+- Trigger condition / 触发条件: shown when `config/config.json` does not exist (fresh install).
+- Behavior / 行为:
+  - Main window opens first.
+  - Selected model packages download in background.
+  - If download fails, use **Tools → Models → Retry model downloads**.
+- Paths / 路径:
+  - Config template: `config/config.example.json`
+  - Runtime config: `config/config.json`
+  - Downloaded models: `data/models/`
+  - HF cache (optional cleanup): `.btrans_cache/hub`
+- Screenshot references / 截图路径:
+  - UI config panel (example): `doc/src/configpanel.png`
+  - Add your local first-run picker screenshot as: `docs/images/first_run_model_picker.png`
 
-### Typesetting / auto layout — how to customize
+## Model Packages
 
-- **Where to configure**: `Config → General → Typesetting`. Here you can:
-  - **Constrain text box to bubble**: keep boxes inside their detected regions; disables post-translate "squeeze" so layout owns the box size.
-  - **Layout judge (center + margin)**: nudge text boxes toward the bubble center and keep them away from edges/corners; **Judge margin** and **Judge center strength** tune the effect. **Clamp overflow** shrinks or moves the box so it never extends outside the bubble (fixes text/lines going out). Optional **Use model for judge** with a small default model (e.g. `google/mobilenet_v2_1.0_224`) to modulate nudge strength.
-  - **Optimal line breaks / Hyphenation**: enable Knuth–Plass-style line breaking plus optional hyphenation for long English words.
-  - **Optimize line breaks (fewer lines)**: bias DP and layout scoring toward fewer, wider lines (fewer 1–2 word lines).
-- **Runtime behavior**:
-  - Auto layout runs **twice per block** when triggered by the pipeline or the **Auto layout** action; the second pass uses the new geometry to re-pack lines (e.g. `"He fought against / countless races across the starry / sky, ..."` instead of one word per line).
-  - Text boxes grow **symmetrically around their center** (width/height caps still apply) to stay visually centered in the bubble.
-  - Updated layout is written back into the project on page switches and saves, so reopening the project preserves the improved layout.
-- **Manual controls on canvas**:
-  - Right-click a block → **Format → Auto layout text** to re-run layout on the selection.
-  - Right-click → **Format → Auto fit font size to box** to rescale font so the current text fits the existing box without changing bubble geometry.
-  - Use the **Typesetting** section defaults plus per-block overrides (font size, line spacing, alignment, stroke, text-on-path) in the Format panel to fine-tune the final look.
+Use **Tools → Manage models** to add/remove optional packages after first launch.
 
----
+Recommended baseline:
+- Detector: `ctd`
+- OCR: `manga_ocr`
+- Inpaint: `aot`
+- Translator: `google`
 
-### Disclaimer: models and testing
+For best-practice module combinations, check:
+- [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md)
+- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
 
-Currently some yolo and hf models cause inpainting issues, huge overcorrection and misalignment, i have yet to find a fix, so use certain models with caution.
+## Startup Scripts
 
-**OCR models:** Many OCR modules currently have major issues (e.g. compatibility with recent pipeline/coordinate changes, float vs integer crop bounds, inconsistent result format). A fix is being worked on; until then, prefer well-tested engines (e.g. manga_ocr, Paddle, Surya) and report problems with specific modules.
+- `python launch.py`: main entrypoint.
+- `setup.bat` / `setup.sh`: one-time environment bootstrap.
+- `Launch BallonsTranslator.bat` (Windows): run with repo venv Python.
 
-This fork adds **many new optional modules** (detectors, OCR engines, inpainters). **Not all of them have been tested in every environment** (Windows/Linux/macOS, CPU/CUDA, all language pairs). Some issues may persist—e.g. dependency conflicts (see [§8 Optional dependency conflicts](#8-optional-dependency-conflicts-and-workarounds)), OOM on low VRAM, or model-specific bugs. Use **docs/QUALITY_RANKINGS.md** and **docs/MANHUA_BEST_SETTINGS.md** for recommended combinations. If you hit a problem with a particular module, try another from the same category or report an issue with details (OS, device, config). Known dependency conflicts (e.g. craft_det, simple_lama) are documented in **docs/OPTIONAL_DEPENDENCIES.md**.
+Tip: keep `data/` and `config/` beside `launch.py` for portable moves.
 
----
+## Core Workflows
+
+## Supported startup entrypoints
+
+Use one of these **official startup entrypoints**:
+
+1. `python launch.py`
+   - **Use for:** source clone on Windows/Linux/macOS, developer workflows, and CI-like diagnostics.
+   - **Behavior:** uses your current Python interpreter (`sys.executable`) and installs missing base dependencies on first run.
+
+2. `Launch BallonsTranslator.bat`
+   - **Use for:** source clone on Windows **after creating a local `venv`** in the repo root.
+   - **Behavior:** always runs `venv\Scripts\python.exe launch.py` so installs and runtime stay inside the project venv (avoids mixing with global Python).
+
+3. `launch_win*.bat` (`launch_win.bat`, `launch_win_with_autoupdate.bat`, `launch_win_amd_nightly.bat`)
+   - **Use for:** Windows **portable bundle layout** that includes `ballontrans_pylibs_win` (+ optional `PortableGit`).
+   - **Behavior:** prepends bundled portable Python paths, validates `python`/`pip`, then runs `launch.py` (optionally with `--update` or `--nightly`).
+
+> Rule of thumb: if you cloned the repo, start with `python launch.py` (or `Launch BallonsTranslator.bat` once venv exists). If you received a prepacked portable Windows bundle, use the matching `launch_win*.bat` script.
 
 ## Quick start
+1. **Project workflow**: Open folder/images → Detect/OCR/Translate/Inpaint → save project.
+2. **Batch workflow**: Tools → Batch queue for multi-folder processing.
+3. **Source workflow**: Tools → Manga/Comic source to search/download chapters.
+4. **Export workflow**: Tools → Export all pages (including PDF export options).
 
-1. **Clone and run:** `git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro.git && cd BallonsTranslator-Pro && python launch.py`
-2. **First run:** Installs base deps. When `config.json` is missing (e.g. fresh install), a **model package selector** appears: choose which packages to download (Core only, or Core + Advanced OCR / Advanced inpainting, etc.). The **main window opens immediately**; model packages then download in the background (so you can retry without restarting if a download fails). Use **Tools → Models → Retry model downloads** to retry after a failed or interrupted download. After a successful download, detector/OCR/inpainter/translator are set to core defaults (ctd, manga_ocr, aot, google). You can download more later via **Tools → Manage models**. If `config.json` already existed, all models are downloaded as before (legacy). Config loads from `config/config.example.json` when missing; manual download paths are shown in the log.
-3. **Config:** Open the settings panel → choose **Text detection**, **OCR**, **Inpainting**, **Translation** from the dropdowns
-4. **New modules** appear automatically; install only the dependencies for the modules you use
-5. **Updating:** Use **View → Help → Update from GitHub** to pull the latest changes without re-downloading; your config and local files are not overwritten. *This only works if you cloned the repo with git (e.g. `git clone ...`). If you downloaded a ZIP, download the latest ZIP from GitHub and replace the folder to update.* Optional: **Config → General → Auto update from GitHub on startup** (can cause issues — see tooltip).
+Related docs:
+- Translation context/glossary: [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
+- InDesign LPtxt export: [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md)
 
-### Portable / one-click setup (Section 11)
+## Troubleshooting
 
-For a **portable-style** install (e.g. copy folder and run elsewhere):
+Primary guide: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
-1. **Setup script (optional)**  
-   - **Windows:** run `setup.bat` to create a venv and install dependencies (or run `python launch.py` directly; it will install base deps and PyTorch).  
-   - **Windows (recommended after venv exists):** double-click **`Launch BallonsTranslator.bat`** in the project root so the app always runs with **`venv\Scripts\python.exe`** instead of a global Python (avoids mixed pip installs).  
-   - **Linux / macOS:** run `./setup.sh` (or `bash setup.sh`) for the same.
+Common areas:
+- GPU/VRAM limits and fallback strategies
+- Optional dependency conflicts
+- HuggingFace/network download failures
+- OCR/box alignment tuning
 
-2. **Torch**  
-   `launch.py` **auto-detects** GPU and installs the right PyTorch build (NVIDIA CUDA, AMD ROCm on Windows, or CPU). You can override with env **TORCH_COMMAND** (e.g. a custom `pip install torch ...` command) before the first run. Use `--reinstall-torch` to force reinstall.
+## Contribution
 
 3. **Fonts**  
    Pre-bundled fonts are in **`fonts/`**. Add `.ttf` / `.otf` / `.ttc` / `.pfb` there; they are loaded at startup. No need to move them for portable use.
@@ -90,6 +134,53 @@ For a **portable-style** install (e.g. copy folder and run elsewhere):
    See **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for GPU OOM, HuggingFace gated models, provider keys, and dependency conflicts.
 
 ---
+
+## Startup troubleshooting (entrypoint-level)
+
+| Symptom | Likely cause | What to run |
+|---|---|---|
+| `python` is not recognized | Python not installed or not on `PATH` | Install Python 3.10+ and verify with `python --version` (Windows may also use `py -V`). Then retry `python launch.py`. |
+| `No module named pip` / pip command fails | Broken or missing pip in selected interpreter | Run `python -m ensurepip --upgrade` then `python -m pip install --upgrade pip`. Retry startup command. |
+| `Launch BallonsTranslator.bat` says venv missing | `venv\Scripts\python.exe` does not exist | From repo root: `py -3.10 -m venv venv` then `venv\Scripts\python.exe -m pip install -r requirements.txt`, then rerun `Launch BallonsTranslator.bat`. |
+| Torch install fails on first launch | Network/index issue, incompatible wheel, or GPU stack mismatch | Retry with: `python launch.py --reinstall-torch`. If needed, set `TORCH_COMMAND` to a known-good install command, then rerun. See `docs/TROUBLESHOOTING.md` for CUDA/ROCm notes. |
+
+## Diagnostics mode (for startup failure reports)
+
+When reporting startup failures, include **exact command + full console output**.
+
+### A) Source clone (cross-platform)
+
+```bash
+python --version
+python -m pip --version
+python launch.py --debug --reinstall-torch
+```
+
+If launch fails, rerun with logging:
+
+```bash
+python launch.py --debug --reinstall-torch > startup_debug.log 2>&1
+```
+
+Attach `startup_debug.log` to the issue.
+
+### B) Windows source clone with venv launcher
+
+```bat
+venv\Scripts\python.exe --version
+venv\Scripts\python.exe -m pip --version
+Launch BallonsTranslator.bat --debug --reinstall-torch
+```
+
+### C) Windows portable bundle (`launch_win*.bat`)
+
+```bat
+launch_win.bat --debug > startup_portable.log 2>&1
+```
+
+(Or use `launch_win_with_autoupdate.bat` / `launch_win_amd_nightly.bat` for that specific bundle mode.)
+
+Include the generated log file plus OS + GPU information in the report.
 
 ## Key highlights (point by point)
 
@@ -696,6 +787,19 @@ On **AMD** GPUs you can use either **ZLUDA** (translation layer, works with the 
 - **Native ROCm (Windows):** Supported on AMD driver **2026.1.1+**. Requires **Python 3.12** and the ROCm PyTorch stack. Use `launch_win_amd_nightly.bat` or `python launch.py --nightly` after installing the appropriate ROCm wheels (see upstream for current URLs and GPU support). For full step-by-step instructions, HIP SDK vs ZLUDA version table, and driver notes, see the [original BallonsTranslator README](https://github.com/dmMaze/BallonsTranslator) and expand the **“启用 AMD ROCm 显卡加速方法”** (Enable AMD ROCm GPU acceleration) section.
 
 ---
+
+## Module tiers & compatibility
+
+Tier definitions used across docs/UI:
+
+| Tier | Meaning |
+|---|---|
+| **Stable** | Best-tested defaults and first-run presets. |
+| **Beta** | Good coverage, but less battle-tested across environments. |
+| **Experimental** | New/stub/high-variance modules. |
+| **External dependency heavy** | Requires heavier optional stacks or external repos/APIs. |
+
+Canonical matrix: **[docs/MODULE_COMPATIBILITY_MATRIX.md](docs/MODULE_COMPATIBILITY_MATRIX.md)**.
 
 ## 3. Text detection – all modules and how to run
 
@@ -1456,3 +1560,6 @@ The **right-hand panel** (text edit / format panel) and the **comic translation 
 ---
 
 If a module is missing from the dropdown or fails to load, check the console/log for import errors and install the dependencies listed in the tables above. For quality-focused choices, use **docs/QUALITY_RANKINGS.md** and **docs/MANHUA_BEST_SETTINGS.md**.
+- Read: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Open issues with reproducible info (OS, GPU/CPU, module names, logs, sample page).
+- Keep changes small and focused.

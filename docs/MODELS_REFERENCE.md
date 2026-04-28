@@ -3,6 +3,7 @@
 This document maps the **curated list of 20+ models per category** (from community recommendations) to **what BallonsTranslator already supports** and what is optional or potential. Use it to choose modules and plan integrations.
 
 **Target:** Windows + NVIDIA GPU. VRAM notes are approximate. For **quality/accuracy rankings** (best to worst) of all detection, OCR, and translation modules, see **[docs/QUALITY_RANKINGS.md](QUALITY_RANKINGS.md)**.
+For tier labels (Stable/Beta/Experimental/External dependency heavy) and cross-platform compatibility, use the canonical matrix: **[docs/MODULE_COMPATIBILITY_MATRIX.md](MODULE_COMPATIBILITY_MATRIX.md)**.
 
 ---
 

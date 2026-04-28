@@ -57,6 +57,7 @@ from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
 from .image_edit import ImageEditMode
 from utils.image_colorization import apply_colorization
+from utils.model_manager import get_available_module_keys
 
 
 class PageListView(QListWidget):
@@ -1802,17 +1803,105 @@ class MainWindow(mainwindow_cls):
         dlg = ModelManagerDialog(self)
         dlg.exec()
 
-    def _reset_modules_to_core_defaults(self):
-        """Set detector, OCR, inpainter, and translator to core defaults after models are downloaded."""
-        pcfg.module.textdetector = 'ctd'
-        pcfg.module.ocr = 'manga_ocr'
-        pcfg.module.inpainter = 'aot'
-        pcfg.module.translator = 'google'
+    def on_open_troubleshooting(self):
+        """Open troubleshooting docs for model downloads and environment/network issues."""
+        root = osp.dirname(osp.dirname(osp.abspath(__file__)))
+        docs_path = osp.join(root, 'docs', 'TROUBLESHOOTING.md')
+        if osp.isfile(docs_path):
+            if sys.platform == 'win32':
+                os.startfile(docs_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', docs_path], check=False)
+            else:
+                subprocess.run(['xdg-open', docs_path], check=False)
+        else:
+            create_info_dialog({'title': self.tr('Troubleshooting'), 'text': self.tr('docs/TROUBLESHOOTING.md not found.')})
+
+    def _persist_model_download_status(self, summary: dict, flow: str, status: str):
+        payload = dict(summary or {})
+        payload['flow'] = flow
+        payload['status'] = status
+        pcfg.model_download_last_status = payload
         save_config()
-        self.module_manager.setTextDetector('ctd')
-        self.module_manager.setOCR('manga_ocr')
-        self.module_manager.setInpainter('aot')
-        self.module_manager.setTranslator('google')
+        LOGGER.info(
+            "Persisted model download status | flow=%s | status=%s | package_ids=%s | module_count=%s | downloaded=%s | failed=%s | skipped=%s",
+            flow,
+            status,
+            payload.get('package_ids', []),
+            payload.get('module_count', 0),
+            payload.get('downloaded', 0),
+            payload.get('failed', 0),
+            payload.get('skipped', 0),
+        )
+
+    def _show_model_download_result_dialog(self, *, title: str, status: str, summary: dict, details: str = ''):
+        downloaded = int((summary or {}).get('downloaded', 0))
+        failed = int((summary or {}).get('failed', 0))
+        skipped = int((summary or {}).get('skipped', 0))
+        body = self.tr('Summary: downloaded {0}, failed {1}, skipped {2}.').format(downloaded, failed, skipped)
+        if details:
+            body += '\n\n' + details
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(body)
+        manage_btn = msg.addButton(self.tr('Open Manage Models'), QMessageBox.ButtonRole.ActionRole)
+        trouble_btn = msg.addButton(self.tr('Open Troubleshooting'), QMessageBox.ButtonRole.ActionRole)
+        continue_btn = msg.addButton(self.tr('Continue with available modules'), QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == manage_btn:
+            self.on_open_manage_models()
+        elif clicked == trouble_btn:
+            self.on_open_troubleshooting()
+        elif clicked == continue_btn and status == 'success':
+            self._reset_modules_to_core_defaults()
+
+    def _reset_modules_to_core_defaults(self):
+        """Set detector/OCR/inpainter/translator with core defaults when available, else fallback to available modules."""
+        from modules import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
+
+        def pick_module(preferred_key: str, available_keys: list[str], valid_keys: list[str]) -> tuple[str, bool]:
+            if preferred_key in available_keys and preferred_key in valid_keys:
+                return preferred_key, True
+            for key in available_keys:
+                if key in valid_keys:
+                    return key, False
+            return preferred_key, False
+
+        det_available = get_available_module_keys(TEXTDETECTORS)
+        ocr_available = get_available_module_keys(OCR)
+        inp_available = get_available_module_keys(INPAINTERS)
+        trans_available = get_available_module_keys(TRANSLATORS)
+
+        det_key, det_is_core = pick_module('ctd', det_available, GET_VALID_TEXTDETECTORS())
+        ocr_key, ocr_is_core = pick_module('manga_ocr', ocr_available, GET_VALID_OCR())
+        inp_key, inp_is_core = pick_module('aot', inp_available, GET_VALID_INPAINTERS())
+        trans_key, trans_is_core = pick_module('google', trans_available, GET_VALID_TRANSLATORS())
+
+        pcfg.module.textdetector = det_key
+        pcfg.module.ocr = ocr_key
+        pcfg.module.inpainter = inp_key
+        pcfg.module.translator = trans_key
+        save_config()
+        self.module_manager.setTextDetector(det_key)
+        self.module_manager.setOCR(ocr_key)
+        self.module_manager.setInpainter(inp_key)
+        self.module_manager.setTranslator(trans_key)
+
+        applied = [
+            ('Detector', det_key, det_is_core, 'ctd'),
+            ('OCR', ocr_key, ocr_is_core, 'manga_ocr'),
+            ('Inpainter', inp_key, inp_is_core, 'aot'),
+            ('Translator', trans_key, trans_is_core, 'google'),
+        ]
+        lines = []
+        for label, key, is_core, expected in applied:
+            if is_core:
+                lines.append(f'• {label}: {key} (core default)')
+            else:
+                reason = 'fallback to available model' if key != expected else 'core default unavailable'
+                lines.append(f'• {label}: {key} ({reason})')
+        return '\n'.join(lines)
 
     def _run_deferred_model_download(self):
         """Run initial model download after window is shown (set by launch.py so app opens first)."""
@@ -1823,13 +1912,26 @@ class MainWindow(mainwindow_cls):
         thread = ModelDownloadThread(self)
         dlg.set_thread(thread)
 
-        def on_finished(success: bool, message: str):
+        def on_finished(status: str, message: str, summary: dict):
             dlg.accept()
-            if success:
-                # Do not reset modules or show popup on normal launch; only Tools → Retry does that.
-                pass
+            self._persist_model_download_status(summary, flow='deferred', status=status)
+            tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
+            if status == 'success':
+                self._show_model_download_result_dialog(
+                    title=self.tr('Model package download complete'),
+                    status=status,
+                    summary=summary,
+                )
+            elif status == 'partial':
+                failed_items = (summary or {}).get('failed_items', [])
+                partial_details = self.tr('Some model packages failed. Failed items: {0}').format(', '.join(failed_items) if failed_items else self.tr('Unknown'))
+                self._show_model_download_result_dialog(
+                    title=self.tr('Model package download partially complete'),
+                    status=status,
+                    summary=summary,
+                    details=partial_details + '\n\n' + tip
+                )
             else:
-                tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
                 create_error_dialog(
                     Exception(message),
                     self.tr('Model download failed. You can retry from Tools → Retry model downloads.') + '\n\n' + tip,
@@ -1853,16 +1955,33 @@ class MainWindow(mainwindow_cls):
         thread = ModelDownloadThread(self)
         dlg.set_thread(thread)
 
-        def on_finished(success: bool, message: str):
+        def on_finished(status: str, message: str, summary: dict):
             dlg.accept()
+            self._persist_model_download_status(summary, flow='retry', status=status)
+            tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
+            if status == 'success':
+                self._show_model_download_result_dialog(
+                    title=self.tr('Download complete.'),
+                    status=status,
+                    summary=summary,
+                    details=self.tr('Model packages have been downloaded. You can use the pipeline now.')
+                )
+            elif status == 'partial':
+                failed_items = (summary or {}).get('failed_items', [])
+                partial_details = self.tr('Some model packages failed. Failed items: {0}').format(', '.join(failed_items) if failed_items else self.tr('Unknown'))
+                self._show_model_download_result_dialog(
+                    title=self.tr('Download partially complete.'),
+                    status=status,
+                    summary=summary,
+                    details=partial_details + '\n\n' + tip
+                )
             if success:
-                self._reset_modules_to_core_defaults()
+                defaults_summary = self._reset_modules_to_core_defaults()
                 create_info_dialog({
-                    'title': self.tr('Download complete.'),
-                    'text': self.tr('Model packages have been downloaded. You can use the pipeline now.'),
+                    'title': self.tr('Download complete. Defaults updated.'),
+                    'text': self.tr('Model packages have been downloaded. Applied modules:\n') + defaults_summary,
                 })
             else:
-                tip = self.tr('If the connectivity check is slow or fails, set DISABLE_MODEL_SOURCE_CHECK=True and retry. See docs/TROUBLESHOOTING.md.')
                 create_error_dialog(
                     Exception(message),
                     self.tr('Model download failed. You can retry from Tools → Retry model downloads.') + '\n\n' + tip,

@@ -1,9 +1,9 @@
 """
-Model packages for selective download at first launch (Issue #15).
+Model packages and user-facing presets for first-launch selective download.
 
-Packages group modules so users can choose e.g. "Core" only (~hundreds MB)
-instead of auto-downloading everything including PaddleOCR-VL (~1.7 GB).
-None = legacy "download all" for existing installs; ["core"] = minimal default for new users.
+`MODEL_PACKAGES` remains the low-level module grouping consumed by download logic.
+`MODEL_PACKAGE_PRESETS` adds user-centered curated bundles (fast start, balanced,
+OCR-heavy, etc.) so the UI can explain tradeoffs and dependency hints clearly.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Any
 
 # Registry name -> module_key. pkuseg is a special key (handled in prepare_local_files).
 FALLBACK_MODEL_PACKAGES = {
@@ -39,9 +40,25 @@ FALLBACK_MODEL_PACKAGES = {
     ],
 }
 
+# Package tier controls first-run presentation order and labels.
+PACKAGE_TIERS = {
+    "core": "Stable",
+    "advanced_inpaint": "Beta",
+    "advanced_ocr": "External dependency heavy",
+    "optional_onnx": "Experimental",
+}
+
 # Human-readable labels and short descriptions for the first-launch dialog
 FALLBACK_PACKAGE_LABELS = {
     "core": ("Core (recommended)", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+PACKAGE_LABELS = {
+    "core": ("Core (recommended) [Stable]", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+    "advanced_ocr": ("Advanced OCR [External dependency heavy]", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
+    "advanced_inpaint": ("Advanced inpainting [Beta]", "LaMa variants, ONNX, PatchMatch"),
+    "optional_onnx": ("Optional ONNX inpainting [Experimental]", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+# Human-readable labels and short descriptions for package-level advanced/custom mode.
+PACKAGE_LABELS = {
+    "core": ("Core package", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
     "advanced_ocr": ("Advanced OCR", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
     "advanced_inpaint": ("Advanced inpainting", "LaMa variants, ONNX, PatchMatch"),
     "optional_onnx": ("Optional ONNX inpainting", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
@@ -322,6 +339,54 @@ def get_module_manifest_metadata(module_key: str) -> Dict[str, Any]:
 _MANIFEST = _load_model_manifest()
 MODEL_PACKAGES = _MANIFEST["model_packages"]
 PACKAGE_LABELS = _MANIFEST["package_labels"]
+# User-centered presets surfaced in the first-launch dialog.
+# package_ids is intentionally explicit to keep setup reproducible.
+MODEL_PACKAGE_PRESETS: Dict[str, Dict[str, Any]] = {
+    "core_minimal": {
+        "label": "Core minimal (fast start)",
+        "intended_use": "Smallest useful setup for quick first run and low disk usage.",
+        "approx_size": "~0.7 GB",
+        "package_ids": ["core"],
+        "dependency_hints": "No extra runtime dependencies expected beyond base install.",
+    },
+    "balanced_default": {
+        "label": "Balanced default",
+        "intended_use": "Recommended for most users: solid OCR + inpaint quality without huge downloads.",
+        "approx_size": "~2.5 GB",
+        "package_ids": ["core", "advanced_inpaint"],
+        "dependency_hints": "Large download; ONNX inpaint variants run best with onnxruntime(-gpu) when available.",
+    },
+    "ocr_heavy": {
+        "label": "OCR-heavy",
+        "intended_use": "Best OCR coverage/accuracy for diverse manga text styles and mixed languages.",
+        "approx_size": "~4.2 GB",
+        "package_ids": ["core", "advanced_ocr"],
+        "dependency_hints": "Very large download. PaddleOCR-VL may require extra runtime wheels depending on platform/device.",
+    },
+    "inpaint_heavy": {
+        "label": "Inpaint-heavy",
+        "intended_use": "More inpainting backends for harder backgrounds, speed/quality experiments, and CPU fallback.",
+        "approx_size": "~3.0 GB",
+        "package_ids": ["core", "advanced_inpaint", "optional_onnx"],
+        "dependency_hints": "Large download. ONNX variants benefit from onnxruntime(-gpu); PatchMatch is CPU-heavy on big pages.",
+    },
+    "video_focused_optional": {
+        "label": "Video-focused optional",
+        "intended_use": "Optional add-on for video/comic workflows that favor broader OCR + inpaint compatibility.",
+        "approx_size": "~5.0 GB",
+        "package_ids": ["core", "advanced_ocr", "advanced_inpaint", "optional_onnx"],
+        "dependency_hints": "Largest download. Recommended only with stable bandwidth/storage and optional GPU runtimes.",
+    },
+}
+
+DEFAULT_MODEL_PACKAGE_PRESET_ID = "balanced_default"
+
+
+def get_package_ids_for_preset(preset_id: str) -> List[str]:
+    preset = MODEL_PACKAGE_PRESETS.get(preset_id)
+    if preset is None:
+        return []
+    return list(preset.get("package_ids") or [])
 
 
 def get_module_classes_for_packages(
