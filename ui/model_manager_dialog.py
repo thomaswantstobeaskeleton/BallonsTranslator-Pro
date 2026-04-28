@@ -200,6 +200,17 @@ class ModelManagerDialog(QDialog):
             if not mod['can_download']:
                 continue
             cb = QCheckBox(mod['display_name'])
+            meta = mod.get('manifest_meta') or {}
+            tooltip_bits = []
+            if meta.get('size_estimate'):
+                tooltip_bits.append(self.tr('Size: {0}').format(meta['size_estimate']))
+            deps = meta.get('required_deps') or []
+            if deps:
+                tooltip_bits.append(self.tr('Dependencies: {0}').format(', '.join(deps)))
+            if meta.get('support_tier'):
+                tooltip_bits.append(self.tr('Support tier: {0}').format(meta['support_tier']))
+            if tooltip_bits:
+                cb.setToolTip('\n'.join(tooltip_bits))
             cb.setToolTip(self._build_module_tooltip(mod))
             cb.setProperty('module_info', mod)
             self.downloadCheckboxLayout.addWidget(cb, row, col)

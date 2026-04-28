@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "module_key": "ctd",
+      "category": "textdetector",
+      "size_estimate": "~260 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "aot",
+      "category": "inpaint",
+      "size_estimate": "~220 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "manga_ocr",
+      "category": "ocr",
+      "size_estimate": "~130 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "mit48px_ctc",
+      "category": "ocr",
+      "size_estimate": "~160 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "pkuseg",
+      "category": "pkuseg",
+      "size_estimate": "~50 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "PaddleOCRVLManga",
+      "category": "ocr",
+      "size_estimate": "~1.7 GB",
+      "required_deps": [
+        "paddlepaddle"
+      ],
+      "support_tier": "advanced"
+    },
+    {
+      "module_key": "mit48px",
+      "category": "ocr",
+      "size_estimate": "~180 MB",
+      "required_deps": [],
+      "support_tier": "advanced"
+    },
+    {
+      "module_key": "mit32px",
+      "category": "ocr",
+      "size_estimate": "~140 MB",
+      "required_deps": [],
+      "support_tier": "advanced"
+    },
+    {
+      "module_key": "lama_mpe",
+      "category": "inpaint",
+      "size_estimate": "~160 MB",
+      "required_deps": [],
+      "support_tier": "advanced"
+    },
+    {
+      "module_key": "lama_large_512px",
+      "category": "inpaint",
+      "size_estimate": "~220 MB",
+      "required_deps": [],
+      "support_tier": "advanced"
+    },
+    {
+      "module_key": "lama_onnx",
+      "category": "inpaint",
+      "size_estimate": "~160 MB",
+      "required_deps": [
+        "onnxruntime"
+      ],
+      "support_tier": "optional"
+    },
+    {
+      "module_key": "lama_manga_onnx",
+      "category": "inpaint",
+      "size_estimate": "~170 MB",
+      "required_deps": [
+        "onnxruntime"
+      ],
+      "support_tier": "optional"
+    },
+    {
+      "module_key": "patchmatch",
+      "category": "inpaint",
+      "size_estimate": "~30 MB",
+      "required_deps": [],
+      "support_tier": "advanced"
+    }
+  ],
+  "packages": [
+    {
+      "id": "core",
+      "label": "Core (recommended)",
+      "description": "Text detection, inpainting, OCR, pkuseg — minimal to run",
+      "modules": [
+        {
+          "category": "textdetector",
+          "module_key": "ctd"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "aot"
+        },
+        {
+          "category": "ocr",
+          "module_key": "manga_ocr"
+        },
+        {
+          "category": "ocr",
+          "module_key": "mit48px_ctc"
+        },
+        {
+          "category": "pkuseg",
+          "module_key": "pkuseg"
+        }
+      ]
+    },
+    {
+      "id": "advanced_ocr",
+      "label": "Advanced OCR",
+      "description": "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px",
+      "modules": [
+        {
+          "category": "ocr",
+          "module_key": "PaddleOCRVLManga"
+        },
+        {
+          "category": "ocr",
+          "module_key": "mit48px"
+        },
+        {
+          "category": "ocr",
+          "module_key": "mit32px"
+        }
+      ]
+    },
+    {
+      "id": "advanced_inpaint",
+      "label": "Advanced inpainting",
+      "description": "LaMa variants, ONNX, PatchMatch",
+      "modules": [
+        {
+          "category": "inpaint",
+          "module_key": "lama_mpe"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "lama_large_512px"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "lama_onnx"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "lama_manga_onnx"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "patchmatch"
+        }
+      ]
+    },
+    {
+      "id": "optional_onnx",
+      "label": "Optional ONNX inpainting",
+      "description": "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)",
+      "modules": [
+        {
+          "category": "_optional_onnx",
+          "module_key": null
+        }
+      ]
+    }
+  ]
+}

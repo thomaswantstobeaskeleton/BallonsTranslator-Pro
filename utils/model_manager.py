@@ -184,6 +184,7 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
       - target_paths (relative/absolute paths where available)
     """
     from modules import INPAINTERS, TEXTDETECTORS, OCR, TRANSLATORS
+    from .model_packages import get_module_manifest_metadata
 
     categories = [
         (TEXTDETECTORS, "Detect"),
@@ -204,6 +205,7 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
             on_load = getattr(module_class, "download_file_on_load", False)
             display_name = f"{category_label} · {human_name} ({module_key})"
             can_download = has_list and not on_load
+            manifest_meta = get_module_manifest_metadata(module_key)
             dl_meta = _extract_download_metadata(module_class)
             result.append({
                 "category_label": category_label,
@@ -213,6 +215,7 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
                 "description": description,
                 "module_class": module_class,
                 "can_download": can_download,
+                "manifest_meta": manifest_meta,
                 "estimated_download_size_bytes": dl_meta["estimated_download_size_bytes"],
                 "target_paths": dl_meta["target_paths"],
             })
