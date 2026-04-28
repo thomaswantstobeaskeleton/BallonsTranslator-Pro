@@ -3885,4 +3885,34 @@ All existing translation results will be cleared!</source>
         <translation>对选中页运行修复</translation>
     </message>
 </context>
+<context>
+    <name>ModelManagerDialog</name>
+    <message><source>Manage models</source><translation>管理模型</translation></message>
+    <message><source>Check model files</source><translation>检查模型文件</translation></message>
+    <message><source>Check all models</source><translation>检查全部模型</translation></message>
+    <message><source>Check which models have their files downloaded, missing, or with hash mismatch.</source><translation>检查哪些模型文件已下载、缺失或哈希不匹配。</translation></message>
+    <message><source>Check compatibility (slow)</source><translation>检查兼容性（较慢）</translation></message>
+    <message><source>Try loading each module to detect missing dependencies or incompatible environment. Can be slow.</source><translation>尝试加载每个模块以检测缺失依赖或环境不兼容。可能较慢。</translation></message>
+    <message><source>Download models</source><translation>下载模型</translation></message>
+    <message><source>Select the models you want to download. Only modules with a predefined file list are listed.</source><translation>选择你要下载的模型。仅显示预定义了文件列表的模块。</translation></message>
+    <message><source>Downloaded</source><translation>已下载</translation></message>
+    <message><source>Hash mismatch</source><translation>哈希不匹配</translation></message>
+    <message><source>Download on load</source><translation>按需下载</translation></message>
+    <message><source>Incompatible</source><translation>不兼容</translation></message>
+    <message><source>Check models</source><translation>检查模型</translation></message>
+    <message><source>Select at least one model to download.</source><translation>请至少选择一个要下载的模型。</translation></message>
+    <message><source>Downloading…</source><translation>下载中…</translation></message>
+    <message><source>Download finished: {0} succeeded, {1} failed.</source><translation>下载完成：成功 {0} 个，失败 {1} 个。</translation></message>
+</context>
+<context>
+    <name>ModelPackageCatalog</name>
+    <message><source>Core (recommended)</source><translation>核心（推荐）</translation></message>
+    <message><source>Text detection, inpainting, OCR, pkuseg — minimal to run</source><translation>文本检测、图像修复、OCR、pkuseg——运行所需的最小集合</translation></message>
+    <message><source>Advanced OCR</source><translation>高级 OCR</translation></message>
+    <message><source>PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px</source><translation>用于漫画的 PaddleOCR-VL（约 1.7 GB），以及 MIT 48px/32px</translation></message>
+    <message><source>Advanced inpainting</source><translation>高级图像修复</translation></message>
+    <message><source>LaMa variants, ONNX, PatchMatch</source><translation>LaMa 系列、ONNX、PatchMatch</translation></message>
+    <message><source>Optional ONNX inpainting</source><translation>可选 ONNX 图像修复</translation></message>
+    <message><source>Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)</source><translation>Lama 2025 / lama-manga ONNX（更小，CPU 更友好）</translation></message>
+</context>
 </TS>

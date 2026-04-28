@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from typing import Dict, List, Optional, Any
 
+from qtpy.QtCore import QT_TRANSLATE_NOOP
+
 # Registry name -> module_key. pkuseg is a special key (handled in prepare_local_files).
 FALLBACK_MODEL_PACKAGES = {
     "core": [
@@ -49,6 +51,23 @@ PACKAGE_TIERS = {
 }
 
 # Human-readable labels and short descriptions for the first-launch dialog
+PACKAGE_LABELS = {
+    "core": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Core (recommended)"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+    ),
+    "advanced_ocr": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Advanced OCR"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
+    ),
+    "advanced_inpaint": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Advanced inpainting"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "LaMa variants, ONNX, PatchMatch"),
+    ),
+    "optional_onnx": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Optional ONNX inpainting"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+    ),
 FALLBACK_PACKAGE_LABELS = {
     "core": ("Core (recommended)", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
 PACKAGE_LABELS = {

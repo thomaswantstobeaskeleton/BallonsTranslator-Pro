@@ -1,0 +1,17 @@
+name: startup-model-ui-i18n
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  i18n-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check startup/model UI localization keys
+        run: python scripts/check_startup_model_ui_i18n.py

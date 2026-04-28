@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" viewBox="0 0 1100 760">
+  <rect width="1100" height="760" fill="#f3f5f8"/>
+  <rect x="50" y="40" width="1000" height="680" rx="12" fill="#fff" stroke="#aab2bd" stroke-width="2"/>
+  <rect x="50" y="40" width="1000" height="54" rx="12" fill="#e8eefb"/>
+  <text x="72" y="74" font-family="Arial, sans-serif" font-size="22" fill="#1a1a1a">选择要下载的模型</text>
+  <text x="72" y="130" font-family="Arial, sans-serif" font-size="17" fill="#222">选择现在要下载的模型包。你也可以稍后通过 工具 → 管理模型 下载更多模型。</text>
+  <text x="72" y="182" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#111">模型包</text>
+
+  <g font-family="Arial, sans-serif" font-size="18" fill="#111">
+    <rect x="76" y="212" width="20" height="20" fill="#fff" stroke="#666"/><text x="108" y="228">核心（推荐）</text>
+    <rect x="76" y="258" width="20" height="20" fill="#fff" stroke="#666"/><text x="108" y="274">高级 OCR</text>
+    <rect x="76" y="304" width="20" height="20" fill="#fff" stroke="#666"/><text x="108" y="320">高级图像修复</text>
+    <rect x="76" y="350" width="20" height="20" fill="#fff" stroke="#666"/><text x="108" y="366">可选 ONNX 图像修复</text>
+  </g>
+
+  <rect x="715" y="650" width="150" height="46" rx="8" fill="#f0f0f0" stroke="#999"/>
+  <text x="743" y="679" font-family="Arial, sans-serif" font-size="16" fill="#222">跳过（仅核心）</text>
+  <rect x="878" y="650" width="150" height="46" rx="8" fill="#3d7cff" stroke="#2b63cd"/>
+  <text x="918" y="679" font-family="Arial, sans-serif" font-size="16" fill="#fff">下载所选</text>
+</svg>

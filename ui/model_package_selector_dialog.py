@@ -5,6 +5,7 @@ Only shown when config file did not exist (new user). User can select packages
 """
 from __future__ import annotations
 
+from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -104,8 +105,8 @@ class ModelPackageSelectorDialog(QDialog):
         group_layout = QVBoxLayout(advanced_group)
         for package_id in MODEL_PACKAGES:
             label, desc = PACKAGE_LABELS.get(package_id, (package_id, ""))
-            cb = QCheckBox(self.tr(label))
-            cb.setToolTip(self.tr(desc))
+            cb = QCheckBox(QCoreApplication.translate("ModelPackageCatalog", label))
+            cb.setToolTip(QCoreApplication.translate("ModelPackageCatalog", desc))
             cb.setProperty("package_id", package_id)
             if package_id == "core":
                 cb.setChecked(True)
