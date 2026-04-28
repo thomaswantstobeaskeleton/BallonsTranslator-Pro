@@ -1,4 +1,4 @@
-@REM Launch BallonsTranslator on Windows (AMD/nightly)
+@REM Launch BallonsTranslator for Windows portable bundle layout with --nightly (AMD ROCm nightly mode).
 @REM @echo %PATH%
 
 cd %~dp0
@@ -51,7 +51,7 @@ type tmp\stdout.txt
 
 :show_stderr
 for /f %%i in ("tmp\stderr.txt") do set size=%%~zi
-if %size% equ 0 goto :show_stderr
+if %size% equ 0 goto :endofscript
 echo.
 echo stderr:
 type tmp\stderr.txt
@@ -61,3 +61,4 @@ type tmp\stderr.txt
 echo.
 echo Launch unsuccessful. Exiting.
 pause
+exit /b
