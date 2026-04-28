@@ -36,6 +36,20 @@ MODEL_PACKAGES = {
     ],
 }
 
+# Package tier controls first-run presentation order and labels.
+PACKAGE_TIERS = {
+    "core": "Stable",
+    "advanced_inpaint": "Beta",
+    "advanced_ocr": "External dependency heavy",
+    "optional_onnx": "Experimental",
+}
+
+# Human-readable labels and short descriptions for the first-launch dialog
+PACKAGE_LABELS = {
+    "core": ("Core (recommended) [Stable]", "Text detection, inpainting, OCR, pkuseg — minimal to run"),
+    "advanced_ocr": ("Advanced OCR [External dependency heavy]", "PaddleOCR-VL for manga (~1.7 GB), MIT 48px/32px"),
+    "advanced_inpaint": ("Advanced inpainting [Beta]", "LaMa variants, ONNX, PatchMatch"),
+    "optional_onnx": ("Optional ONNX inpainting [Experimental]", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
 # Human-readable labels and short descriptions for package-level advanced/custom mode.
 PACKAGE_LABELS = {
     "core": ("Core package", "Text detection, inpainting, OCR, pkuseg — minimal to run"),

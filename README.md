@@ -788,6 +788,19 @@ On **AMD** GPUs you can use either **ZLUDA** (translation layer, works with the 
 
 ---
 
+## Module tiers & compatibility
+
+Tier definitions used across docs/UI:
+
+| Tier | Meaning |
+|---|---|
+| **Stable** | Best-tested defaults and first-run presets. |
+| **Beta** | Good coverage, but less battle-tested across environments. |
+| **Experimental** | New/stub/high-variance modules. |
+| **External dependency heavy** | Requires heavier optional stacks or external repos/APIs. |
+
+Canonical matrix: **[docs/MODULE_COMPATIBILITY_MATRIX.md](docs/MODULE_COMPATIBILITY_MATRIX.md)**.
+
 ## 3. Text detection – all modules and how to run
 
 Select the detector from the **Text detection** dropdown in the settings panel. Pair detection-only modules with an OCR (see [INSTALL_EXTRA_DETECTORS.md](docs/INSTALL_EXTRA_DETECTORS.md) for which work with **none_ocr**).
