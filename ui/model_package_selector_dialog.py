@@ -29,6 +29,24 @@ PACKAGE_TIERS = getattr(_model_packages, "PACKAGE_TIERS", {})
 DEFAULT_MODEL_PACKAGE_PRESET_ID = getattr(_model_packages, "DEFAULT_MODEL_PACKAGE_PRESET_ID", next(iter(MODEL_PACKAGE_PRESETS)))
 get_package_ids_for_preset = getattr(_model_packages, "get_package_ids_for_preset", lambda pid: ["core"] if pid == "core" else [])
 
+def _dark_first_launch_stylesheet() -> str:
+    """Keep first-launch model selection readable even before global theme is applied."""
+    return """
+QDialog { background-color: #21252b; color: #e6e6e6; }
+QLabel { color: #e6e6e6; }
+QGroupBox { border: 1px solid #3b3f4c; border-radius: 8px; margin-top: 12px; padding-top: 8px; color: #f0f0f0; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+QCheckBox, QRadioButton { color: #e6e6e6; }
+QPushButton {
+    background-color: #2f3440;
+    color: #f2f2f2;
+    border: 1px solid #4a5060;
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+QPushButton:hover { background-color: #3a404d; }
+QPushButton:pressed { background-color: #2a2f39; }
+"""
 
 class ModelPackageSelectorDialog(QDialog):
     """Let the user choose which model packages to download at first launch."""
@@ -46,6 +64,7 @@ class ModelPackageSelectorDialog(QDialog):
         self._result = ["core"]
         self._result_preset_ids = []
         self._build_ui()
+        self.setStyleSheet(_dark_first_launch_stylesheet())
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -83,7 +102,7 @@ class ModelPackageSelectorDialog(QDialog):
             details_label = QLabel(details)
             details_label.setWordWrap(True)
             if hasattr(details_label, "setStyleSheet"):
-                details_label.setStyleSheet("color: #666; margin-left: 22px;")
+                details_label.setStyleSheet("color: #b8becd; margin-left: 22px;")
             presets_layout.addWidget(details_label)
 
         default_rb = self._preset_radios.get(DEFAULT_MODEL_PACKAGE_PRESET_ID)

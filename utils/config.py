@@ -444,7 +444,7 @@ class ProgramConfig(Config):
     gsearch_whole_word: bool = False
     gsearch_regex: bool = False
     gsearch_range: int = 0
-    darkmode: bool = False
+    darkmode: bool = True
     bubbly_ui: bool = True
     accent_color_hex: str = ''  # Theme customizer: e.g. #1E93E5 (blue) or #9B59B6 (purple). Empty = use theme default.
     app_font_family: str = ''   # Theme customizer: app-wide font. Empty = system default.
