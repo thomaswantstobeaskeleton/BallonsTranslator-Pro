@@ -793,7 +793,7 @@ class TitleBar(Widget):
         self.fileToolBtn.setText(self.tr('File'))
         self.fileToolBtn.setPopupMode(QToolButton.InstantPopup)
 
-        self.titleLabel = QLabel('BallonsTranslatorPro')
+        self.titleLabel = QLabel(self.tr('BallonsTranslatorPro'))
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

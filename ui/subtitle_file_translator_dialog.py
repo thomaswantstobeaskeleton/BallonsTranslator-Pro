@@ -235,7 +235,7 @@ class SubtitleFileTranslatorDialog(QDialog):
         out_box = QGroupBox(self.tr("Output"))
         out_form = QFormLayout(out_box)
         self.out_format_combo = QComboBox()
-        self.out_format_combo.addItem("SRT (.srt)", "srt")
+        self.out_format_combo.addItem(self.tr("SRT (.srt)"), "srt")
         self.out_format_combo.addItem(self.tr("Timestamped text (.txt)"), "txt")
         out_form.addRow(self.tr("Save as:"), self.out_format_combo)
         root.addWidget(out_box)
