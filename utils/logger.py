@@ -1,5 +1,6 @@
 import datetime
 import logging
+from collections import defaultdict
 import os
 import os.path as osp
 from glob import glob
@@ -80,6 +81,8 @@ class NoisyThirdPartyFilter(logging.Filter):
         "Materializing param=",
     )
 
+    _counts = defaultdict(int)
+
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             msg = record.getMessage()
@@ -87,8 +90,13 @@ class NoisyThirdPartyFilter(logging.Filter):
             return True
         for pattern in self._SUPPRESS_PATTERNS:
             if pattern in msg:
+                self._counts[pattern] += 1
                 return False
         return True
+
+    @classmethod
+    def suppressed_summary(cls) -> dict:
+        return dict(cls._counts)
 
 
 class ColoredLogger(logging.Logger):

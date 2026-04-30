@@ -182,6 +182,7 @@ class MainWindow(mainwindow_cls):
         self._zip_batch = ZipBatchManager()
         self._current_batch_dir = None
         self._last_batch_report = None
+        self._startup_health_shown = False
 
         shared.create_errdialog_in_mainthread = self.create_errdialog.emit
         self.create_errdialog.connect(self.on_create_errdialog)
@@ -202,6 +203,7 @@ class MainWindow(mainwindow_cls):
         self.setupConfig()
         self.setupShortcuts()
         self.setupRegisterWidget()
+        self._recover_window_geometry_if_offscreen()
         # self.showMaximized()
         FramelessMoveResize.toggleMaxState(self)
         self.setAcceptDrops(True)
@@ -847,8 +849,6 @@ class MainWindow(mainwindow_cls):
         """Open a project from a list of image file paths (e.g. drag-drop or Select Files). Uses first file's directory as project dir and only those files as pages."""
         if not file_paths:
             return
-        from utils.logger import logger as LOGGER
-        from utils import create_error_dialog
         try:
             if self.imgtrans_proj.directory is not None and self.canvas.projstate_unsaved:
                 self.saveCurrentPage()
@@ -960,6 +960,9 @@ class MainWindow(mainwindow_cls):
             shared.DEFER_INITIAL_MODEL_DOWNLOAD = False
             self._initial_model_download_done = True
             self._run_deferred_model_download()
+        if not self._startup_health_shown:
+            self._startup_health_shown = True
+            QTimer.singleShot(250, self._show_startup_health_overlay)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         reply = QMessageBox.question(
@@ -1094,6 +1097,12 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
+        self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
+        self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
+        self.titleBar.export_startup_diag_trigger.connect(self.on_export_startup_report)
+        self.titleBar.open_log_folder_trigger.connect(self.on_open_log_folder)
+        self.titleBar.relaunch_pyqt5_trigger.connect(self.on_relaunch_pyqt5_safe_mode)
+        self.titleBar.relaunch_cpu_only_trigger.connect(self.on_relaunch_cpu_only_safe_mode)
         self.titleBar.release_model_caches_trigger.connect(self.on_release_model_caches)
         self.titleBar.clear_pipeline_caches_trigger.connect(self.on_clear_pipeline_caches)
         self.titleBar.run_preset_full_trigger.connect(self.on_run_preset_full)
@@ -1833,6 +1842,156 @@ class MainWindow(mainwindow_cls):
             payload.get('failed', 0),
             payload.get('skipped', 0),
         )
+
+    def _collect_startup_diagnostics_text(self) -> str:
+        from qtpy import API, QT_VERSION
+        from utils.logger import NoisyThirdPartyFilter
+        lines = [
+            f"Version: {shared.APP_VERSION}",
+            f"Qt API: {API}",
+            f"Qt Version: {QT_VERSION}",
+            f"Python: {sys.version.splitlines()[0]}",
+            f"Python executable: {sys.executable}",
+            f"Platform: {sys.platform}",
+            f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}",
+            f"Detector: {getattr(pcfg.module, 'textdetector', '')}",
+            f"OCR: {getattr(pcfg.module, 'ocr', '')}",
+            f"Inpainter: {getattr(pcfg.module, 'inpainter', '')}",
+            f"Translator: {getattr(pcfg.module, 'translator', '')}",
+        ]
+        suppressed = NoisyThirdPartyFilter.suppressed_summary()
+        if suppressed:
+            lines.append(f"Suppressed noisy warning groups: {sum(suppressed.values())}")
+        last = getattr(pcfg, 'model_download_last_status', {}) or {}
+        if last:
+            lines.extend([
+                "",
+                "Last model download:",
+                f"  flow={last.get('flow', 'unknown')}, status={last.get('status', 'unknown')}",
+                f"  downloaded={last.get('downloaded', 0)}, failed={last.get('failed', 0)}, skipped={last.get('skipped', 0)}",
+                f"  package_ids={last.get('package_ids', [])}",
+            ])
+            failed_items = last.get('failed_items', [])
+            if failed_items:
+                lines.append(f"  failed_items={failed_items}")
+        stages = getattr(shared, "STARTUP_HEALTH", []) or []
+        if stages:
+            lines.append("")
+            lines.append("Startup stages:")
+            for item in stages:
+                lines.append(f"  - {item.get('stage', '?')}: {item.get('status', 'ok')} ({item.get('details', '')})")
+        return "\n".join(lines)
+
+    def _show_startup_health_overlay(self):
+        stages = getattr(shared, "STARTUP_HEALTH", []) or []
+        if not stages:
+            return
+        labels = " \u2192 ".join([str(s.get("stage", "?")) for s in stages])
+        summary = self.tr("Startup stages: {0}").format(labels)
+        msg = QMessageBox(self)
+        msg.setWindowTitle(self.tr("Startup health"))
+        msg.setText(summary)
+        msg.setDetailedText(self._collect_startup_diagnostics_text())
+        copy_btn = msg.addButton(self.tr("Copy diagnostics"), QMessageBox.ButtonRole.ActionRole)
+        pyqt5_btn = msg.addButton(self.tr("Relaunch PyQt5"), QMessageBox.ButtonRole.ActionRole)
+        cpu_btn = msg.addButton(self.tr("Relaunch CPU-only"), QMessageBox.ButtonRole.ActionRole)
+        msg.addButton(self.tr("Close"), QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == copy_btn:
+            self.on_copy_startup_diagnostics()
+        elif clicked == pyqt5_btn:
+            self.on_relaunch_pyqt5_safe_mode()
+        elif clicked == cpu_btn:
+            self.on_relaunch_cpu_only_safe_mode()
+
+    def on_copy_startup_diagnostics(self):
+        text = self._collect_startup_diagnostics_text()
+        app = QApplication.instance()
+        if app is not None:
+            app.clipboard().setText(text)
+        create_info_dialog({'title': self.tr('Diagnostics copied'), 'text': self.tr('Startup diagnostics copied to clipboard.')})
+
+    def on_export_startup_report(self):
+        text = self._collect_startup_diagnostics_text()
+        default_name = f"startup_report_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        out_path = QFileDialog.getSaveFileName(self, self.tr('Export startup report'), default_name, self.tr('Text files (*.txt)'))[0]
+        if not out_path:
+            return
+        try:
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            create_info_dialog({'title': self.tr('Startup report saved'), 'text': out_path})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export startup report.'))
+
+    def on_open_log_folder(self):
+        p = shared.LOGGING_PATH
+        try:
+            if sys.platform == 'win32':
+                os.startfile(p)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', p], check=False)
+            else:
+                subprocess.run(['xdg-open', p], check=False)
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to open log folder.'))
+
+    def on_show_model_download_diagnostics(self):
+        last = getattr(pcfg, 'model_download_last_status', {}) or {}
+        if not last:
+            create_info_dialog({'title': self.tr('Model download diagnostics'), 'text': self.tr('No model download diagnostics available yet.')})
+            return
+        failed_items = last.get('failed_items', [])
+        details = self.tr('Flow: {0}\nStatus: {1}\nDownloaded: {2}\nFailed: {3}\nSkipped: {4}\nPackage IDs: {5}').format(
+            last.get('flow', 'unknown'),
+            last.get('status', 'unknown'),
+            last.get('downloaded', 0),
+            last.get('failed', 0),
+            last.get('skipped', 0),
+            ', '.join(last.get('package_ids', []))
+        )
+        if failed_items:
+            details += '\n' + self.tr('Failed items: {0}').format(', '.join(failed_items))
+        create_info_dialog({'title': self.tr('Model download diagnostics'), 'text': details})
+
+    def _relaunch_with_overrides(self, extra_args=None, env_overrides=None):
+        extra_args = extra_args or []
+        env_overrides = env_overrides or {}
+        script_path = osp.abspath(osp.join(osp.dirname(__file__), '..', 'launch.py'))
+        cmd = [sys.executable, script_path] + list(extra_args)
+        env = os.environ.copy()
+        env.update(env_overrides)
+        subprocess.Popen(cmd, env=env, cwd=osp.dirname(script_path))
+        QApplication.instance().quit()
+
+    def on_relaunch_pyqt5_safe_mode(self):
+        self._relaunch_with_overrides(extra_args=['--qt-api', 'pyqt5'])
+
+    def on_relaunch_cpu_only_safe_mode(self):
+        self._relaunch_with_overrides(env_overrides={'CUDA_VISIBLE_DEVICES': ''})
+
+    def _recover_window_geometry_if_offscreen(self):
+        try:
+            frame = self.frameGeometry()
+            if frame.width() <= 0 or frame.height() <= 0:
+                return
+            target = frame.adjusted(40, 40, -40, -40)
+            for s in QGuiApplication.screens():
+                if s.availableGeometry().intersects(target):
+                    return
+            primary = QGuiApplication.primaryScreen()
+            if primary is None:
+                return
+            ag = primary.availableGeometry()
+            w = min(max(frame.width(), 900), ag.width())
+            h = min(max(frame.height(), 600), ag.height())
+            x = ag.x() + max(0, (ag.width() - w) // 2)
+            y = ag.y() + max(0, (ag.height() - h) // 2)
+            self.setGeometry(x, y, w, h)
+            LOGGER.warning("Recovered off-screen window geometry to primary screen.")
+        except Exception as e:
+            LOGGER.debug("Window geometry recovery skipped: %s", e)
 
     def _show_model_download_result_dialog(self, *, title: str, status: str, summary: dict, details: str = ''):
         downloaded = int((summary or {}).get('downloaded', 0))
