@@ -44,6 +44,30 @@ def download_optional_onnx_models():
         download_and_check_files(**kw)
 
 
+def maybe_quantize_optional_onnx_models():
+    """
+    Optional post-download quantization for ONNX inpainter models.
+    Enable with env:
+      BT_QUANTIZE_OPTIONAL_ONNX=1
+    Optional mode:
+      BT_ONNX_QUANT_MODE=dynamic|static (default: dynamic)
+    """
+    if str(os.getenv("BT_QUANTIZE_OPTIONAL_ONNX", "")).strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+
+    mode = str(os.getenv("BT_ONNX_QUANT_MODE", "dynamic")).strip().lower()
+    try:
+        from scripts.quantize_optional_onnx import quantize_optional_onnx_models
+    except Exception as e:
+        LOGGER.warning("Optional ONNX quantization unavailable: %s", e)
+        return
+    try:
+        summary = quantize_optional_onnx_models(mode=mode)
+        LOGGER.info("Optional ONNX quantization complete: %s", summary)
+    except Exception as e:
+        LOGGER.warning("Optional ONNX quantization failed (continuing without quantized models): %s", e)
+
+
 def prepare_pkuseg():
     try:
         import pkuseg
@@ -108,6 +132,7 @@ def prepare_local_files_forall():
 
     if package_ids_include_optional_onnx(package_ids):
         download_optional_onnx_models()
+        maybe_quantize_optional_onnx_models()
 
     if package_ids_include_pkuseg(package_ids):
         prepare_pkuseg()
@@ -226,6 +251,7 @@ def prepare_local_files_forall_with_summary() -> Dict[str, Any]:
                 failed += 1
                 failed_items.append(item_id)
                 LOGGER.error("Model download failed for optional ONNX asset=%s", item_id)
+        maybe_quantize_optional_onnx_models()
 
     if package_ids_include_pkuseg(package_ids):
         try:
@@ -253,4 +279,3 @@ def prepare_local_files_forall_with_summary() -> Dict[str, Any]:
         summary["package_ids"], summary["module_count"], summary["downloaded"], summary["failed"], summary["skipped"], summary["failed_items"]
     )
     return summary
-
