@@ -23,6 +23,16 @@ class TransChain(BaseTranslator):
             'value': 'English',
             'description': 'Comma-separated intermediate language(s). Must be n-1 for n translators (e.g. one for 2-step chain).',
         },
+        'chain_llm_review_mode': {
+            'type': 'checkbox',
+            'value': True,
+            'description': 'When the final step is LLM_API_Translator, pass both original text and first-step draft so the LLM can review/correct it (2-step translation validation).',
+        },
+        'chain_llm_review_instruction': {
+            'type': 'editor',
+            'value': 'Improve the draft translation using the source text. Keep meaning accurate, natural, and concise; preserve names and terms consistently.',
+            'description': 'Instruction prepended when chain_llm_review_mode is enabled.',
+        },
         'description': 'Run multiple translators in sequence. Set chain_translators (e.g. google,trans_llm_api) and chain_intermediate_langs (e.g. English).',
     }
 
@@ -45,6 +55,25 @@ class TransChain(BaseTranslator):
         intermediate = [l.strip() for l in raw_langs.split(',') if l.strip()]
         return names, intermediate
 
+
+    def _as_bool(self, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+    def _build_llm_review_inputs(self, sources: List[str], drafts: List[str], review_instruction: str) -> List[str]:
+        payloads: List[str] = []
+        for src, draft in zip(sources, drafts):
+            payloads.append(
+                f"{review_instruction}\n\n"
+                f"[Source Text]\n{src}\n\n"
+                f"[Draft Translation]\n{draft}\n\n"
+                "Return only the improved final translation text."
+            )
+        return payloads
+
     def _translate(self, src_list: List[str]) -> List[str]:
         names, intermediate_langs = self._get_chain_config()
         if not names:
@@ -61,6 +90,7 @@ class TransChain(BaseTranslator):
 
         exclude = {'Chain', 'None', 'Copy Source', 'Ensemble (3+1)', 'Chimera (multi-source)'}
         current = list(src_list)
+        original_sources = list(src_list)
         for i, tname in enumerate(names):
             if tname in exclude:
                 continue
@@ -104,8 +134,18 @@ class TransChain(BaseTranslator):
                         setattr(trans, attr, getattr(self, attr))
                     except Exception:
                         pass
+            step_inputs = current
+            if (
+                i == len(names) - 1
+                and tname == 'LLM_API_Translator'
+                and self._as_bool(self.get_param_value('chain_llm_review_mode'))
+                and len(original_sources) == len(current)
+            ):
+                review_instruction = (self.get_param_value('chain_llm_review_instruction') or '').strip()
+                if review_instruction:
+                    step_inputs = self._build_llm_review_inputs(original_sources, current, review_instruction)
             try:
-                current = trans.translate(current)
+                current = trans.translate(step_inputs)
             except Exception as e:
                 self.logger.error(f"Chain: step '{tname}' failed: {e}")
                 break

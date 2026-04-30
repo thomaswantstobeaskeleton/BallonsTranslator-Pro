@@ -1,6 +1,10 @@
 # BallonsTranslator-Pro
 
-BallonsTranslator-Pro is a desktop app that helps you translate manga/comic pages with an assisted workflow:
+BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator), keeping the same assisted manga/comic translation pipeline while adding production-focused module options and quality-of-life workflow improvements for power users.
+
+<img src="https://raw.githubusercontent.com/dmMaze/BallonsTranslator/master/doc/src/ui0.jpg" align="center">
+
+BallonsTranslator-Pro helps you translate manga/comic pages with an assisted workflow:
 
 1. Detect speech balloons/text areas
 2. Read text (OCR)
@@ -14,6 +18,15 @@ This fork focuses on practical, real-world comic workflows and gives you multipl
 - Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
+
+## What this fork keeps from base (and what it extends)
+
+From the base project, Pro preserves the core five-stage pipeline (detect → OCR → translate → inpaint → edit/export) and WYSIWYG editing workflow.
+
+The Pro fork focuses on:
+- broader translator/model choices (including chainable and LLM-based translators),
+- practical configuration for real chapter workflows,
+- documentation for tuning quality/speed tradeoffs.
 
 ## Who this is for
 
@@ -76,6 +89,19 @@ Default baseline after successful setup:
 5. **Export results**: Tools → Export all pages
 
 That’s enough to complete most projects.
+
+### New: 2-step translation validation (Feature #55)
+
+You can now run a two-step translation flow with online MT + LLM review/correction:
+
+1. Set **Translator** to `Chain`
+2. In Chain settings:
+   - `chain_translators`: `google,LLM_API_Translator` (or `DeepL,LLM_API_Translator`)
+   - `chain_intermediate_langs`: `English`
+   - leave `chain_llm_review_mode` enabled
+3. Configure your `LLM_API_Translator` provider/model normally
+
+When enabled, the final LLM step receives both original source text and the first-pass draft so it can validate and refine wording, tone, and consistency before final output.
 
 ---
 
