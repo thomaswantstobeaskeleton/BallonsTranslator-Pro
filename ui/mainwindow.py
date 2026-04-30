@@ -885,6 +885,7 @@ class MainWindow(mainwindow_cls):
             self.st_manager.clearSceneTextitems()
             self.titleBar.setTitleContent(page_name=osp.basename(target_dir))
             self.updatePageList()
+            self._ensure_first_page_loaded_and_autolayout()
             self.canvas.clear_undostack(update_saved_step=True)
             self.canvas.drop_files = []
             self.canvas.drop_folder = None
@@ -926,6 +927,8 @@ class MainWindow(mainwindow_cls):
         """After opening a project, ensure the first page is displayed. Use saved layout (no re-run of auto layout)."""
         if not self.imgtrans_proj.current_img:
             return
+        # Reset zoom baseline so newly opened folders/files default to fit-in-view instead of keeping previous zoom.
+        self.canvas.scale_factor = 1.0
         self.canvas.updateCanvas()
         self.st_manager.updateSceneTextitems()
 
