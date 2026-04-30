@@ -962,7 +962,9 @@ class MainWindow(mainwindow_cls):
         if getattr(shared, 'DEFER_INITIAL_MODEL_DOWNLOAD', False) and not self._initial_model_download_done:
             shared.DEFER_INITIAL_MODEL_DOWNLOAD = False
             self._initial_model_download_done = True
-            self._run_deferred_model_download()
+            # Run after the event loop gets a chance to paint the window.
+            # Calling a modal dialog directly from showEvent can keep the main UI hidden on some setups.
+            QTimer.singleShot(0, self._run_deferred_model_download)
         if not self._startup_health_shown:
             self._startup_health_shown = True
             QTimer.singleShot(250, self._show_startup_health_overlay)
