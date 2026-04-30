@@ -1847,7 +1847,7 @@ class MainWindow(mainwindow_cls):
         from qtpy import API, QT_VERSION
         from utils.logger import NoisyThirdPartyFilter
         lines = [
-            f"Version: {shared.APP_VERSION}",
+            f"Version: {(QApplication.instance().applicationVersion() or 'unknown') if QApplication.instance() else 'unknown'}",
             f"Qt API: {API}",
             f"Qt Version: {QT_VERSION}",
             f"Python: {sys.version.splitlines()[0]}",
