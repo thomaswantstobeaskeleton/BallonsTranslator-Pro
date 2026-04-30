@@ -9,7 +9,24 @@ if exist "%PADDLE_PATH%" set "PATH=%PADDLE_PATH%;%PATH%"
 
 :: Prefer existing project venv, then bundled portable python, then system Python launcher/python.
 set "PYTHON="
-if exist "venv\Scripts\python.exe" set "PYTHON=venv\Scripts\python.exe"
+set "PY_MODE_FILE=.bt_python_mode"
+set "PY_MODE="
+if exist "%PY_MODE_FILE%" (
+    set /p PY_MODE=<"%PY_MODE_FILE%"
+)
+if /I "%PY_MODE%"=="venv" (
+    if exist "venv\Scripts\python.exe" set "PYTHON=venv\Scripts\python.exe"
+)
+if /I "%PY_MODE%"=="system" (
+    py -3 -c "" >NUL 2>NUL
+    if %ERRORLEVEL% == 0 set "PYTHON=py -3"
+    if not defined PYTHON (
+        python -c "" >NUL 2>NUL
+        if %ERRORLEVEL% == 0 set "PYTHON=python"
+    )
+)
+
+if not defined PYTHON if exist "venv\Scripts\python.exe" set "PYTHON=venv\Scripts\python.exe"
 if not defined PYTHON if exist "ballontrans_pylibs_win\python.exe" set "PYTHON=ballontrans_pylibs_win\python.exe"
 if not defined PYTHON (
     py -3 -c "" >NUL 2>NUL

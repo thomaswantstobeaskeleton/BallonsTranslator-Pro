@@ -4,6 +4,7 @@ REM Installs dependencies. PyTorch is auto-installed on first "python launch.py"
 
 setlocal
 cd /d "%~dp0"
+set "PY_MODE_FILE=.bt_python_mode"
 
 echo BallonsTranslator setup (Windows)
 echo.
@@ -39,6 +40,7 @@ if not defined PYTHON (
     exit /b 1
 )
 echo Using system interpreter: %PYTHON%
+> "%PY_MODE_FILE%" echo system
 goto :install
 
 :setup_venv
@@ -56,6 +58,7 @@ if not exist "venv\Scripts\python.exe" (
 )
 set "PYTHON=venv\Scripts\python.exe"
 echo Using venv interpreter: %PYTHON%
+> "%PY_MODE_FILE%" echo venv
 goto :install
 
 :install

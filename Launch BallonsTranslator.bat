@@ -122,26 +122,8 @@ call "%~dp0launch_win_amd_nightly.bat"
 goto :end
 
 :direct_launch
-if exist "venv\Scripts\python.exe" (
-    "venv\Scripts\python.exe" launch.py %*
-    set "ERR=%ERRORLEVEL%"
-    if not "%ERR%"=="0" (
-        echo.
-        echo launch.py exited with code %ERR%
-        pause
-    )
-    goto :finish
-)
-
-echo.
-echo [BallonsTranslator] No venv found at: %~dp0venv
-echo Create it, then install deps:
-echo   py -3.10 -m venv venv
-echo   venv\Scripts\python.exe -m pip install -r requirements.txt
-echo   Optional: GPU PyTorch ^(see README or run launch.py --reinstall-torch^)
-echo.
-pause
-set "ERR=1"
+call "%~dp0launch_win.bat" %*
+set "ERR=%ERRORLEVEL%"
 goto :finish
 
 :finish
