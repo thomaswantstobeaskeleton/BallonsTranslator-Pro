@@ -1,17 +1,39 @@
 # PyInstaller spec for BallonsTranslator (launch.py)
-# 导入模块
 import os
-import sys
-from PyInstaller.utils.hooks import collect_data_files
 import subprocess
 
 # 获取提交哈希值
-commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('utf-8').strip()  
+commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('utf-8').strip()
 
 # 构造带提交哈希值的版本号
 version = "1.4.0.dev." + commit_hash
 
 block_cipher = None
+
+base_datas = [
+    ('.btrans_cache', './.btrans_cache'),
+    ('config', './config'),
+    ('data', './data'),
+    ('doc', './doc'),
+    ('docs', './docs'),
+    ('fonts', './fonts'),
+    ('icons', './icons'),
+    ('modules', './modules'),
+    ('scripts', './scripts'),
+    ('translate', './translate'),
+    ('ui', './ui'),
+    ('utils', './utils'),
+]
+
+optional_datas = [
+    ('venv/lib/python3.12/site-packages/spacy_pkuseg', './spacy_pkuseg'),
+    ('venv/lib/python3.12/site-packages/torchvision', './torchvision'),
+    ('venv/lib/python3.12/site-packages/translators', './translators'),
+    ('venv/lib/python3.12/site-packages/cryptography', './cryptography'),
+]
+
+datas = [entry for entry in base_datas if os.path.exists(entry[0])]
+datas.extend(entry for entry in optional_datas if os.path.exists(entry[0]))
 
 a = Analysis([
         'launch.py',
@@ -20,24 +42,7 @@ a = Analysis([
         './scripts',
         ],
     binaries=[],
-    datas=[
-        ('.btrans_cache', './.btrans_cache'),
-        ('config', './config'),
-        ('data', './data'),
-        ('doc', './doc'),
-        ('docs', './docs'),
-        ('fonts', './fonts'),
-        ('icons', './icons'),
-        ('modules', './modules'),
-        ('scripts', './scripts'),
-        ('translate', './translate'),
-        ('ui', './ui'),
-        ('utils', './utils'),
-        ('venv/lib/python3.12/site-packages/spacy_pkuseg', './spacy_pkuseg'),
-        ('venv/lib/python3.12/site-packages/torchvision', './torchvision'),
-        ('venv/lib/python3.12/site-packages/translators', './translators'),
-        ('venv/lib/python3.12/site-packages/cryptography', './cryptography'),
-        ],
+    datas=datas,
     hiddenimports=[
         'PyQt6',
         'numpy',
