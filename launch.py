@@ -276,7 +276,14 @@ def main():
     from qtpy.QtCore import qInstallMessageHandler, QtMsgType
     from qtpy import API, QT_VERSION
 
+    shared.STARTUP_HEALTH = []
+    def _stage(name: str, status: str = "ok", details: str = ""):
+        try:
+            shared.STARTUP_HEALTH.append({"stage": name, "status": status, "details": details})
+        except Exception:
+            pass
     LOGGER.info(f'QT_API: {API}, QT Version: {QT_VERSION}')
+    _stage("Qt ready", "ok", f"{API} / Qt {QT_VERSION}")
 
     shared.DEBUG = args.debug
     shared.USE_PYSIDE6 = API == 'pyside6'
@@ -356,8 +363,10 @@ def main():
     if args.headless or getattr(args, 'headless_continuous', False):
         LOGGER.info('Downloading selected model packages (this may take a few minutes)...')
         prepare_local_files_forall()
+        _stage("Model check", "ok", "headless download path")
     else:
         shared.DEFER_INITIAL_MODEL_DOWNLOAD = True
+        _stage("Model check", "ok", "deferred until UI shown")
 
     if not args.headless and not getattr(args, 'headless_continuous', False):
         ps = QGuiApplication.primaryScreen()
@@ -380,6 +389,7 @@ def main():
     elif lang not in ('en_US', 'English'):
         LOGGER.warning(f'target display language file {langp} doesnt exist.')
     LOGGER.info(f'set display language to {lang}')
+    _stage("Display language", "ok", str(lang))
 
     # Fonts
     # Load custom fonts if they exist
@@ -480,6 +490,7 @@ def main():
         ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
         ballontrans.show()
         ballontrans.resetStyleSheet()
+        _stage("UI shown", "ok", "mainwindow.show()")
 
         # Optional: offer Windows context menu on first launch (once per config)
         if sys.platform == 'win32' and not getattr(config, 'windows_context_menu_offered', False):

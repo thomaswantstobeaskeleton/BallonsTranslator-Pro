@@ -654,6 +654,24 @@ class TitleBar(Widget):
         retryModelsAction = QAction(self.tr('Retry model downloads'), self)
         retryModelsAction.setToolTip(self.tr('Retry downloading model packages (e.g. after a failed first install).'))
         self.retry_models_trigger = retryModelsAction.triggered
+        showDownloadDiagAction = QAction(self.tr('Show model download diagnostics'), self)
+        showDownloadDiagAction.setToolTip(self.tr('Show last model download summary and failed items.'))
+        self.show_model_download_diag_trigger = showDownloadDiagAction.triggered
+        copyStartupDiagAction = QAction(self.tr('Copy startup diagnostics'), self)
+        copyStartupDiagAction.setToolTip(self.tr('Copy startup and environment diagnostics to clipboard.'))
+        self.copy_startup_diag_trigger = copyStartupDiagAction.triggered
+        exportStartupDiagAction = QAction(self.tr('Export startup report...'), self)
+        exportStartupDiagAction.setToolTip(self.tr('Save startup diagnostics to a text file for support.'))
+        self.export_startup_diag_trigger = exportStartupDiagAction.triggered
+        openLogFolderAction = QAction(self.tr('Open log folder'), self)
+        openLogFolderAction.setToolTip(self.tr('Open logs directory in your file explorer.'))
+        self.open_log_folder_trigger = openLogFolderAction.triggered
+        relaunchPyQt5Action = QAction(self.tr('Relaunch with PyQt5 (safe mode)'), self)
+        relaunchPyQt5Action.setToolTip(self.tr('Restart app using --qt-api pyqt5 for compatibility troubleshooting.'))
+        self.relaunch_pyqt5_trigger = relaunchPyQt5Action.triggered
+        relaunchCpuOnlyAction = QAction(self.tr('Relaunch CPU-only (safe mode)'), self)
+        relaunchCpuOnlyAction.setToolTip(self.tr('Restart app with CUDA_VISIBLE_DEVICES empty to disable GPU for this launch.'))
+        self.relaunch_cpu_only_trigger = relaunchCpuOnlyAction.triggered
 
         releaseCachesAction = QAction(self.tr('Release model caches'), self)
         releaseCachesAction.setToolTip(self.tr('Unload detector/OCR/inpainter/translator models and free GPU memory. Use after a batch to reduce RAM.'))
@@ -684,6 +702,13 @@ class TitleBar(Widget):
         modelsMenu = QMenu(self.tr('Models'), self)
         modelsMenu.addAction(manageModelsAction)
         modelsMenu.addAction(retryModelsAction)
+        modelsMenu.addAction(showDownloadDiagAction)
+        modelsMenu.addSeparator()
+        modelsMenu.addAction(copyStartupDiagAction)
+        modelsMenu.addAction(exportStartupDiagAction)
+        modelsMenu.addAction(openLogFolderAction)
+        modelsMenu.addAction(relaunchPyQt5Action)
+        modelsMenu.addAction(relaunchCpuOnlyAction)
         modelsMenu.addSeparator()
         modelsMenu.addAction(releaseCachesAction)
         modelsMenu.addAction(clearPipelineCachesAction)
