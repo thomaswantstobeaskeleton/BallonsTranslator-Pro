@@ -281,6 +281,10 @@ class LLM_API_Translator(BaseTranslator):
             "value": 1.0,
             "description": "Top P for sampling.",
         },
+        "top k": {
+            "value": 0,
+            "description": "Top K for sampling. 0 disables/lets provider default. Supported by OpenRouter, Ollama, and many local OpenAI-compatible servers.",
+        },
         "retry attempts": {
             "value": 3,
             "description": "Number of retry attempts on API connection or parsing failures.",
@@ -1000,6 +1004,12 @@ class LLM_API_Translator(BaseTranslator):
         if provider == "OpenAI":
             cfg["frequency_penalty"] = self.frequency_penalty
             cfg["presence_penalty"] = self.presence_penalty
+        if int(self.top_k or 0) > 0 and provider in {"OpenRouter", "Ollama", "LLM Studio", "Grok"}:
+            extra = cfg.get("extra_body")
+            if not isinstance(extra, dict):
+                extra = {}
+            extra["top_k"] = int(self.top_k)
+            cfg["extra_body"] = extra
         # Do not set max_tokens here.
         # _request_translation() already computes a tighter per-request cap via
         # _translation_completion_max_tokens(provider, expected_count). Overriding it
@@ -1101,6 +1111,10 @@ class LLM_API_Translator(BaseTranslator):
     @property
     def top_p(self) -> float:
         return float(self.get_param_value("top p"))
+
+    @property
+    def top_k(self) -> int:
+        return int(self.get_param_value("top k") or 0)
 
     @property
     def max_tokens(self) -> int:
