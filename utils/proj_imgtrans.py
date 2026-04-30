@@ -218,18 +218,24 @@ class ProjImgTrans:
             if len(self.pages) > 0:
                 self.set_current_img_byidx(0)
 
+    def _ensure_image_info_entry(self, pagename: str):
+        if pagename not in self._image_info:
+            LOGGER.warning(f"Missing page progress entry for {pagename}; creating default progress state.")
+            self._image_info[pagename] = {'finish_code': 0, 'ignored': False}
+        return self._image_info[pagename]
+
     def get_page_progress(self, pagename: str):
-        fin_code = self._image_info[pagename]['finish_code']
+        fin_code = self._ensure_image_info_entry(pagename)['finish_code']
         return (fin_code & pcfg.module.finish_code) == pcfg.module.finish_code
 
     def set_page_progress(self, pagename, code):
-        self._image_info[pagename]['finish_code'] = code 
+        self._ensure_image_info_entry(pagename)['finish_code'] = code 
 
     def is_page_ignored(self, pagename: str) -> bool:
         """True if this page is marked to be skipped in full/batch run."""
         if pagename not in self._image_info:
             return False
-        return bool(self._image_info[pagename].get('ignored', False))
+        return bool(self._ensure_image_info_entry(pagename).get('ignored', False))
 
     def set_page_ignored(self, pagename: str, ignored: bool):
         """Mark page as ignored (skip in full run) or not."""
@@ -237,10 +243,10 @@ class ProjImgTrans:
             return
         if pagename not in self._image_info:
             self._image_info[pagename] = {'finish_code': 0, 'ignored': False}
-        self._image_info[pagename]['ignored'] = bool(ignored)
+        self._ensure_image_info_entry(pagename)['ignored'] = bool(ignored)
 
     def update_page_progress(self, pagename, code):
-        self._image_info[pagename]['finish_code'] |= code 
+        self._ensure_image_info_entry(pagename)['finish_code'] |= code 
 
     def load_translation_from_txt(self, file_path: str):
         page_list = parse_txt_translation(file_path)
