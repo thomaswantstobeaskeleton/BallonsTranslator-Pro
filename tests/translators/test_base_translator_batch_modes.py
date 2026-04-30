@@ -86,9 +86,9 @@ def test_translate_list_uses_per_item_path_when_translate_by_textblock_is_true()
     assert translator.calls[0] == src
 
 
-def test_google_translator_keeps_batch_concatenation_capability_by_default():
-    # Class-level defaults should continue enabling concatenation for Google provider path.
-    assert TransGoogle.concate_text is True
+def test_google_translator_uses_per_item_translation_by_default():
+    # Google responses can rewrite delimiter markers, so default to per-item translation for stable block counts.
+    assert TransGoogle.concate_text is False
     assert TransGoogle.translate_by_textblock is False
 
 

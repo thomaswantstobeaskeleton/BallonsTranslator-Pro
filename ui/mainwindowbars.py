@@ -1164,7 +1164,13 @@ class TitleBar(Widget):
         try:
             if not proxy_index or not proxy_index.isValid():
                 return
-            src_index = self._omni_proxy.mapToSource(proxy_index)
+            # Depending on completer internals, activation can provide either proxy or source indexes.
+            if proxy_index.model() is self._omni_proxy:
+                src_index = self._omni_proxy.mapToSource(proxy_index)
+            elif proxy_index.model() is self._omni_model:
+                src_index = proxy_index
+            else:
+                return
             item = self._omni_model.itemFromIndex(src_index) if src_index.isValid() else None
             payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if not isinstance(payload, dict):

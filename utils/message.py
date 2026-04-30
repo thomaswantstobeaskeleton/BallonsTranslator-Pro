@@ -13,7 +13,11 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
         exception_type: Specify it to avoid errors dialog of the same type popup repeatedly 
     '''
 
-    detail_traceback = traceback.format_exc()
+    # format_exc() outside an active exception block yields noisy "NoneType: None".
+    if exception is not None and getattr(exception, "__traceback__", None) is not None:
+        detail_traceback = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+    else:
+        detail_traceback = ''
     
     if exception_type is None:
         exception_type = ''
@@ -27,7 +31,8 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
         else:
             error_msg = str(exception) + '\n' + error_msg
         LOGGER.error(error_msg + '\n')
-        LOGGER.error(detail_traceback)
+        if detail_traceback:
+            LOGGER.error(detail_traceback)
 
         if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             shared.create_errdialog_in_mainthread(error_msg, detail_traceback, exception_type)
