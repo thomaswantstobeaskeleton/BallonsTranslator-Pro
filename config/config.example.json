@@ -212,7 +212,7 @@
   "gsearch_whole_word": false,
   "gsearch_regex": false,
   "gsearch_range": 0,
-  "darkmode": false,
+  "darkmode": true,
   "bubbly_ui": true,
   "accent_color_hex": "",
   "app_font_family": "",
