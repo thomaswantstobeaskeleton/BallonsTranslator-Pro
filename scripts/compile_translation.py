@@ -7,75 +7,90 @@ Run from project root. Tries, in order:
 
 If none is found, prints where to get lrelease and exits with 1.
 """
-import os
 import os.path as osp
 import subprocess
 import sys
+from glob import glob
+
+
+def _lrelease_candidates(ts_path: str, qm_path: str):
+    return [
+        ['pyside6-lrelease', ts_path, '-qm', qm_path],
+        ['lrelease', ts_path, '-qm', qm_path],
+        ['lrelease-qt6', ts_path, '-qm', qm_path],
+        [sys.executable, '-m', 'pylrelease6', ts_path, '-qm', qm_path],
+        [sys.executable, '-m', 'PySide6.scripts.pyside_tool', 'lrelease', ts_path, '-qm', qm_path],
+    ]
+
+
+def _compile_one(root: str, ts_path: str, qm_path: str) -> bool:
+    for cmd in _lrelease_candidates(ts_path, qm_path):
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f'[WARN] Compiler launch failed for {cmd}: {e}', file=sys.stderr)
+            continue
+
+        if r.returncode == 0 and osp.isfile(qm_path):
+            print(f'Compiled: {qm_path}')
+            return True
+
+        stderr = (r.stderr or '').strip()
+        if stderr:
+            print(f'[DEBUG] failed cmd: {" ".join(cmd)}', file=sys.stderr)
+            print(stderr, file=sys.stderr)
+    return False
 
 def main():
     root = osp.dirname(osp.dirname(osp.abspath(__file__)))
     trans_dir = osp.join(root, 'translate')
-    ts_path = osp.join(trans_dir, 'zh_CN.ts')
-    qm_path = osp.join(trans_dir, 'zh_CN.qm')
+    if len(sys.argv) > 1:
+        targets = []
+        for arg in sys.argv[1:]:
+            ts_path = arg if osp.isabs(arg) else osp.join(root, arg)
+            if ts_path.endswith('.qm'):
+                ts_path = ts_path[:-3] + '.ts'
+            if not ts_path.endswith('.ts'):
+                ts_path = ts_path + '.ts'
+            if osp.isfile(ts_path):
+                targets.append(ts_path)
+            else:
+                print(f'Not found: {ts_path}', file=sys.stderr)
+    else:
+        targets = sorted(glob(osp.join(trans_dir, '*.ts')))
 
-    if not osp.isfile(ts_path):
-        print(f'Not found: {ts_path}', file=sys.stderr)
+    if not targets:
+        print(f'No translation source files found in: {trans_dir}', file=sys.stderr)
         return 1
 
-    # 1) lrelease on PATH
-    for cmd in ('lrelease', 'lrelease-qt6'):
-        try:
-            r = subprocess.run(
-                [cmd, ts_path, '-qm', qm_path],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if r.returncode == 0:
-                print(f'Compiled: {qm_path}')
-                return 0
-            if r.stderr and 'not found' not in r.stderr.lower():
-                print(r.stderr, file=sys.stderr)
-        except FileNotFoundError:
-            pass
+    ok = 0
+    fail = 0
+    for ts_path in targets:
+        qm_path = ts_path[:-3] + '.qm'
+        if _compile_one(root, ts_path, qm_path):
+            ok += 1
+        else:
+            fail += 1
+            print(f'Failed to compile: {ts_path}', file=sys.stderr)
 
-    # 2) pylrelease6
-    try:
-        r = subprocess.run(
-            [sys.executable, '-m', 'pylrelease6', ts_path, '-qm', qm_path],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if r.returncode == 0:
-            print(f'Compiled: {qm_path}')
-            return 0
-    except Exception:
-        pass
+    if fail == 0:
+        print(f'All translations compiled successfully ({ok}/{ok}).')
+        return 0
 
-    # 3) pyside6-lrelease
-    try:
-        r = subprocess.run(
-            [sys.executable, '-m', 'PySide6.scripts.pyside_tool', 'lrelease', ts_path, '-qm', qm_path],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if r.returncode == 0:
-            print(f'Compiled: {qm_path}')
-            return 0
-    except Exception:
-        pass
-
-    print('Could not find lrelease / pylrelease6 / pyside6-lrelease.', file=sys.stderr)
+    print('Could not compile one or more translations. Compiler candidates tried:', file=sys.stderr)
     print('Install one of:', file=sys.stderr)
     print('  - Qt Linguist / Qt SDK (add bin/ to PATH), then run: lrelease translate/zh_CN.ts', file=sys.stderr)
     print('  - pip install pyqt6-tools  then: python -m pylrelease6 translate/zh_CN.ts -qm translate/zh_CN.qm', file=sys.stderr)
     print('  - pip install pyside6  then use pyside6-lrelease if available.', file=sys.stderr)
-    print('See docs/TRANSLATIONS.md for details.', file=sys.stderr)
+    print(f'Successful: {ok}, Failed: {fail}', file=sys.stderr)
     return 1
 
 if __name__ == '__main__':
