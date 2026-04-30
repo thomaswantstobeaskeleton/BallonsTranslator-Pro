@@ -806,6 +806,7 @@ class TitleBar(Widget):
         self.omniSearch.setMinimumWidth(260)
         self.omniSearch.setMaximumWidth(1200)
         self.omniSearch.textEdited.connect(self._on_omni_search_text_edited)
+        self.omniSearch.returnPressed.connect(self._on_omni_search_return_pressed)
 
         self._omni_model = QStandardItemModel(self.omniSearch)
         self._omni_proxy = QSortFilterProxyModel(self.omniSearch)
@@ -943,13 +944,20 @@ class TitleBar(Widget):
                     sub_prefix = f"{prefix}{text} > "
                     yield from self._walk_menu_actions(sub, prefix=sub_prefix)
                     continue
-                label = f"Menu > {prefix}{text}" if prefix else f"Menu > {text}"
+                tip = (act.toolTip() or "").strip()
+                shortcut = act.shortcut().toString() if hasattr(act, "shortcut") else ""
+                extra = ""
+                if tip:
+                    extra += f" ({tip})"
+                if shortcut:
+                    extra += f" [{shortcut}]"
+                label = (f"Menu > {prefix}{text}" if prefix else f"Menu > {text}") + extra
                 yield (label, act)
             except Exception:
                 continue
 
-    def _get_actions_cache(self):
-        if self._omni_actions_cache is not None:
+    def _get_actions_cache(self, force_rebuild: bool = False):
+        if self._omni_actions_cache is not None and not force_rebuild:
             return self._omni_actions_cache
         actions = []
         try:
@@ -1138,6 +1146,19 @@ class TitleBar(Widget):
         except Exception:
             pass
 
+    def _on_omni_search_return_pressed(self):
+        """Activate current highlighted result, or the first result if popup is hidden."""
+        try:
+            cidx = self._omni_completer.currentIndex()
+            if cidx is not None and cidx.isValid():
+                self._on_omni_search_index_activated(cidx)
+                return
+            if self._omni_model.rowCount() > 0:
+                src_idx = self._omni_model.index(0, 0)
+                self._on_omni_search_index_activated(src_idx)
+        except Exception:
+            pass
+
     def _on_omni_drop_clicked(self):
         """Open the popup list on demand."""
         try:
@@ -1254,6 +1275,7 @@ class TitleBar(Widget):
         importMenu.addActions([actionImportDoc, actionImportTransTxt])
         fileMenu.addMenu(importMenu)
         self.fileToolBtn.setMenu(fileMenu)
+        self._omni_actions_cache = None
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
