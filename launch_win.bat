@@ -62,8 +62,7 @@ echo Couldn't install pip
 goto :show_stdout_stderr
 
 :launch
-%PYTHON% launch.py %*
-pause
+start "BallonsTranslator" cmd /k "cd /d "%~dp0" && %PYTHON% launch.py %*"
 exit /b
 
 :show_stdout_stderr
