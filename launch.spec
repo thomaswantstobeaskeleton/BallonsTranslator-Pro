@@ -1,6 +1,7 @@
 # PyInstaller spec for BallonsTranslator (launch.py)
 import os
 import subprocess
+from PyInstaller.utils.hooks import collect_data_files
 
 # 获取提交哈希值
 commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('utf-8').strip()
@@ -34,6 +35,8 @@ optional_datas = [
 
 datas = [entry for entry in base_datas if os.path.exists(entry[0])]
 datas.extend(entry for entry in optional_datas if os.path.exists(entry[0]))
+# Ensure unidic_lite dictionary assets (e.g. dicdir/version) are bundled for manga_ocr tokenizer.
+datas.extend(collect_data_files('unidic_lite'))
 
 a = Analysis([
         'launch.py',
