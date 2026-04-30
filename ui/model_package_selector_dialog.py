@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QFrame,
     QMessageBox,
+    QComboBox,
 )
 try:
     from qtpy.QtWidgets import QRadioButton
@@ -22,6 +23,8 @@ except ImportError:
     QRadioButton = QCheckBox
 
 import utils.model_packages as _model_packages
+from utils.config import pcfg, save_config
+from utils.shared import DISPLAY_LANGUAGE_MAP
 MODEL_PACKAGES = _model_packages.MODEL_PACKAGES
 PACKAGE_LABELS = _model_packages.PACKAGE_LABELS
 MODEL_PACKAGE_PRESETS = getattr(_model_packages, "MODEL_PACKAGE_PRESETS", {"core": {"label": "Core only"}})
@@ -68,6 +71,16 @@ class ModelPackageSelectorDialog(QDialog):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+
+        lang_row = QHBoxLayout()
+        lang_label = QLabel(self.tr("Display language"))
+        self._lang_combo = QComboBox(self)
+        self._lang_combo.addItems(list(DISPLAY_LANGUAGE_MAP.keys()))
+        self._lang_combo.setCurrentText(self._display_lang_to_label(getattr(pcfg, "display_lang", "English")))
+        self._lang_combo.currentTextChanged.connect(self._on_display_lang_changed)
+        lang_row.addWidget(lang_label)
+        lang_row.addWidget(self._lang_combo, 1)
+        layout.addLayout(lang_row)
 
         intro = QLabel(
             self.tr(
@@ -153,6 +166,19 @@ class ModelPackageSelectorDialog(QDialog):
         btn_row.addWidget(local_only_btn)
         btn_row.addWidget(download_btn)
         layout.addLayout(btn_row)
+
+    def _display_lang_to_label(self, code: str) -> str:
+        for label, lang_code in DISPLAY_LANGUAGE_MAP.items():
+            if lang_code == code:
+                return label
+        return "English"
+
+    def _on_display_lang_changed(self, text: str):
+        code = DISPLAY_LANGUAGE_MAP.get(text)
+        if not code:
+            return
+        pcfg.display_lang = code
+        save_config()
 
     def _sync_mode_ui(self, advanced_enabled: bool):
         if self._advanced_group is not None and hasattr(self._advanced_group, "setVisible"):

@@ -1464,4 +1464,85 @@ All existing translation results will be cleared!</source>
         <translation>대상:</translation>
     </message>
 </context>
+<context>
+    <name>StartupModelCoverage</name>
+    <message>
+        <source>Copy model files from an existing local folder into this app\'s data/models directory.</source>
+        <translation>기존 로컬 폴더의 모델 파일을 이 앱의 data/models 디렉터리로 복사합니다.</translation>
+    </message>
+    <message>
+        <source>Core package</source>
+        <translation>핵심 패키지</translation>
+    </message>
+    <message>
+        <source>Core package not selected</source>
+        <translation>핵심 패키지가 선택되지 않음</translation>
+    </message>
+    <message>
+        <source>Do not download any model package now. Use only already-local modules/files.</source>
+        <translation>지금은 어떤 모델 패키지도 다운로드하지 않습니다. 이미 로컬에 있는 모듈/파일만 사용합니다.</translation>
+    </message>
+    <message>
+        <source>Download complete. Defaults updated.</source>
+        <translation>다운로드 완료. 기본값이 업데이트되었습니다.</translation>
+    </message>
+    <message>
+        <source>Download partially complete.</source>
+        <translation>다운로드가 부분적으로 완료되었습니다.</translation>
+    </message>
+    <message>
+        <source>First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.</source>
+        <translation>첫 실행 로컬 전용 모드가 활성화되어 있습니다. 도구 → 모델 관리에서 모델을 가져오거나 다운로드하거나, config/config.json을 수정해 패키지를 활성화한 뒤 다시 시작하세요.</translation>
+    </message>
+    <message>
+        <source>Import local model directory...</source>
+        <translation>로컬 모델 디렉터리 가져오기...</translation>
+    </message>
+    <message>
+        <source>Import local models</source>
+        <translation>로컬 모델 가져오기</translation>
+    </message>
+    <message>
+        <source>Manual package selection</source>
+        <translation>수동 패키지 선택</translation>
+    </message>
+    <message>
+        <source>Manually select low-level packages instead of using a preset.</source>
+        <translation>프리셋 대신 저수준 패키지를 수동으로 선택합니다.</translation>
+    </message>
+    <message>
+        <source>Model package download complete</source>
+        <translation>모델 패키지 다운로드 완료</translation>
+    </message>
+    <message>
+        <source>Model package download partially complete</source>
+        <translation>모델 패키지 다운로드 부분 완료</translation>
+    </message>
+    <message>
+        <source>Model packages have been downloaded. Applied modules:
+</source>
+        <translation>모델 패키지가 다운로드되었습니다. 적용된 모듈:
+</translation>
+    </message>
+    <message>
+        <source>Open Manage Models</source>
+        <translation>모델 관리 열기</translation>
+    </message>
+    <message>
+        <source>Select local model directory</source>
+        <translation>로컬 모델 디렉터리 선택</translation>
+    </message>
+    <message>
+        <source>Skip all downloads (local-only)</source>
+        <translation>모든 다운로드 건너뛰기(로컬 전용)</translation>
+    </message>
+    <message>
+        <source>Some model packages failed. Failed items: {0}</source>
+        <translation>일부 모델 패키지가 실패했습니다. 실패 항목: {0}</translation>
+    </message>
+    <message>
+        <source>Summary: downloaded {0}, failed {1}, skipped {2}.</source>
+        <translation>요약: 다운로드 {0}, 실패 {1}, 건너뜀 {2}.</translation>
+    </message>
+</context>
 </TS>

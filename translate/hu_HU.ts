@@ -1413,4 +1413,85 @@ Minden eddigi fordítás elveszik!</translation>
         <translation>Cél</translation>
     </message>
 </context>
+<context>
+    <name>StartupModelCoverage</name>
+    <message>
+        <source>Copy model files from an existing local folder into this app\'s data/models directory.</source>
+        <translation>Modellfájlok másolása egy meglévő helyi mappából az alkalmazás data/models könyvtárába.</translation>
+    </message>
+    <message>
+        <source>Core package</source>
+        <translation>Alapcsomag</translation>
+    </message>
+    <message>
+        <source>Core package not selected</source>
+        <translation>Az alapcsomag nincs kiválasztva</translation>
+    </message>
+    <message>
+        <source>Do not download any model package now. Use only already-local modules/files.</source>
+        <translation>Most ne tölts le modellcsomagot. Csak a már helyben elérhető modulokat/fájlokat használd.</translation>
+    </message>
+    <message>
+        <source>Download complete. Defaults updated.</source>
+        <translation>A letöltés kész. Az alapértelmezések frissítve.</translation>
+    </message>
+    <message>
+        <source>Download partially complete.</source>
+        <translation>A letöltés részben befejeződött.</translation>
+    </message>
+    <message>
+        <source>First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.</source>
+        <translation>Az első indítás helyi módja aktív. A modellek importálásához/letöltéséhez használd az Eszközök → Modellek kezelése menüt, vagy szerkeszd a config/config.json fájlt a csomagok engedélyezéséhez, majd indítsd újra.</translation>
+    </message>
+    <message>
+        <source>Import local model directory...</source>
+        <translation>Helyi modellkönyvtár importálása...</translation>
+    </message>
+    <message>
+        <source>Import local models</source>
+        <translation>Helyi modellek importálása</translation>
+    </message>
+    <message>
+        <source>Manual package selection</source>
+        <translation>Kézi csomagválasztás</translation>
+    </message>
+    <message>
+        <source>Manually select low-level packages instead of using a preset.</source>
+        <translation>Előbeállítás helyett kézzel válassz alacsony szintű csomagokat.</translation>
+    </message>
+    <message>
+        <source>Model package download complete</source>
+        <translation>A modellcsomag letöltése kész</translation>
+    </message>
+    <message>
+        <source>Model package download partially complete</source>
+        <translation>A modellcsomag letöltése részben kész</translation>
+    </message>
+    <message>
+        <source>Model packages have been downloaded. Applied modules:
+</source>
+        <translation>A modellcsomagok letöltődtek. Alkalmazott modulok:
+</translation>
+    </message>
+    <message>
+        <source>Open Manage Models</source>
+        <translation>Modellek kezelése megnyitása</translation>
+    </message>
+    <message>
+        <source>Select local model directory</source>
+        <translation>Helyi modellkönyvtár kiválasztása</translation>
+    </message>
+    <message>
+        <source>Skip all downloads (local-only)</source>
+        <translation>Minden letöltés kihagyása (csak helyi)</translation>
+    </message>
+    <message>
+        <source>Some model packages failed. Failed items: {0}</source>
+        <translation>Néhány modellcsomag letöltése sikertelen. Sikertelen elemek: {0}</translation>
+    </message>
+    <message>
+        <source>Summary: downloaded {0}, failed {1}, skipped {2}.</source>
+        <translation>Összegzés: letöltve {0}, sikertelen {1}, kihagyva {2}.</translation>
+    </message>
+</context>
 </TS>

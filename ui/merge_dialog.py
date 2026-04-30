@@ -12,7 +12,7 @@ class MergeDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Region merge tool settings")
+        self.setWindowTitle(self.tr("Region merge tool settings"))
         self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
         self.adjustSize()
         self.setWindowFlags(
@@ -28,21 +28,21 @@ class MergeDialog(QDialog):
 
         # --- Mappings for merge logic (data values unchanged) ---
         self.merge_mode_map = {
-            "Vertical": "VERTICAL",
-            "Horizontal": "HORIZONTAL",
-            "Vertical then horizontal": "VERTICAL_THEN_HORIZONTAL",
-            "Horizontal then vertical": "HORIZONTAL_THEN_VERTICAL",
-            "None": "NONE",
+            self.tr("Vertical"): "VERTICAL",
+            self.tr("Horizontal"): "HORIZONTAL",
+            self.tr("Vertical then horizontal"): "VERTICAL_THEN_HORIZONTAL",
+            self.tr("Horizontal then vertical"): "HORIZONTAL_THEN_VERTICAL",
+            self.tr("None"): "NONE",
         }
         self.label_strategy_map = {
-            "Prefer shorter label": "PREFER_SHORTER",
-            "Use first box's label": "FIRST",
-            "Combine labels (label1+label2)": "COMBINE",
-            "Prefer non-default label": "PREFER_NON_DEFAULT",
+            self.tr("Prefer shorter label"): "PREFER_SHORTER",
+            self.tr("Use first box's label"): "FIRST",
+            self.tr("Combine labels (label1+label2)"): "COMBINE",
+            self.tr("Prefer non-default label"): "PREFER_NON_DEFAULT",
         }
 
         # --- Main Settings --- #
-        main_group = QGroupBox("Main settings")
+        main_group = QGroupBox(self.tr("Main settings"))
         main_layout = QFormLayout(main_group)
         main_layout.setSpacing(4)
         main_layout.setContentsMargins(8, 6, 8, 6)
@@ -50,30 +50,30 @@ class MergeDialog(QDialog):
         self.merge_mode = QComboBox()
         for text, data in self.merge_mode_map.items():
             self.merge_mode.addItem(text, userData=data)
-        main_layout.addRow("Merge mode:", self.merge_mode)
+        main_layout.addRow(self.tr("Merge mode:"), self.merge_mode)
         self.layout.addWidget(main_group)
 
         # --- Text reading order (by label) ---
-        reading_order_group = QGroupBox("Text merge order (by label)")
+        reading_order_group = QGroupBox(self.tr("Text merge order (by label)"))
         reading_order_layout = QFormLayout(reading_order_group)
         reading_order_layout.setSpacing(4)
         reading_order_layout.setContentsMargins(8, 6, 8, 6)
 
         self.ltr_labels_edit = QLineEdit()
-        self.ltr_labels_edit.setPlaceholderText("label1,label2,...")
+        self.ltr_labels_edit.setPlaceholderText(self.tr("label1,label2,..."))
         self.rtl_labels_edit = QLineEdit()
-        self.rtl_labels_edit.setText("balloon,qipao,shuqing")
+        self.rtl_labels_edit.setText(self.tr("balloon,qipao,shuqing"))
         self.ttb_labels_edit = QLineEdit()
-        self.ttb_labels_edit.setText("changfangtiao,hengxie")
+        self.ttb_labels_edit.setText(self.tr("changfangtiao,hengxie"))
 
-        reading_order_layout.addRow("Left-to-right (LTR) labels:", self.ltr_labels_edit)
-        reading_order_layout.addRow("Right-to-left (RTL) labels:", self.rtl_labels_edit)
-        reading_order_layout.addRow("Top-to-bottom (TTB) labels:", self.ttb_labels_edit)
+        reading_order_layout.addRow(self.tr("Left-to-right (LTR) labels:"), self.ltr_labels_edit)
+        reading_order_layout.addRow(self.tr("Right-to-left (RTL) labels:"), self.rtl_labels_edit)
+        reading_order_layout.addRow(self.tr("Top-to-bottom (TTB) labels:"), self.ttb_labels_edit)
 
         self.layout.addWidget(reading_order_group)
 
         # --- Label rules --- #
-        label_group = QGroupBox("Label merge rules")
+        label_group = QGroupBox(self.tr("Label merge rules"))
         label_layout = QFormLayout(label_group)
         label_layout.setSpacing(4)
         label_layout.setContentsMargins(8, 6, 8, 6)
@@ -81,25 +81,25 @@ class MergeDialog(QDialog):
         self.label_merge_strategy = QComboBox()
         for text, data in self.label_strategy_map.items():
             self.label_merge_strategy.addItem(text, userData=data)
-        label_layout.addRow("Label merge strategy:", self.label_merge_strategy)
+        label_layout.addRow(self.tr("Label merge strategy:"), self.label_merge_strategy)
 
-        self.enable_exclude_labels = QCheckBox("Enable exclude-from-merge labels (blacklist)")
+        self.enable_exclude_labels = QCheckBox(self.tr("Enable exclude-from-merge labels (blacklist)"))
         self.enable_exclude_labels.setChecked(True)
         label_layout.addRow(self.enable_exclude_labels)
 
         self.exclude_labels = QLineEdit()
-        self.exclude_labels.setText("other")
-        self.exclude_labels.setPlaceholderText("e.g. label1,label2")
-        label_layout.addRow("Blacklist labels:", self.exclude_labels)
+        self.exclude_labels.setText(self.tr("other"))
+        self.exclude_labels.setPlaceholderText(self.tr("e.g. label1,label2"))
+        label_layout.addRow(self.tr("Blacklist labels:"), self.exclude_labels)
 
         self.enable_exclude_labels.toggled.connect(self.exclude_labels.setEnabled)
 
-        self.require_same_label = QCheckBox("Require same label to merge")
+        self.require_same_label = QCheckBox(self.tr("Require same label to merge"))
         label_layout.addRow(self.require_same_label)
 
-        self.use_specific_groups = QCheckBox("Merge only within specific label groups")
+        self.use_specific_groups = QCheckBox(self.tr("Merge only within specific label groups"))
         self.specific_groups_edit = QPlainTextEdit()
-        self.specific_groups_edit.setPlaceholderText("One group per line, labels comma-separated\n e.g.:\nballoon,balloon2\nqipao,qipao2")
+        self.specific_groups_edit.setPlaceholderText(self.tr("One group per line, labels comma-separated\n e.g.:\nballoon,balloon2\nqipao,qipao2"))
         self.specific_groups_edit.setPlainText("balloon\nqipao\nshuqing\nchangfangtiao\nhengxie")
         self.specific_groups_edit.setMinimumHeight(100)
         self.specific_groups_edit.setMaximumHeight(120)
@@ -113,7 +113,7 @@ class MergeDialog(QDialog):
         self.layout.addWidget(label_group)
 
         # --- Geometric rules ---
-        geo_group = QGroupBox("Geometry merge parameters")
+        geo_group = QGroupBox(self.tr("Geometry merge parameters"))
         geo_layout = QFormLayout(geo_group)
         geo_layout.setSpacing(4)
         geo_layout.setContentsMargins(8, 6, 8, 6)
@@ -121,29 +121,29 @@ class MergeDialog(QDialog):
         self.max_vertical_gap = QSpinBox()
         self.max_vertical_gap.setRange(-100, 1000)
         self.max_vertical_gap.setValue(10)
-        self.max_vertical_gap.setToolTip("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap).")
+        self.max_vertical_gap.setToolTip(self.tr("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap)."))
         self.min_width_overlap_ratio = QSpinBox()
         self.min_width_overlap_ratio.setRange(0, 100)
         self.min_width_overlap_ratio.setValue(90)
         self.min_width_overlap_ratio.setSuffix(" %")
-        self.min_width_overlap_ratio.setToolTip("Min horizontal overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped).")
+        self.min_width_overlap_ratio.setToolTip(self.tr("Min horizontal overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped)."))
 
         self.max_horizontal_gap = QSpinBox()
         self.max_horizontal_gap.setRange(-100, 1000)
         self.max_horizontal_gap.setValue(10)
-        self.max_horizontal_gap.setToolTip("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap).")
+        self.max_horizontal_gap.setToolTip(self.tr("Max gap between boxes (px). 0 = must touch; negative = require overlap (e.g. -15 = at least 15 px overlap)."))
         self.min_height_overlap_ratio = QSpinBox()
         self.min_height_overlap_ratio.setRange(0, 100)
         self.min_height_overlap_ratio.setValue(90)
         self.min_height_overlap_ratio.setSuffix(" %")
-        self.min_height_overlap_ratio.setToolTip("Min vertical overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped).")
+        self.min_height_overlap_ratio.setToolTip(self.tr("Min vertical overlap (%). Higher = boxes must align more (e.g. 98 = almost fully overlapped)."))
 
-        geo_layout.addRow(QLabel("<b>Vertical merge (up-down)</b>"))
-        geo_layout.addRow("Max vertical gap (px):", self.max_vertical_gap)
-        geo_layout.addRow("Min horizontal overlap ratio:", self.min_width_overlap_ratio)
-        geo_layout.addRow(QLabel("<b>Horizontal merge (left-right)</b>"))
-        geo_layout.addRow("Max horizontal gap (px):", self.max_horizontal_gap)
-        geo_layout.addRow("Min vertical overlap ratio:", self.min_height_overlap_ratio)
+        geo_layout.addRow(QLabel(self.tr("<b>Vertical merge (up-down)</b>")))
+        geo_layout.addRow(self.tr("Max vertical gap (px):"), self.max_vertical_gap)
+        geo_layout.addRow(self.tr("Min horizontal overlap ratio:"), self.min_width_overlap_ratio)
+        geo_layout.addRow(QLabel(self.tr("<b>Horizontal merge (left-right)</b>")))
+        geo_layout.addRow(self.tr("Max horizontal gap (px):"), self.max_horizontal_gap)
+        geo_layout.addRow(self.tr("Min vertical overlap ratio:"), self.min_height_overlap_ratio)
         geo_strict_label = QLabel(self.tr("Strict (one box per bubble): set both gaps to 0 or negative (e.g. -10), overlap to 98–100%."))
         geo_strict_label.setWordWrap(True)
         geo_strict_label.setStyleSheet("color: gray; font-size: 0.9em;")
@@ -152,25 +152,25 @@ class MergeDialog(QDialog):
         self.layout.addWidget(geo_group)
 
         # --- Advanced options --- #
-        advanced_group = QGroupBox("Advanced options")
+        advanced_group = QGroupBox(self.tr("Advanced options"))
         advanced_layout = QVBoxLayout(advanced_group)
         advanced_layout.setSpacing(4)
         advanced_layout.setContentsMargins(8, 6, 8, 6)
-        self.allow_negative_gap = QCheckBox("Allow negative gap (overlapping boxes)")
+        self.allow_negative_gap = QCheckBox(self.tr("Allow negative gap (overlapping boxes)"))
         self.allow_negative_gap.setChecked(True)
         advanced_layout.addWidget(self.allow_negative_gap)
 
         self.layout.addWidget(advanced_group)
 
         # --- Merge result type --- #
-        result_type_group = QGroupBox("Merge result type")
+        result_type_group = QGroupBox(self.tr("Merge result type"))
         result_type_layout = QVBoxLayout(result_type_group)
         result_type_layout.setSpacing(4)
         result_type_layout.setContentsMargins(8, 6, 8, 6)
 
         self.output_type_group = QButtonGroup(self)
-        self.radio_output_rectangle = QRadioButton("Axis-aligned rectangle")
-        self.radio_output_rotation = QRadioButton("Rotated rectangle")
+        self.radio_output_rectangle = QRadioButton(self.tr("Axis-aligned rectangle"))
+        self.radio_output_rotation = QRadioButton(self.tr("Rotated rectangle"))
 
         self.radio_output_rectangle.setChecked(True)
 
@@ -184,9 +184,9 @@ class MergeDialog(QDialog):
 
         # --- Buttons --- #
         button_layout = QHBoxLayout()
-        self.run_current_button = QPushButton("Run on current page")
-        self.run_all_button = QPushButton("Run on all pages")
-        self.cancel_button = QPushButton("Cancel")
+        self.run_current_button = QPushButton(self.tr("Run on current page"))
+        self.run_all_button = QPushButton(self.tr("Run on all pages"))
+        self.cancel_button = QPushButton(self.tr("Cancel"))
 
         button_layout.addWidget(self.run_current_button)
         button_layout.addWidget(self.run_all_button)

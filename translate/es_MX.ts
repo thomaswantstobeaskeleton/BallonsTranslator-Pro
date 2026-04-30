@@ -1414,4 +1414,85 @@ All existing translation results will be cleared!</source>
         <translation>Objetivo</translation>
     </message>
 </context>
+<context>
+    <name>StartupModelCoverage</name>
+    <message>
+        <source>Copy model files from an existing local folder into this app\'s data/models directory.</source>
+        <translation>Copiar archivos de modelo desde una carpeta local existente al directorio data/models de esta aplicación.</translation>
+    </message>
+    <message>
+        <source>Core package</source>
+        <translation>Paquete base</translation>
+    </message>
+    <message>
+        <source>Core package not selected</source>
+        <translation>Paquete base no seleccionado</translation>
+    </message>
+    <message>
+        <source>Do not download any model package now. Use only already-local modules/files.</source>
+        <translation>No descargar ningún paquete de modelos ahora. Usar solo módulos/archivos ya locales.</translation>
+    </message>
+    <message>
+        <source>Download complete. Defaults updated.</source>
+        <translation>Descarga completa. Valores predeterminados actualizados.</translation>
+    </message>
+    <message>
+        <source>Download partially complete.</source>
+        <translation>Descarga completada parcialmente.</translation>
+    </message>
+    <message>
+        <source>First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.</source>
+        <translation>El modo solo local de primer inicio está activo. Usa Herramientas → Administrar modelos para importar/descargar modelos, o edita config/config.json para habilitar paquetes y reinicia.</translation>
+    </message>
+    <message>
+        <source>Import local model directory...</source>
+        <translation>Importar directorio local de modelos...</translation>
+    </message>
+    <message>
+        <source>Import local models</source>
+        <translation>Importar modelos locales</translation>
+    </message>
+    <message>
+        <source>Manual package selection</source>
+        <translation>Selección manual de paquetes</translation>
+    </message>
+    <message>
+        <source>Manually select low-level packages instead of using a preset.</source>
+        <translation>Selecciona manualmente paquetes de bajo nivel en lugar de usar un preajuste.</translation>
+    </message>
+    <message>
+        <source>Model package download complete</source>
+        <translation>Descarga de paquetes de modelos completada</translation>
+    </message>
+    <message>
+        <source>Model package download partially complete</source>
+        <translation>Descarga de paquetes de modelos parcialmente completada</translation>
+    </message>
+    <message>
+        <source>Model packages have been downloaded. Applied modules:
+</source>
+        <translation>Se han descargado los paquetes de modelos. Módulos aplicados:
+</translation>
+    </message>
+    <message>
+        <source>Open Manage Models</source>
+        <translation>Abrir Administrar modelos</translation>
+    </message>
+    <message>
+        <source>Select local model directory</source>
+        <translation>Seleccionar directorio local de modelos</translation>
+    </message>
+    <message>
+        <source>Skip all downloads (local-only)</source>
+        <translation>Omitir todas las descargas (solo local)</translation>
+    </message>
+    <message>
+        <source>Some model packages failed. Failed items: {0}</source>
+        <translation>Algunos paquetes de modelos fallaron. Elementos fallidos: {0}</translation>
+    </message>
+    <message>
+        <source>Summary: downloaded {0}, failed {1}, skipped {2}.</source>
+        <translation>Resumen: descargados {0}, fallidos {1}, omitidos {2}.</translation>
+    </message>
+</context>
 </TS>

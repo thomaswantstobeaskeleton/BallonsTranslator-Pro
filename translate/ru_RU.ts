@@ -1218,4 +1218,85 @@
         <translation>Цель: </translation>
     </message>
 </context>
+<context>
+    <name>StartupModelCoverage</name>
+    <message>
+        <source>Copy model files from an existing local folder into this app\'s data/models directory.</source>
+        <translation>Скопировать файлы моделей из существующей локальной папки в каталог data/models этого приложения.</translation>
+    </message>
+    <message>
+        <source>Core package</source>
+        <translation>Базовый пакет</translation>
+    </message>
+    <message>
+        <source>Core package not selected</source>
+        <translation>Базовый пакет не выбран</translation>
+    </message>
+    <message>
+        <source>Do not download any model package now. Use only already-local modules/files.</source>
+        <translation>Не загружать сейчас ни один пакет моделей. Использовать только уже локальные модули/файлы.</translation>
+    </message>
+    <message>
+        <source>Download complete. Defaults updated.</source>
+        <translation>Загрузка завершена. Значения по умолчанию обновлены.</translation>
+    </message>
+    <message>
+        <source>Download partially complete.</source>
+        <translation>Загрузка частично завершена.</translation>
+    </message>
+    <message>
+        <source>First-run local-only mode is active. Use Tools → Manage models to import/download models, or edit config/config.json to enable packages and restart.</source>
+        <translation>Активен режим только локальных данных при первом запуске. Используйте Инструменты → Управление моделями для импорта/загрузки моделей или отредактируйте config/config.json, чтобы включить пакеты, затем перезапустите.</translation>
+    </message>
+    <message>
+        <source>Import local model directory...</source>
+        <translation>Импортировать локальный каталог моделей...</translation>
+    </message>
+    <message>
+        <source>Import local models</source>
+        <translation>Импорт локальных моделей</translation>
+    </message>
+    <message>
+        <source>Manual package selection</source>
+        <translation>Ручной выбор пакетов</translation>
+    </message>
+    <message>
+        <source>Manually select low-level packages instead of using a preset.</source>
+        <translation>Выберите низкоуровневые пакеты вручную вместо использования предустановки.</translation>
+    </message>
+    <message>
+        <source>Model package download complete</source>
+        <translation>Загрузка пакета моделей завершена</translation>
+    </message>
+    <message>
+        <source>Model package download partially complete</source>
+        <translation>Загрузка пакета моделей частично завершена</translation>
+    </message>
+    <message>
+        <source>Model packages have been downloaded. Applied modules:
+</source>
+        <translation>Пакеты моделей загружены. Применённые модули:
+</translation>
+    </message>
+    <message>
+        <source>Open Manage Models</source>
+        <translation>Открыть «Управление моделями»</translation>
+    </message>
+    <message>
+        <source>Select local model directory</source>
+        <translation>Выбрать локальный каталог моделей</translation>
+    </message>
+    <message>
+        <source>Skip all downloads (local-only)</source>
+        <translation>Пропустить все загрузки (только локально)</translation>
+    </message>
+    <message>
+        <source>Some model packages failed. Failed items: {0}</source>
+        <translation>Некоторые пакеты моделей не удалось загрузить. Ошибки: {0}</translation>
+    </message>
+    <message>
+        <source>Summary: downloaded {0}, failed {1}, skipped {2}.</source>
+        <translation>Итог: загружено {0}, ошибок {1}, пропущено {2}.</translation>
+    </message>
+</context>
 </TS>
