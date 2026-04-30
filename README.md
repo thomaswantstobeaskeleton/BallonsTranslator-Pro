@@ -56,7 +56,7 @@ On first launch, base requirements are installed automatically if needed.
 ## Option B: Windows helper scripts
 
 - `setup.bat`: one-time setup
-- `Launch BallonsTranslator.bat`: run with local repo virtual environment
+- `Launch BallonsTranslator.bat`: run with the Python mode selected in `setup.bat` (system Python or local `venv`, with automatic fallback)
 - `launch_win.bat` / `launch_win_with_autoupdate.bat` / `launch_win_amd_nightly.bat`: for portable bundle layouts
 
 If you are unsure, start with **`python launch.py`**.
