@@ -97,6 +97,59 @@ def is_installed(package):
     return spec is not None
 
 
+def _lrelease_candidates(ts_path: str, qm_path: str):
+    return [
+        ["pyside6-lrelease", ts_path, "-qm", qm_path],
+        ["lrelease", ts_path, "-qm", qm_path],
+        ["lrelease-qt6", ts_path, "-qm", qm_path],
+        [sys.executable, "-m", "pylrelease6", ts_path, "-qm", qm_path],
+        [sys.executable, "-m", "PySide6.scripts.pyside_tool", "lrelease", ts_path, "-qm", qm_path],
+    ]
+
+
+def ensure_qm_for_display_language(lang: str, translate_dir: str, logger=None) -> bool:
+    """
+    Ensure `<translate_dir>/<lang>.qm` exists.
+    If missing and `<translate_dir>/<lang>.ts` exists, try compiling it with available lrelease tooling.
+    Returns True when qm exists (already existed or compiled), otherwise False.
+    """
+    if not lang or lang in ('en_US', 'English'):
+        return True
+
+    qm_path = osp.join(translate_dir, f"{lang}.qm")
+    if osp.exists(qm_path):
+        return True
+
+    ts_path = osp.join(translate_dir, f"{lang}.ts")
+    if not osp.exists(ts_path):
+        return False
+
+    candidates = _lrelease_candidates(ts_path, qm_path)
+
+    log = logger.info if logger is not None else print
+    log(f"Display language qm missing for {lang}; attempting to compile {ts_path}.")
+
+    for cmd in candidates:
+        try:
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            if logger is not None:
+                logger.debug("lrelease command failed: %s | err=%s", cmd, exc, exc_info=True)
+            continue
+
+        if result.returncode == 0 and osp.exists(qm_path):
+            log(f"Compiled display language qm successfully: {qm_path}")
+            return True
+        if logger is not None:
+            logger.debug(
+                "lrelease attempt failed: cmd=%s rc=%s stdout=%s stderr=%s",
+                cmd, result.returncode, (result.stdout or "").strip(), (result.stderr or "").strip()
+            )
+    return osp.exists(qm_path)
+
+
 def run(command, desc=None, errdesc=None, custom_env=None, live=False):
     if desc is not None:
         print(desc)
@@ -375,6 +428,7 @@ def main():
         shared.SCREEN_H = ps.geometry().height()
 
     lang = config.display_lang
+    ensure_qm_for_display_language(lang, shared.TRANSLATE_DIR, LOGGER)
     langp = osp.join(shared.TRANSLATE_DIR, lang + '.qm')
     if not osp.exists(langp) and lang.startswith('zh_'):
         for code in ('zh_CN', 'zh_TW'):
