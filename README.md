@@ -1,10 +1,10 @@
 # BallonsTranslator-Pro
 
-BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator), keeping the same assisted manga/comic translation pipeline while adding production-focused module options and quality-of-life workflow improvements for power users.
+BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator). It keeps the original assisted manga/comic translation pipeline, then extends it with production-focused module choices and quality-of-life workflow improvements.
 
 <img src="https://raw.githubusercontent.com/dmMaze/BallonsTranslator/master/doc/src/ui0.jpg" align="center">
 
-BallonsTranslator-Pro helps you translate manga/comic pages with an assisted workflow:
+At a high level, BallonsTranslator-Pro helps you:
 
 1. Detect speech balloons/text areas
 2. Read text (OCR)
@@ -12,96 +12,158 @@ BallonsTranslator-Pro helps you translate manga/comic pages with an assisted wor
 4. Clean original text from artwork (inpaint)
 5. Edit and export pages
 
-This fork focuses on practical, real-world comic workflows and gives you multiple module options for detection, OCR, translation, and inpainting.
+This means you can keep creative control (editing text and layout yourself) while removing most repetitive technical work.
 
 - 中文文档（与本页同结构）: [README_zh_CN.md](README_zh_CN.md)
 - Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 
-## What this fork keeps from base (and what it extends)
+## Why use **Pro** (and not just the base fork)
 
-From the base project, Pro preserves the core five-stage pipeline (detect → OCR → translate → inpaint → edit/export) and WYSIWYG editing workflow.
+If you are translating full chapters or frequent batches, Pro is designed to save time and reduce rework.
 
-The Pro fork focuses on:
-- broader translator/model choices (including chainable and LLM-based translators),
-- practical configuration for real chapter workflows,
-- documentation for tuning quality/speed tradeoffs.
+### Key reasons
+
+- **More practical module choices** for detector/OCR/translator/inpaint combinations.
+- **Better real-project flexibility** when some pages are easy and others are difficult.
+- **Chain + LLM review workflows** to improve translation quality and consistency.
+- **Beginner-friendly defaults** that work out-of-the-box for most users.
+
+In short: base behavior is preserved, but Pro gives you more control when quality, speed, and consistency matter.
+
+---
 
 ## Who this is for
 
-This README is for regular users who just want to run the app and translate pages.
+This README is written for **non-developers and regular users** first.
 
-If you want deep technical details, see:
+You do **not** need programming knowledge to start.
+
+If you want deeper technical details, use:
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
 - [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
 
 ---
 
-## Quick Start (recommended)
+## Quick start (non-developer friendly)
 
-## Option A: Run with Python (Windows / Linux / macOS)
+Choose **one** install method below.
 
-1. Install Python 3.10+.
-2. Clone or download this repository.
-3. In the project folder, run:
+### Option A (Easiest for most people): Download ZIP from GitHub
+
+Use this if “git clone” is unfamiliar.
+
+1. Open this repository page in your browser.
+2. Click the green **Code** button.
+3. Click **Download ZIP**.
+4. Extract the ZIP to a normal folder (for example: `Documents/BallonsTranslator-Pro`).
+5. Open that folder.
+6. Run:
 
 ```bash
 python launch.py
 ```
 
-On first launch, base requirements are installed automatically if needed.
-
-## Option B: Windows helper scripts
-
-- `setup.bat`: one-time setup
-- `Launch BallonsTranslator.bat`: run with the Python mode selected in `setup.bat` (system Python or local `venv`, with automatic fallback)
-- `launch_win.bat` / `launch_win_with_autoupdate.bat` / `launch_win_amd_nightly.bat`: for portable bundle layouts
-
-If you are unsure, start with **`python launch.py`**.
+> On first launch, required base packages install automatically.
 
 ---
 
-## First run: what to expect
+### Option B: Clone with GitHub Desktop (no terminal required)
 
-When no `config/config.json` exists (fresh install), the app may ask which model package(s) to download.
+Use this if you want easier future updates but still avoid command-line Git.
 
-- You can start with **Core only** (fastest, simplest)
-- Downloads run in the background
-- If a download fails, use **Tools → Models → Retry model downloads**
-- You can add/remove packages later via **Tools → Manage models**
+1. Install **GitHub Desktop**.
+2. In GitHub Desktop, choose **File → Clone repository**.
+3. Paste this repo URL and choose a local folder.
+4. After clone finishes, open the local folder.
+5. Run:
 
-Default baseline after successful setup:
+```bash
+python launch.py
+```
+
+---
+
+### Option C: Clone with command line Git (for users comfortable with terminal)
+
+```bash
+git clone <REPO_URL>
+cd BallonsTranslator-Pro
+python launch.py
+```
+
+If you are not sure which option to choose, pick **Option A (Download ZIP)**.
+
+---
+
+## Requirements (simple version)
+
+- Python **3.10 or newer** installed
+- Internet connection for first-time dependency/model downloads
+- Enough free disk space for models (size depends on selected packages)
+
+Check Python quickly:
+
+```bash
+python --version
+```
+
+---
+
+## First launch: what happens and why
+
+On a fresh install (no `config/config.json` yet), Pro may ask what model packages to download.
+
+- Start with **Core only** if you want the fastest setup
+- Downloads run in background
+- If a download fails: **Tools → Models → Retry model downloads**
+- You can add/remove packages later: **Tools → Manage models**
+
+Default baseline after setup:
 - Detector: `ctd`
 - OCR: `manga_ocr`
 - Inpaint: `aot`
 - Translator: `google`
 
+These defaults are intentionally chosen to help beginners get usable results quickly.
+
 ---
 
 ## Basic workflow (5 steps)
 
-1. **Open images**: File → Open Folder (or Open Images)
-2. **Pick modules**: Config panel → Detector / OCR / Inpaint / Translator
-3. **Run pipeline**: click **Run** in the bottom bar
-4. **Review & edit text** as needed
-5. **Export results**: Tools → Export all pages
+1. **Open pages**: File → Open Folder (or Open Images)
+2. **Pick modules** in Config panel (Detector / OCR / Inpaint / Translator)
+3. Click **Run** in the bottom bar
+4. **Review/edit** text bubbles as needed
+5. **Export**: Tools → Export all pages
 
-That’s enough to complete most projects.
+That is enough for most chapter workflows.
 
-### New: 2-step translation validation (Feature #55)
+---
 
-You can now run a two-step translation flow with online MT + LLM review/correction:
+## When Pro is especially useful
+
+Use Pro when you need one or more of the following:
+
+- Better handling of mixed page difficulty (clean pages + messy pages)
+- More translation control than one-click machine translation
+- Consistency in terminology/tone across many pages
+- A pipeline you can tune gradually rather than replacing everything at once
+
+### 2-step translation validation (Feature #55)
+
+You can run online MT first, then LLM review/correction second:
 
 1. Set **Translator** to `Chain`
 2. In Chain settings:
    - `chain_translators`: `google,LLM_API_Translator` (or `DeepL,LLM_API_Translator`)
    - `chain_intermediate_langs`: `English`
    - leave `chain_llm_review_mode` enabled
-3. Configure your `LLM_API_Translator` provider/model normally
+3. Configure `LLM_API_Translator` provider/model normally
 
-When enabled, the final LLM step receives both original source text and the first-pass draft so it can validate and refine wording, tone, and consistency before final output.
+This lets the final LLM stage validate and refine wording with access to both source text and first draft.
 
 ---
 
@@ -114,13 +176,13 @@ If you want a stable starting point:
 - Inpaint: `aot`
 - Translator: `google`
 
-You can switch modules later when you want better quality for difficult pages.
+Then only change one module at a time when improving quality.
 
-For manhua-focused tuning, see: [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md)
+For manhua-focused tuning: [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_SETTINGS.md)
 
 ---
 
-## Where files are stored
+## Where your files are
 
 - Config template: `config/config.example.json`
 - Active config: `config/config.json`
@@ -128,39 +190,37 @@ For manhua-focused tuning, see: [docs/MANHUA_BEST_SETTINGS.md](docs/MANHUA_BEST_
 - Optional HuggingFace cache: `.btrans_cache/hub`
 - Fonts folder: `fonts/`
 
-Project outputs are saved with the project/pages you open (not in one global output folder).
+Outputs are saved with the project/pages you open (not one global output folder).
 
 ---
 
-## Common issues (fast fixes)
+## Common issues (quick fixes)
 
-### Python command not found
-Install Python 3.10+ and verify:
+### “python” command not found
+Install Python 3.10+ and retry:
 
 ```bash
 python --version
 ```
 
 ### pip problems
-Try:
 
 ```bash
 python -m ensurepip --upgrade
 python -m pip install --upgrade pip
 ```
 
-### Torch install fails on first run
-Retry with:
+### Torch install fails during first run
 
 ```bash
 python launch.py --reinstall-torch
 ```
 
-For GPU/CUDA/ROCm details, use: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+For GPU/CUDA/ROCm details: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ---
 
-## Helpful docs (when you need more)
+## Extra docs (when needed)
 
 - Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - Quality tiers: [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
@@ -170,8 +230,8 @@ For GPU/CUDA/ROCm details, use: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.m
 
 ---
 
-## Notes
+## Practical advice
 
-- This project includes many optional modules and fonts. You do **not** need all of them to get started.
-- Start simple (core modules), verify your workflow, then expand.
-- If you report issues, include your startup command and full terminal log.
+- You do **not** need every model/module on day one.
+- Start with default modules, confirm your end-to-end workflow, then expand.
+- If you report an issue, include your startup command and full terminal log.
