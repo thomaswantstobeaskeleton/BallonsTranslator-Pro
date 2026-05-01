@@ -30,6 +30,17 @@ from utils.box_size_check_model import check_box_size_from_model
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
 from utils.line_breaking import split_long_token_with_hyphenation
+from utils.layout_review_agent import (
+    BlockSnapshot,
+    ExternalReviewProvider,
+    HeuristicReviewProvider,
+    LayoutReviewPlanner,
+    ReviewModelConfig,
+    ReviewProvider,
+    ReviewAction,
+    collect_actions_from_list,
+    filter_actions_by_block_indices,
+)
 from utils.logger import logger as LOGGER
 from modules.textdetector.outside_text_processor import OSB_LABELS
 
@@ -1240,6 +1251,299 @@ class SceneTextManager(QObject):
             self.layout_textblk(blkitem)
             self._scale_font_to_fit_box(blkitem)
         self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+
+    def review_and_fix_selected_textboxes(
+        self,
+        max_iters: int = 2,
+        target_block_indices: Optional[List[int]] = None,
+    ) -> int:
+        """Iteratively review selected blocks and apply conservative fixes.
+
+        Returns the number of iterations used. This reuses existing operations
+        (auto-fit, resize-to-fit-content, center-in-bubble) to preserve behavior.
+        """
+        selected = self._get_review_target_blocks(target_block_indices)
+        if not selected:
+            return 0
+        planner = LayoutReviewPlanner()
+        loops = 0
+        for i in range(max(1, int(max_iters))):
+            snapshots: List[BlockSnapshot] = []
+            for blk in selected:
+                abr = blk.absBoundingRect(qrect=True)
+                doc = blk.document()
+                est = None
+                if doc is not None:
+                    ds = doc.size()
+                    est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
+                bubble_center = self._estimate_block_bubble_center(blk)
+                snapshots.append(
+                    BlockSnapshot(
+                        block_index=blk.idx,
+                        xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
+                        text=blk.toPlainText(),
+                        font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
+                        est_text_size=est,
+                        bubble_center=bubble_center,
+                    )
+                )
+            result = planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
+            pending_actions = [a for block_result in result.blocks for a in block_result.actions]
+            if not pending_actions:
+                return loops
+            if target_block_indices:
+                pending_actions = filter_actions_by_block_indices(pending_actions, target_block_indices)
+                if not pending_actions:
+                    return loops
+            self._apply_layout_review_actions(pending_actions, selected)
+            loops = i + 1
+        return loops
+
+    def review_selected_textboxes_dry_run(
+        self, target_block_indices: Optional[List[int]] = None
+    ):
+        """Run planner only and return PageReviewResult without applying fixes."""
+        selected = self._get_review_target_blocks(target_block_indices)
+        planner = LayoutReviewPlanner()
+        snapshots: List[BlockSnapshot] = []
+        for blk in selected:
+            abr = blk.absBoundingRect(qrect=True)
+            doc = blk.document()
+            est = None
+            if doc is not None:
+                ds = doc.size()
+                est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
+            snapshots.append(
+                BlockSnapshot(
+                    block_index=blk.idx,
+                    xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
+                    text=blk.toPlainText(),
+                    font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
+                    est_text_size=est,
+                    bubble_center=self._estimate_block_bubble_center(blk),
+                )
+            )
+        return planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
+
+    def review_selected_textboxes_with_provider(
+        self,
+        config: Optional[ReviewModelConfig] = None,
+        target_block_indices: Optional[List[int]] = None,
+        provider: Optional[ReviewProvider] = None,
+    ):
+        """Review selected/targeted boxes with heuristic/local/cloud provider and return proposals."""
+        cfg = config or ReviewModelConfig()
+        selected = self._get_review_target_blocks(target_block_indices)
+        snapshots: List[BlockSnapshot] = []
+        for blk in selected:
+            abr = blk.absBoundingRect(qrect=True)
+            doc = blk.document()
+            est = None
+            if doc is not None:
+                ds = doc.size()
+                est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
+            snapshots.append(
+                BlockSnapshot(
+                    block_index=blk.idx,
+                    xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
+                    text=blk.toPlainText(),
+                    font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
+                    est_text_size=est,
+                    bubble_center=self._estimate_block_bubble_center(blk),
+                )
+            )
+        provider_impl = provider or self._resolve_review_provider(cfg)
+        return provider_impl.review(getattr(self.imgtrans_proj, "current_img", ""), snapshots, cfg)
+
+    def apply_review_result(
+        self,
+        review_result,
+        target_block_indices: Optional[List[int]] = None,
+    ) -> int:
+        """Apply actions from a precomputed review result and return number of actions applied."""
+        pending_actions = [a for block_result in review_result.blocks for a in block_result.actions]
+        if target_block_indices:
+            pending_actions = filter_actions_by_block_indices(pending_actions, target_block_indices)
+        if not pending_actions:
+            return 0
+        selected = self._get_review_target_blocks(target_block_indices)
+        if not selected:
+            return 0
+        self._apply_layout_review_actions(pending_actions, selected)
+        return len(pending_actions)
+
+    def review_and_fix_selected_textboxes_with_provider(
+        self,
+        config: Optional[ReviewModelConfig] = None,
+        target_block_indices: Optional[List[int]] = None,
+        provider: Optional[ReviewProvider] = None,
+        max_iters: int = 2,
+    ) -> int:
+        """Provider-driven iterative review/apply loop."""
+        loops = 0
+        for i in range(max(1, int(max_iters))):
+            rst = self.review_selected_textboxes_with_provider(config=config, target_block_indices=target_block_indices, provider=provider)
+            applied = self.apply_review_result(rst, target_block_indices=target_block_indices)
+            if applied <= 0:
+                return loops
+            loops = i + 1
+        return loops
+
+    def _resolve_review_provider(self, config: ReviewModelConfig) -> ReviewProvider:
+        """Return configured review provider.
+
+        For `local_api` / `cloud_api`, attach a callable at runtime via:
+        - `self.layout_review_local_api_handler`
+        - `self.layout_review_cloud_api_handler`
+        """
+        if config.provider == "heuristic":
+            return HeuristicReviewProvider()
+        attr = "layout_review_local_api_handler" if config.provider == "local_api" else "layout_review_cloud_api_handler"
+        handler = getattr(self, attr, None)
+        if callable(handler):
+            return ExternalReviewProvider(handler)
+        LOGGER.warning("layout review provider '%s' requested but handler is not configured; falling back to heuristic", config.provider)
+        return HeuristicReviewProvider()
+
+    def review_all_textboxes_on_page_dry_run(self):
+        """Run planner against all non-vertical blocks without mutating layout."""
+        target_indices = [
+            blk.idx
+            for blk in self.textblk_item_list
+            if blk is not None and not getattr(blk.fontformat, "vertical", False)
+        ]
+        return self.review_selected_textboxes_dry_run(target_indices)
+
+    def review_and_fix_all_textboxes_on_page(self, max_iters: int = 2) -> int:
+        """Review/fix all non-vertical text boxes on the current page."""
+        target_indices = [
+            blk.idx
+            for blk in self.textblk_item_list
+            if blk is not None and not getattr(blk.fontformat, "vertical", False)
+        ]
+        if not target_indices:
+            return 0
+        return self._run_layout_review_with_temporary_selection(target_indices, max_iters=max_iters)
+
+    def _run_layout_review_with_temporary_selection(self, target_indices: List[int], max_iters: int = 2) -> int:
+        """Run review while temporarily selecting requested targets, then restore selection."""
+        selected_before = list(self.canvas.selected_text_items())
+        was_editing = self.canvas.editing_textblkitem
+        try:
+            for blk in self.textblk_item_list:
+                if blk is not None:
+                    blk.setSelected(False)
+            idx_set = set(target_indices)
+            for blk in self.textblk_item_list:
+                if blk is None:
+                    continue
+                blk.setSelected(blk.idx in idx_set)
+            return self.review_and_fix_selected_textboxes(
+                max_iters=max_iters,
+                target_block_indices=target_indices,
+            )
+        finally:
+            for blk in self.textblk_item_list:
+                if blk is not None:
+                    blk.setSelected(False)
+            for blk in selected_before:
+                try:
+                    blk.setSelected(True)
+                except Exception:
+                    continue
+            if was_editing is not None and was_editing in self.textblk_item_list:
+                self.canvas.editing_textblkitem = was_editing
+
+    def _get_review_target_blocks(self, target_block_indices: Optional[List[int]] = None) -> List[TextBlkItem]:
+        """Resolve review targets deterministically by block index.
+
+        If target_block_indices is None, currently selected blocks are used.
+        """
+        if not target_block_indices:
+            return [blk for blk in self.canvas.selected_text_items() if not blk.fontformat.vertical]
+        all_blocks = [
+            blk for blk in self.textblk_item_list
+            if blk is not None and not getattr(blk.fontformat, "vertical", False)
+        ]
+        selected_by_idx = {blk.idx: blk for blk in all_blocks}
+        targets: List[TextBlkItem] = []
+        for idx in target_block_indices:
+            blk = selected_by_idx.get(idx)
+            if blk is None:
+                continue
+            targets.append(blk)
+        return targets
+
+    def _estimate_block_bubble_center(self, blkitem: TextBlkItem) -> Optional[Tuple[float, float]]:
+        """Estimate bubble center for a block so off-center review checks can run."""
+        img = self.imgtrans_proj.img_array
+        if img is None:
+            return None
+        abr = blkitem.absBoundingRect(qrect=True)
+        br = [int(abr.x()), int(abr.y()), int(abr.width()), int(abr.height())]
+        if br[2] <= 0 or br[3] <= 0:
+            return None
+        try:
+            enlarge_ratio = min(max(br[2] / max(br[3], 1), br[3] / max(br[2], 1)) * 1.5, 3.0)
+            mask, _area, mask_xyxy, _region_rect = extract_ballon_region(
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+            )
+            cx_crop, cy_crop = mask_centroid_in_crop(mask)
+            return (float(mask_xyxy[0] + cx_crop), float(mask_xyxy[1] + cy_crop))
+        except Exception as e:
+            LOGGER.debug("layout review: failed to estimate bubble center for block idx=%s: %s", getattr(blkitem, "idx", -1), e)
+            return None
+
+    def _apply_layout_review_actions(self, actions: List[ReviewAction], selected: List[TextBlkItem]) -> None:
+        """Apply planner actions through existing commands whenever possible."""
+        grouped = collect_actions_from_list(actions)
+        selected_by_idx = {blk.idx: blk for blk in selected}
+        # Keep existing action handlers first to preserve current undo behavior.
+        if grouped["auto_fit"]:
+            self.onAutoFitFontToBox()
+        if grouped["resize_to_fit_content"]:
+            self.onResizeToFitContent()
+        if grouped["center_in_bubble"]:
+            self.onCenterInBubble()
+        for action in grouped["move"]:
+            blkitem = selected_by_idx.get(action.block_index)
+            if blkitem is None:
+                continue
+            dx = float(action.args.get("dx", 0.0) or 0.0)
+            dy = float(action.args.get("dy", 0.0) or 0.0)
+            if dx == 0.0 and dy == 0.0:
+                continue
+            rect = blkitem.absBoundingRect(qrect=True)
+            blkitem.oldRect = rect
+            blkitem.setRect([rect.x() + dx, rect.y() + dy, rect.width(), rect.height()], repaint=True)
+            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+        for action in grouped["resize"]:
+            blkitem = selected_by_idx.get(action.block_index)
+            if blkitem is None:
+                continue
+            scale = float(action.args.get("scale", 1.0) or 1.0)
+            if scale <= 0:
+                continue
+            rect = blkitem.absBoundingRect(qrect=True)
+            if rect.width() <= 0 or rect.height() <= 0:
+                continue
+            new_w = max(1.0, rect.width() * scale)
+            new_h = max(1.0, rect.height() * scale)
+            cx = rect.x() + rect.width() / 2.0
+            cy = rect.y() + rect.height() / 2.0
+            blkitem.oldRect = rect
+            blkitem.setRect([cx - new_w / 2.0, cy - new_h / 2.0, new_w, new_h], repaint=True)
+            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+        for action in grouped["set_font_size"]:
+            blkitem = selected_by_idx.get(action.block_index)
+            if blkitem is None:
+                continue
+            size_pt = float(action.args.get("font_size", 0.0) or 0.0)
+            if size_pt <= 0:
+                continue
+            blkitem.setFontSize(size_pt)
+            if blkitem.blk is not None:
+                blkitem.blk.fontformat.font_size = pt2px(size_pt)
 
     def onSetBalloonShape(self, shape: str):
         """Set global balloon shape and run layout on selected blocks."""
