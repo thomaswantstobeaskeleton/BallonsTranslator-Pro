@@ -2,6 +2,7 @@
 Keyboard shortcuts dialog: list all actions, edit keybindings, reset to default, apply.
 """
 from typing import Dict, List, Optional
+import json
 
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QKeySequence, QShortcut
@@ -20,9 +21,10 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QMessageBox,
     QWidget,
+    QFileDialog,
 )
 
-from utils.shortcuts import get_shortcut_info, get_default_shortcuts
+from utils.shortcuts import get_shortcut_info, get_default_shortcuts, find_shortcut_conflicts, classify_shortcut_conflicts, auto_resolve_shortcut_conflicts
 from utils.config import pcfg, save_config
 
 
@@ -60,6 +62,13 @@ class ShortcutsDialog(QDialog):
         filter_layout.addWidget(self.category_combo)
         layout.addLayout(filter_layout)
 
+        jump_layout = QHBoxLayout()
+        jump_layout.addWidget(QLabel(self.tr("Find by key:")))
+        self.key_jump_edit = QKeySequenceEdit(self)
+        self.key_jump_edit.keySequenceChanged.connect(self._jump_to_key)
+        jump_layout.addWidget(self.key_jump_edit)
+        layout.addLayout(jump_layout)
+
         # Table: Category | Action | Shortcut
         self.table = QTableWidget(self)
         self.table.setColumnCount(4)
@@ -85,6 +94,12 @@ class ShortcutsDialog(QDialog):
         self.reset_all_btn = QPushButton(self.tr("Reset all to default"), self)
         self.reset_all_btn.clicked.connect(self._reset_all)
         btn_layout.addWidget(self.reset_all_btn)
+        self.export_btn = QPushButton(self.tr("Export JSON"), self)
+        self.export_btn.clicked.connect(self._export_json)
+        btn_layout.addWidget(self.export_btn)
+        self.import_btn = QPushButton(self.tr("Import JSON"), self)
+        self.import_btn.clicked.connect(self._import_json)
+        btn_layout.addWidget(self.import_btn)
         self.apply_btn = QPushButton(self.tr("Apply"), self)
         self.apply_btn.clicked.connect(self._apply)
         self.apply_btn.setDefault(True)
@@ -165,6 +180,47 @@ class ShortcutsDialog(QDialog):
                 )
             self.table.setRowHidden(row, not show)
 
+    def _jump_to_key(self):
+        seq = self.key_jump_edit.keySequence()
+        key = seq.toString(QKeySequence.SequenceFormat.PortableText) if not seq.isEmpty() else ""
+        if not key:
+            return
+        for row in range(self.table.rowCount()):
+            key_edit = self.table.cellWidget(row, 2)
+            if isinstance(key_edit, QKeySequenceEdit):
+                s = key_edit.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
+                if s == key:
+                    self.table.selectRow(row)
+                    self.table.scrollToItem(self.table.item(row, 1))
+                    return
+
+    def _export_json(self):
+        path, _ = QFileDialog.getSaveFileName(self, self.tr("Export shortcuts"), "shortcuts.json", self.tr("JSON files (*.json)"))
+        if not path:
+            return
+        data = self.get_current_shortcuts()
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def _import_json(self):
+        path, _ = QFileDialog.getOpenFileName(self, self.tr("Import shortcuts"), "", self.tr("JSON files (*.json)"))
+        if not path:
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError('invalid format')
+            for row in range(self.table.rowCount()):
+                key_edit = self.table.cellWidget(row, 2)
+                if isinstance(key_edit, QKeySequenceEdit):
+                    action_id = key_edit.property("action_id")
+                    if action_id in data:
+                        key = str(data.get(action_id) or "")
+                        key_edit.setKeySequence(QKeySequence.fromString(key) if key else QKeySequence())
+        except Exception as e:
+            QMessageBox.warning(self, self.tr("Import failed"), str(e))
+
     def _apply(self):
         # Collect current keys from key edits
         for row in range(self.table.rowCount()):
@@ -173,6 +229,36 @@ class ShortcutsDialog(QDialog):
                 action_id = key_edit.property("action_id")
                 seq = key_edit.keySequence()
                 self._current[action_id] = seq.toString(QKeySequence.SequenceFormat.PortableText) if not seq.isEmpty() else ""
+
+        # Validate duplicate assignments to avoid ambiguous behavior.
+        action_labels = {aid: desc for (aid, _d, _c, desc) in self._info}
+        classified = classify_shortcut_conflicts(self._current)
+        hard_conflicts = classified.get('hard', {})
+        alias_conflicts = classified.get('alias', {})
+        if hard_conflicts or alias_conflicts:
+            lines = [self.tr("Shortcut conflicts found:")]
+            if hard_conflicts:
+                lines.append(self.tr("Hard conflicts:"))
+                for key, action_ids in sorted(hard_conflicts.items()):
+                    names = [action_labels.get(aid, aid) for aid in action_ids]
+                    lines.append(f"• {key}: " + ", ".join(names))
+            if alias_conflicts:
+                lines.append(self.tr("Alias conflicts (alternate variants):"))
+                for key, action_ids in sorted(alias_conflicts.items()):
+                    names = [action_labels.get(aid, aid) for aid in action_ids]
+                    lines.append(f"• {key}: " + ", ".join(names))
+            lines.append("")
+            lines.append(self.tr("Auto-resolve can keep first action and clear duplicates. Apply auto-resolve?"))
+            rst = QMessageBox.question(self, self.tr("Shortcut conflicts"), "\n".join(lines), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if rst == QMessageBox.StandardButton.Yes:
+                self._current = auto_resolve_shortcut_conflicts(self._current)
+                for row in range(self.table.rowCount()):
+                    key_edit = self.table.cellWidget(row, 2)
+                    if isinstance(key_edit, QKeySequenceEdit):
+                        action_id = key_edit.property("action_id")
+                        key = self._current.get(action_id, "")
+                        key_edit.setKeySequence(QKeySequence.fromString(key) if key else QKeySequence())
+            return
 
         if not isinstance(pcfg.shortcuts, dict):
             pcfg.shortcuts = {}

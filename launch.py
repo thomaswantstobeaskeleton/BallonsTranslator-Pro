@@ -411,6 +411,8 @@ def main():
         except Exception:
             pass
         shared.FIRST_RUN_NO_CONFIG = False
+        # Force welcome/start screen after first-setup flow so users land on onboarding UI.
+        shared.FORCE_SHOW_WELCOME_ON_STARTUP = True
 
     # Download selected model packages; defer to after window is shown (GUI) so user can retry from Tools if it fails
     if args.headless or getattr(args, 'headless_continuous', False):

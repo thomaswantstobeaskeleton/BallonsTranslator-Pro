@@ -420,6 +420,8 @@ class ProgramConfig(Config):
     show_welcome_screen: bool = True
     # When True, check for and pull GitHub updates on startup. Can cause issues or bad results; use with caution.
     auto_update_from_github: bool = False
+    show_model_download_result_dialog: bool = True
+    show_startup_health_dialog: bool = True
     logical_dpi: int = 0
     confirm_before_run: bool = True
     let_fntsize_flag: int = 0
@@ -507,6 +509,10 @@ class ProgramConfig(Config):
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
     context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
     context_menu_pinned: List = field(default_factory=list)  # Action keys to show at top of right-click menu (order preserved)
+    context_run_macros: List = field(default_factory=lambda: [
+        {'id': 'detect_ocr_translate', 'label': 'Macro: Detect+OCR+Translate', 'mode': 1, 'detect_first': True},
+        {'id': 'ocr_translate_inpaint', 'label': 'Macro: OCR+Translate+Inpaint', 'mode': 2, 'detect_first': False},
+    ])
     huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
     translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
     # When True, the "Add Open in BallonsTranslator to context menu?" dialog has been shown once (first launch); don't show again.
@@ -605,7 +611,7 @@ CONTEXT_MENU_DEFAULT = {
 CONFIG_KEY_ORDER = (
     "module", "drawpanel", "global_fontformat", "recent_proj_list", "show_page_list",
     "imgtrans_paintmode", "imgtrans_textedit", "imgtrans_textblock", "mask_transparency", "original_transparency",
-    "open_recent_on_startup", "recent_proj_list_max", "show_welcome_screen", "auto_update_from_github", "logical_dpi", "confirm_before_run",
+    "open_recent_on_startup", "recent_proj_list_max", "show_welcome_screen", "auto_update_from_github", "show_model_download_result_dialog", "show_startup_health_dialog", "logical_dpi", "confirm_before_run",
     "let_fntsize_flag", "let_fntstroke_flag", "let_fntcolor_flag", "let_fnt_scolor_flag", "let_fnteffect_flag",
     "let_alignment_flag", "let_writing_mode_flag", "let_family_flag", "let_autolayout_flag", "let_uppercase_flag",
     "let_show_only_custom_fonts_flag", "let_textstyle_indep_flag", "text_styles_path", "default_text_style_name",
@@ -629,7 +635,7 @@ CONFIG_KEY_ORDER = (
     "diagnostic_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
-    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned",
+    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",
     "windows_context_menu_offered",
 )
@@ -751,6 +757,11 @@ def load_config(config_path: str = shared.CONFIG_PATH):
         pcfg.context_menu = dict(CONTEXT_MENU_DEFAULT)
     if not isinstance(getattr(pcfg, 'context_menu_pinned', None), list):
         pcfg.context_menu_pinned = []
+    if not isinstance(getattr(pcfg, 'context_run_macros', None), list):
+        pcfg.context_run_macros = [
+            {'id': 'detect_ocr_translate', 'label': 'Macro: Detect+OCR+Translate', 'mode': 1, 'detect_first': True},
+            {'id': 'ocr_translate_inpaint', 'label': 'Macro: OCR+Translate+Inpaint', 'mode': 2, 'detect_first': False},
+        ]
     # Ensure all shortcut keys exist (merge defaults for any new action)
     try:
         from utils.shortcuts import get_default_shortcuts
@@ -938,3 +949,22 @@ def save_text_styles(raise_exception = False):
     os.replace(tmp_save_tgt, pcfg.text_styles_path)
     LOGGER.info('Text style saved')
     return True
+
+
+def parse_context_run_macros(raw: str):
+    import json
+    data = json.loads((raw or '').strip() or '[]')
+    if not isinstance(data, list):
+        raise ValueError('Run macros must be a JSON list.')
+    norm = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise ValueError(f'Run macro #{i+1} must be an object.')
+        label = str(item.get('label', '')).strip()
+        if not label:
+            raise ValueError(f'Run macro #{i+1} missing label.')
+        mode = int(item.get('mode', 1))
+        detect_first = bool(item.get('detect_first', False))
+        mid = str(item.get('id', f'macro_{i+1}')).strip()
+        norm.append({'id': mid, 'label': label, 'mode': mode, 'detect_first': detect_first})
+    return norm
