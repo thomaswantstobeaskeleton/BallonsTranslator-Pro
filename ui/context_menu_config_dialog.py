@@ -21,9 +21,10 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QSizePolicy,
     QMenu,
+    QPlainTextEdit,
 )
 
-from utils.config import pcfg, save_config, CONTEXT_MENU_DEFAULT
+from utils.config import pcfg, save_config, CONTEXT_MENU_DEFAULT, parse_context_run_macros
 
 
 def _all_keys_with_labels() -> List[Tuple[str, str]]:
@@ -149,6 +150,20 @@ class ContextMenuConfigDialog(QDialog):
         pinned_layout.addWidget(clear_pinned_btn)
         layout.addWidget(pinned_group)
 
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel(self.tr("Quick profiles:")))
+        btn_edit = QPushButton(self.tr("Editing-focused"))
+        btn_edit.clicked.connect(lambda: self._apply_profile("editing"))
+        preset_row.addWidget(btn_edit)
+        btn_pipe = QPushButton(self.tr("Pipeline-focused"))
+        btn_pipe.clicked.connect(lambda: self._apply_profile("pipeline"))
+        preset_row.addWidget(btn_pipe)
+        btn_layout = QPushButton(self.tr("Layout-focused"))
+        btn_layout.clicked.connect(lambda: self._apply_profile("layout"))
+        preset_row.addWidget(btn_layout)
+        preset_row.addStretch(1)
+        layout.addLayout(preset_row)
+
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -179,6 +194,19 @@ class ContextMenuConfigDialog(QDialog):
         scroll.setWidget(content)
         layout.addWidget(scroll)
 
+        macros_group = QGroupBox(self.tr("Run macros (JSON list)"))
+        macros_layout = QVBoxLayout(macros_group)
+        self._macros_edit = QPlainTextEdit(self)
+        self._macros_edit.setPlaceholderText('[{"id":"detect_ocr_translate","label":"Macro: Detect+OCR+Translate","mode":1,"detect_first":true}]')
+        try:
+            import json
+            self._macros_edit.setPlainText(json.dumps(getattr(pcfg, 'context_run_macros', []), ensure_ascii=False, indent=2))
+        except Exception:
+            self._macros_edit.setPlainText('[]')
+        self._macros_edit.setMaximumHeight(140)
+        macros_layout.addWidget(self._macros_edit)
+        layout.addWidget(macros_group)
+
         btn_layout = QHBoxLayout()
         btn_layout.addStretch(1)
         restore_btn = QPushButton(self.tr("Restore defaults"))
@@ -194,6 +222,17 @@ class ContextMenuConfigDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._refresh_pinned_list()
+
+    def _apply_profile(self, profile: str):
+        editing_keys = {
+            'edit_copy','edit_paste','edit_copy_trans','edit_paste_trans','edit_delete','edit_select_all',
+            'text_trim','text_upper','text_lower','format_apply','format_layout','format_fit_to_bubble','create_textbox'
+        }
+        pipeline_keys = {'run_detect_region','run_detect_page','run_translate','run_ocr','run_ocr_translate','run_ocr_translate_inpaint','run_inpaint'}
+        layout_keys = {'format_apply','format_layout','format_fit_to_bubble','format_auto_fit','format_auto_fit_binary','format_balloon_shape','format_resize_to_fit_content','format_center_in_bubble','format_angle','format_squeeze'}
+        chosen = editing_keys if profile == 'editing' else pipeline_keys if profile == 'pipeline' else layout_keys
+        for key, cb in self._checkboxes.items():
+            cb.setChecked(key in chosen)
 
     def _refresh_pinned_list(self):
         self._pinned_list.clear()
@@ -245,5 +284,11 @@ class ContextMenuConfigDialog(QDialog):
             if k and k not in self._pinned_keys:
                 self._pinned_keys.append(k)
         pcfg.context_menu_pinned = self._pinned_keys
+        try:
+            pcfg.context_run_macros = parse_context_run_macros(self._macros_edit.toPlainText())
+        except Exception as e:
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.warning(self, self.tr('Invalid run macros JSON'), str(e))
+            return
         save_config()
         super().accept()

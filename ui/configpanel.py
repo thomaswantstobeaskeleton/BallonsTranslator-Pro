@@ -647,6 +647,19 @@ class ConfigPanel(Widget):
         )
         self.auto_update_from_github_checker.stateChanged.connect(self.on_auto_update_from_github_changed)
 
+        self.show_model_download_result_dialog_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Show model download result popup on startup'),
+            discription=self.tr('When enabled, show the model package download summary dialog after startup downloads. Disable to suppress this popup.')
+        )
+        self.show_model_download_result_dialog_checker.stateChanged.connect(self.on_show_model_download_result_dialog_changed)
+
+        self.show_startup_health_dialog_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Show startup health popup on startup'),
+            discription=self.tr('When enabled, show startup stages/diagnostics popup on launch. Disable to suppress this popup.')
+        )
+        self.show_startup_health_dialog_checker.stateChanged.connect(self.on_show_startup_health_dialog_changed)
+
+
         self.dev_mode_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Dev mode (show all modules)'),
             discription=self.tr(
@@ -1222,6 +1235,12 @@ class ConfigPanel(Widget):
     def on_auto_update_from_github_changed(self):
         pcfg.auto_update_from_github = self.auto_update_from_github_checker.isChecked()
 
+    def on_show_model_download_result_dialog_changed(self):
+        pcfg.show_model_download_result_dialog = self.show_model_download_result_dialog_checker.isChecked()
+
+    def on_show_startup_health_dialog_changed(self):
+        pcfg.show_startup_health_dialog = self.show_startup_health_dialog_checker.isChecked()
+
     def on_dev_mode_changed(self):
         pcfg.dev_mode = self.dev_mode_checker.isChecked()
         try:
@@ -1770,6 +1789,8 @@ class ConfigPanel(Widget):
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
         self.show_welcome_screen_checker.setChecked(getattr(pcfg, 'show_welcome_screen', True))
+        self.show_model_download_result_dialog_checker.setChecked(getattr(pcfg, 'show_model_download_result_dialog', True))
+        self.show_startup_health_dialog_checker.setChecked(getattr(pcfg, 'show_startup_health_dialog', True))
         self.dev_mode_checker.setChecked(getattr(pcfg, 'dev_mode', False))
         self.logical_dpi_spin.setValue(getattr(pcfg, 'logical_dpi', 0))
         self.confirm_before_run_checker.setChecked(getattr(pcfg, 'confirm_before_run', True))

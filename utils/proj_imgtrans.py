@@ -110,6 +110,7 @@ class ProjImgTrans:
         self.inpainted_array: np.ndarray = None
         self.translation_glossary: List[Dict[str, str]] = []  # [{"source": "...", "target": "..."}]
         self.series_context_path: str = ""  # Folder or ID for cross-chapter consistency (e.g. urban_immortal_cultivator)
+        self.run_profiles: Dict[str, Dict] = {}  # project-local snapshots of selected run/module settings
         if directory is not None:
             self.load(directory)
 
@@ -189,6 +190,7 @@ class ProjImgTrans:
         self.translation_glossary = proj_dict.get('translation_glossary') or []
 
         self.series_context_path = (proj_dict.get('series_context_path') or "").strip()
+        self.run_profiles = proj_dict.get('run_profiles') or {}
 
         for p in self.pages:
             if p not in self._image_info:
@@ -247,6 +249,19 @@ class ProjImgTrans:
 
     def update_page_progress(self, pagename, code):
         self._ensure_image_info_entry(pagename)['finish_code'] |= code 
+
+    def add_triage_flags(self, pagename: str, idx_list: List[int]):
+        info = self._ensure_image_info_entry(pagename)
+        triage = info.setdefault('triage_flags', {})
+        for idx in idx_list or []:
+            triage[str(idx)] = 'open'
+
+    def mark_triage_reviewed(self, pagename: str, idx_list: List[int]):
+        info = self._ensure_image_info_entry(pagename)
+        triage = info.setdefault('triage_flags', {})
+        for idx in idx_list or []:
+            triage[str(idx)] = 'reviewed'
+
 
     def load_translation_from_txt(self, file_path: str):
         page_list = parse_txt_translation(file_path)
@@ -385,6 +400,8 @@ class ProjImgTrans:
             out['translation_glossary'] = self.translation_glossary
         if getattr(self, 'series_context_path', None):
             out['series_context_path'] = self.series_context_path
+        if getattr(self, 'run_profiles', None):
+            out['run_profiles'] = self.run_profiles
         return out
 
     def read_img(self, imgname: str) -> np.ndarray:

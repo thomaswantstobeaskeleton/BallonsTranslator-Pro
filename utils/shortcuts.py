@@ -51,6 +51,14 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("format.auto_fit_binary", "", "Format", "Auto fit font size (binary search)"),
     ("format.balloon_shape_auto", "", "Format", "Set balloon shape to Auto"),
     ("format.resize_to_fit_content", "", "Format", "Resize to fit content"),
+    # Context / Run shortcuts
+    ("run.detect_page", "", "Run", "Detect text on page"),
+    ("run.translate", "", "Run", "Translate"),
+    ("run.ocr", "", "Run", "OCR"),
+    ("run.ocr_translate", "", "Run", "OCR and translate"),
+    ("run.ocr_translate_inpaint", "", "Run", "OCR, translate and inpaint"),
+    ("run.macro_detect_ocr_translate", "", "Run", "Macro: Detect+OCR+Translate"),
+    ("run.macro_ocr_translate_inpaint", "", "Run", "Macro: OCR+Translate+Inpaint"),
     # Drawing panel tools
     ("draw.hand", "H", "Drawing", "Hand tool (pan)"),
     ("draw.inpaint", "J", "Drawing", "Inpaint brush"),
@@ -75,3 +83,37 @@ def get_shortcut(action_id: str, shortcuts_override: Optional[Dict[str, str]] = 
     if shortcuts_override and action_id in shortcuts_override:
         return shortcuts_override[action_id] or defaults.get(action_id, "")
     return defaults.get(action_id, "")
+
+
+def find_shortcut_conflicts(shortcuts_map: Dict[str, str]) -> Dict[str, List[str]]:
+    """Return key -> [action_ids] for duplicate non-empty shortcuts."""
+    key_to_actions: Dict[str, List[str]] = {}
+    for action_id, key in (shortcuts_map or {}).items():
+        k = (key or "").strip()
+        if not k:
+            continue
+        key_to_actions.setdefault(k, []).append(action_id)
+    return {k: v for k, v in key_to_actions.items() if len(v) > 1}
+
+
+def classify_shortcut_conflicts(shortcuts_map: Dict[str, str]) -> Dict[str, Dict[str, List[str]]]:
+    """Return {'hard': {key:[ids]}, 'alias': {key:[ids]}}."""
+    conflicts = find_shortcut_conflicts(shortcuts_map)
+    out = {'hard': {}, 'alias': {}}
+    for key, ids in conflicts.items():
+        base = {i.replace('_alt', '') for i in ids}
+        if len(base) == 1:
+            out['alias'][key] = ids
+        else:
+            out['hard'][key] = ids
+    return out
+
+
+def auto_resolve_shortcut_conflicts(shortcuts_map: Dict[str, str]) -> Dict[str, str]:
+    """Keep first action for each duplicate key, clear others."""
+    out = dict(shortcuts_map or {})
+    conflicts = find_shortcut_conflicts(out)
+    for _key, ids in conflicts.items():
+        for aid in ids[1:]:
+            out[aid] = ''
+    return out

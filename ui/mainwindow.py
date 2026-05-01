@@ -208,12 +208,13 @@ class MainWindow(mainwindow_cls):
         FramelessMoveResize.toggleMaxState(self)
         self.setAcceptDrops(True)
 
-        if open_dir != '' and osp.exists(open_dir):
+        force_welcome = bool(getattr(shared, 'FORCE_SHOW_WELCOME_ON_STARTUP', False))
+        if not force_welcome and open_dir != '' and osp.exists(open_dir):
             if osp.isfile(open_dir) and open_dir.lower().endswith('.json'):
                 self.openJsonProj(open_dir)
             else:
                 self.OpenProj(open_dir)
-        elif pcfg.open_recent_on_startup:
+        elif not force_welcome and pcfg.open_recent_on_startup:
             # Auto-open most recent project when user has this preference.
             if len(self.leftBar.recent_proj_list) > 0:
                 proj_dir = self.leftBar.recent_proj_list[0]
@@ -221,9 +222,10 @@ class MainWindow(mainwindow_cls):
                     self.OpenProj(proj_dir)
 
         if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
-            # When no project is loaded, always show welcome screen so user can open or create one.
-            if self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
+            # When no project is loaded (or first-setup requests onboarding), show welcome screen.
+            if force_welcome or self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
                 self._show_welcome_screen()
+                shared.FORCE_SHOW_WELCOME_ON_STARTUP = False
 
         if shared.HEADLESS or shared.HEADLESS_CONTINUOUS:
             self.run_batch(**exec_args)
@@ -441,6 +443,8 @@ class MainWindow(mainwindow_cls):
         self.canvas.move_blocks_down_signal.connect(self.on_move_blocks_down)
         self.canvas.import_image_to_blk.connect(self.on_import_image_to_blk)
         self.canvas.clear_overlay_signal.connect(self.on_clear_overlay)
+        self.canvas.triage_add_selected_signal.connect(self.on_add_selected_to_triage)
+        self.canvas.triage_mark_reviewed_selected_signal.connect(self.on_mark_selected_triage_reviewed)
 
         self.app.installEventFilter(self)
         self.canvas.gv.installEventFilter(self)
@@ -1102,6 +1106,12 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
+        self.titleBar.environment_doctor_trigger.connect(self.on_environment_doctor)
+        self.titleBar.translation_qa_report_trigger.connect(self.on_translation_qa_report_current_page)
+        self.titleBar.ocr_triage_trigger.connect(self.on_open_ocr_triage_current_page)
+        self.titleBar.auto_extract_glossary_trigger.connect(self.on_auto_extract_glossary_current_page)
+        self.titleBar.save_run_profile_trigger.connect(self.on_save_run_profile_snapshot)
+        self.titleBar.apply_run_profile_trigger.connect(self.on_apply_run_profile_snapshot)
         self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
         self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
         self.titleBar.export_startup_diag_trigger.connect(self.on_export_startup_report)
@@ -1888,6 +1898,8 @@ class MainWindow(mainwindow_cls):
         return "\n".join(lines)
 
     def _show_startup_health_overlay(self):
+        if not getattr(pcfg, 'show_startup_health_dialog', True):
+            return
         stages = getattr(shared, "STARTUP_HEALTH", []) or []
         if not stages:
             return
@@ -1999,6 +2011,8 @@ class MainWindow(mainwindow_cls):
             LOGGER.debug("Window geometry recovery skipped: %s", e)
 
     def _show_model_download_result_dialog(self, *, title: str, status: str, summary: dict, details: str = ''):
+        if not getattr(pcfg, 'show_model_download_result_dialog', True):
+            return
         downloaded = int((summary or {}).get('downloaded', 0))
         failed = int((summary or {}).get('failed', 0))
         skipped = int((summary or {}).get('skipped', 0))
@@ -2121,7 +2135,7 @@ class MainWindow(mainwindow_cls):
                     summary=summary,
                     details=partial_details + '\n\n' + tip
                 )
-            if success:
+            if status == "success":
                 defaults_summary = self._reset_modules_to_core_defaults()
                 create_info_dialog({
                     'title': self.tr('Download complete. Defaults updated.'),
@@ -4392,6 +4406,150 @@ class MainWindow(mainwindow_cls):
                 skip_ignored_in_batch=skip_ignored,
                 pages_to_process=pages_to_process,
             )
+
+    def on_environment_doctor(self):
+        from utils.environment_doctor import run_environment_doctor
+        checks = run_environment_doctor()
+        lines = [f"{name}: {status} ({detail})" for name, status, detail in checks]
+        create_info_dialog({'title': self.tr('Environment doctor report'), 'text': '\n'.join(lines)})
+
+    def on_translation_qa_report_current_page(self):
+        if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
+            create_info_dialog({'title': self.tr('No page loaded'), 'text': self.tr('Open a project/page first.')})
+            return
+        from utils.translation_review import extract_glossary_candidates, check_translation_guardrails
+        page = self.imgtrans_proj.current_img
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        src_texts = [getattr(b, 'text', '') or '' for b in blks]
+        trans_texts = [getattr(b, 'translation', '') or '' for b in blks]
+        glossary = getattr(self.imgtrans_proj, 'translation_glossary', None) or []
+        issues = []
+        for i, b in enumerate(blks):
+            for issue in check_translation_guardrails(getattr(b, 'text', ''), getattr(b, 'translation', ''), glossary=glossary):
+                issues.append(f"#{i+1}: {issue}")
+        candidates = extract_glossary_candidates(src_texts, trans_texts, min_freq=2)[:20]
+        empty_ocr = [str(i+1) for i,b in enumerate(blks) if not (getattr(b, 'text', '') or '').strip()]
+        lines = [self.tr('Page: ') + str(page), self.tr('Blocks: ') + str(len(blks))]
+        lines.append(self.tr('Likely OCR triage (empty source): ') + (', '.join(empty_ocr) if empty_ocr else self.tr('none')))
+        lines.append(self.tr('Guardrail issues: ') + str(len(issues)))
+        lines.extend(issues[:50])
+        if candidates:
+            lines.append(self.tr('Glossary candidates (source -> target):'))
+            lines.extend([f"- {c.get('source','')} -> " for c in candidates])
+        create_info_dialog({'title': self.tr('Translation QA report'), 'text': '\n'.join(lines)})
+
+    def on_save_run_profile_snapshot(self):
+        if self.imgtrans_proj is None:
+            return
+        from qtpy.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, self.tr('Save run profile'), self.tr('Profile name:'))
+        if not ok or not str(name).strip():
+            return
+        cfg = pcfg.module
+        snap = {
+            'textdetector': getattr(cfg, 'textdetector', ''),
+            'ocr': getattr(cfg, 'ocr', ''),
+            'inpainter': getattr(cfg, 'inpainter', ''),
+            'translator': getattr(cfg, 'translator', ''),
+        }
+        if not isinstance(getattr(self.imgtrans_proj, 'run_profiles', None), dict):
+            self.imgtrans_proj.run_profiles = {}
+        self.imgtrans_proj.run_profiles[str(name).strip()] = snap
+        self.imgtrans_proj.save()
+        create_info_dialog({'title': self.tr('Saved'), 'text': self.tr('Run profile saved to project.')})
+
+    def on_apply_run_profile_snapshot(self):
+        if self.imgtrans_proj is None:
+            return
+        profiles = getattr(self.imgtrans_proj, 'run_profiles', None) or {}
+        if not profiles:
+            create_info_dialog({'title': self.tr('No profiles'), 'text': self.tr('No run profiles found in this project.')})
+            return
+        from qtpy.QtWidgets import QInputDialog
+        names = sorted(list(profiles.keys()))
+        name, ok = QInputDialog.getItem(self, self.tr('Apply run profile'), self.tr('Select profile:'), names, 0, False)
+        if not ok or not name:
+            return
+        snap = profiles.get(name) or {}
+        if snap.get('textdetector'):
+            self.module_manager.setTextDetector(snap['textdetector'])
+        if snap.get('ocr'):
+            self.module_manager.setOCR(snap['ocr'])
+        if snap.get('inpainter'):
+            self.module_manager.setInpainter(snap['inpainter'])
+        if snap.get('translator'):
+            self.module_manager.setTranslator(snap['translator'])
+        create_info_dialog({'title': self.tr('Applied'), 'text': self.tr('Run profile applied.')})
+
+    def on_open_ocr_triage_current_page(self):
+        if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
+            create_info_dialog({'title': self.tr('No page loaded'), 'text': self.tr('Open a project/page first.')})
+            return
+        from utils.translation_review import check_translation_guardrails
+        from ui.ocr_triage_dialog import OcrTriageDialog
+        page = self.imgtrans_proj.current_img
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        glossary = getattr(self.imgtrans_proj, 'translation_glossary', None) or []
+        rows = []
+        triage_state = (self.imgtrans_proj._image_info.get(page, {}) or {}).get('triage_flags', {})
+        for i, b in enumerate(blks):
+            src = (getattr(b, 'text', '') or '').strip()
+            trn = (getattr(b, 'translation', '') or '').strip()
+            state = triage_state.get(str(i), 'none')
+            if state != 'none':
+                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': self.tr('Triage state: ') + state})
+            if not src:
+                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': self.tr('Empty OCR source text')})
+            for issue in check_translation_guardrails(src, trn, glossary=glossary):
+                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': issue})
+        if not rows:
+            create_info_dialog({'title': self.tr('OCR triage worklist'), 'text': self.tr('No triage issues found on current page.')})
+            return
+        dlg = OcrTriageDialog(rows, self)
+        dlg.exec()
+
+    def on_auto_extract_glossary_current_page(self):
+        if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
+            create_info_dialog({'title': self.tr('No page loaded'), 'text': self.tr('Open a project/page first.')})
+            return
+        from utils.translation_review import extract_glossary_candidates
+        page = self.imgtrans_proj.current_img
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        src_texts = [getattr(b, 'text', '') or '' for b in blks]
+        candidates = extract_glossary_candidates(src_texts, None, min_freq=2)
+        if not candidates:
+            create_info_dialog({'title': self.tr('Auto-extract glossary'), 'text': self.tr('No glossary candidates found on current page.')})
+            return
+        existing = getattr(self.imgtrans_proj, 'translation_glossary', None) or []
+        seen = {str(g.get('source', '')).strip() for g in existing if isinstance(g, dict)}
+        added = []
+        for c in candidates:
+            src = str(c.get('source', '')).strip()
+            if not src or src in seen:
+                continue
+            existing.append({'source': src, 'target': ''})
+            seen.add(src)
+            added.append(src)
+        self.imgtrans_proj.translation_glossary = existing
+        self.imgtrans_proj.save()
+        preview = ', '.join(added[:20]) if added else self.tr('None (all candidates already existed).')
+        create_info_dialog({'title': self.tr('Auto-extract glossary complete'), 'text': self.tr('Added terms: {0}').format(preview)})
+
+    def on_add_selected_to_triage(self, idx_list: list):
+        if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
+            return
+        page = self.imgtrans_proj.current_img
+        self.imgtrans_proj.add_triage_flags(page, idx_list)
+        self.imgtrans_proj.save()
+        create_info_dialog({'title': self.tr('Triage updated'), 'text': self.tr('Selected blocks added to triage worklist.')})
+
+    def on_mark_selected_triage_reviewed(self, idx_list: list):
+        if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
+            return
+        page = self.imgtrans_proj.current_img
+        self.imgtrans_proj.mark_triage_reviewed(page, idx_list)
+        self.imgtrans_proj.save()
+        create_info_dialog({'title': self.tr('Triage updated'), 'text': self.tr('Selected blocks marked as reviewed.')})
 
     def setupRegisterWidget(self):
         self.titleBar.viewMenu.addSeparator()

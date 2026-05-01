@@ -673,6 +673,30 @@ class TitleBar(Widget):
         relaunchCpuOnlyAction.setToolTip(self.tr('Restart app with CUDA_VISIBLE_DEVICES empty to disable GPU for this launch.'))
         self.relaunch_cpu_only_trigger = relaunchCpuOnlyAction.triggered
 
+        environmentDoctorAction = QAction(self.tr('Environment doctor...'), self)
+        environmentDoctorAction.setToolTip(self.tr('Run dependency and auth checks and show a report.'))
+        self.environment_doctor_trigger = environmentDoctorAction.triggered
+
+        ocrTriageAction = QAction(self.tr('OCR triage worklist (current page)...'), self)
+        ocrTriageAction.setToolTip(self.tr('Show blocks that likely need OCR/translation review and triage.'))
+        self.ocr_triage_trigger = ocrTriageAction.triggered
+
+        autoExtractGlossaryAction = QAction(self.tr('Auto-extract glossary (current page)...'), self)
+        autoExtractGlossaryAction.setToolTip(self.tr('Extract frequent source terms and append to project glossary.'))
+        self.auto_extract_glossary_trigger = autoExtractGlossaryAction.triggered
+
+        translationQaAction = QAction(self.tr('Translation QA report (current page)...'), self)
+        translationQaAction.setToolTip(self.tr('Run glossary candidate extraction and guardrail checks on current page.'))
+        self.translation_qa_report_trigger = translationQaAction.triggered
+
+        saveRunProfileAction = QAction(self.tr('Save run profile snapshot...'), self)
+        saveRunProfileAction.setToolTip(self.tr('Save current module selections as a project-local run profile.'))
+        self.save_run_profile_trigger = saveRunProfileAction.triggered
+
+        applyRunProfileAction = QAction(self.tr('Apply run profile snapshot...'), self)
+        applyRunProfileAction.setToolTip(self.tr('Apply a previously saved project-local run profile.'))
+        self.apply_run_profile_trigger = applyRunProfileAction.triggered
+
         releaseCachesAction = QAction(self.tr('Release model caches'), self)
         releaseCachesAction.setToolTip(self.tr('Unload detector/OCR/inpainter/translator models and free GPU memory. Use after a batch to reduce RAM.'))
         self.release_model_caches_trigger = releaseCachesAction.triggered
@@ -688,6 +712,12 @@ class TitleBar(Widget):
         projectMenu.addAction(reRunOCRAction)
         projectMenu.addAction(validateProjAction)
         projectMenu.addAction(showBatchReportAction)
+        projectMenu.addSeparator()
+        projectMenu.addAction(saveRunProfileAction)
+        projectMenu.addAction(applyRunProfileAction)
+        projectMenu.addAction(translationQaAction)
+        projectMenu.addAction(ocrTriageAction)
+        projectMenu.addAction(autoExtractGlossaryAction)
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)
@@ -702,6 +732,7 @@ class TitleBar(Widget):
         modelsMenu = QMenu(self.tr('Models'), self)
         modelsMenu.addAction(manageModelsAction)
         modelsMenu.addAction(retryModelsAction)
+        modelsMenu.addAction(environmentDoctorAction)
         modelsMenu.addAction(showDownloadDiagAction)
         modelsMenu.addSeparator()
         modelsMenu.addAction(copyStartupDiagAction)

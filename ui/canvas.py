@@ -21,6 +21,7 @@ from .page_search_widget import PageSearchWidget
 from utils import shared as C
 from utils.config import pcfg
 from utils.config import context_menu_visible
+from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from .context_menu_config_dialog import ContextMenuConfigDialog, CONTEXT_MENU_ITEMS
 
@@ -218,6 +219,8 @@ class Canvas(QGraphicsScene):
     run_detect_region = Signal(QRectF, bool)  # rect, replace_page (True = "Detect text on page" -> replace blocks)
 
     download_page_requested = Signal(str)  # "result" | "inpainted" | "original"
+    triage_add_selected_signal = Signal(list)
+    triage_mark_reviewed_selected_signal = Signal(list)
 
 
     begin_scale_tool = Signal(QPointF)
@@ -1170,6 +1173,7 @@ class Canvas(QGraphicsScene):
 
             # --- Block (selection) ---
             merge_blocks_act = split_regions_act = move_up_act = move_down_act = None
+            triage_add_act = triage_mark_act = None
             create_textbox_act = None
             block_menu = None
             if context_menu_visible('create_textbox'):
@@ -1197,6 +1201,9 @@ class Canvas(QGraphicsScene):
                     move_down_act = block_menu.addAction(self.tr("Move block(s) down"))
                     move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
                     actions_map['block_move_down'] = move_down_act
+                if block_menu is not None:
+                    triage_add_act = block_menu.addAction(self.tr("Add selected to triage worklist"))
+                    triage_mark_act = block_menu.addAction(self.tr("Mark selected as reviewed"))
 
             # --- Image / Overlay (selection) ---
             import_image_act = clear_overlay_act = None
@@ -1324,6 +1331,7 @@ class Canvas(QGraphicsScene):
             # --- Run (pipeline) ---
             detect_region_act = detect_page_act = translate_act = ocr_act = None
             ocr_translate_act = ocr_translate_inpaint_act = inpaint_act = None
+            macro_actions = {}
             run_menu = None
             if context_menu_visible('run_detect_region') and saved_rect is not None:
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
@@ -1332,27 +1340,43 @@ class Canvas(QGraphicsScene):
             if context_menu_visible('run_detect_page'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 detect_page_act = run_menu.addAction(self.tr("Detect text on page"))
+                detect_page_act.setShortcut(QKeySequence.fromString(get_shortcut("run.detect_page", getattr(pcfg, "shortcuts", None))))
                 actions_map['run_detect_page'] = detect_page_act
             if context_menu_visible('run_translate'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 translate_act = run_menu.addAction(self.tr("Translate"))
+                translate_act.setShortcut(QKeySequence.fromString(get_shortcut("run.translate", getattr(pcfg, "shortcuts", None))))
                 actions_map['run_translate'] = translate_act
             if context_menu_visible('run_ocr'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_act = run_menu.addAction(self.tr("OCR"))
+                ocr_act.setShortcut(QKeySequence.fromString(get_shortcut("run.ocr", getattr(pcfg, "shortcuts", None))))
                 actions_map['run_ocr'] = ocr_act
             if context_menu_visible('run_ocr_translate'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_act = run_menu.addAction(self.tr("OCR and translate"))
+                ocr_translate_act.setShortcut(QKeySequence.fromString(get_shortcut("run.ocr_translate", getattr(pcfg, "shortcuts", None))))
                 actions_map['run_ocr_translate'] = ocr_translate_act
             if context_menu_visible('run_ocr_translate_inpaint'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 ocr_translate_inpaint_act = run_menu.addAction(self.tr("OCR, translate and inpaint"))
+                ocr_translate_inpaint_act.setShortcut(QKeySequence.fromString(get_shortcut("run.ocr_translate_inpaint", getattr(pcfg, "shortcuts", None))))
                 actions_map['run_ocr_translate_inpaint'] = ocr_translate_inpaint_act
             if context_menu_visible('run_inpaint'):
                 if run_menu is None: run_menu = menu.addMenu(self.tr("Run"))
                 inpaint_act = run_menu.addAction(self.tr("Inpaint"))
                 actions_map['run_inpaint'] = inpaint_act
+            if run_menu is not None:
+                run_menu.addSeparator()
+                for m in (getattr(pcfg, 'context_run_macros', None) or []):
+                    label = str(m.get('label', 'Macro'))
+                    act = run_menu.addAction(self.tr(label))
+                    mid = str(m.get('id', ''))
+                    if mid == 'detect_ocr_translate':
+                        act.setShortcut(QKeySequence.fromString(get_shortcut('run.macro_detect_ocr_translate', getattr(pcfg, 'shortcuts', None))))
+                    elif mid == 'ocr_translate_inpaint':
+                        act.setShortcut(QKeySequence.fromString(get_shortcut('run.macro_ocr_translate_inpaint', getattr(pcfg, 'shortcuts', None))))
+                    macro_actions[act] = m
 
             download_menu = None
             download_result_act = download_inpainted_act = download_original_act = None
@@ -1369,6 +1393,16 @@ class Canvas(QGraphicsScene):
             # Rebuild menu with pinned items at top
             menu_new = QMenu(self.gv)
             menu_new.setStyleSheet(menu.styleSheet())
+            pin_toggle_actions = {}
+            pin_manage_sub = menu_new.addMenu(self.tr("Pin quick actions"))
+            for key, obj in actions_map.items():
+                if isinstance(obj, QMenu):
+                    continue
+                act = pin_manage_sub.addAction(key)
+                act.setCheckable(True)
+                act.setChecked(key in pinned)
+                pin_toggle_actions[act] = key
+            menu_new.addSeparator()
             for key in pinned:
                 if key in actions_map:
                     o = actions_map[key]
@@ -1467,6 +1501,10 @@ class Canvas(QGraphicsScene):
                 self.merge_selected_blocks_signal.emit()
             elif split_regions_act is not None and rst == split_regions_act:
                 self.split_selected_regions_signal.emit()
+            elif triage_add_act is not None and rst == triage_add_act:
+                self.triage_add_selected_signal.emit([it.idx for it in sel])
+            elif triage_mark_act is not None and rst == triage_mark_act:
+                self.triage_mark_reviewed_selected_signal.emit([it.idx for it in sel])
             elif move_up_act is not None and rst == move_up_act:
                 self.move_blocks_up_signal.emit()
             elif move_down_act is not None and rst == move_down_act:
@@ -1584,6 +1622,11 @@ class Canvas(QGraphicsScene):
                 self.run_blktrans.emit(2)
             elif rst == inpaint_act:
                 self.run_blktrans.emit(3)
+            elif rst in macro_actions:
+                m = macro_actions.get(rst) or {}
+                if bool(m.get('detect_first', False)) and self.imgtrans_proj is not None and self.imgtrans_proj.img_valid and self.sceneRect().isValid():
+                    self.run_detect_region.emit(self.sceneRect(), True)
+                self.run_blktrans.emit(int(m.get('mode', 1)))
             elif download_result_act is not None and rst == download_result_act:
                 self.download_page_requested.emit("result")
             elif download_inpainted_act is not None and rst == download_inpainted_act:
