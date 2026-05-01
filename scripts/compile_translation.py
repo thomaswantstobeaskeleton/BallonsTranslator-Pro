@@ -11,6 +11,7 @@ import os.path as osp
 import subprocess
 import sys
 from glob import glob
+import xml.etree.ElementTree as ET
 
 
 def _lrelease_candidates(ts_path: str, qm_path: str):
@@ -49,6 +50,30 @@ def _compile_one(root: str, ts_path: str, qm_path: str) -> bool:
             print(stderr, file=sys.stderr)
     return False
 
+
+
+def _ts_translation_stats(ts_path: str) -> tuple[int, int, int]:
+    """Return (total_messages, finished_messages, unfinished_messages)."""
+    try:
+        root = ET.parse(ts_path).getroot()
+    except Exception:
+        return (0, 0, 0)
+
+    total = 0
+    finished = 0
+    unfinished = 0
+    for msg in root.findall('.//message'):
+        trans = msg.find('translation')
+        if trans is None:
+            continue
+        total += 1
+        is_unfinished = trans.get('type') == 'unfinished' or not (trans.text or '').strip()
+        if is_unfinished:
+            unfinished += 1
+        else:
+            finished += 1
+    return total, finished, unfinished
+
 def main():
     root = osp.dirname(osp.dirname(osp.abspath(__file__)))
     trans_dir = osp.join(root, 'translate')
@@ -73,13 +98,21 @@ def main():
 
     ok = 0
     fail = 0
+    stats = []
     for ts_path in targets:
+        total, finished, unfinished = _ts_translation_stats(ts_path)
+        stats.append((ts_path, total, finished, unfinished))
         qm_path = ts_path[:-3] + '.qm'
         if _compile_one(root, ts_path, qm_path):
             ok += 1
         else:
             fail += 1
             print(f'Failed to compile: {ts_path}', file=sys.stderr)
+
+    for ts_path, total, finished, unfinished in stats:
+        locale = osp.basename(ts_path).replace('.ts', '')
+        if total:
+            print(f'[i18n] {locale}: {finished}/{total} finished, {unfinished} unfinished')
 
     if fail == 0:
         print(f'All translations compiled successfully ({ok}/{ok}).')

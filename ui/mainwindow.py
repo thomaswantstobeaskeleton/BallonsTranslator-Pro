@@ -209,6 +209,12 @@ class MainWindow(mainwindow_cls):
         self.setAcceptDrops(True)
 
         force_welcome = bool(getattr(shared, 'FORCE_SHOW_WELCOME_ON_STARTUP', False))
+        # Respect startup preference: when enabled, always land on welcome screen unless
+        # user explicitly launched with a project path/json.
+        startup_prefers_welcome = bool(getattr(pcfg, 'show_welcome_screen', True))
+        explicit_start_target = bool(open_dir and str(open_dir).strip())
+        if startup_prefers_welcome and not explicit_start_target:
+            force_welcome = True
         if not force_welcome and open_dir != '' and osp.exists(open_dir):
             if osp.isfile(open_dir) and open_dir.lower().endswith('.json'):
                 self.openJsonProj(open_dir)
@@ -1114,6 +1120,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.apply_run_profile_trigger.connect(self.on_apply_run_profile_snapshot)
         self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
         self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
+        self.titleBar.runtime_resource_summary_trigger.connect(self.on_runtime_resource_summary)
         self.titleBar.export_startup_diag_trigger.connect(self.on_export_startup_report)
         self.titleBar.open_log_folder_trigger.connect(self.on_open_log_folder)
         self.titleBar.relaunch_pyqt5_trigger.connect(self.on_relaunch_pyqt5_safe_mode)
@@ -1928,6 +1935,53 @@ class MainWindow(mainwindow_cls):
         if app is not None:
             app.clipboard().setText(text)
         create_info_dialog({'title': self.tr('Diagnostics copied'), 'text': self.tr('Startup diagnostics copied to clipboard.')})
+
+    def _collect_runtime_resource_summary_text(self) -> str:
+        lines = []
+        run_state = self.tr("RUNNING") if self.imgtrans_thread.isRunning() else self.tr("IDLE")
+        lines.append(self.tr("Pipeline state: {}").format(run_state))
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            proc = psutil.Process(os.getpid())
+            proc_mem = proc.memory_info().rss / (1024 ** 3)
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            lines.append(self.tr("CPU usage: {0:.1f}%").format(cpu_pct))
+            lines.append(self.tr("System RAM: {0:.1f} / {1:.1f} GB ({2:.0f}%)").format(
+                (vm.total - vm.available) / (1024 ** 3), vm.total / (1024 ** 3), vm.percent
+            ))
+            lines.append(self.tr("App RAM (RSS): {0:.2f} GB").format(proc_mem))
+        except Exception as e:
+            lines.append(self.tr("CPU/RAM stats unavailable: {0}").format(str(e)))
+
+        try:
+            import torch
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                dev_idx = torch.cuda.current_device()
+                total = torch.cuda.get_device_properties(dev_idx).total_memory / (1024 ** 3)
+                allocated = torch.cuda.memory_allocated(dev_idx) / (1024 ** 3)
+                reserved = torch.cuda.memory_reserved(dev_idx) / (1024 ** 3)
+                lines.append(self.tr("GPU ({0}) VRAM allocated/reserved/total: {1:.2f} / {2:.2f} / {3:.2f} GB").format(
+                    torch.cuda.get_device_name(dev_idx), allocated, reserved, total
+                ))
+                if reserved / max(total, 1e-6) > 0.75:
+                    lines.append(self.tr("Suggestion: VRAM usage is high; use low-VRAM mode, smaller models, CPU device, or quantized variants (4-bit/8-bit) when available."))
+            else:
+                lines.append(self.tr("GPU VRAM: CUDA not available in current runtime."))
+        except Exception as e:
+            lines.append(self.tr("GPU stats unavailable: {0}").format(str(e)))
+
+        lines.append(self.tr("Quantization note: model quantization is module-dependent; some HF/LLM modules provide low-VRAM/4-bit/8-bit style options, but not every detector/OCR/inpainter supports quantized loading."))
+        return "\n".join(lines)
+
+    def on_runtime_resource_summary(self):
+        text = self._collect_runtime_resource_summary_text()
+        msg = QMessageBox(self)
+        msg.setWindowTitle(self.tr("Runtime resource summary"))
+        msg.setText(self.tr("Current resource usage snapshot."))
+        msg.setDetailedText(text)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.exec()
 
     def on_export_startup_report(self):
         text = self._collect_startup_diagnostics_text()

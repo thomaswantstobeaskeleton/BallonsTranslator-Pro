@@ -660,6 +660,9 @@ class TitleBar(Widget):
         copyStartupDiagAction = QAction(self.tr('Copy startup diagnostics'), self)
         copyStartupDiagAction.setToolTip(self.tr('Copy startup and environment diagnostics to clipboard.'))
         self.copy_startup_diag_trigger = copyStartupDiagAction.triggered
+        runtimeResourceSummaryAction = QAction(self.tr('Runtime resource summary'), self)
+        runtimeResourceSummaryAction.setToolTip(self.tr('Show current CPU/RAM/VRAM usage and quick quantization guidance.'))
+        self.runtime_resource_summary_trigger = runtimeResourceSummaryAction.triggered
         exportStartupDiagAction = QAction(self.tr('Export startup report...'), self)
         exportStartupDiagAction.setToolTip(self.tr('Save startup diagnostics to a text file for support.'))
         self.export_startup_diag_trigger = exportStartupDiagAction.triggered
@@ -736,6 +739,7 @@ class TitleBar(Widget):
         modelsMenu.addAction(showDownloadDiagAction)
         modelsMenu.addSeparator()
         modelsMenu.addAction(copyStartupDiagAction)
+        modelsMenu.addAction(runtimeResourceSummaryAction)
         modelsMenu.addAction(exportStartupDiagAction)
         modelsMenu.addAction(openLogFolderAction)
         modelsMenu.addAction(relaunchPyQt5Action)
