@@ -11,7 +11,7 @@ import time
 import cv2
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap
 
@@ -29,6 +29,7 @@ from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRA
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat, log_diagnostic_event
+from utils.layout_review_agent import ReviewModelConfig
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from utils.zip_batch import ZipBatchManager
@@ -1186,6 +1187,9 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.auto_fit_binary", "", self.shortcutFormatAutoFitBinary)
         _mk_shortcut("format.balloon_shape_auto", "", self.shortcutBalloonShapeAuto)
         _mk_shortcut("format.resize_to_fit_content", "", self.shortcutResizeToFitContent)
+        _mk_shortcut("format.layout_review_selected", "", self.shortcutLayoutReviewSelected)
+        _mk_shortcut("format.layout_review_page", "", self.shortcutLayoutReviewPage)
+        _mk_shortcut("format.layout_review_config", "", self.shortcutLayoutReviewConfig)
 
         drawpanel_shortcuts = [
             ("draw.hand", "H", "hand"),
@@ -1680,6 +1684,86 @@ class MainWindow(mainwindow_cls):
         """Resize selected text box(es) to fit content (Format shortcut)."""
         if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.resize_to_fit_content_signal.emit()
+
+    def shortcutLayoutReviewSelected(self):
+        """Run layout review/fix for selected textboxes."""
+        if self.centralStackWidget.currentIndex() != 1 or not self.canvas.gv.isVisible():
+            return
+        if not self.canvas.selected_text_items():
+            return
+        cfg = self._get_layout_review_config()
+        loops = self.st_manager.review_and_fix_selected_textboxes_with_provider(
+            config=cfg,
+            max_iters=2,
+        )
+        if loops <= 0:
+            self.statusBar().showMessage(self.tr("Layout review: no issues detected in selection."), 4000)
+            return
+        self.statusBar().showMessage(self.tr(f"Layout review applied to selection ({loops} iteration(s))."), 5000)
+
+    def shortcutLayoutReviewPage(self):
+        """Run layout review/fix for all textboxes on current page."""
+        if self.centralStackWidget.currentIndex() != 1 or not self.canvas.gv.isVisible():
+            return
+        cfg = self._get_layout_review_config()
+        target_indices = [
+            blk.idx for blk in self.st_manager.textblk_item_list
+            if blk is not None and not getattr(blk.fontformat, "vertical", False)
+        ]
+        loops = self.st_manager.review_and_fix_selected_textboxes_with_provider(
+            config=cfg,
+            target_block_indices=target_indices,
+            max_iters=2,
+        )
+        if loops <= 0:
+            self.statusBar().showMessage(self.tr("Layout review: no page-level issues detected."), 4000)
+            return
+        self.statusBar().showMessage(self.tr(f"Layout review applied to page ({loops} iteration(s))."), 5000)
+
+    def _get_layout_review_config(self) -> ReviewModelConfig:
+        cfg = getattr(self, "_layout_review_config", None)
+        if isinstance(cfg, ReviewModelConfig):
+            return cfg
+        self._layout_review_config = ReviewModelConfig(provider="heuristic")
+        return self._layout_review_config
+
+    def shortcutLayoutReviewConfig(self):
+        """Configure provider/prompt for layout review."""
+        cfg = self._get_layout_review_config()
+        provider_items = ["heuristic", "local_api", "cloud_api"]
+        provider_idx = max(0, provider_items.index(cfg.provider) if cfg.provider in provider_items else 0)
+        provider, ok = QInputDialog.getItem(self, self.tr("Layout Review Provider"), self.tr("Provider"), provider_items, provider_idx, False)
+        if not ok:
+            return
+        model_name, ok = QInputDialog.getText(self, self.tr("Layout Review Model"), self.tr("Model name"), text=cfg.model_name)
+        if not ok:
+            return
+        prompt, ok = QInputDialog.getText(self, self.tr("Layout Review Prompt"), self.tr("Prompt"), text=cfg.prompt)
+        if not ok:
+            return
+        temperature, ok = QInputDialog.getDouble(
+            self, self.tr("Layout Review Temperature"), self.tr("Temperature"), float(cfg.temperature), 0.0, 2.0, 2
+        )
+        if not ok:
+            return
+        top_p, ok = QInputDialog.getDouble(
+            self, self.tr("Layout Review Top-p"), self.tr("Top-p"), float(cfg.top_p), 0.0, 1.0, 2
+        )
+        if not ok:
+            return
+        max_tokens, ok = QInputDialog.getInt(
+            self, self.tr("Layout Review Max Tokens"), self.tr("Max tokens"), int(cfg.max_tokens), 64, 8192, 32
+        )
+        if not ok:
+            return
+        cfg.provider = provider
+        cfg.model_name = model_name
+        cfg.prompt = prompt
+        cfg.temperature = temperature
+        cfg.top_p = top_p
+        cfg.max_tokens = max_tokens
+        self._layout_review_config = cfg
+        self.statusBar().showMessage(self.tr(f"Layout review config updated ({provider})."), 4000)
 
     def on_redo(self):
         log_diagnostic_event(
