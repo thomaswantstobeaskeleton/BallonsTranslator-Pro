@@ -199,13 +199,11 @@ class ParamWidget(QWidget):
                     param_widget = ParamComboBox(
                         param_key, options_list, size=size, scrollWidget=scrollWidget, flush_btn=flush_btn, path_selector=path_selector)
 
-                    if param_key == 'device' and DEFAULT_DEVICE == 'cpu':
+                    if param_key == 'device' and DEFAULT_DEVICE == 'cpu' and str(param_dict.get('value', '')).strip() == '':
+                        # Keep CPU as the implicit default when runtime did not detect GPU,
+                        # but do not disable GPU choices in UI: users may still run with
+                        # CUDA/XPU/MPS in environments where torch detection is incomplete.
                         param_dict['value'] = 'cpu'
-                        for ii, device in enumerate(options_list):
-                            if device in GPUINTENSIVE_SET:
-                                model = param_widget.model()
-                                item = model.item(ii, 0)
-                                item.setEnabled(False)
                     param_widget.setCurrentText(str(value))
                     param_widget.setEditable(param_dict.get('editable', False))
 
