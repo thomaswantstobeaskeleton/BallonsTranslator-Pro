@@ -1207,7 +1207,12 @@ class MainWindow(mainwindow_cls):
             box = getattr(self.titleBar, "omniSearch", None)
             if box is None:
                 return
-            # omniSearch is a QLineEdit
+            # omniSearch may be collapsed behind the search icon; expand first.
+            if hasattr(self.titleBar, '_searchExpanded') and not self.titleBar._searchExpanded:
+                try:
+                    self.titleBar._toggle_omni_search()
+                except Exception:
+                    pass
             box.setFocus(Qt.FocusReason.ShortcutFocusReason)
             try:
                 box.selectAll()
@@ -1311,8 +1316,8 @@ class MainWindow(mainwindow_cls):
                         pass
             # Switch to main canvas view (index 0 = imgtrans)
             try:
-                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 0:
-                    self.centralStackWidget.setCurrentIndex(0)
+                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 1:
+                    self.centralStackWidget.setCurrentIndex(1)
             except Exception:
                 pass
             if not getattr(self, "st_manager", None) or not getattr(self.st_manager, "textblk_item_list", None):
@@ -1343,8 +1348,8 @@ class MainWindow(mainwindow_cls):
                     except Exception:
                         pass
             try:
-                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 0:
-                    self.centralStackWidget.setCurrentIndex(0)
+                if hasattr(self, "centralStackWidget") and self.centralStackWidget.currentIndex() != 1:
+                    self.centralStackWidget.setCurrentIndex(1)
             except Exception:
                 pass
             # Right panel: index 1 is the text/format panel in rightComicTransStackPanel
@@ -1443,7 +1448,7 @@ class MainWindow(mainwindow_cls):
             if sender.key() == QKEY.Key_D:
                 if self.canvas.editing_textblkitem is not None:
                     return
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             focus_widget = self.app.focusWidget()
             if self.st_manager.is_editting():
                 self.st_manager.on_switch_textitem(1)
@@ -1463,7 +1468,7 @@ class MainWindow(mainwindow_cls):
             if sender.key() == QKEY.Key_A:
                 if self.canvas.editing_textblkitem is not None:
                     return
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             focus_widget = self.app.focusWidget()
             if self.st_manager.is_editting():
                 self.st_manager.on_switch_textitem(-1)
@@ -1478,21 +1483,21 @@ class MainWindow(mainwindow_cls):
                     self.pageList.setCurrentRow(row)
 
     def shortcutTextedit(self):
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             self.bottomBar.texteditChecker.click()
 
     def shortcutTextblock(self):
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             if self.bottomBar.texteditChecker.isChecked():
                 self.bottomBar.textblockChecker.click()
 
     def shortcutDrawboard(self):
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             self.bottomBar.paintChecker.click()
 
     def shortcutSpellCheckPanel(self):
         """Show Spell check panel (PR #974)."""
-        if self.centralStackWidget.currentIndex() != 0:
+        if self.centralStackWidget.currentIndex() != 1:
             return
         if self.rightComicTransStackPanel.isHidden():
             self.rightComicTransStackPanel.show()
@@ -1547,7 +1552,7 @@ class MainWindow(mainwindow_cls):
             edit.blockSignals(False)
 
     def shortcutCtrlD(self):
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             if self.drawingPanel.isVisible():
                 if self.drawingPanel.currentTool == self.drawingPanel.rectTool:
                     self.drawingPanel.rectPanel.delete_btn.click()
@@ -1584,7 +1589,7 @@ class MainWindow(mainwindow_cls):
         return super().eventFilter(obj, event)
 
     def shortcutSpace(self):
-        if self.centralStackWidget.currentIndex() == 0:
+        if self.centralStackWidget.currentIndex() == 1:
             if self.drawingPanel.isVisible():
                 if self.drawingPanel.currentTool == self.drawingPanel.rectTool:
                     self.drawingPanel.rectPanel.inpaint_btn.click()
@@ -1633,7 +1638,7 @@ class MainWindow(mainwindow_cls):
 
     def shortcutCreateTextbox(self):
         """Create a default-size text box at cursor (Canvas)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
             self.canvas.create_textbox_at_cursor()
 
     def shortcutContextMenuOptions(self):
@@ -1643,37 +1648,37 @@ class MainWindow(mainwindow_cls):
 
     def shortcutFormatApply(self):
         """Apply font formatting to selection (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
             self.canvas.format_textblks.emit()
 
     def shortcutFormatLayout(self):
         """Auto layout selected text blocks (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.layout_textblks.emit()
 
     def shortcutFitToBubble(self):
         """Fit to bubble for selection (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.layout_textblks.emit()
 
     def shortcutFormatAutoFit(self):
         """Auto fit font size to box (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.auto_fit_font_signal.emit()
 
     def shortcutFormatAutoFitBinary(self):
         """Auto fit font size binary search (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.auto_fit_binary_signal.emit()
 
     def shortcutBalloonShapeAuto(self):
         """Set balloon shape to Auto (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.set_balloon_shape_signal.emit("auto")
 
     def shortcutResizeToFitContent(self):
         """Resize selected text box(es) to fit content (Format shortcut)."""
-        if self.centralStackWidget.currentIndex() == 0 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.resize_to_fit_content_signal.emit()
 
     def on_redo(self):
@@ -4048,7 +4053,7 @@ class MainWindow(mainwindow_cls):
                 self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
             )
             return
-        if self.centralStackWidget.currentIndex() != 0:
+        if self.centralStackWidget.currentIndex() != 1:
             return
         if self.rightComicTransStackPanel.isHidden():
             self.rightComicTransStackPanel.show()
@@ -4069,7 +4074,7 @@ class MainWindow(mainwindow_cls):
                 self.tr("Spell check requires pyenchant. Install it and a system dictionary (e.g. en_US)."),
             )
             return
-        if self.centralStackWidget.currentIndex() != 0:
+        if self.centralStackWidget.currentIndex() != 1:
             return
         if self.rightComicTransStackPanel.isHidden():
             self.rightComicTransStackPanel.show()
