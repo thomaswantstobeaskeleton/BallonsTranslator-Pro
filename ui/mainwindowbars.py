@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QDoubleSpinBox,
 )
-from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression
+from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression, QPropertyAnimation, QEasingCurve
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
 from modules.translators import BaseTranslator
@@ -451,7 +451,7 @@ class TitleBar(Widget):
         pageSearchAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Search'), self)
         self.page_search_trigger = pageSearchAction.triggered
         pageSearchAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.page_search", getattr(pcfg, "shortcuts", None))))
-        globalSearchAction = QAction(self.tr('Global Search'), self)
+        globalSearchAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search_activate.svg')), self.tr('Global Search'), self)
         self.global_search_trigger = globalSearchAction.triggered
         globalSearchAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.global_search", getattr(pcfg, "shortcuts", None))))
 
@@ -501,8 +501,8 @@ class TitleBar(Widget):
         drawBoardAction.setShortcut(QKeySequence.fromString(get_shortcut("view.draw_board", getattr(pcfg, "shortcuts", None))))
         texteditAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_textedit.svg')), self.tr('Text Editor'), self)
         texteditAction.setShortcut(QKeySequence.fromString(get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None))))
-        importTextStyles = QAction(self.tr('Import Text Styles'), self)
-        exportTextStyles = QAction(self.tr('Export Text Styles'), self)
+        importTextStyles = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-down.svg')), self.tr('Import Text Styles'), self)
+        exportTextStyles = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-up.svg')), self.tr('Export Text Styles'), self)
         spellCheckPanelAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')), self.tr('Spell check panel'), self)
         spellCheckPanelAction.setToolTip(self.tr('Show spell check panel (PR #974).'))
         self.spellcheck_panel_trigger = spellCheckPanelAction.triggered
@@ -564,7 +564,7 @@ class TitleBar(Widget):
         viewMenu.addMenu(themeMenu)
         viewMenu.addAction(darkModeAction)
         viewMenu.addAction(bubblyUIAction)
-        themeCustomizerAction = QAction(self.tr('Theme and UI customizer...'), self)
+        themeCustomizerAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')), self.tr('Theme and UI customizer...'), self)
         themeCustomizerAction.setToolTip(self.tr('Change accent color, app font, light/dark, simple vs advanced UI.'))
         viewMenu.addAction(themeCustomizerAction)
         self.theme_customizer_trigger = themeCustomizerAction.triggered
@@ -581,7 +581,7 @@ class TitleBar(Widget):
         self.help_about_trigger = aboutAction.triggered
         self.help_update_from_github_trigger = updateFromGitHubAction.triggered
 
-        mergeToolAction = QAction(self.tr('Region merge tool'), self)
+        mergeToolAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'merge-tool.svg')), self.tr('Region merge tool'), self)
         mergeToolAction.setShortcut(QKeySequence.fromString(get_shortcut("edit.merge_tool", getattr(pcfg, "shortcuts", None))))
 
         self._shortcut_actions_title = [
@@ -598,8 +598,8 @@ class TitleBar(Widget):
 
         self.goToolBtn = TitleBarToolBtn(self)
         self.goToolBtn.setText(self.tr('Go'))
-        prevPageAction = QAction(self.tr('Previous Page'), self)
-        nextPageAction = QAction(self.tr('Next Page'), self)
+        prevPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-left.svg')), self.tr('Previous Page'), self)
+        nextPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Next Page'), self)
         prevPageAltAction = QAction(self.tr('Previous Page (alternate)'), self)
         nextPageAltAction = QAction(self.tr('Next Page (alternate)'), self)
         goMenu = QMenu(self.goToolBtn)
@@ -624,7 +624,7 @@ class TitleBar(Widget):
         self.re_run_detection_only_trigger = reRunDetectAction.triggered
         reRunOCRAction = QAction(self.tr('Re-run OCR only'), self)
         self.re_run_ocr_only_trigger = reRunOCRAction.triggered
-        batchExportAction = QAction(self.tr('Export all pages'), self)
+        batchExportAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'save_activate.svg')), self.tr('Export all pages'), self)
         batchExportAction.setShortcut(QKeySequence.fromString(get_shortcut("file.export_all_pages", getattr(pcfg, "shortcuts", None))))
         self.batch_export_trigger = batchExportAction.triggered
         self._shortcut_actions_title.append(("file.export_all_pages", "Ctrl+Shift+S", batchExportAction))
@@ -647,7 +647,7 @@ class TitleBar(Widget):
         batchQueueAction.setToolTip(self.tr('Process multiple folders in sequence with Pause/Cancel (issue #1020).'))
         self.batch_queue_trigger = batchQueueAction.triggered
 
-        manageModelsAction = QAction(self.tr('Manage models...'), self)
+        manageModelsAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')), self.tr('Manage models...'), self)
         manageModelsAction.setToolTip(self.tr('Check which models are downloaded and download selected models.'))
         self.manage_models_trigger = manageModelsAction.triggered
 
@@ -666,7 +666,7 @@ class TitleBar(Widget):
         exportStartupDiagAction = QAction(self.tr('Export startup report...'), self)
         exportStartupDiagAction.setToolTip(self.tr('Save startup diagnostics to a text file for support.'))
         self.export_startup_diag_trigger = exportStartupDiagAction.triggered
-        openLogFolderAction = QAction(self.tr('Open log folder'), self)
+        openLogFolderAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr('Open log folder'), self)
         openLogFolderAction.setToolTip(self.tr('Open logs directory in your file explorer.'))
         self.open_log_folder_trigger = openLogFolderAction.triggered
         relaunchPyQt5Action = QAction(self.tr('Relaunch with PyQt5 (safe mode)'), self)
@@ -676,7 +676,7 @@ class TitleBar(Widget):
         relaunchCpuOnlyAction.setToolTip(self.tr('Restart app with CUDA_VISIBLE_DEVICES empty to disable GPU for this launch.'))
         self.relaunch_cpu_only_trigger = relaunchCpuOnlyAction.triggered
 
-        environmentDoctorAction = QAction(self.tr('Environment doctor...'), self)
+        environmentDoctorAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'doctor.svg')), self.tr('Environment doctor...'), self)
         environmentDoctorAction.setToolTip(self.tr('Run dependency and auth checks and show a report.'))
         self.environment_doctor_trigger = environmentDoctorAction.triggered
 
@@ -794,17 +794,17 @@ class TitleBar(Widget):
         runMenu.addSeparator()
         runMenu.addActions([runAction, runWoUpdateTextStyle, translatePageAction])
         runMenu.addSeparator()
-        videoTranslatorAc = QAction(self.tr('Video translator...'), self)
+        videoTranslatorAc = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'video_render.svg')), self.tr('Video translator...'), self)
         videoTranslatorAc.setToolTip(self.tr('Translate hardcoded subtitles in video: detect, OCR, translate, inpaint per frame.'))
         runMenu.addAction(videoTranslatorAc)
         self.video_translator_trigger = videoTranslatorAc.triggered
-        subtitleFileTranslatorAc = QAction(self.tr('Translate subtitle file…'), self)
+        subtitleFileTranslatorAc = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'subtitle_export.svg')), self.tr('Translate subtitle file…'), self)
         subtitleFileTranslatorAc.setToolTip(
             self.tr('Translate a standalone .srt or timestamped .txt using the configured translator (OpenRouter via LLM API).')
         )
         runMenu.addAction(subtitleFileTranslatorAc)
         self.subtitle_file_translator_trigger = subtitleFileTranslatorAc.triggered
-        videoSubtitleEditorAc = QAction(self.tr('Video Subtitle Editor...'), self)
+        videoSubtitleEditorAc = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'video_subtitle_editor.svg')), self.tr('Video Subtitle Editor...'), self)
         videoSubtitleEditorAc.setToolTip(self.tr('Edit video captions: cut, edit text, frame-accurate timing, export SRT/ASS/VTT, render with burned-in subtitles.'))
         runMenu.addAction(videoSubtitleEditorAc)
         self.video_subtitle_editor_trigger = videoSubtitleEditorAc.triggered
@@ -832,7 +832,16 @@ class TitleBar(Widget):
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Omni search (menus + settings + canvas): QLineEdit + QCompleter popup (avoids QComboBox auto-fill issues)
+        # Omni search (menus + settings + canvas): compact icon toggle + animated QLineEdit.
+        self._searchExpanded = False
+        self._searchTargetWidth = 320
+        self._searchToggleBtn = QToolButton(self)
+        self._searchToggleBtn.setObjectName("OmniSearchToggleBtn")
+        self._searchToggleBtn.setIcon(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')))
+        self._searchToggleBtn.setToolTip(self.tr("Open search"))
+        self._searchToggleBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._searchToggleBtn.clicked.connect(self._toggle_omni_search)
+
         self.omniSearch = QLineEdit(self)
         self.omniSearch.setObjectName("OmniSearch")
         self.omniSearch.setPlaceholderText(self.tr("Search: menus, settings, canvas…"))
@@ -891,10 +900,16 @@ class TitleBar(Widget):
             self.omniSearch.setFixedHeight(24)
             self._omniDropBtn.setFixedHeight(24)
             self._omniDropBtn.setFixedWidth(24)
+            self._searchToggleBtn.setFixedHeight(24)
+            self._searchToggleBtn.setFixedWidth(24)
         except Exception:
             pass
+        self.omniSearch.setMaximumWidth(0)
+        self.omniSearch.hide()
+        self._omniDropBtn.hide()
 
         self._searchRowLayout.addStretch()
+        self._searchRowLayout.addWidget(self._searchToggleBtn, 0)
         self._searchRowLayout.addWidget(self.omniSearch, 0)
         self._searchRowLayout.addWidget(self._omniDropBtn, 0)
         self._searchRowLayout.addStretch()
@@ -956,10 +971,43 @@ class TitleBar(Widget):
             self._centerContainer.setFixedWidth(center_w)
             # Search takes ~45% of canvas area, clamped.
             search_w = int(max(280, min(950, center_w * 0.45)))
-            self.omniSearch.setFixedWidth(search_w)
+            self._searchTargetWidth = search_w
+            if self._searchExpanded:
+                self.omniSearch.setMaximumWidth(search_w)
         except Exception:
             pass
         return super().resizeEvent(event)
+
+
+    def _toggle_omni_search(self):
+        expand = not bool(getattr(self, '_searchExpanded', False))
+        self._searchExpanded = expand
+        self._searchToggleBtn.setToolTip(self.tr("Close search") if expand else self.tr("Open search"))
+        self._searchToggleBtn.setIcon(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search_activate.svg' if expand else 'search.svg')))
+        if expand:
+            self.omniSearch.show()
+            self._omniDropBtn.show()
+            self.omniSearch.setFocus()
+            self.omniSearch.selectAll()
+        else:
+            self.omniSearch.clear()
+            self._omni_model.clear()
+
+        try:
+            anim = QPropertyAnimation(self.omniSearch, b"maximumWidth", self)
+            anim.setDuration(180)
+            anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            anim.setStartValue(self.omniSearch.maximumWidth())
+            anim.setEndValue(self._searchTargetWidth if expand else 0)
+            if not expand:
+                def _hide_after():
+                    self.omniSearch.hide()
+                    self._omniDropBtn.hide()
+                anim.finished.connect(_hide_after)
+            self._search_anim = anim
+            anim.start()
+        except Exception:
+            self.omniSearch.setMaximumWidth(self._searchTargetWidth if expand else 0)
 
     def _walk_menu_actions(self, menu: QMenu, prefix: str = ""):
         """Yield (label, QAction) for all actions in menu (including submenus)."""

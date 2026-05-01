@@ -19,6 +19,10 @@ os.environ["FLAGS_use_mkldnn"] = "0"
 if "DISABLE_MODEL_SOURCE_CHECK" not in os.environ:
     os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
+# Prefer software-backed Qt rendering when system OpenGL is unavailable/misconfigured.
+os.environ.setdefault("QT_OPENGL", "software")
+os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
 # Reduce verbose logging from Hugging Face / transformers (HTTP request lines, etc.)
 import logging
 for _name in (
