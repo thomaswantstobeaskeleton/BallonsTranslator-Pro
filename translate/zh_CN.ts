@@ -46,7 +46,7 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="70" />
         <source>Remove selected</source>
-        <translation>删除选定的</translation>
+        <translation>移除所选项</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="72" />
@@ -71,7 +71,7 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="91" />
         <source>Queue: 0 items. Add folders and click Start.</source>
-        <translation>队列：0 项。添加文件夹并单击开始。</translation>
+        <translation>队列：0 项。添加文件夹并点击“开始”。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="96" />
@@ -81,7 +81,7 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="98" />
         <source>Process queue items one by one (same as headless --exec_dirs).</source>
-        <translation>一项一项地处理队列项（与 headless --exec_dirs 相同）。</translation>
+        <translation>逐项处理队列（与无界面模式 --exec_dirs 一致）。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="99" />
@@ -131,7 +131,7 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="184" />
         <source>Batch queue</source>
-        <translation>批量队列</translation>
+        <translation>批处理队列</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="185" />
@@ -141,38 +141,38 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="195" />
         <source>Paused. Click Resume to continue.</source>
-        <translation>暂停了。单击“继续”继续。</translation>
+        <translation>已暂停。点击“继续”以恢复。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="201" />
         <location filename="../ui/batch_queue_dialog.py" line="233" />
         <source>Running…</source>
-        <translation>跑步…</translation>
+        <translation>运行中…</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="206" />
         <source>Queue: {} item(s). Add folders and click Start.</source>
-        <translation>队列：{} 项。添加文件夹并单击开始。</translation>
+        <translation>队列：{} 项。添加文件夹并点击“开始”。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="215" />
         <source>Running… Use Pause / Cancel queue as needed.</source>
-        <translation>正在运行...根据需要使用暂停/取消队列。</translation>
+        <translation>正在运行……可按需使用“暂停”或“取消队列”。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="223" />
         <source>Queue empty. Add folders and click Start.</source>
-        <translation>队列空了。添加文件夹并单击开始。</translation>
+        <translation>队列为空。添加文件夹并点击“开始”。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="231" />
         <source>Running: {}</source>
-        <translation>跑步： {}</translation>
+        <translation>运行中：{}</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="237" />
         <source>Queue finished. Add more folders or close.</source>
-        <translation>排队完毕。添加更多文件夹或关闭。</translation>
+        <translation>队列处理完成。可继续添加文件夹或关闭。</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="241" />
