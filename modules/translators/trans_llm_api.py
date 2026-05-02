@@ -15,6 +15,7 @@ from utils.llm_provider import (
     is_local_provider,
     normalize_model_name,
     resolve_endpoint,
+    ENDPOINT_PRESETS,
 )
 from utils.proxy_utils import create_httpx_client
 from utils.series_context_store import (
@@ -132,6 +133,12 @@ class LLM_API_Translator(BaseTranslator):
         "endpoint": {
             "value": "",
             "description": "Base URL for the API. Leave empty for provider default.",
+        },
+        "endpoint_preset": {
+            "type": "selector",
+            "options": list(ENDPOINT_PRESETS.keys()),
+            "value": "Auto (provider default)",
+            "description": "Quick preset for endpoint/provider routing (e.g. Ollama, LM Studio, OpenRouter).",
         },
         "system_prompt": {
             "type": "editor",
@@ -3525,6 +3532,13 @@ class LLM_API_Translator(BaseTranslator):
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
+
+        if param_key == "endpoint_preset":
+            preset_name = str(param_content or "Auto (provider default)")
+            provider, endpoint = ENDPOINT_PRESETS.get(preset_name, (None, ""))
+            if provider:
+                self.params["provider"]["value"] = provider
+            self.params["endpoint"]["value"] = endpoint
 
         if param_key in ["proxy", "multiple_keys", "apikey", "provider", "endpoint"]:
             self.client = None

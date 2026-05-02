@@ -1408,7 +1408,8 @@ class Canvas(QGraphicsScene):
             for key, obj in actions_map.items():
                 if isinstance(obj, QMenu):
                     continue
-                act = pin_manage_sub.addAction(key)
+                pretty_label = key.replace("_", " ").strip().title()
+                act = pin_manage_sub.addAction(self.tr(pretty_label))
                 act.setCheckable(True)
                 act.setChecked(key in pinned)
                 pin_toggle_actions[act] = key
@@ -1828,4 +1829,3 @@ class Canvas(QGraphicsScene):
         self.blockSignals(True)
         self.text_undo_stack.blockSignals(True)
         self.draw_undo_stack.blockSignals(True)
-

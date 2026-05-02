@@ -394,6 +394,7 @@ def main():
     qInstallMessageHandler(_qt_message_filter)
     app.setApplicationName('BallonsTranslatorPro')
     app.setApplicationVersion(VERSION)
+    app.setWindowIcon(QIcon(shared.ICON_PATH))
 
     # import msl.loadlib (required by translators/trans_eztrans) before init QApplication
     # yield QWindowsContext: OleInitialize() failed on py3.10, 

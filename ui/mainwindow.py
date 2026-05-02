@@ -3,12 +3,15 @@ import os, re, traceback, sys
 import shutil
 import copy
 import numpy as np
+import json
 from typing import List, Union
 from pathlib import Path
 import subprocess
 from functools import partial
 import time
 import cv2
+from urllib import request as urlrequest
+from urllib import error as urlerror
 
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog
@@ -29,7 +32,7 @@ from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRA
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat, log_diagnostic_event
-from utils.layout_review_agent import ReviewModelConfig
+from utils.layout_review_agent import ReviewModelConfig, PageReviewResult, BlockReviewResult, ReviewIssue, ReviewAction
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from utils.zip_batch import ZipBatchManager
@@ -58,6 +61,7 @@ from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
 from .image_edit import ImageEditMode
 from utils.image_colorization import apply_colorization
+from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
 
 
@@ -204,6 +208,8 @@ class MainWindow(mainwindow_cls):
         self.setupConfig()
         self.setupShortcuts()
         self.setupRegisterWidget()
+        self.st_manager.layout_review_local_api_handler = self._layout_review_local_api_handler
+        self.st_manager.layout_review_cloud_api_handler = self._layout_review_cloud_api_handler
         self._recover_window_geometry_if_offscreen()
         # self.showMaximized()
         FramelessMoveResize.toggleMaxState(self)
@@ -795,6 +801,14 @@ class MainWindow(mainwindow_cls):
         # Guard against late UI-state signals (e.g. left bar checker updates) that can
         # briefly switch back to canvas on first launch with no project loaded.
         QTimer.singleShot(0, lambda: self.centralStackWidget.setCurrentIndex(0))
+        # Extra guard: if no project is open, re-assert welcome after startup timers settle.
+        def _reassert_welcome_if_empty():
+            try:
+                if self.imgtrans_proj.is_empty or not self.imgtrans_proj.directory:
+                    self.centralStackWidget.setCurrentIndex(0)
+            except Exception:
+                return
+        QTimer.singleShot(250, _reassert_welcome_if_empty)
 
     def _show_main_content(self):
         """Switch from welcome to main translation view."""
@@ -1127,6 +1141,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
+        self.titleBar.install_google_font_trigger.connect(self.on_install_google_font)
         self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
         self.titleBar.environment_doctor_trigger.connect(self.on_environment_doctor)
         self.titleBar.translation_qa_report_trigger.connect(self.on_translation_qa_report_current_page)
@@ -1777,6 +1792,11 @@ class MainWindow(mainwindow_cls):
         if isinstance(cfg, ReviewModelConfig):
             return cfg
         self._layout_review_config = ReviewModelConfig(provider="heuristic")
+        self._layout_review_config.extra_params = {
+            "api_base_url": "",
+            "api_key": "",
+            "api_path": "/v1/chat/completions",
+        }
         return self._layout_review_config
 
     def shortcutLayoutReviewConfig(self):
@@ -1808,14 +1828,132 @@ class MainWindow(mainwindow_cls):
         )
         if not ok:
             return
+        include_ss, ok = QInputDialog.getItem(
+            self,
+            self.tr("Layout Review Screenshot"),
+            self.tr("Attach page screenshot to provider context"),
+            ["true", "false"],
+            0 if getattr(cfg, "include_page_screenshot", True) else 1,
+            False,
+        )
+        if not ok:
+            return
+        max_side, ok = QInputDialog.getInt(
+            self,
+            self.tr("Layout Review Screenshot Max Side"),
+            self.tr("Max image side (px)"),
+            int(getattr(cfg, "screenshot_max_side", 1280)),
+            256, 4096, 32
+        )
+        if not ok:
+            return
+        ep = cfg.extra_params if isinstance(cfg.extra_params, dict) else {}
+        api_base_url, ok = QInputDialog.getText(
+            self, self.tr("Layout Review API Base URL"), self.tr("API base URL (for local/cloud providers)"), text=str(ep.get("api_base_url", ""))
+        )
+        if not ok:
+            return
+        api_key, ok = QInputDialog.getText(
+            self, self.tr("Layout Review API Key"), self.tr("API key/token (optional)"), text=str(ep.get("api_key", ""))
+        )
+        if not ok:
+            return
+        api_path, ok = QInputDialog.getText(
+            self, self.tr("Layout Review API Path"), self.tr("API path"), text=str(ep.get("api_path", "/v1/chat/completions"))
+        )
+        if not ok:
+            return
         cfg.provider = provider
         cfg.model_name = model_name
         cfg.prompt = prompt
         cfg.temperature = temperature
         cfg.top_p = top_p
         cfg.max_tokens = max_tokens
+        cfg.include_page_screenshot = include_ss == "true"
+        cfg.screenshot_max_side = max_side
+        cfg.extra_params = {
+            "api_base_url": api_base_url.strip(),
+            "api_key": api_key.strip(),
+            "api_path": api_path.strip() or "/v1/chat/completions",
+        }
         self._layout_review_config = cfg
         self.statusBar().showMessage(self.tr(f"Layout review config updated ({provider})."), 4000)
+
+    def _layout_review_local_api_handler(self, page_name, blocks, config: ReviewModelConfig) -> PageReviewResult:
+        return self._layout_review_http_provider(page_name, blocks, config, provider_name="local_api")
+
+    def _layout_review_cloud_api_handler(self, page_name, blocks, config: ReviewModelConfig) -> PageReviewResult:
+        return self._layout_review_http_provider(page_name, blocks, config, provider_name="cloud_api")
+
+    def _layout_review_http_provider(self, page_name, blocks, config: ReviewModelConfig, provider_name: str) -> PageReviewResult:
+        ep = config.extra_params if isinstance(config.extra_params, dict) else {}
+        base_url = str(ep.get("api_base_url", "")).rstrip("/")
+        api_path = str(ep.get("api_path", "/v1/chat/completions")).strip()
+        api_key = str(ep.get("api_key", "")).strip()
+        if not base_url:
+            LOGGER.warning("layout review %s provider has no api_base_url; fallback to heuristic", provider_name)
+            return self.st_manager._resolve_review_provider(ReviewModelConfig(provider="heuristic")).review(page_name, blocks, config)
+        url = f"{base_url}{api_path if api_path.startswith('/') else '/' + api_path}"
+        page_ctx = ep.get("page_context") or config.extra_params.get("page_context")
+        payload = {
+            "model": config.model_name or "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": config.prompt},
+                {"role": "user", "content": json.dumps({
+                    "page_name": page_name,
+                    "blocks": [b.__dict__ for b in blocks],
+                    "page_context": page_ctx,
+                    "required_schema": {
+                        "actions": [{"action": "move|resize|set_font_size|auto_fit|center_in_bubble|resize_to_fit_content", "block_index": 0, "args": {}, "reason": ""}]
+                    }
+                })},
+            ],
+            "temperature": float(config.temperature),
+            "top_p": float(config.top_p),
+            "max_tokens": int(config.max_tokens),
+            "response_format": {"type": "json_object"},
+        }
+        req = urlrequest.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST")
+        req.add_header("Content-Type", "application/json")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        try:
+            with urlrequest.urlopen(req, timeout=60) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            content = body.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            parsed = json.loads(content) if isinstance(content, str) else content
+            return self._build_review_result_from_provider_actions(page_name, blocks, parsed.get("actions", []))
+        except (urlerror.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError) as e:
+            LOGGER.warning("layout review %s provider request failed, fallback to heuristic: %s", provider_name, e)
+            return self.st_manager._resolve_review_provider(ReviewModelConfig(provider="heuristic")).review(page_name, blocks, config)
+
+    def _build_review_result_from_provider_actions(self, page_name: str, blocks, raw_actions) -> PageReviewResult:
+        action_map = {}
+        for ra in raw_actions if isinstance(raw_actions, list) else []:
+            try:
+                action = ReviewAction(
+                    action=str(ra.get("action", "move")),
+                    block_index=int(ra.get("block_index", -1)),
+                    args=dict(ra.get("args", {}) or {}),
+                    reason=str(ra.get("reason", "")),
+                )
+                if action.block_index < 0:
+                    continue
+                action_map.setdefault(action.block_index, []).append(action)
+            except Exception:
+                continue
+        block_results = []
+        for blk in blocks:
+            block_results.append(
+                BlockReviewResult(
+                    block_index=blk.block_index,
+                    score_before=1.0,
+                    score_after=1.0 if blk.block_index not in action_map else 0.95,
+                    issues=[ReviewIssue(code="provider_suggested_fix", severity="info", message="Provider suggested layout adjustments.", score_penalty=0.0)] if blk.block_index in action_map else [],
+                    actions=action_map.get(blk.block_index, []),
+                )
+            )
+        return PageReviewResult(page_name=page_name, blocks=block_results)
 
     def on_redo(self):
         log_diagnostic_event(
@@ -1834,6 +1972,39 @@ class MainWindow(mainwindow_cls):
             block_count=len(getattr(self.st_manager, 'textblk_item_list', [])) if self.st_manager is not None else 0,
         )
         self.canvas.undo()
+
+    def on_install_google_font(self):
+        family, ok = QInputDialog.getText(
+            self,
+            self.tr("Install Google Font"),
+            self.tr("Font family name (example: Bangers, Noto Sans JP, Comic Neue):"),
+        )
+        if not ok:
+            return
+        family = (family or "").strip()
+        if not family:
+            return
+        target_dir = osp.join(shared.PROGRAM_PATH, "fonts", "google")
+        try:
+            installed = install_google_font_family(family, target_dir)
+            from qtpy.QtGui import QFontDatabase
+            added = 0
+            for fp in installed:
+                idx = QFontDatabase.addApplicationFont(fp)
+                if idx >= 0:
+                    added += 1
+                    for fam_name in QFontDatabase.applicationFontFamilies(idx):
+                        shared.CUSTOM_FONTS.append(fam_name)
+                        if isinstance(shared.FONT_FAMILIES, set):
+                            shared.FONT_FAMILIES.add(fam_name)
+            self.on_show_only_custom_font(False)
+            QMessageBox.information(
+                self,
+                self.tr("Google Font Installed"),
+                self.tr(f"Installed {len(installed)} font files for '{family}'. Registered: {added}."),
+            )
+        except Exception as e:
+            QMessageBox.warning(self, self.tr("Google Font Install Failed"), str(e))
 
     def on_page_search(self):
         if self.canvas.gv.isVisible():

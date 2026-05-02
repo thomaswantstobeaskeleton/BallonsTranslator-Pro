@@ -15,6 +15,7 @@ from utils.llm_provider import (
     is_local_provider,
     normalize_model_name,
     resolve_endpoint,
+    ENDPOINT_PRESETS,
 )
 from utils.ocr_preprocess import preprocess_for_ocr
 
@@ -194,6 +195,12 @@ class LLM_OCR(OCRBase):
         "endpoint": {
             "value": "",
             "description": "Base URL for the API. Leave empty for provider default.",
+        },
+        "endpoint_preset": {
+            "type": "selector",
+            "options": list(ENDPOINT_PRESETS.keys()),
+            "value": "Auto (provider default)",
+            "description": "Quick preset for endpoint/provider routing (e.g. Ollama, LM Studio, OpenRouter).",
         },
         "model": {
             "type": "selector",
@@ -604,6 +611,12 @@ class LLM_OCR(OCRBase):
 
     def updateParam(self, param_key: str, param_content):
         super().updateParam(param_key, param_content)
+        if param_key == "endpoint_preset":
+            preset_name = str(param_content or "Auto (provider default)")
+            provider, endpoint = ENDPOINT_PRESETS.get(preset_name, (None, ""))
+            if provider and provider in self.params["provider"]["options"]:
+                self.params["provider"]["value"] = provider
+            self.params["endpoint"]["value"] = endpoint
         if param_key in ["api_key", "multiple_keys", "endpoint", "proxy", "provider"]:
             self.client = None  # Force re-initialization on next call
         if param_key in ["requests_per_minute", "delay"]:

@@ -4,7 +4,13 @@ import os.path as osp
 import json
 import sys
 
-ICON_PATH = 'icons/icon.icns'
+ICON_CANDIDATES = [
+    'icons/app_icon.ico',
+    'icons/app_icon.png',
+    'icons/icon.icns',
+]
+
+ICON_PATH = next((p for p in ICON_CANDIDATES if osp.exists(osp.join(osp.abspath(osp.dirname(osp.dirname(__file__))), p))), 'icons/icon.icns')
 
 PROGRAM_PATH = osp.abspath(osp.dirname(osp.dirname(__file__)))
 LOGGING_PATH = osp.join(PROGRAM_PATH, 'logs')
