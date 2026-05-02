@@ -4,7 +4,7 @@ from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent, QColor
 from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit,
-    QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox, QFileDialog)
+    QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox, QFileDialog, QDialog)
 
 from .custom_widget import ConfigComboBox, Widget, DangoSwitch
 from .custom_widget.smooth_scroll import SmoothScrollArea
@@ -13,6 +13,8 @@ from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
+from .glossary_map_dialog import GlossaryMapDialog
+from .regex_profile_dialog import RegexProfileDialog
 from .module_parse_widgets import InpaintConfigPanel, TextDetectConfigPanel, TranslatorConfigPanel, OCRConfigPanel
 
 
@@ -685,11 +687,106 @@ class ConfigPanel(Widget):
         )
         self.manual_mode_checker.stateChanged.connect(self.on_manual_mode_changed)
 
+
+        generalConfigPanel.addTextLabel(self.tr('Pipeline Insights / LLM QA'))
+        self.enable_glossary_enforcement_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable glossary enforcement in translation postprocess'),
+            discription=self.tr('Replace glossary terms in translated text after MT and before write-back.')
+        )
+        self.enable_glossary_enforcement_checker.stateChanged.connect(self.on_enable_glossary_enforcement_changed)
+
+        self.enable_back_translation_qa_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable translation drift QA warnings'),
+            discription=self.tr('Compute drift score and surface MT_DRIFT warnings in Pipeline Insights.')
+        )
+        self.enable_back_translation_qa_checker.stateChanged.connect(self.on_enable_back_translation_qa_changed)
+
+        self.back_translation_drift_threshold_spin = QDoubleSpinBox()
+        self.back_translation_drift_threshold_spin.setRange(0.05, 0.99)
+        self.back_translation_drift_threshold_spin.setSingleStep(0.01)
+        self.back_translation_drift_threshold_spin.setDecimals(2)
+        self.back_translation_drift_threshold_spin.valueChanged.connect(self.on_back_translation_drift_threshold_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.back_translation_drift_threshold_spin,
+            self.tr('Drift warning threshold'),
+            discription=self.tr('Higher = stricter warning threshold for MT drift (default 0.58).')
+        ))
+
+        self.llm_token_budget_spin = QSpinBox()
+        self.llm_token_budget_spin.setRange(64, 4096)
+        self.llm_token_budget_spin.setSingleStep(32)
+        self.llm_token_budget_spin.valueChanged.connect(self.on_llm_token_budget_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.llm_token_budget_spin,
+            self.tr('LLM token budget per chunk'),
+            discription=self.tr('Chunk size used by LLM quality helper for long text splitting.')
+        ))
+        self.enable_text_normalization_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable translation text normalization'),
+            discription=self.tr('Normalize punctuation/spacing after MT postprocess for cleaner output.')
+        )
+        self.enable_text_normalization_checker.stateChanged.connect(self.on_enable_text_normalization_changed)
+        self.text_normalization_profile_combo = QComboBox()
+        self.text_normalization_profile_combo.addItem(self.tr('Balanced'), 'balanced')
+        self.text_normalization_profile_combo.addItem(self.tr('CJK punctuation'), 'cjk')
+        self.text_normalization_profile_combo.addItem(self.tr('Latin punctuation'), 'latin')
+        self.text_normalization_profile_combo.currentIndexChanged.connect(self.on_text_normalization_profile_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.text_normalization_profile_combo,
+            self.tr('Normalization profile'),
+            discription=self.tr('Balanced auto-normalization or language-focused punctuation style.')
+        ))
+
+        self.glossary_map_edit_btn = QPushButton(self.tr('Edit glossary map...'))
+        self.glossary_map_edit_btn.clicked.connect(self.on_edit_glossary_map)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.glossary_map_edit_btn,
+            self.tr('Glossary mappings'),
+            discription=self.tr('Manage source→target replacements used by glossary enforcement.')
+        ))
+        self.regex_profiles_edit_btn = QPushButton(self.tr('Edit regex replace profiles...'))
+        self.regex_profiles_edit_btn.clicked.connect(self.on_edit_regex_profiles)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.regex_profiles_edit_btn,
+            self.tr('Regex replace profiles'),
+            discription=self.tr('Reusable regex replacement presets for quick cleanup and post-editing.')
+        ))
+
         self.skip_ignored_in_run_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Skip ignored pages in run'),
             discription=self.tr('When on, full run and batch queue skip pages marked as "Ignore in run" in the page list context menu.')
         )
         self.skip_ignored_in_run_checker.stateChanged.connect(self.on_skip_ignored_in_run_changed)
+        generalConfigPanel.addTextLabel(self.tr('Runtime HTTP controls'))
+        self.runtime_http_timeout_spin = QDoubleSpinBox()
+        self.runtime_http_timeout_spin.setRange(2.0, 300.0)
+        self.runtime_http_timeout_spin.setSingleStep(1.0)
+        self.runtime_http_timeout_spin.setDecimals(1)
+        self.runtime_http_timeout_spin.valueChanged.connect(self.on_runtime_http_timeout_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.runtime_http_timeout_spin,
+            self.tr('HTTP timeout (seconds)'),
+            discription=self.tr('Runtime HTTP timeout for provider-backed features (layout review, QA requests).')
+        ))
+        self.runtime_http_retries_spin = QSpinBox()
+        self.runtime_http_retries_spin.setRange(1, 8)
+        self.runtime_http_retries_spin.valueChanged.connect(self.on_runtime_http_retries_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.runtime_http_retries_spin,
+            self.tr('HTTP retries'),
+            discription=self.tr('Retry count for transient network/provider errors.')
+        ))
+        generalConfigPanel.addTextLabel(self.tr('Vertical CJK rendering'))
+        self.vertical_cjk_rotate_latin_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Rotate latin glyphs in vertical text'),
+            discription=self.tr('When off, latin letters stay upright in vertical lines.')
+        )
+        self.vertical_cjk_rotate_latin_checker.stateChanged.connect(self.on_vertical_cjk_rotate_latin_changed)
+        self.vertical_cjk_punctuation_hang_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable vertical punctuation hanging'),
+            discription=self.tr('Apply manga-style hanging for pause/stop punctuation in vertical CJK.')
+        )
+        self.vertical_cjk_punctuation_hang_checker.stateChanged.connect(self.on_vertical_cjk_punctuation_hang_changed)
 
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
@@ -1552,6 +1649,41 @@ class ConfigPanel(Widget):
         url = self.searchurl_combobox.currentText()
         pcfg.search_url = url
 
+
+
+    def on_edit_glossary_map(self):
+        dlg = GlossaryMapDialog(getattr(pcfg, 'llm_glossary_map', {}) or {}, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            pcfg.llm_glossary_map = dlg.get_map()
+    def on_edit_regex_profiles(self):
+        dlg = RegexProfileDialog(getattr(pcfg, 'user_replace_profiles', {}) or {}, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            pcfg.user_replace_profiles = dlg.get_profiles()
+
+    def on_enable_glossary_enforcement_changed(self):
+        pcfg.enable_glossary_enforcement = self.enable_glossary_enforcement_checker.isChecked()
+
+    def on_enable_back_translation_qa_changed(self):
+        pcfg.enable_back_translation_qa = self.enable_back_translation_qa_checker.isChecked()
+
+    def on_back_translation_drift_threshold_changed(self):
+        pcfg.back_translation_drift_threshold = float(self.back_translation_drift_threshold_spin.value())
+
+    def on_llm_token_budget_changed(self):
+        pcfg.llm_token_budget = int(self.llm_token_budget_spin.value())
+    def on_enable_text_normalization_changed(self):
+        pcfg.enable_text_normalization = self.enable_text_normalization_checker.isChecked()
+    def on_text_normalization_profile_changed(self):
+        pcfg.text_normalization_profile = str(self.text_normalization_profile_combo.currentData() or 'balanced')
+    def on_runtime_http_timeout_changed(self):
+        pcfg.runtime_http_timeout_sec = float(self.runtime_http_timeout_spin.value())
+    def on_runtime_http_retries_changed(self):
+        pcfg.runtime_http_retries = int(self.runtime_http_retries_spin.value())
+    def on_vertical_cjk_rotate_latin_changed(self):
+        pcfg.vertical_cjk_rotate_latin = self.vertical_cjk_rotate_latin_checker.isChecked()
+    def on_vertical_cjk_punctuation_hang_changed(self):
+        pcfg.vertical_cjk_punctuation_hang = self.vertical_cjk_punctuation_hang_checker.isChecked()
+
     def on_fontcolor_flag_changed(self):
         pcfg.let_fntcolor_flag = self.let_fntcolor_combox.currentIndex()
 
@@ -1728,6 +1860,28 @@ class ConfigPanel(Widget):
             self.text_box_format_combox.setCurrentIndex(0)
         else:
             self.text_box_format_combox.setCurrentIndex(1)
+        if hasattr(self, 'enable_glossary_enforcement_checker'):
+            self.enable_glossary_enforcement_checker.setChecked(bool(getattr(pcfg, 'enable_glossary_enforcement', True)))
+        if hasattr(self, 'enable_back_translation_qa_checker'):
+            self.enable_back_translation_qa_checker.setChecked(bool(getattr(pcfg, 'enable_back_translation_qa', False)))
+        if hasattr(self, 'back_translation_drift_threshold_spin'):
+            self.back_translation_drift_threshold_spin.setValue(float(getattr(pcfg, 'back_translation_drift_threshold', 0.58)))
+        if hasattr(self, 'llm_token_budget_spin'):
+            self.llm_token_budget_spin.setValue(int(getattr(pcfg, 'llm_token_budget', 420)))
+        if hasattr(self, 'enable_text_normalization_checker'):
+            self.enable_text_normalization_checker.setChecked(bool(getattr(pcfg, 'enable_text_normalization', False)))
+        if hasattr(self, 'text_normalization_profile_combo'):
+            profile = str(getattr(pcfg, 'text_normalization_profile', 'balanced'))
+            idx = max(0, self.text_normalization_profile_combo.findData(profile))
+            self.text_normalization_profile_combo.setCurrentIndex(idx)
+        if hasattr(self, 'runtime_http_timeout_spin'):
+            self.runtime_http_timeout_spin.setValue(float(getattr(pcfg, 'runtime_http_timeout_sec', 60.0)))
+        if hasattr(self, 'runtime_http_retries_spin'):
+            self.runtime_http_retries_spin.setValue(int(getattr(pcfg, 'runtime_http_retries', 1)))
+        if hasattr(self, 'vertical_cjk_rotate_latin_checker'):
+            self.vertical_cjk_rotate_latin_checker.setChecked(bool(getattr(pcfg, 'vertical_cjk_rotate_latin', True)))
+        if hasattr(self, 'vertical_cjk_punctuation_hang_checker'):
+            self.vertical_cjk_punctuation_hang_checker.setChecked(bool(getattr(pcfg, 'vertical_cjk_punctuation_hang', True)))
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)

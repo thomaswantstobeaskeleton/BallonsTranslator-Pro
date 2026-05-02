@@ -285,6 +285,23 @@ class ModuleConfig(Config):
     video_translator_llm_redundant_continuation_fix: bool = True
     video_translator_qwen35_allow_aux_passes: bool = False  # Allow Qwen3.5-4B LM Studio OCR-correction/reflection passes (can be slower/less stable JSON).
     video_translator_series_context_path: str = ""  # Optional series context path (folder or ID) for glossary/context; same as project series context.
+    # Koharu-inspired LLM QA/consistency controls
+    enable_glossary_enforcement: bool = True
+    llm_glossary_map: dict = {}
+    enable_back_translation_qa: bool = False
+    back_translation_drift_threshold: float = 0.58
+    llm_token_budget: int = 420
+    enable_text_normalization: bool = False
+    text_normalization_profile: str = "balanced"
+    runtime_http_timeout_sec: float = 60.0
+    runtime_http_retries: int = 1
+    user_replace_profiles: dict = {}
+    vertical_cjk_rotate_latin: bool = True
+    vertical_cjk_punctuation_hang: bool = True
+    pipeline_retry_detect: int = 1
+    pipeline_retry_ocr: int = 1
+    pipeline_retry_translate: int = 1
+    pipeline_retry_inpaint: int = 1
     video_translator_asr_sentence_break: bool = False  # LLM merges/splits ASR segments into natural sentences.
     video_translator_sentence_merge_by_punctuation: bool = True  # Rule-based: merge adjacent short cues until sentence punctuation before translation.
     video_translator_sentence_merge_max_seconds: float = 8.0  # Upper bound for one merged cue duration to avoid over-long subtitle chunks.
@@ -623,6 +640,12 @@ CONFIG_KEY_ORDER = (
     "darkmode", "bubbly_ui", "accent_color_hex", "app_font_family", "app_font_size", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
     "saladict_shortcut", "search_url", "ocr_sublist", "restore_ocr_empty", "pre_mt_sublist", "mt_sublist",
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
+    "enable_glossary_enforcement", "llm_glossary_map", "enable_back_translation_qa", "back_translation_drift_threshold", "llm_token_budget",
+    "enable_text_normalization", "text_normalization_profile",
+    "runtime_http_timeout_sec", "runtime_http_retries",
+    "user_replace_profiles",
+    "vertical_cjk_rotate_latin", "vertical_cjk_punctuation_hang",
+    "pipeline_retry_detect", "pipeline_retry_ocr", "pipeline_retry_translate", "pipeline_retry_inpaint",
     "supersampling_factor", "show_text_style_preset", "expand_tstyle_panel", "show_text_effect_panel",
     "expand_teffect_panel", "text_advanced_format_panel", "expand_tadvanced_panel", "config_panel_font_scale",
     "default_device", "unload_after_idle_minutes", "ocr_spell_check",
