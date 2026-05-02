@@ -364,6 +364,8 @@ def main():
     app_args = sys.argv
     if args.headless or getattr(args, 'headless_continuous', False):
         app_args = sys.argv + ['-platform', 'offscreen']
+    # Keep dialogs Qt-rendered so they inherit app stylesheet in dark/light modes.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
     app = QApplication(app_args)
     # Filter noisy Qt warnings (QPainter / QFont spam) so the console stays readable.
     # This does NOT change behavior, only hides repeated benign messages.

@@ -51,6 +51,12 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("format.auto_fit_binary", "", "Format", "Auto fit font size (binary search)"),
     ("format.balloon_shape_auto", "", "Format", "Set balloon shape to Auto"),
     ("format.resize_to_fit_content", "", "Format", "Resize to fit content"),
+    ("format.layout_review_selected", "Ctrl+Shift+L", "Format", "Layout review: selected textboxes"),
+    ("format.layout_review_page", "Ctrl+Alt+L", "Format", "Layout review: entire page"),
+    ("format.layout_review_config", "Ctrl+Shift+Alt+L", "Format", "Layout review settings"),
+    ("review.ocr_triage_page", "Ctrl+Shift+Y", "Review", "OCR triage worklist (current page)"),
+    ("review.translation_qa_page", "Ctrl+Shift+Q", "Review", "Translation QA report (current page)"),
+    ("review.auto_extract_glossary_page", "Ctrl+Shift+G", "Review", "Auto-extract glossary (current page)"),
     # Context / Run shortcuts
     ("run.detect_page", "", "Run", "Detect text on page"),
     ("run.translate", "", "Run", "Translate"),

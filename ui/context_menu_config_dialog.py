@@ -65,6 +65,8 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("block_split", "Split selected region(s)"),
         ("block_move_up", "Move block(s) up"),
         ("block_move_down", "Move block(s) down"),
+        ("block_triage_add", "Add selected to triage worklist"),
+        ("block_triage_mark_reviewed", "Mark selected as reviewed"),
         ("create_textbox", "Create text box"),
     ]),
     ("Image / Overlay", [
@@ -91,6 +93,9 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_center_in_bubble", "Center in bubble"),
         ("format_angle", "Reset Angle"),
         ("format_squeeze", "Squeeze"),
+        ("format_layout_review_selected", "Layout review selected textboxes"),
+        ("format_layout_review_page", "Layout review entire page"),
+        ("format_layout_review_config", "Layout review settings"),
     ]),
     ("Run", [
         ("run_detect_region", "Detect text in region"),
@@ -100,6 +105,9 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("run_ocr_translate", "OCR and translate"),
         ("run_ocr_translate_inpaint", "OCR, translate and inpaint"),
         ("run_inpaint", "Inpaint"),
+        ("review_ocr_triage_page", "OCR triage worklist (current page)"),
+        ("review_translation_qa_page", "Translation QA report (current page)"),
+        ("review_auto_extract_glossary_page", "Auto-extract glossary (current page)"),
     ]),
     ("Download image", [
         ("download_image", "Download image (submenu)"),

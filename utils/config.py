@@ -597,13 +597,16 @@ CONTEXT_MENU_DEFAULT = {
     'text_spell_src': True, 'text_spell_trans': True, 'text_trim': True, 'text_upper': True, 'text_lower': True,
     'text_strikethrough': True, 'text_gradient': True, 'text_on_path': True,
     'block_merge': True, 'block_split': True, 'block_move_up': True, 'block_move_down': True,
+    'block_triage_add': True, 'block_triage_mark_reviewed': True,
     'create_textbox': True,
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
     'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
+    'format_layout_review_selected': True, 'format_layout_review_page': True, 'format_layout_review_config': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
+    'review_ocr_triage_page': True, 'review_translation_qa_page': True, 'review_auto_extract_glossary_page': True,
     'download_image': True,
 }
 

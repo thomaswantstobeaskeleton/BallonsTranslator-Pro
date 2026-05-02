@@ -251,8 +251,8 @@ class MainWindow(mainwindow_cls):
         try:
             if exception_type != '':
                 shared.showed_exception.add(exception_type)
-            err = QMessageBox()
-            err.setText(error_msg)
+            err = MessageBox(info_msg=error_msg)
+            err.setWindowTitle(self.tr('Error'))
             err.setDetailedText(detail_traceback)
             err.exec()
             if exception_type != '':
@@ -296,7 +296,13 @@ class MainWindow(mainwindow_cls):
 
     def resetStyleSheet(self, reverse_icon: bool = False):
         theme = 'eva-dark' if pcfg.darkmode else 'eva-light'
-        self.setStyleSheet(parse_stylesheet(theme, reverse_icon))
+        stylesheet = parse_stylesheet(theme, reverse_icon)
+        # Apply theme at application level too so top-level popups/dialogs (not direct
+        # children of MainWindow) match the active dark/light styling.
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(stylesheet)
+        self.setStyleSheet(stylesheet)
         self._apply_custom_cursor()
         self._apply_app_font()
 
@@ -452,6 +458,12 @@ class MainWindow(mainwindow_cls):
         self.canvas.clear_overlay_signal.connect(self.on_clear_overlay)
         self.canvas.triage_add_selected_signal.connect(self.on_add_selected_to_triage)
         self.canvas.triage_mark_reviewed_selected_signal.connect(self.on_mark_selected_triage_reviewed)
+        self.canvas.layout_review_selected_signal.connect(self.shortcutLayoutReviewSelected)
+        self.canvas.layout_review_page_signal.connect(self.shortcutLayoutReviewPage)
+        self.canvas.layout_review_config_signal.connect(self.shortcutLayoutReviewConfig)
+        self.canvas.review_ocr_triage_signal.connect(self.on_open_ocr_triage_current_page)
+        self.canvas.review_translation_qa_signal.connect(self.on_translation_qa_report_current_page)
+        self.canvas.review_auto_extract_glossary_signal.connect(self.on_auto_extract_glossary_current_page)
 
         self.app.installEventFilter(self)
         self.canvas.gv.installEventFilter(self)
@@ -780,6 +792,9 @@ class MainWindow(mainwindow_cls):
         if hasattr(self, 'welcomeWidget'):
             self.welcomeWidget.set_recent_projects(getattr(self.leftBar, 'recent_proj_list', []) or [])
         self.centralStackWidget.setCurrentIndex(0)
+        # Guard against late UI-state signals (e.g. left bar checker updates) that can
+        # briefly switch back to canvas on first launch with no project loaded.
+        QTimer.singleShot(0, lambda: self.centralStackWidget.setCurrentIndex(0))
 
     def _show_main_content(self):
         """Switch from welcome to main translation view."""
@@ -1119,6 +1134,9 @@ class MainWindow(mainwindow_cls):
         self.titleBar.auto_extract_glossary_trigger.connect(self.on_auto_extract_glossary_current_page)
         self.titleBar.save_run_profile_trigger.connect(self.on_save_run_profile_snapshot)
         self.titleBar.apply_run_profile_trigger.connect(self.on_apply_run_profile_snapshot)
+        self.titleBar.layout_review_selected_trigger.connect(self.shortcutLayoutReviewSelected)
+        self.titleBar.layout_review_page_trigger.connect(self.shortcutLayoutReviewPage)
+        self.titleBar.layout_review_config_trigger.connect(self.shortcutLayoutReviewConfig)
         self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
         self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
         self.titleBar.runtime_resource_summary_trigger.connect(self.on_runtime_resource_summary)
@@ -1190,6 +1208,9 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.layout_review_selected", "", self.shortcutLayoutReviewSelected)
         _mk_shortcut("format.layout_review_page", "", self.shortcutLayoutReviewPage)
         _mk_shortcut("format.layout_review_config", "", self.shortcutLayoutReviewConfig)
+        _mk_shortcut("review.ocr_triage_page", "Ctrl+Shift+Y", self.on_open_ocr_triage_current_page)
+        _mk_shortcut("review.translation_qa_page", "Ctrl+Shift+Q", self.on_translation_qa_report_current_page)
+        _mk_shortcut("review.auto_extract_glossary_page", "Ctrl+Shift+G", self.on_auto_extract_glossary_current_page)
 
         drawpanel_shortcuts = [
             ("draw.hand", "H", "hand"),
@@ -1364,6 +1385,37 @@ class MainWindow(mainwindow_cls):
                 pass
         except Exception:
             return
+
+    def _new_themed_message_box(self, parent=None) -> QMessageBox:
+        box = QMessageBox(parent if parent is not None else self)
+        box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        return box
+
+    def _msg_information(self, title: str, text: str):
+        box = self._new_themed_message_box(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+
+    def _msg_warning(self, title: str, text: str):
+        box = self._new_themed_message_box(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+
+    def _msg_question(self, title: str, text: str, buttons, default_button):
+        box = self._new_themed_message_box(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(text)
+        box.setStandardButtons(buttons)
+        box.setDefaultButton(default_button)
+        box.exec()
+        return box.standardButton(box.clickedButton())
 
     def on_update_from_github(self):
         """Pull latest changes from GitHub (Help menu). Only updates tracked files; config and local files are preserved."""
@@ -2331,7 +2383,7 @@ class MainWindow(mainwindow_cls):
         from qtpy.QtWidgets import QMessageBox
         
         if self.imgtrans_proj.is_empty:
-            QMessageBox.warning(self, "Warning", "Please open a project first.")
+            self._msg_warning("Warning", "Please open a project first.")
             return
         
         config = self.merge_dialog.get_config()
@@ -2342,17 +2394,17 @@ class MainWindow(mainwindow_cls):
             
             current_img = self.imgtrans_proj.current_img
             if not current_img:
-                QMessageBox.warning(self, "Warning", "No current page.")
+                self._msg_warning("Warning", "No current page.")
                 return
 
             # Get text blocks for current page from memory
             if current_img not in self.imgtrans_proj.pages:
-                QMessageBox.warning(self, "Warning", "Current page data not found.")
+                self._msg_warning("Warning", "Current page data not found.")
                 return
 
             textblocks = self.imgtrans_proj.pages[current_img]
             if not textblocks:
-                QMessageBox.warning(self, "Info", "Current page has no text blocks.")
+                self._msg_warning("Info", "Current page has no text blocks.")
                 return
             
             # Convert to dict format (merger expects dicts)
@@ -2386,7 +2438,7 @@ class MainWindow(mainwindow_cls):
                 self.canvas.updateCanvas()
                 self.st_manager.updateSceneTextitems()
                 final_count = len(final_shapes)
-                QMessageBox.information(self, "Success", f"Merge done: {initial_count} -> {final_count} blocks (reduced by {initial_count - final_count})")
+                self._msg_information("Success", f"Merge done: {initial_count} -> {final_count} blocks (reduced by {initial_count - final_count})")
             else:
                 raw_labels = set(s.get('label') for s in initial_shapes)
                 label_list = sorted({str(lbl) for lbl in raw_labels if lbl})
@@ -2401,17 +2453,17 @@ class MainWindow(mainwindow_cls):
                 detail_msg += "2. Lower min overlap ratio (e.g. 50–70%)\n"
                 detail_msg += "3. Uncheck 'Enable exclude-from-merge labels'\n"
                 detail_msg += "4. Check if labels are in the blacklist"
-                QMessageBox.warning(self, "Info", detail_msg)
+                self._msg_warning("Info", detail_msg)
         else:
             # Run on all pages
             img_list = list(self.imgtrans_proj.pages.keys())
             if not img_list:
-                QMessageBox.warning(self, "Warning", "Project has no images.")
+                self._msg_warning("Warning", "Project has no images.")
                 return
 
             json_path = self.imgtrans_proj.proj_path
             if not json_path or not osp.exists(json_path):
-                QMessageBox.warning(self, "Warning", f"Project JSON not found: {json_path}")
+                self._msg_warning("Warning", f"Project JSON not found: {json_path}")
                 return
 
             self.run_merge_all_async(json_path, img_list, config)
@@ -2461,7 +2513,7 @@ class MainWindow(mainwindow_cls):
         
         # Show result
         total = success_count + fail_count
-        QMessageBox.information(self, "Done", f"Region merge finished\nSuccess: {success_count}/{total}\nFailed: {fail_count}/{total}")
+        self._msg_information("Done", f"Region merge finished\nSuccess: {success_count}/{total}\nFailed: {fail_count}/{total}")
 
     def on_re_run_detection_only(self):
         """Run pipeline with only detection enabled (OCR, translate, inpaint disabled)."""
@@ -4578,7 +4630,7 @@ class MainWindow(mainwindow_cls):
         lines.extend(issues[:50])
         if candidates:
             lines.append(self.tr('Glossary candidates (source -> target):'))
-            lines.extend([f"- {c.get('source','')} -> " for c in candidates])
+            lines.extend([f"- {c.get('source','')} -> {c.get('target','')}" for c in candidates])
         create_info_dialog({'title': self.tr('Translation QA report'), 'text': '\n'.join(lines)})
 
     def on_save_run_profile_snapshot(self):
@@ -4634,21 +4686,33 @@ class MainWindow(mainwindow_cls):
         blks = self.imgtrans_proj.pages.get(page, []) or []
         glossary = getattr(self.imgtrans_proj, 'translation_glossary', None) or []
         rows = []
+        seen_rows = set()
         triage_state = (self.imgtrans_proj._image_info.get(page, {}) or {}).get('triage_flags', {})
         for i, b in enumerate(blks):
             src = (getattr(b, 'text', '') or '').strip()
             trn = (getattr(b, 'translation', '') or '').strip()
+
+            def _add_issue(issue_text: str):
+                key = (i, issue_text)
+                if key in seen_rows:
+                    return
+                seen_rows.add(key)
+                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': issue_text})
+
             state = triage_state.get(str(i), 'none')
             if state != 'none':
-                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': self.tr('Triage state: ') + state})
+                _add_issue(self.tr('Triage state: ') + state)
             if not src:
-                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': self.tr('Empty OCR source text')})
+                _add_issue(self.tr('Empty OCR source text'))
             for issue in check_translation_guardrails(src, trn, glossary=glossary):
-                rows.append({'block': i + 1, 'source': src, 'translation': trn, 'issue': issue})
+                _add_issue(issue)
         if not rows:
             create_info_dialog({'title': self.tr('OCR triage worklist'), 'text': self.tr('No triage issues found on current page.')})
             return
         dlg = OcrTriageDialog(rows, self)
+        dlg.open_block_requested.connect(self.jump_to_canvas_block)
+        dlg.mark_open_requested.connect(self.on_add_selected_to_triage)
+        dlg.mark_reviewed_requested.connect(self.on_mark_selected_triage_reviewed)
         dlg.exec()
 
     def on_auto_extract_glossary_current_page(self):
