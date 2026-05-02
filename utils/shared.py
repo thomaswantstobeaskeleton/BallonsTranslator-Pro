@@ -31,13 +31,23 @@ def _user_config_root() -> str:
 
 def _resolve_textstyle_dir() -> str:
     installed_dir = osp.join(PROGRAM_PATH, 'config/textstyles')
-    if os.access(PROGRAM_PATH, os.W_OK):
-        return installed_dir
-    return osp.join(_user_config_root(), 'config', 'textstyles')
+    user_dir = osp.join(_user_config_root(), 'config', 'textstyles')
+
+    candidates = [installed_dir, user_dir]
+    if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+        candidates = [user_dir, installed_dir]
+
+    for candidate in candidates:
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            return candidate
+        except PermissionError:
+            continue
+
+    return user_dir
 
 
 DEFAULT_TEXTSTYLE_DIR = _resolve_textstyle_dir()
-os.makedirs(DEFAULT_TEXTSTYLE_DIR, exist_ok=True)
 
 
 CONFIG_FONTSIZE_HEADER = 18
