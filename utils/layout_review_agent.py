@@ -76,6 +76,8 @@ class ReviewModelConfig:
     temperature: float = 0.0
     top_p: float = 1.0
     max_tokens: int = 512
+    include_page_screenshot: bool = True
+    screenshot_max_side: int = 1280
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
 

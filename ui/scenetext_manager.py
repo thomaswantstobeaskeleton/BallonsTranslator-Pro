@@ -1,7 +1,8 @@
 
-from typing import List, Union, Tuple, Optional
+from typing import List, Union, Tuple, Optional, Set
 import numpy as np
 import copy
+import base64
 
 from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF, QPoint
@@ -1333,6 +1334,8 @@ class SceneTextManager(QObject):
     ):
         """Review selected/targeted boxes with heuristic/local/cloud provider and return proposals."""
         cfg = config or ReviewModelConfig()
+        cfg = copy.deepcopy(cfg)
+        self._attach_review_page_context(cfg)
         selected = self._get_review_target_blocks(target_block_indices)
         snapshots: List[BlockSnapshot] = []
         for blk in selected:
@@ -1354,6 +1357,42 @@ class SceneTextManager(QObject):
             )
         provider_impl = provider or self._resolve_review_provider(cfg)
         return provider_impl.review(getattr(self.imgtrans_proj, "current_img", ""), snapshots, cfg)
+
+    def _attach_review_page_context(self, config: ReviewModelConfig) -> None:
+        """Attach page-level screenshot/context for provider-backed review.
+
+        External provider handlers can consume this through:
+        `config.extra_params["page_context"]`.
+        """
+        if not getattr(config, "include_page_screenshot", True):
+            return
+        img = getattr(self.imgtrans_proj, "img_array", None)
+        if img is None or getattr(img, "size", 0) == 0:
+            return
+        try:
+            import cv2
+            h, w = img.shape[:2]
+            max_side = max(1, int(getattr(config, "screenshot_max_side", 1280) or 1280))
+            scale = min(1.0, float(max_side) / float(max(h, w)))
+            if scale < 1.0:
+                resized = cv2.resize(img, (max(1, int(round(w * scale))), max(1, int(round(h * scale)))), interpolation=cv2.INTER_AREA)
+            else:
+                resized = img
+            ok, enc = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            if not ok:
+                return
+            payload = {
+                "image_data_url": "data:image/jpeg;base64," + base64.b64encode(enc.tobytes()).decode("ascii"),
+                "image_width": int(resized.shape[1]),
+                "image_height": int(resized.shape[0]),
+                "source_width": int(w),
+                "source_height": int(h),
+            }
+            if not isinstance(config.extra_params, dict):
+                config.extra_params = {}
+            config.extra_params["page_context"] = payload
+        except Exception as e:
+            LOGGER.debug("layout review: failed to attach page screenshot context: %s", e)
 
     def apply_review_result(
         self,
@@ -1494,56 +1533,98 @@ class SceneTextManager(QObject):
             LOGGER.debug("layout review: failed to estimate bubble center for block idx=%s: %s", getattr(blkitem, "idx", -1), e)
             return None
 
+    def _normalize_review_actions(self, actions: List[ReviewAction], target_indices: Set[int]) -> List[ReviewAction]:
+        """Sanitize + dedupe review actions before applying."""
+        normalized: List[ReviewAction] = []
+        seen = set()
+        for action in actions:
+            if action.block_index not in target_indices:
+                continue
+            if action.action == "move":
+                dx = float(action.args.get("dx", 0.0) or 0.0)
+                dy = float(action.args.get("dy", 0.0) or 0.0)
+                if dx == 0.0 and dy == 0.0:
+                    continue
+            elif action.action == "resize":
+                scale = float(action.args.get("scale", 1.0) or 1.0)
+                if scale <= 0 or abs(scale - 1.0) < 1e-6:
+                    continue
+            elif action.action == "set_font_size":
+                size_pt = float(action.args.get("font_size", 0.0) or 0.0)
+                if size_pt <= 0:
+                    continue
+            key = (action.action, action.block_index, tuple(sorted((action.args or {}).items())))
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(action)
+        return normalized
+
     def _apply_layout_review_actions(self, actions: List[ReviewAction], selected: List[TextBlkItem]) -> None:
         """Apply planner actions through existing commands whenever possible."""
-        grouped = collect_actions_from_list(actions)
         selected_by_idx = {blk.idx: blk for blk in selected}
-        # Keep existing action handlers first to preserve current undo behavior.
-        if grouped["auto_fit"]:
-            self.onAutoFitFontToBox()
-        if grouped["resize_to_fit_content"]:
-            self.onResizeToFitContent()
-        if grouped["center_in_bubble"]:
-            self.onCenterInBubble()
-        for action in grouped["move"]:
-            blkitem = selected_by_idx.get(action.block_index)
-            if blkitem is None:
-                continue
-            dx = float(action.args.get("dx", 0.0) or 0.0)
-            dy = float(action.args.get("dy", 0.0) or 0.0)
-            if dx == 0.0 and dy == 0.0:
-                continue
-            rect = blkitem.absBoundingRect(qrect=True)
-            blkitem.oldRect = rect
-            blkitem.setRect([rect.x() + dx, rect.y() + dy, rect.width(), rect.height()], repaint=True)
-            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
-        for action in grouped["resize"]:
-            blkitem = selected_by_idx.get(action.block_index)
-            if blkitem is None:
-                continue
-            scale = float(action.args.get("scale", 1.0) or 1.0)
-            if scale <= 0:
-                continue
-            rect = blkitem.absBoundingRect(qrect=True)
-            if rect.width() <= 0 or rect.height() <= 0:
-                continue
-            new_w = max(1.0, rect.width() * scale)
-            new_h = max(1.0, rect.height() * scale)
-            cx = rect.x() + rect.width() / 2.0
-            cy = rect.y() + rect.height() / 2.0
-            blkitem.oldRect = rect
-            blkitem.setRect([cx - new_w / 2.0, cy - new_h / 2.0, new_w, new_h], repaint=True)
-            self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
-        for action in grouped["set_font_size"]:
-            blkitem = selected_by_idx.get(action.block_index)
-            if blkitem is None:
-                continue
-            size_pt = float(action.args.get("font_size", 0.0) or 0.0)
-            if size_pt <= 0:
-                continue
-            blkitem.setFontSize(size_pt)
-            if blkitem.blk is not None:
-                blkitem.blk.fontformat.font_size = pt2px(size_pt)
+        if not selected_by_idx:
+            return
+        actions = self._normalize_review_actions(actions, set(selected_by_idx.keys()))
+        if not actions:
+            return
+        grouped = collect_actions_from_list(actions)
+        undo_stack = self.canvas.get_active_undostack()
+        if undo_stack is not None:
+            undo_stack.beginMacro("Layout review agent")
+        try:
+            # Keep existing action handlers first to preserve current behavior.
+            if grouped["auto_fit"]:
+                self.onAutoFitFontToBox()
+            if grouped["resize_to_fit_content"]:
+                self.onResizeToFitContent()
+            if grouped["center_in_bubble"]:
+                self.onCenterInBubble()
+            for action in grouped["move"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                dx = float(action.args.get("dx", 0.0) or 0.0)
+                dy = float(action.args.get("dy", 0.0) or 0.0)
+                if dx == 0.0 and dy == 0.0:
+                    continue
+                rect = blkitem.absBoundingRect(qrect=True)
+                blkitem.oldRect = rect
+                blkitem.setRect([rect.x() + dx, rect.y() + dy, rect.width(), rect.height()], repaint=True)
+                self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+            for action in grouped["resize"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                scale = float(action.args.get("scale", 1.0) or 1.0)
+                if scale <= 0:
+                    continue
+                rect = blkitem.absBoundingRect(qrect=True)
+                if rect.width() <= 0 or rect.height() <= 0:
+                    continue
+                new_w = max(1.0, rect.width() * scale)
+                new_h = max(1.0, rect.height() * scale)
+                cx = rect.x() + rect.width() / 2.0
+                cy = rect.y() + rect.height() / 2.0
+                blkitem.oldRect = rect
+                blkitem.setRect([cx - new_w / 2.0, cy - new_h / 2.0, new_w, new_h], repaint=True)
+                self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
+            for action in grouped["set_font_size"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                size_pt = float(action.args.get("font_size", 0.0) or 0.0)
+                if size_pt <= 0:
+                    continue
+                pairw = self.pairwidget_list[blkitem.idx] if 0 <= blkitem.idx < len(self.pairwidget_list) else None
+                if pairw is None:
+                    continue
+                fmt = blkitem.get_fontformat()
+                fmt.font_size = pt2px(size_pt)
+                self.canvas.push_undo_command(ApplyFontformatCommand([blkitem], [pairw.e_trans], fmt))
+        finally:
+            if undo_stack is not None:
+                undo_stack.endMacro()
 
     def onSetBalloonShape(self, shape: str):
         """Set global balloon shape and run layout on selected blocks."""

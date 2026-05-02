@@ -19,6 +19,15 @@ PROVIDER_DEFAULT_ENDPOINTS = {
     "Ollama": "http://localhost:11434/v1",
 }
 LOCAL_PROVIDERS = {"LLM Studio", "Ollama"}
+ENDPOINT_PRESETS = {
+    "Auto (provider default)": (None, ""),
+    "OpenAI Cloud": ("OpenAI", PROVIDER_DEFAULT_ENDPOINTS["OpenAI"]),
+    "Google Gemini (OpenAI-compatible)": ("Google", PROVIDER_DEFAULT_ENDPOINTS["Google"]),
+    "OpenRouter": ("OpenRouter", PROVIDER_DEFAULT_ENDPOINTS["OpenRouter"]),
+    "xAI Grok": ("Grok", PROVIDER_DEFAULT_ENDPOINTS["Grok"]),
+    "LM Studio (local)": ("LLM Studio", PROVIDER_DEFAULT_ENDPOINTS["LLM Studio"]),
+    "Ollama (local)": ("Ollama", PROVIDER_DEFAULT_ENDPOINTS["Ollama"]),
+}
 
 
 def is_local_provider(provider: Optional[str]) -> bool:
