@@ -4,7 +4,7 @@ import shutil
 import copy
 import numpy as np
 import json
-from typing import List, Union
+from typing import List, Union, get_args
 from pathlib import Path
 import subprocess
 from functools import partial
@@ -32,7 +32,7 @@ from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRA
 from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat, log_diagnostic_event
-from utils.layout_review_agent import ReviewModelConfig, PageReviewResult, BlockReviewResult, ReviewIssue, ReviewAction
+from utils.layout_review_agent import ActionType, ReviewModelConfig, PageReviewResult, BlockReviewResult, ReviewIssue, ReviewAction
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
 from utils.zip_batch import ZipBatchManager
@@ -63,6 +63,9 @@ from .image_edit import ImageEditMode
 from utils.image_colorization import apply_colorization
 from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
+
+
+VALID_REVIEW_ACTIONS = set(get_args(ActionType))
 
 
 class PageListView(QListWidget):
@@ -1931,14 +1934,19 @@ class MainWindow(mainwindow_cls):
         action_map = {}
         for ra in raw_actions if isinstance(raw_actions, list) else []:
             try:
+                action_name = str(ra.get("action", "move")).strip()
+                if action_name not in VALID_REVIEW_ACTIONS:
+                    LOGGER.debug("layout review provider returned unsupported action '%s'; skipping", action_name)
+                    continue
+                block_index = int(ra.get("block_index", -1))
+                if block_index < 0:
+                    continue
                 action = ReviewAction(
-                    action=str(ra.get("action", "move")),
-                    block_index=int(ra.get("block_index", -1)),
+                    action=action_name,
+                    block_index=block_index,
                     args=dict(ra.get("args", {}) or {}),
                     reason=str(ra.get("reason", "")),
                 )
-                if action.block_index < 0:
-                    continue
                 action_map.setdefault(action.block_index, []).append(action)
             except Exception:
                 continue
