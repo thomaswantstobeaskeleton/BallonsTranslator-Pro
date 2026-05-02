@@ -643,7 +643,7 @@ class TitleBar(Widget):
         mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
         self.manga_source_trigger = mangaSourceAction.triggered
 
-        batchQueueAction = QAction(self.tr('Batch queue...'), self)
+        batchQueueAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Batch queue...'), self)
         batchQueueAction.setToolTip(self.tr('Process multiple folders in sequence with Pause/Cancel (issue #1020).'))
         self.batch_queue_trigger = batchQueueAction.triggered
 
@@ -680,23 +680,35 @@ class TitleBar(Widget):
         environmentDoctorAction.setToolTip(self.tr('Run dependency and auth checks and show a report.'))
         self.environment_doctor_trigger = environmentDoctorAction.triggered
 
-        ocrTriageAction = QAction(self.tr('OCR triage worklist (current page)...'), self)
+        ocrTriageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'doctor.svg')), self.tr('OCR triage worklist (current page)...'), self)
         ocrTriageAction.setToolTip(self.tr('Show blocks that likely need OCR/translation review and triage.'))
         self.ocr_triage_trigger = ocrTriageAction.triggered
 
-        autoExtractGlossaryAction = QAction(self.tr('Auto-extract glossary (current page)...'), self)
+        autoExtractGlossaryAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'add.svg')), self.tr('Auto-extract glossary (current page)...'), self)
         autoExtractGlossaryAction.setToolTip(self.tr('Extract frequent source terms and append to project glossary.'))
         self.auto_extract_glossary_trigger = autoExtractGlossaryAction.triggered
 
-        translationQaAction = QAction(self.tr('Translation QA report (current page)...'), self)
+        translationQaAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Translation QA report (current page)...'), self)
         translationQaAction.setToolTip(self.tr('Run glossary candidate extraction and guardrail checks on current page.'))
         self.translation_qa_report_trigger = translationQaAction.triggered
 
-        saveRunProfileAction = QAction(self.tr('Save run profile snapshot...'), self)
+        saveRunProfileAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'save_activate.svg')), self.tr('Save run profile snapshot...'), self)
         saveRunProfileAction.setToolTip(self.tr('Save current module selections as a project-local run profile.'))
         self.save_run_profile_trigger = saveRunProfileAction.triggered
 
-        applyRunProfileAction = QAction(self.tr('Apply run profile snapshot...'), self)
+        layoutReviewSelectedAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignc.svg')), self.tr('Layout review selected textboxes'), self)
+        layoutReviewSelectedAction.setToolTip(self.tr('Review/fix layout for selected text boxes on current page.'))
+        self.layout_review_selected_trigger = layoutReviewSelectedAction.triggered
+
+        layoutReviewPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignl.svg')), self.tr('Layout review entire page'), self)
+        layoutReviewPageAction.setToolTip(self.tr('Review/fix layout for all non-vertical text boxes on current page.'))
+        self.layout_review_page_trigger = layoutReviewPageAction.triggered
+
+        layoutReviewConfigAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config.svg')), self.tr('Layout review settings...'), self)
+        layoutReviewConfigAction.setToolTip(self.tr('Configure provider/model/prompt for page review agent.'))
+        self.layout_review_config_trigger = layoutReviewConfigAction.triggered
+
+        applyRunProfileAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr('Apply run profile snapshot...'), self)
         applyRunProfileAction.setToolTip(self.tr('Apply a previously saved project-local run profile.'))
         self.apply_run_profile_trigger = applyRunProfileAction.triggered
 
@@ -718,6 +730,11 @@ class TitleBar(Widget):
         projectMenu.addSeparator()
         projectMenu.addAction(saveRunProfileAction)
         projectMenu.addAction(applyRunProfileAction)
+        projectMenu.addSeparator()
+        projectMenu.addAction(layoutReviewSelectedAction)
+        projectMenu.addAction(layoutReviewPageAction)
+        projectMenu.addAction(layoutReviewConfigAction)
+        projectMenu.addSeparator()
         projectMenu.addAction(translationQaAction)
         projectMenu.addAction(ocrTriageAction)
         projectMenu.addAction(autoExtractGlossaryAction)

@@ -22,6 +22,8 @@ class MessageBox(QMessageBox):
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         if modal:
             self.setModal(modal)
+        # Force Qt-drawn dialogs so they inherit app stylesheet (dark/light) instead of OS-native white popups.
+        self.setOption(QMessageBox.Option.DontUseNativeDialog, True)
         if btn_type is not None:
             self.setStandardButtons(btn_type)
 

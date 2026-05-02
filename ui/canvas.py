@@ -221,6 +221,12 @@ class Canvas(QGraphicsScene):
     download_page_requested = Signal(str)  # "result" | "inpainted" | "original"
     triage_add_selected_signal = Signal(list)
     triage_mark_reviewed_selected_signal = Signal(list)
+    layout_review_selected_signal = Signal()
+    layout_review_page_signal = Signal()
+    layout_review_config_signal = Signal()
+    review_ocr_triage_signal = Signal()
+    review_translation_qa_signal = Signal()
+    review_auto_extract_glossary_signal = Signal()
 
 
     begin_scale_tool = Signal(QPointF)
@@ -1174,6 +1180,8 @@ class Canvas(QGraphicsScene):
             # --- Block (selection) ---
             merge_blocks_act = split_regions_act = move_up_act = move_down_act = None
             triage_add_act = triage_mark_act = None
+            layout_review_selected_act = layout_review_page_act = layout_review_config_act = None
+            review_ocr_triage_act = review_translation_qa_act = review_auto_extract_glossary_act = None
             create_textbox_act = None
             block_menu = None
             if context_menu_visible('create_textbox'):
@@ -1202,8 +1210,10 @@ class Canvas(QGraphicsScene):
                     move_down_act.setEnabled(n_sel == 1 and n_total > 0 and sel[0].idx < n_total - 1)
                     actions_map['block_move_down'] = move_down_act
                 if block_menu is not None:
-                    triage_add_act = block_menu.addAction(self.tr("Add selected to triage worklist"))
-                    triage_mark_act = block_menu.addAction(self.tr("Mark selected as reviewed"))
+                    if context_menu_visible('block_triage_add'):
+                        triage_add_act = block_menu.addAction(self.tr("Add selected to triage worklist"))
+                    if context_menu_visible('block_triage_mark_reviewed'):
+                        triage_mark_act = block_menu.addAction(self.tr("Mark selected as reviewed"))
 
             # --- Image / Overlay (selection) ---
             import_image_act = clear_overlay_act = None
@@ -1505,6 +1515,18 @@ class Canvas(QGraphicsScene):
                 self.triage_add_selected_signal.emit([it.idx for it in sel])
             elif triage_mark_act is not None and rst == triage_mark_act:
                 self.triage_mark_reviewed_selected_signal.emit([it.idx for it in sel])
+            elif layout_review_selected_act is not None and rst == layout_review_selected_act:
+                self.layout_review_selected_signal.emit()
+            elif layout_review_page_act is not None and rst == layout_review_page_act:
+                self.layout_review_page_signal.emit()
+            elif layout_review_config_act is not None and rst == layout_review_config_act:
+                self.layout_review_config_signal.emit()
+            elif review_ocr_triage_act is not None and rst == review_ocr_triage_act:
+                self.review_ocr_triage_signal.emit()
+            elif review_translation_qa_act is not None and rst == review_translation_qa_act:
+                self.review_translation_qa_signal.emit()
+            elif review_auto_extract_glossary_act is not None and rst == review_auto_extract_glossary_act:
+                self.review_auto_extract_glossary_signal.emit()
             elif move_up_act is not None and rst == move_up_act:
                 self.move_blocks_up_signal.emit()
             elif move_down_act is not None and rst == move_down_act:
