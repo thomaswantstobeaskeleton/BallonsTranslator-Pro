@@ -202,3 +202,78 @@ QGroupBox::title {
 QLabel#angleLabel {
     border-radius: 12px;
 }
+
+
+/* === Neo-glass uplift for major UI refresh === */
+QMainWindow, Widget {
+    background-color: @qwidgetBackgroundColor;
+}
+
+QMenu, QToolTip {
+    border: 1px solid @accentColorRgba35;
+    background-color: @emptyContentBackgroundColor;
+}
+
+PanelAreaContent, ConfigBlock, ConfigSubBlock, ConfigTable, QGroupBox {
+    border: 1px solid @accentColorRgba20;
+    background-color: @emptyContentBackgroundColor;
+}
+
+QLineEdit, QComboBox, QPlainTextEdit, SourceTextEdit, TransTextEdit {
+    border: 1px solid @accentColorRgba35;
+    selection-background-color: @accentColorRgba80;
+}
+
+QLineEdit:hover, QComboBox:hover, QPlainTextEdit:hover {
+    border: 1px solid @accentColor;
+}
+
+QPushButton#LeftBarRunBtn, QPushButton#BottomBarRunBtn, TitleBarToolBtn#PipelineRunBtn {
+    border: 1px solid @accentColorRgba80;
+    min-height: 32px;
+}
+
+QPushButton#LeftBarRunBtn:focus, QPushButton#BottomBarRunBtn:focus {
+    border: 2px solid @accentColor;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 @accentColorRgba35, stop:1 @accentColorRgba80);
+}
+
+PipelineInsightsWidget {
+    border: 1px solid @accentColorRgba35;
+    border-radius: 12px;
+    background-color: @emptyContentBackgroundColor;
+}
+QLabel#PipelineInsightsTitle {
+    font-weight: 700;
+    font-size: 14px;
+}
+QFrame#PipelineCard {
+    border: 1px solid @accentColorRgba35;
+    border-radius: 12px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 @accentColorRgba20, stop:1 transparent);
+}
+QLabel#PipelineJobLabel {
+    color: @accentColor;
+    font-weight: 600;
+}
+QLabel#PipelineInsightsWarningBadge {
+    border-radius: 10px;
+    border: 1px solid @accentColorRgba80;
+    background-color: @accentColorRgba20;
+    padding: 4px 8px;
+    font-weight: 600;
+}
+PipelineInsightsWidget QPushButton {
+    min-height: 28px;
+    border-radius: 10px;
+}
+PipelineInsightsWidget QListWidget {
+    border: 1px solid @accentColorRgba20;
+    border-radius: 10px;
+    background-color: @accentColorRgba20;
+}

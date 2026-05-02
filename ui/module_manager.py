@@ -856,7 +856,19 @@ class ImgtransThread(QThread):
         self.ocr_counter = 0
         self.translate_counter = 0
         self.inpaint_counter = 0
-        
+
+        def _run_stage_with_retry(stage_name: str, fn, retries: int = 1):
+            attempts = max(1, int(retries))
+            last_err = None
+            for i in range(attempts):
+                try:
+                    return fn()
+                except Exception as e:
+                    last_err = e
+                    LOGGER.warning('%s failed (attempt %d/%d): %s', stage_name, i + 1, attempts, e)
+            if last_err is not None:
+                raise last_err
+
         # 如果指定了pages_to_process，只处理这些页面
         all_pages = list(self.imgtrans_proj.pages.keys())
         if self.pages_to_process is not None and len(self.pages_to_process) > 0:
@@ -1227,15 +1239,19 @@ class ImgtransThread(QThread):
                             and hasattr(ocr_runner, "run_ocr_translate")
                         ):
                             try:
-                                ocr_runner.run_ocr_translate(img, blk_list, cfg_module.translate_source, cfg_module.translate_target)
+                                _run_stage_with_retry(
+                                    'OCR+Translate',
+                                    lambda: ocr_runner.run_ocr_translate(img, blk_list, cfg_module.translate_source, cfg_module.translate_target),
+                                    getattr(pcfg, 'pipeline_retry_ocr', 1),
+                                )
                                 # Ensure source text exists for later editing (keep original OCR empty)
                                 for blk in blk_list:
                                     if getattr(blk, "text", None) is None:
                                         blk.text = [""]
                             except NotImplementedError:
-                                ocr_runner.run_ocr(img, blk_list)
+                                _run_stage_with_retry('OCR', lambda: ocr_runner.run_ocr(img, blk_list), getattr(pcfg, 'pipeline_retry_ocr', 1))
                         else:
-                            ocr_runner.run_ocr(img, blk_list)
+                            _run_stage_with_retry('OCR', lambda: ocr_runner.run_ocr(img, blk_list), getattr(pcfg, 'pipeline_retry_ocr', 1))
                         if getattr(cfg_module, 'ocr_cache_enabled', True) and blk_list:
                             try:
                                 from utils.pipeline_cache_manager import (
@@ -1679,6 +1695,10 @@ class ModuleManager(QObject):
     blktrans_pipeline_finished = Signal(int, list)
     page_trans_finished = Signal(int)
     detect_region_finished = Signal(str, list, bool)  # page_name, new_blk_list, replace (replace page blocks)
+    pipeline_job_started = Signal(str)
+    pipeline_stage_event = Signal(str, int, str)  # stage_name, progress, page_name
+    pipeline_event_logged = Signal(str, str)  # code, message
+    engine_registry_updated = Signal(dict)
 
     # Translation failure in batch: user choice (retry/skip/terminate)
     translation_failure_request = Signal(str, str)  # msg, page_key
@@ -1697,6 +1717,7 @@ class ModuleManager(QObject):
         self._trans_failure_mutex = QMutex()
         self._trans_failure_condition = QWaitCondition()
         self._trans_failure_choice = None  # 'retry' | 'skip' | 'terminate'
+        self._pipeline_job_seq = 0
 
     def setupThread(self, config_panel: ConfigPanel, imgtrans_progress_msgbox: ImgtransProgressMessageBox, ocr_postprocess: Callable = None, translate_preprocess: Callable = None, translate_postprocess: Callable = None):
         self.textdetect_thread = TextDetectThread()
@@ -1790,6 +1811,27 @@ class ModuleManager(QObject):
         translator_params = merge_config_module_params(cfg_module.translator_params, GET_VALID_TRANSLATORS(), TRANSLATORS.get)
         self.translator_panel.addModulesParamWidgets(translator_params)
         self.translator_panel.setModule(cfg_module.translator if cfg_module.translator in GET_VALID_TRANSLATORS() else (GET_VALID_TRANSLATORS()[0] if GET_VALID_TRANSLATORS() else ''))
+        self.engine_registry_updated.emit(self.get_engine_registry_snapshot())
+
+    def get_engine_registry_snapshot(self) -> dict:
+        return {
+            "detector": {
+                "selected": getattr(cfg_module, "textdetector", ""),
+                "loaded": getattr(self.textdetect_thread.textdetector, "name", "") if hasattr(self, "textdetect_thread") and self.textdetect_thread.textdetector else "",
+            },
+            "ocr": {
+                "selected": getattr(cfg_module, "ocr", ""),
+                "loaded": getattr(self.ocr_thread.ocr, "name", "") if hasattr(self, "ocr_thread") and self.ocr_thread.ocr else "",
+            },
+            "translator": {
+                "selected": getattr(cfg_module, "translator", ""),
+                "loaded": getattr(self.translate_thread.translator, "name", "") if hasattr(self, "translate_thread") and self.translate_thread.translator else "",
+            },
+            "inpainter": {
+                "selected": getattr(cfg_module, "inpainter", ""),
+                "loaded": getattr(self.inpaint_thread.inpainter, "name", "") if hasattr(self, "inpaint_thread") and self.inpaint_thread.inpainter else "",
+            },
+        }
 
     def unload_all_models(self):
         unload_modules(self, {'textdetector', 'inpainter', 'ocr', 'translator'})
@@ -1899,6 +1941,10 @@ class ModuleManager(QObject):
         self.progress_msgbox.inpaint_bar.setVisible(cfg_module.enable_inpaint)
         self.progress_msgbox.zero_progress()
         self.progress_msgbox.show()
+        self._pipeline_job_seq += 1
+        job_id = f'job-{self._pipeline_job_seq:04d}'
+        self.pipeline_job_started.emit(job_id)
+        self.pipeline_event_logged.emit('JOB_START', f'Pipeline started: {job_id}')
         self.imgtrans_thread.runImgtransPipeline(self.imgtrans_proj, pages_to_process)
     
     def stopImgtransPipeline(self):
@@ -1969,6 +2015,9 @@ class ModuleManager(QObject):
         if 'detect' in shared.pbar:
             shared.pbar['detect'].update(1)
         progress = int(progress / self.imgtrans_thread.num_pages * 100)
+        self.pipeline_stage_event.emit('detect', progress, '')
+        if progress in (1, 100):
+            self.pipeline_event_logged.emit('DETECT', f'Detect progress {progress}%')
         self.progress_msgbox.updateDetectProgress(progress)
         if ri != self.last_finished_index:
             self.last_finished_index = ri
@@ -1981,6 +2030,9 @@ class ModuleManager(QObject):
         if 'ocr' in shared.pbar:
             shared.pbar['ocr'].update(1)
         progress = int(progress / self.imgtrans_thread.num_pages * 100)
+        self.pipeline_stage_event.emit('ocr', progress, '')
+        if progress in (1, 100):
+            self.pipeline_event_logged.emit('OCR', f'OCR progress {progress}%')
         self.progress_msgbox.updateOCRProgress(progress)
         if ri != self.last_finished_index:
             self.last_finished_index = ri
@@ -1993,6 +2045,9 @@ class ModuleManager(QObject):
         if 'translate' in shared.pbar:
             shared.pbar['translate'].update(1)
         progress = int(progress / self.imgtrans_thread.num_pages * 100)
+        self.pipeline_stage_event.emit('translate', progress, '')
+        if progress in (1, 100):
+            self.pipeline_event_logged.emit('TRANSLATE', f'Translate progress {progress}%')
         self.progress_msgbox.updateTranslateProgress(progress)
         if ri != self.last_finished_index:
             self.last_finished_index = ri
@@ -2005,6 +2060,9 @@ class ModuleManager(QObject):
         if 'inpaint' in shared.pbar:
             shared.pbar['inpaint'].update(1)
         progress = int(progress / self.imgtrans_thread.num_pages * 100)
+        self.pipeline_stage_event.emit('inpaint', progress, '')
+        if progress in (1, 100):
+            self.pipeline_event_logged.emit('INPAINT', f'Inpaint progress {progress}%')
         self.progress_msgbox.updateInpaintProgress(progress)
         if ri != self.last_finished_index:
             self.last_finished_index = ri

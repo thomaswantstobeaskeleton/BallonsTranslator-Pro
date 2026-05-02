@@ -59,10 +59,15 @@ from .context_menu_config_dialog import ContextMenuConfigDialog
 from .batch_queue_dialog import BatchQueueDialog
 from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
+from .pipeline_insights_widget import PipelineInsightsWidget
 from .image_edit import ImageEditMode
+from .mask_diagnostics_widget import MaskDiagnosticsWidget
 from utils.image_colorization import apply_colorization
 from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
+from modules.llm_quality import enforce_glossary, back_translation_drift_score
+from modules.text_normalization import normalize_text
+from modules.text_replace_profiles import apply_profile, default_profiles
 
 
 class PageListView(QListWidget):
@@ -517,6 +522,13 @@ class MainWindow(mainwindow_cls):
         self.spellCheckPanel.close_requested.connect(self._on_spellcheck_panel_close)
         self.spellCheckPanel.focus_block_requested.connect(self._on_spellcheck_focus_block)
         self.rightComicTransStackPanel.addWidget(self.spellCheckPanel)
+        self.pipelineInsightsPanel = PipelineInsightsWidget(self)
+        self.pipelineInsightsPanel.rerun_stage_requested.connect(self.on_rerun_stage_requested)
+        self.pipelineInsightsPanel.apply_regex_profile_requested.connect(self.on_apply_regex_profile_requested)
+        self.pipelineInsightsPanel.open_mask_diagnostics_requested.connect(self.on_open_mask_diagnostics_requested)
+        self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
+        self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
+        self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
         self.comicTransSplitter = QSplitter(Qt.Orientation.Horizontal)
@@ -562,6 +574,8 @@ class MainWindow(mainwindow_cls):
                 self.configPanel.detect_config_panel.setDetector(name)
                 self.bottomBar.textdet_selector.setSelectedValue(name)
                 LOGGER.info('Text detector set to {}'.format(name))
+                self._refresh_pipeline_provider_health()
+                self.pipelineInsightsPanel.set_engine_registry(self.module_manager.get_engine_registry_snapshot())
             QTimer.singleShot(0, _update)
 
     def on_finish_setocr(self):
@@ -573,6 +587,8 @@ class MainWindow(mainwindow_cls):
                 self.configPanel.ocr_config_panel.setOCR(name)
                 self.bottomBar.ocr_selector.setSelectedValue(name)
                 LOGGER.info('OCR set to {}'.format(name))
+                self._refresh_pipeline_provider_health()
+                self.pipelineInsightsPanel.set_engine_registry(self.module_manager.get_engine_registry_snapshot())
             QTimer.singleShot(0, _update)
 
     def on_finish_setinpainter(self):
@@ -584,6 +600,8 @@ class MainWindow(mainwindow_cls):
                 self.configPanel.inpaint_config_panel.setInpainter(name)
                 self.bottomBar.inpaint_selector.setSelectedValue(name)
                 LOGGER.info('Inpainter set to {}'.format(name))
+                self._refresh_pipeline_provider_health()
+                self.pipelineInsightsPanel.set_engine_registry(self.module_manager.get_engine_registry_snapshot())
             QTimer.singleShot(0, _update)
 
     def on_finish_settranslator(self):
@@ -596,6 +614,8 @@ class MainWindow(mainwindow_cls):
                 self.bottomBar.trans_selector.finishSetTranslator(translator)
                 self.configPanel.trans_config_panel.finishSetTranslator(translator)
                 LOGGER.info('Translator set to {}'.format(name))
+                self._refresh_pipeline_provider_health()
+                self.pipelineInsightsPanel.set_engine_registry(self.module_manager.get_engine_registry_snapshot())
             QTimer.singleShot(0, _update)
         else:
             LOGGER.error('invalid translator')
@@ -662,6 +682,10 @@ class MainWindow(mainwindow_cls):
         module_manager.finish_translate_page.connect(self.finishTranslatePage)
         module_manager.imgtrans_pipeline_finished.connect(self.on_imgtrans_pipeline_finished)
         module_manager.page_trans_finished.connect(self.on_pagtrans_finished)
+        module_manager.pipeline_job_started.connect(self.pipelineInsightsPanel.set_job_id)
+        module_manager.pipeline_stage_event.connect(self.on_pipeline_stage_event)
+        module_manager.pipeline_event_logged.connect(self.pipelineInsightsPanel.add_event)
+        module_manager.engine_registry_updated.connect(self.pipelineInsightsPanel.set_engine_registry)
         module_manager.setupThread(self.configPanel, self.imgtrans_progress_msgbox, self.ocr_postprocess, self.translate_preprocess, self.translate_postprocess)
         module_manager.progress_msgbox.showed.connect(self.on_imgtrans_progressbox_showed)
         module_manager.blktrans_pipeline_finished.connect(self.on_blktrans_finished)
@@ -675,6 +699,8 @@ class MainWindow(mainwindow_cls):
         module_manager.setOCR()
         module_manager.setTranslator()
         module_manager.setInpainter()
+        self.pipelineInsightsPanel.set_engine_registry(module_manager.get_engine_registry_snapshot())
+        self._refresh_pipeline_provider_health()
 
         self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
         self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
@@ -756,6 +782,65 @@ class MainWindow(mainwindow_cls):
         self.leftBar.runBtn.setToolTip(base)
         self.titleBar.runToolBtn.setToolTip(base)
         self.bottomBar.runBtn.setToolTip(base)
+
+
+    def on_rerun_stage_requested(self, stage: str):
+        self.pipelineInsightsPanel.add_warning('RERUN', self.tr(f'Rerun requested from stage: {stage}'))
+        # Current implementation reruns the full pipeline while preserving stage intent in warnings.
+        self.run_imgtrans()
+
+    def on_pipeline_stage_event(self, stage_name: str, progress: int, page_name: str):
+        _ = (stage_name, page_name)
+        self.pipelineInsightsPanel.set_pipeline_progress(progress)
+
+    def _refresh_pipeline_provider_health(self):
+        providers = (
+            ('detector', 'Detector', self.module_manager.textdetector),
+            ('ocr', 'OCR', self.module_manager.ocr),
+            ('translator', 'Translator', self.module_manager.translator),
+            ('inpainter', 'Inpainter', self.module_manager.inpainter),
+        )
+        for key, label, impl in providers:
+            status = 'ready' if impl is not None else 'missing'
+            self.pipelineInsightsPanel.set_provider_status(key, self.tr(label), status)
+
+    def on_apply_regex_profile_requested(self):
+        profiles = default_profiles()
+        profiles.update(getattr(pcfg, 'user_replace_profiles', {}) or {})
+        if not profiles:
+            self.pipelineInsightsPanel.add_warning('PROFILE', self.tr('No regex profiles configured.'))
+            return
+        names = sorted(profiles.keys())
+        name, ok = QInputDialog.getItem(self, self.tr("Apply Regex Profile"), self.tr("Profile"), names, 0, False)
+        if not ok or not name:
+            return
+        page = self.imgtrans_proj.current_img
+        if not page or page not in self.imgtrans_proj.pages:
+            self.pipelineInsightsPanel.add_warning('PROFILE', self.tr('No current page loaded.'))
+            return
+        blk_list = self.imgtrans_proj.pages.get(page, [])
+        changed = 0
+        rules = profiles.get(name, [])
+        for blk in blk_list:
+            cur = getattr(blk, 'translation', '') or blk.get_text()
+            nxt = apply_profile(cur, rules)
+            if nxt != cur:
+                blk.translation = nxt
+                changed += 1
+        self.pipelineInsightsPanel.add_warning('PROFILE', self.tr(f'Applied profile {name} on {changed} block(s).'))
+        self.canvas.updateTextBlkList()
+
+    def on_open_mask_diagnostics_requested(self):
+        page = self.imgtrans_proj.current_img
+        if not page:
+            self.pipelineInsightsPanel.add_warning('MASK_DIAG', self.tr('No current page loaded.'))
+            return
+        mask = self.imgtrans_proj.load_mask_by_imgname(page)
+        if mask is None:
+            self.pipelineInsightsPanel.add_warning('MASK_DIAG', self.tr('No mask available for current page.'))
+            return
+        self.maskDiagnosticsPanel.set_mask(mask)
+        self.rightComicTransStackPanel.setCurrentWidget(self.maskDiagnosticsPanel)
 
     def setupImgTransUI(self):
         self.centralStackWidget.setCurrentIndex(1)
@@ -1917,15 +2002,22 @@ class MainWindow(mainwindow_cls):
         req.add_header("Content-Type", "application/json")
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
-        try:
-            with urlrequest.urlopen(req, timeout=60) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-            content = body.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-            parsed = json.loads(content) if isinstance(content, str) else content
-            return self._build_review_result_from_provider_actions(page_name, blocks, parsed.get("actions", []))
-        except (urlerror.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError) as e:
-            LOGGER.warning("layout review %s provider request failed, fallback to heuristic: %s", provider_name, e)
-            return self.st_manager._resolve_review_provider(ReviewModelConfig(provider="heuristic")).review(page_name, blocks, config)
+        retries = max(1, int(getattr(pcfg, "runtime_http_retries", 1)))
+        timeout_sec = max(2.0, float(getattr(pcfg, "runtime_http_timeout_sec", 60.0)))
+        last_error = None
+        for attempt in range(retries):
+            try:
+                with urlrequest.urlopen(req, timeout=timeout_sec) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                content = body.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                parsed = json.loads(content) if isinstance(content, str) else content
+                return self._build_review_result_from_provider_actions(page_name, blocks, parsed.get("actions", []))
+            except (urlerror.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError) as e:
+                last_error = e
+                LOGGER.warning("layout review %s attempt %d/%d failed: %s", provider_name, attempt + 1, retries, e)
+        self.pipelineInsightsPanel.add_warning('HTTP_RETRY_FAIL', f'Layout review provider failed after {retries} attempts ({provider_name}).')
+        LOGGER.warning("layout review %s provider request failed after retries, fallback to heuristic: %s", provider_name, last_error)
+        return self.st_manager._resolve_review_provider(ReviewModelConfig(provider="heuristic")).review(page_name, blocks, config)
 
     def _build_review_result_from_provider_actions(self, page_name: str, blocks, raw_actions) -> PageReviewResult:
         action_map = {}
@@ -4267,9 +4359,26 @@ class MainWindow(mainwindow_cls):
     def translate_postprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None):
         if not self.postprocess_mt_toggle:
             return
-        
+
+        glossary_map = getattr(pcfg, 'llm_glossary_map', {}) or {}
         for ii, tr in enumerate(translations):
-            translations[ii] = self.mtSubWidget.sub_text(tr)
+            text = self.mtSubWidget.sub_text(tr)
+            if getattr(pcfg, 'enable_glossary_enforcement', True) and glossary_map:
+                text = enforce_glossary(text, glossary_map).text
+            if getattr(pcfg, 'enable_text_normalization', False):
+                text = normalize_text(text, getattr(pcfg, 'text_normalization_profile', 'balanced'))
+            translations[ii] = text
+
+        if getattr(pcfg, 'enable_back_translation_qa', False) and textblocks:
+            try:
+                for i, blk in enumerate(textblocks[:len(translations)]):
+                    src = blk.get_text() if hasattr(blk, 'get_text') else ''
+                    drift = back_translation_drift_score(src, translations[i])
+                    if drift > float(getattr(pcfg, 'back_translation_drift_threshold', 0.58)):
+                        LOGGER.warning('Translation drift warning blk=%s drift=%.3f', i, drift)
+                        self.pipelineInsightsPanel.add_warning('MT_DRIFT', f'Block {i} drift={drift:.3f}')
+            except Exception:
+                LOGGER.debug('Back-translation QA scoring skipped.', exc_info=True)
 
     def on_copy_src(self):
         blks = self.canvas.selected_text_items()

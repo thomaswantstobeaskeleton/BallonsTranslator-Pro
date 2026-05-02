@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QDoubleSpinBox,
 )
-from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression, QPropertyAnimation, QEasingCurve
+from qtpy.QtCore import Qt, Signal, QPoint, QEvent, QSize, QSortFilterProxyModel, QModelIndex, QRegularExpression, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QTimer
 from qtpy.QtGui import QMouseEvent, QKeySequence, QActionGroup, QIcon, QWheelEvent, QStandardItemModel, QStandardItem
 
 from modules.translators import BaseTranslator
@@ -217,6 +217,20 @@ class LeftBar(Widget):
             install_hover_opacity_animation(w, duration_ms=100, normal_opacity=0.88, press_opacity=0.74)
         # Run button: scale animation persists even when Bubbly UI is off
         install_hover_scale_animation(self.runBtn, duration_ms=80, size_delta=(3, 2))
+
+        # Gentle breathing animation to spotlight the primary Run action in the refreshed UI.
+        self._run_btn_breathe = QSequentialAnimationGroup(self)
+        self._run_btn_pulse_up = QPropertyAnimation(self.runBtn, b"iconSize", self)
+        self._run_btn_pulse_up.setDuration(900)
+        self._run_btn_pulse_up.setEasingCurve(QEasingCurve.InOutQuad)
+        self._run_btn_pulse_down = QPropertyAnimation(self.runBtn, b"iconSize", self)
+        self._run_btn_pulse_down.setDuration(900)
+        self._run_btn_pulse_down.setEasingCurve(QEasingCurve.InOutQuad)
+        self._run_btn_breathe.addAnimation(self._run_btn_pulse_up)
+        self._run_btn_breathe.addAnimation(self._run_btn_pulse_down)
+        self._refresh_run_button_breathe_animation()
+        self._run_btn_breathe.setLoopCount(-1)
+        QTimer.singleShot(300, self._run_btn_breathe.start)
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
@@ -1787,3 +1801,15 @@ class BottomBar(Widget):
 
     def onTextblockCheckerClicked(self):
         self.textblock_checkchanged.emit()
+    def _refresh_run_button_breathe_animation(self):
+        icon_sz = self.runBtn.iconSize()
+        if icon_sz.width() <= 0 or icon_sz.height() <= 0:
+            icon_sz = QSize(20, 20)
+            self.runBtn.setIconSize(icon_sz)
+        up_sz = QSize(icon_sz.width() + 2, icon_sz.height() + 2)
+        self._run_btn_pulse_up.setStartValue(icon_sz)
+        self._run_btn_pulse_up.setEndValue(up_sz)
+        self._run_btn_pulse_down.setStartValue(up_sz)
+        self._run_btn_pulse_down.setEndValue(icon_sz)
+
+

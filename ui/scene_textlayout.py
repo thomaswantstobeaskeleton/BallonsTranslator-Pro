@@ -12,6 +12,7 @@ from functools import lru_cache, cached_property
 from .misc import pixmap2ndarray, LruIgnoreArg
 from utils import shared as C
 from utils.fontformat import pt2px, FontFormat, LineSpacingType
+from utils.config import pcfg
 
 def print_transform(tr: QTransform):
     print(f'[[{tr.m11(), tr.m12(), tr.m13()}]\n [{tr.m21(), tr.m22(), tr.m23()}]\n [{tr.m31(), tr.m32(), tr.m33()}]]')
@@ -42,6 +43,14 @@ vertical_force_aligncentel_pattern = re.compile('[' + Dingbats_vertical_aligncen
 @lru_cache
 def vertical_force_aligncentel(char: str) -> bool:
     return char in PUNSET_PAUSEORSTOP or vertical_force_aligncentel_pattern.match(char) is not None
+
+
+def _vertical_rotate_latin_enabled() -> bool:
+    return bool(getattr(pcfg, 'vertical_cjk_rotate_latin', True))
+
+
+def _vertical_punctuation_hang_enabled() -> bool:
+    return bool(getattr(pcfg, 'vertical_cjk_punctuation_hang', True))
 
 @lru_cache(maxsize=512)
 def _font_metrics(ffamily: str, size: float, weight: int, italic: bool) -> QFontMetricsF:
@@ -452,7 +461,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 if num_lspaces > 0:
                     space_shift = num_lspaces * cfmt.space_width
 
-                if char in PUNSET_VERNEEDROTATE:
+                should_rotate = char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
+                if should_rotate:
                     char = blk_text[char_idx]
                     if char.isalpha():
                         xoff = 0
@@ -491,6 +501,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                     if char in PUNSET_ALIGNCENTER:
                         tbr, br = cfmt.punc_rect(char)
                         yoff += (tbr.height() + cfmt.font_metrics.descent() - act_rect[3]) / 2
+                    if _vertical_punctuation_hang_enabled() and char in PUNSET_PAUSEORSTOP:
+                        yoff -= line_width * 0.08
 
                 # else:
                 #     empty_spacing = num_lspaces * cfmt.space_width
@@ -560,7 +572,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 if line_width < 0:
                     line_width = cfmt.tbr.width()
                 
-                if char in PUNSET_VERNEEDROTATE:
+                should_rotate = char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
+                if should_rotate:
                     line_x, line_y = line.x(), line.y()
                     y_x = line_y - line_x
                     y_p_x = line_y + line_x
