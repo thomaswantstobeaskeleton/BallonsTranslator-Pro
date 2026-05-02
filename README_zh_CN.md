@@ -1,3 +1,6 @@
+> [!IMPORTANT]  
+> **如打算公开分享本工具的机翻结果，且没有有经验的译者进行过完整的翻译或校对，请在显眼位置注明机翻。**
+
 # BallonsTranslator-Pro
 
 BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的增强分支，面向严肃漫画/条漫翻译工作流。
