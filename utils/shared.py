@@ -21,9 +21,23 @@ STYLESHEET_PATH = osp.join(PROGRAM_PATH, 'config/stylesheet.css')
 THEME_PATH = osp.join(PROGRAM_PATH, 'config/themes.json')
 CONFIG_PATH = osp.join(PROGRAM_PATH, 'config/config.json')
 
-DEFAULT_TEXTSTYLE_DIR = osp.join(PROGRAM_PATH, 'config/textstyles')
-if not osp.exists(DEFAULT_TEXTSTYLE_DIR):
-    os.makedirs(DEFAULT_TEXTSTYLE_DIR)
+def _user_config_root() -> str:
+    if sys.platform == 'win32':
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            return osp.join(appdata, 'BallonsTranslator Pro')
+    return osp.join(osp.expanduser('~'), '.ballonstranslator-pro')
+
+
+def _resolve_textstyle_dir() -> str:
+    installed_dir = osp.join(PROGRAM_PATH, 'config/textstyles')
+    if os.access(PROGRAM_PATH, os.W_OK):
+        return installed_dir
+    return osp.join(_user_config_root(), 'config', 'textstyles')
+
+
+DEFAULT_TEXTSTYLE_DIR = _resolve_textstyle_dir()
+os.makedirs(DEFAULT_TEXTSTYLE_DIR, exist_ok=True)
 
 
 CONFIG_FONTSIZE_HEADER = 18

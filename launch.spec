@@ -102,12 +102,15 @@ a = Analysis([
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+win_icon = 'icons/icon2.ico' if os.path.exists('icons/icon2.ico') else None
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
     name='launch',
+    icon=win_icon,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
