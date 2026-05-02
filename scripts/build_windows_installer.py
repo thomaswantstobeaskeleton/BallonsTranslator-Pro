@@ -11,6 +11,26 @@ import subprocess
 import sys
 
 
+def _ensure_windows_icon(root: str) -> str | None:
+    """Create icons/icon2.ico from doc/src/icon2.png when possible."""
+    src = osp.join(root, "doc", "src", "icon2.png")
+    dst = osp.join(root, "icons", "icon2.ico")
+    if osp.isfile(dst):
+        return dst
+    if not osp.isfile(src):
+        print("[warn] icon source not found:", src)
+        return None
+    try:
+        from PIL import Image
+        img = Image.open(src)
+        img.save(dst, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        print("[ok] generated", dst)
+        return dst
+    except Exception as e:
+        print(f"[warn] could not generate {dst}: {e}")
+        return None
+
+
 def _find_iscc() -> str:
     candidates = [
         os.environ.get("ISCC_EXE", ""),
@@ -27,6 +47,9 @@ def main() -> int:
     root = osp.abspath(osp.join(osp.dirname(__file__), ".."))
     os.chdir(root)
     py = sys.executable
+
+    # 0) Ensure optional Windows .ico exists for installer/exe branding
+    _ensure_windows_icon(root)
 
     # 1) Build standalone exe with PyInstaller
     subprocess.check_call([py, "scripts/package_release.py"])
