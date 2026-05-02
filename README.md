@@ -3,15 +3,6 @@
 BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) focused on serious manga/comic translation workflows.
 
 
-      <img src="doc/src/1111.png" alt="BallonsTranslator-Pro logo" width="400" />
-    </td>
-    <td align="center" width="34%">
-      <img src="doc/src/icon2.png" alt="BallonsTranslator-Pro overview" width="320" />
-    </td>
-    <td align="right" width="33%">
-      <img src="doc/src/overview1.png" alt="BallonsTranslator-Pro workflow overview" width="400" />
-    </td>
-
 At a high level, BallonsTranslator-Pro helps you:
 
 1. Detect speech balloons/text areas
