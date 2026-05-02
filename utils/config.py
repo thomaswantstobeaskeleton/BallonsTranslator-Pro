@@ -53,7 +53,7 @@ class ModuleConfig(Config):
     inpaint_tile_size: int = 0   # 0 = no tiling (recommended); set 512–1024 only if OOM
     inpaint_tile_overlap: int = 64   # overlap between tiles (px); only used when tile_size > 0
     # Optional: exclude text blocks by detector label from inpainting (e.g. leave scene text as-is). Off by default.
-    inpaint_exclude_labels_enabled: bool = False
+    inpaint_exclude_labels_d: bool = False
     inpaint_exclude_labels: str = ''  # comma-separated, case-insensitive (e.g. "other,scene")
     # When True, inpaint the whole image at once (no per-block crops). Uses more VRAM/slower but avoids per-block issues; try if Lama gives bad results.
     inpaint_full_image: bool = False
@@ -61,25 +61,25 @@ class ModuleConfig(Config):
     inpaint_torch_compile: bool = False
     # ONNX Runtime session options for lama_onnx / lama_manga_onnx (graph opts, memory; intra_op threads 0 = ORT default).
     inpaint_onnx_ort_graph_optimization_level: str = "all"  # all | extended | basic | disable
-    inpaint_onnx_ort_enable_mem_pattern: bool = True
-    inpaint_onnx_ort_enable_cpu_mem_arena: bool = True
+    inpaint_onnx_ort__mem_pattern: bool = True
+    inpaint_onnx_ort__cpu_mem_arena: bool = True
     inpaint_onnx_ort_intra_op_num_threads: int = 0
     # Per-block inpainting: expand polygon mask vertically (descenders, halos). Critical for video subs + CTD; turn off if bubble edges look eaten.
     inpaint_block_mask_vertical_expand: bool = True
     load_model_on_demand: bool = False
     empty_runcache: bool = False
     # Optional: panel-aware reading order for block sorting (affects translation prompt order & typesetting sequence).
-    enable_panel_order: bool = False
+    _panel_order: bool = False
     # "auto" uses heuristic based on detected text orientation; "rtl" forces right-to-left; "ltr" forces left-to-right.
     panel_reading_direction: str = "auto"
     # Outside-speech-bubble (OSB) / text_free pipeline (optional, only works when detector sets blk.label, e.g. HF object det).
-    enable_osb_pipeline: bool = False
+    _osb_pipeline: bool = False
     # Group nearby OSB boxes into larger regions (captions/SFX clusters).
     osb_group_nearby: bool = True
     osb_group_gap_px: int = 24
     # Drop OSB boxes that overlap bubble boxes by IoU (to avoid double-processing text inside bubbles).
     osb_exclude_bubble_iou: float = 0.10
-    # After OCR, remove small margin page-number-like OSB blocks (e.g. "12"). Requires OCR enabled.
+    # After OCR, remove small margin page-number-like OSB blocks (e.g. "12"). Requires OCR d.
     osb_page_number_filter: bool = False
     osb_page_number_margin_ratio: float = 0.08
     # Probe OSB background and set readable fg/stroke defaults for rendering (does not override user styles later).
@@ -89,7 +89,7 @@ class ModuleConfig(Config):
     # Section 14: expand bubble boxes to fully contain overlapping OSB text so mask includes all text pixels.
     osb_expand_bubbles_with_osb: bool = True
     # Section 19: when OSB layout fails, retry with vertical stacking then restore original crop. Disable to only set restore_original_region on first failure.
-    osb_layout_fallbacks_enabled: bool = True
+    osb_layout_fallbacks_d: bool = True
     # Section 15: resolve overlapping mask regions by bisector split (and nudge for text boxes).
     resolve_mask_overlaps_bisector: bool = True
     # Section 16: cleaning quality — adaptive shrink at conjoined junctions, Otsu retry on failure.
@@ -110,16 +110,16 @@ class ModuleConfig(Config):
     translation_soft_failure_continue: bool = True
     # Skip translation for pages that already have all blocks translated (non-empty translation). Speeds up re-runs.
     skip_already_translated: bool = False
-    # Optional: merge nearby text blocks using collision-based grouping (Dango-style). Off by default; enable for word-level OCR or many small blocks.
+    # Optional: merge nearby text blocks using collision-based grouping (Dango-style). Off by default;  for word-level OCR or many small blocks.
     merge_nearby_blocks_collision: bool = False
     merge_nearby_blocks_gap_ratio: float = 1.5  # vertical expansion ratio for horizontal merge; 1.5 = Dango-style
     # Only run collision merge when page has at least this many blocks (avoids merging normal bubble layouts; default 18).
     merge_nearby_blocks_min_blocks: int = 18
     # Translation caching (saves API costs for deterministic settings/reruns)
-    translation_cache_enabled: bool = False
+    translation_cache_d: bool = False
     translation_cache_deterministic_only: bool = True
     # In-session OCR cache: reuse OCR results for same image/model/language (comic-translate style). Reduces redundant OCR runs.
-    ocr_cache_enabled: bool = True
+    ocr_cache_d: bool = True
     # When True, pipeline selects OCR by source language (e.g. Japanese → manga_ocr, Korean → preferred Korean OCR). Fallback: current OCR.
     ocr_auto_by_language: bool = False
     # Typesetting / layout (auto layout for translated text blocks)
@@ -147,7 +147,7 @@ class ModuleConfig(Config):
     layout_center_in_bubble_after_autolayout: bool = True
     layout_center_in_bubble_min_gap_px: float = 40.0  # skip centering if another block is within this many pixels (edge-to-edge)
     # Layout judge: nudge text box toward bubble center and keep it away from bubble edges (no corners). Off = 0.
-    layout_judge_enabled: bool = True
+    layout_judge_d: bool = True
     layout_judge_margin_ratio: float = 0.06  # min margin from bubble edge (fraction of min(bubble_w, bubble_h)); e.g. 0.06 = 6%
     layout_judge_center_strength: float = 1.0  # 0 = no nudge, 1 = full nudge toward bubble center (right-click Judge and auto-layout)
     layout_judge_clamp_overflow: bool = True  # shrink/clamp box so it never extends outside the bubble
@@ -287,7 +287,7 @@ class ModuleConfig(Config):
     video_translator_series_context_path: str = ""  # Optional series context path (folder or ID) for glossary/context; same as project series context.
     # Koharu-inspired LLM QA/consistency controls
     enable_glossary_enforcement: bool = True
-    llm_glossary_map: dict = {}
+    llm_glossary_map: Dict = field(default_factory=dict)
     enable_back_translation_qa: bool = False
     back_translation_drift_threshold: float = 0.58
     llm_token_budget: int = 420
@@ -295,7 +295,7 @@ class ModuleConfig(Config):
     text_normalization_profile: str = "balanced"
     runtime_http_timeout_sec: float = 60.0
     runtime_http_retries: int = 1
-    user_replace_profiles: dict = {}
+    user_replace_profiles: Dict = field(default_factory=dict)
     vertical_cjk_rotate_latin: bool = True
     vertical_cjk_punctuation_hang: bool = True
     pipeline_retry_detect: int = 1
