@@ -4,13 +4,13 @@ BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://
 
 <table align="center">
   <tr>
-    <td align="left" width="33%">
+    <td align="left" width="100%">
       <img src="doc/src/1111.png" alt="BallonsTranslator-Pro logo" width="180" />
     </td>
     <td align="center" width="34%">
       <img src="doc/src/icon2.png" alt="BallonsTranslator-Pro overview" width="320" />
     </td>
-    <td align="right" width="33%">
+    <td align="right" width="100%">
       <img src="doc/src/overview1.png" alt="BallonsTranslator-Pro workflow overview" width="180" />
     </td>
   </tr>
