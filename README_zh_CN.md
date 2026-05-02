@@ -87,7 +87,7 @@ BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/B
 ### 方式 B — Git clone（终端）
 
 ```bash
-git clone <REPO_URL>
+git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro
 cd BallonsTranslator-Pro
 python launch.py
 ```
