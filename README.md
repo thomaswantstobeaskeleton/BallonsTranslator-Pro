@@ -1,3 +1,6 @@
+> [!IMPORTANT]  
+> **如打算公开分享本工具的机翻结果，且没有有经验的译者进行过完整的翻译或校对，请在显眼位置注明机翻。**
+
 # BallonsTranslator-Pro
 
 BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) focused on serious manga/comic translation workflows.
@@ -41,33 +44,6 @@ You can now install Google Fonts directly from the app:
 3. The app downloads and registers the font automatically.
 
 Installed fonts are stored under `fonts/google/` and become available in font pickers.
-
----
-
-## Build desktop executables (Windows / macOS / Linux)
-
-One-click build scripts are included:
-
-- **Windows:** double-click `build_release.bat`
-- **macOS/Linux:** run `bash build_release.sh`
-
-These scripts install packaging dependencies and run PyInstaller using `launch.spec`, outputting app bundles in `dist/`.
-
----
-
-## Windows installer `.exe` (real app install flow)
-
-To create a Windows installer that behaves like normal software (install folder, Start Menu entry, optional Desktop shortcut):
-
-1. Install **Inno Setup 6** (https://jrsoftware.org/isinfo.php)
-2. Run `build_windows_installer.bat`
-3. Find the installer in `dist_installer/BallonsTranslatorPro-Setup.exe`
-
-This installer:
-- installs into `Program Files`
-- registers app uninstall entry in Windows
-- adds Start Menu shortcut
-- optionally adds Desktop shortcut
 
 ---
 
