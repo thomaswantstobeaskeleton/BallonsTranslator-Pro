@@ -8,7 +8,7 @@ BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://
       <img src="doc/src/1111.png" alt="BallonsTranslator-Pro logo" width="180" />
     </td>
     <td align="center" width="34%">
-      <img src="doc/src/icon1.jpg" alt="BallonsTranslator-Pro overview" width="320" />
+      <img src="doc/src/icon1.png" alt="BallonsTranslator-Pro overview" width="320" />
     </td>
     <td align="right" width="33%">
       <img src="doc/src/overview1.png" alt="BallonsTranslator-Pro workflow overview" width="180" />
