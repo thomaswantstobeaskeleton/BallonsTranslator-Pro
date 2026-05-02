@@ -232,6 +232,19 @@ class LeftBar(Widget):
         self._run_btn_breathe.setLoopCount(-1)
         QTimer.singleShot(300, self._run_btn_breathe.start)
 
+    def _refresh_run_button_breathe_animation(self):
+        icon_sz = self.runBtn.iconSize()
+        if icon_sz.width() <= 0 or icon_sz.height() <= 0:
+            icon_sz = QSize(20, 20)
+            self.runBtn.setIconSize(icon_sz)
+
+        up_sz = QSize(icon_sz.width() + 2, icon_sz.height() + 2)
+
+        self._run_btn_pulse_up.setStartValue(icon_sz)
+        self._run_btn_pulse_up.setEndValue(up_sz)
+        self._run_btn_pulse_down.setStartValue(up_sz)
+        self._run_btn_pulse_down.setEndValue(icon_sz)
+
     def apply_shortcuts(self, shortcuts_dict):
         """Apply keyboard shortcuts from config (action_id -> key string)."""
         from qtpy.QtGui import QKeySequence
