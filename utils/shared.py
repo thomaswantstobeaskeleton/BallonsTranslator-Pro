@@ -1,6 +1,7 @@
 from typing import Dict
 import os
 import os.path as osp
+import ntpath
 import json
 import sys
 
@@ -34,8 +35,23 @@ def _resolve_textstyle_dir() -> str:
     user_dir = osp.join(_user_config_root(), 'config', 'textstyles')
 
     candidates = [installed_dir, user_dir]
-    if sys.platform == 'win32' and getattr(sys, 'frozen', False):
-        candidates = [user_dir, installed_dir]
+    if sys.platform == 'win32':
+        # Installed builds are commonly placed under Program Files, which is
+        # read-only for standard users. Prefer per-user storage in that case.
+        protected_roots = [
+            os.environ.get('ProgramW6432', ''),
+            os.environ.get('ProgramFiles', ''),
+            os.environ.get('ProgramFiles(x86)', ''),
+        ]
+        normalized_program_path = ntpath.normcase(ntpath.normpath(PROGRAM_PATH))
+        is_protected_install = any(
+            root and normalized_program_path.startswith(ntpath.normcase(ntpath.normpath(root)) + ntpath.sep)
+            for root in protected_roots
+        )
+        if is_protected_install:
+            candidates = [user_dir, installed_dir]
+        elif getattr(sys, 'frozen', False):
+            candidates = [user_dir, installed_dir]
 
     for candidate in candidates:
         try:
