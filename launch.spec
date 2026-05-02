@@ -3,8 +3,14 @@ import os
 import subprocess
 from PyInstaller.utils.hooks import collect_data_files
 
-# 获取提交哈希值
-commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('utf-8').strip()
+# 获取提交哈希值（如果不是 git 仓库则使用 fallback）
+try:
+    commit_hash = subprocess.check_output(
+        ['git', 'rev-parse', '--short', 'HEAD'],
+        stderr=subprocess.DEVNULL,
+    ).decode('utf-8').strip()
+except Exception:
+    commit_hash = os.environ.get('BATR_COMMIT_HASH', 'nogit')
 
 # 构造带提交哈希值的版本号
 version = "1.4.0.dev." + commit_hash
