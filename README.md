@@ -60,7 +60,7 @@ Installed fonts are stored under `fonts/google/` and become available in font pi
 ### Option B — Git clone (terminal)
 
 ```bash
-git clone <REPO_URL>
+git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro
 cd BallonsTranslator-Pro
 python launch.py
 ```
