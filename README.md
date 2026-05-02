@@ -3,7 +3,7 @@
 BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) focused on serious manga/comic translation workflows.
 
 <p align="center">
-  <img src="doc/src/1111.png" width="80%">
+  <img src="doc/src/1111.png" width="100%">
 </p>
 
 At a high level, BallonsTranslator-Pro helps you:
