@@ -19,7 +19,7 @@ from .custom_widget import ScrollBar, FadeLabel
 from .image_edit import ImageEditMode, DrawingLayer, StrokeImgItem
 from .page_search_widget import PageSearchWidget
 from utils import shared as C
-from utils.config import pcfg
+from utils.config import pcfg, save_config
 from utils.config import context_menu_visible
 from utils.shortcuts import get_shortcut
 from utils.proj_imgtrans import ProjImgTrans
@@ -1438,6 +1438,20 @@ class Canvas(QGraphicsScene):
 
             rst = menu_new.exec(pos)
             self._last_rubber_band_rect = None
+
+            if rst in pin_toggle_actions:
+                key = pin_toggle_actions[rst]
+
+                pinned_now = [
+                    k for k in (getattr(pcfg, "context_menu_pinned", None) or [])
+                    if k in actions_map and k != key
+                ]
+                if rst.isChecked():
+                    pinned_now.append(key)
+
+                pcfg.context_menu_pinned = pinned_now
+                save_config()
+                return
 
             if rst == configure_menu_act:
                 dlg = ContextMenuConfigDialog(self.gv)
