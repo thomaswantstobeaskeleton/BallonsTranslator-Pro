@@ -2054,16 +2054,7 @@ class MainWindow(mainwindow_cls):
         self.statusBar().showMessage(self.tr(f"Layout review applied to page ({loops} iteration(s))."), 5000)
 
     def _get_layout_review_config(self) -> ReviewModelConfig:
-        cfg = getattr(self, "_layout_review_config", None)
-        if isinstance(cfg, ReviewModelConfig):
-            return cfg
-        self._layout_review_config = ReviewModelConfig(provider="heuristic")
-        self._layout_review_config.extra_params = {
-            "api_base_url": "",
-            "api_key": "",
-            "api_path": "/v1/chat/completions",
-        }
-        return self._layout_review_config
+        return self._layout_review_config_from_pcfg()
 
     def shortcutLayoutReviewConfig(self):
         dlg = QDialog(self)
