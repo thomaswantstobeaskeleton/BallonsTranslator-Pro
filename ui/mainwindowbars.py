@@ -1785,6 +1785,7 @@ class BottomBar(Widget):
         self.spellCheckChecker = QCheckBox()
         self.spellCheckChecker.setObjectName('SpellCheckChecker')
         self.spellCheckChecker.setToolTip(self.tr('Spell check panel'))
+        self._set_spellcheck_icon(False)
         self.spellCheckChecker.clicked.connect(self.onSpellCheckCheckerPressed)
         self.textblockChecker = QCheckBox()
         self.textblockChecker.setObjectName('TextblockChecker')
@@ -1854,11 +1855,34 @@ class BottomBar(Widget):
             install_hover_opacity_animation(chk, duration_ms=100, normal_opacity=0.88, press_opacity=0.74)
 
 
+    def _set_spellcheck_icon(self, checked: bool = None):
+        """Use a real icon for the bottom-bar spell-check mode button.
+
+        The other bottom-bar mode buttons are primarily styled by objectName in
+        QSS.  SpellCheckChecker was added later and may not have a matching QSS
+        image rule in older themes, so give it an explicit SVG fallback here.
+        """
+        if checked is None:
+            checked = bool(self.spellCheckChecker.isChecked())
+
+        icon_name = 'bottombar_spellcheck_activate.svg' if checked else 'bottombar_spellcheck.svg'
+        icon_path = osp.join(C.PROGRAM_PATH, 'icons', icon_name)
+
+        # Fall back to the title-bar spell-check icon if the new bottombar icon
+        # was not copied yet. This keeps older checkouts usable.
+        if not osp.isfile(icon_path):
+            icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')
+
+        if osp.isfile(icon_path):
+            self.spellCheckChecker.setIcon(QIcon(icon_path))
+            self.spellCheckChecker.setIconSize(QSize(20, 20))
+
     def onPaintCheckerPressed(self):
         checked = self.paintChecker.isChecked()
         if checked:
             self.texteditChecker.setChecked(False)
             self.spellCheckChecker.setChecked(False)
+            self._set_spellcheck_icon(False)
         pcfg.imgtrans_paintmode = checked
         self.paintmode_checkchanged.emit()
 
@@ -1867,6 +1891,7 @@ class BottomBar(Widget):
         if checked:
             self.paintChecker.setChecked(False)
             self.spellCheckChecker.setChecked(False)
+            self._set_spellcheck_icon(False)
         pcfg.imgtrans_textedit = checked
         self.textedit_checkchanged.emit()
 
@@ -1875,6 +1900,7 @@ class BottomBar(Widget):
         if checked:
             self.paintChecker.setChecked(False)
             self.texteditChecker.setChecked(False)
+        self._set_spellcheck_icon(checked)
         self.spellcheck_checkchanged.emit()
 
     def setPipelineVisible(self, visible: bool):
