@@ -540,8 +540,6 @@ class TitleBar(Widget):
         contextMenuOptionsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.context_menu_options", getattr(pcfg, "shortcuts", None))))
         contextMenuOptionsAction.setToolTip(self.tr('Show or hide canvas right-click menu actions by category.'))
         self.context_menu_options_trigger = contextMenuOptionsAction.triggered
-        self.darkModeAction = darkModeAction = QAction(self.tr('Dark Mode'), self)
-        darkModeAction.setCheckable(True)
         themeLightAction = QAction(self.tr('Light'), self)
         themeLightAction.setToolTip(self.tr('Use light theme (Eva Light).'))
         themeDarkAction = QAction(self.tr('Dark'), self)
@@ -554,11 +552,6 @@ class TitleBar(Widget):
         themeGroup.addAction(themeDarkAction)
         self.theme_light_trigger = themeLightAction.triggered
         self.theme_dark_trigger = themeDarkAction.triggered
-        bubblyUIAction = QAction(self.tr('Bubbly UI'), self)
-        bubblyUIAction.setCheckable(True)
-        bubblyUIAction.setToolTip(self.tr('Rounder corners, gradients, and softer look.'))
-        self.bubbly_ui_trigger = bubblyUIAction.triggered
-        self.bubblyUIAction = bubblyUIAction
         self.themeLightAction = themeLightAction
         self.themeDarkAction = themeDarkAction
 
@@ -589,8 +582,6 @@ class TitleBar(Widget):
         themeMenu.addAction(themeLightAction)
         themeMenu.addAction(themeDarkAction)
         viewMenu.addMenu(themeMenu)
-        viewMenu.addAction(darkModeAction)
-        viewMenu.addAction(bubblyUIAction)
         themeCustomizerAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')), self.tr('Theme and UI customizer...'), self)
         themeCustomizerAction.setToolTip(self.tr('Change accent color, app font, light/dark, simple vs advanced UI.'))
         viewMenu.addAction(themeCustomizerAction)
@@ -603,7 +594,6 @@ class TitleBar(Widget):
         self.drawboard_trigger = drawBoardAction.triggered
         self.importtstyle_trigger = importTextStyles.triggered
         self.exporttstyle_trigger = exportTextStyles.triggered
-        self.darkmode_trigger = darkModeAction.triggered
         self.help_doc_trigger = docAction.triggered
         self.help_about_trigger = aboutAction.triggered
         self.help_update_from_github_trigger = updateFromGitHubAction.triggered

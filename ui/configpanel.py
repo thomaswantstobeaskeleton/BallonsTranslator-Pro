@@ -11,6 +11,7 @@ from .custom_widget.smooth_scroll import SmoothScrollArea
 from .custom_widget.focus_ring import FocusRingFrame
 from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
+from utils.data_path_manager import resolve_data_path, free_space_gb, ensure_data_path
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .glossary_map_dialog import GlossaryMapDialog
@@ -390,7 +391,6 @@ class ConfigPanel(Widget):
     reload_textstyle = Signal(bool)
     show_only_custom_font = Signal(bool)
     darkmode_changed = Signal(bool)
-    bubbly_ui_changed = Signal(bool)
     custom_cursor_changed = Signal()
     display_lang_changed = Signal(str)
     dev_mode_changed = Signal()
@@ -776,6 +776,40 @@ class ConfigPanel(Widget):
             self.tr('HTTP retries'),
             discription=self.tr('Retry count for transient network/provider errors.')
         ))
+        self.automation_api_enabled_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable local automation API (localhost only)'),
+            discription=self.tr('Exposes open_project/run_pipeline/apply_edit/undo/redo/export endpoints on 127.0.0.1.')
+        )
+        self.automation_api_enabled_checker.stateChanged.connect(self.on_automation_api_enabled_changed)
+        self.automation_api_port_spin = QSpinBox()
+        self.automation_api_port_spin.setRange(1024, 65535)
+        self.automation_api_port_spin.valueChanged.connect(self.on_automation_api_port_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.automation_api_port_spin,
+            self.tr('Automation API port'),
+            discription=self.tr('Restart app after changing this value.')
+        ))
+        self.automation_api_key_edit = QLineEdit(self)
+        self.automation_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.automation_api_key_edit.textChanged.connect(self.on_automation_api_key_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.automation_api_key_edit,
+            self.tr('Automation API key (optional)'),
+            discription=self.tr('When set, callers must send matching X-API-Key header.')
+        ))
+        self.data_path_btn = QPushButton(self.tr('Set data path...'))
+        self.data_path_btn.clicked.connect(self.on_pick_data_path)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.data_path_btn,
+            self.tr('Data path manager'),
+            discription=self.tr('Choose a custom data folder and run a free-space health check.')
+        ))
+        self.data_path_status_label = QLabel(self)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.data_path_status_label,
+            self.tr('Data path health'),
+            discription=self.tr('Shows active data path and free disk space.')
+        ))
         generalConfigPanel.addTextLabel(self.tr('Vertical CJK rendering'))
         self.vertical_cjk_rotate_latin_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Rotate latin glyphs in vertical text'),
@@ -813,17 +847,6 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(darkmode_sublock)
         self.darkmode_checker.checkedChanged.connect(self.on_darkmode_checker_changed)
 
-        self.bubbly_ui_checker = DangoSwitch(self)
-        self.bubbly_ui_checker.setChecked(bool(getattr(pcfg, 'bubbly_ui', True)))
-        bubbly_ui_sublock = ConfigSubBlock(
-            self.bubbly_ui_checker,
-            self.tr('Bubbly UI'),
-            discription=self.tr('Rounder corners, gradients, softer look. Same as View → Bubbly UI.'),
-            vertical_layout=False,
-            insert_stretch=True
-        )
-        generalConfigPanel.addSublock(bubbly_ui_sublock)
-        self.bubbly_ui_checker.checkedChanged.connect(self.on_bubbly_ui_checker_changed)
 
         self.smooth_scroll_spin = QSpinBox()
         self.smooth_scroll_spin.setRange(0, 400)
@@ -1375,10 +1398,6 @@ class ConfigPanel(Widget):
         pcfg.darkmode = self.darkmode_checker.isChecked()
         self.darkmode_changed.emit(pcfg.darkmode)
 
-    def on_bubbly_ui_checker_changed(self):
-        pcfg.bubbly_ui = self.bubbly_ui_checker.isChecked()
-        self.bubbly_ui_changed.emit(pcfg.bubbly_ui)
-
     def on_smooth_scroll_changed(self, value: int):
         pcfg.smooth_scroll_duration_ms = value
         if hasattr(self, 'configContent') and hasattr(self.configContent, 'setSmoothScrollDuration'):
@@ -1679,6 +1698,28 @@ class ConfigPanel(Widget):
         pcfg.runtime_http_timeout_sec = float(self.runtime_http_timeout_spin.value())
     def on_runtime_http_retries_changed(self):
         pcfg.runtime_http_retries = int(self.runtime_http_retries_spin.value())
+    def on_automation_api_enabled_changed(self):
+        pcfg.automation_api_enabled = self.automation_api_enabled_checker.isChecked()
+    def on_automation_api_port_changed(self):
+        pcfg.automation_api_port = int(self.automation_api_port_spin.value())
+    def on_automation_api_key_changed(self):
+        pcfg.automation_api_key = (self.automation_api_key_edit.text() or '').strip()
+    def on_pick_data_path(self):
+        current = resolve_data_path(getattr(pcfg, 'data_path_override', ''))
+        path = QFileDialog.getExistingDirectory(self, self.tr('Choose data path'), current)
+        if not path:
+            return
+        pcfg.data_path_override = path
+        self.refresh_data_path_health()
+
+    def refresh_data_path_health(self):
+        p = resolve_data_path(getattr(pcfg, 'data_path_override', ''))
+        try:
+            ensure_data_path(p)
+            free_gb = free_space_gb(p)
+            self.data_path_status_label.setText(self.tr(f'{p} (free: {free_gb:.2f} GB)'))
+        except Exception:
+            self.data_path_status_label.setText(self.tr(f'{p} (health check failed)'))
     def on_vertical_cjk_rotate_latin_changed(self):
         pcfg.vertical_cjk_rotate_latin = self.vertical_cjk_rotate_latin_checker.isChecked()
     def on_vertical_cjk_punctuation_hang_changed(self):
@@ -1878,6 +1919,14 @@ class ConfigPanel(Widget):
             self.runtime_http_timeout_spin.setValue(float(getattr(pcfg, 'runtime_http_timeout_sec', 60.0)))
         if hasattr(self, 'runtime_http_retries_spin'):
             self.runtime_http_retries_spin.setValue(int(getattr(pcfg, 'runtime_http_retries', 1)))
+        if hasattr(self, 'automation_api_enabled_checker'):
+            self.automation_api_enabled_checker.setChecked(bool(getattr(pcfg, 'automation_api_enabled', False)))
+        if hasattr(self, 'automation_api_port_spin'):
+            self.automation_api_port_spin.setValue(int(getattr(pcfg, 'automation_api_port', 39542)))
+        if hasattr(self, 'automation_api_key_edit'):
+            self.automation_api_key_edit.setText(str(getattr(pcfg, 'automation_api_key', '') or ''))
+        if hasattr(self, 'data_path_status_label'):
+            self.refresh_data_path_health()
         if hasattr(self, 'vertical_cjk_rotate_latin_checker'):
             self.vertical_cjk_rotate_latin_checker.setChecked(bool(getattr(pcfg, 'vertical_cjk_rotate_latin', True)))
         if hasattr(self, 'vertical_cjk_punctuation_hang_checker'):
@@ -1969,7 +2018,6 @@ class ConfigPanel(Widget):
             self.auto_region_merge_combobox.setCurrentIndex(arm_idx)
             self.auto_region_merge_combobox.blockSignals(False)
         self.darkmode_checker.setChecked(pcfg.darkmode)
-        self.bubbly_ui_checker.setChecked(getattr(pcfg, 'bubbly_ui', True))
         self.use_custom_cursor_checker.setChecked(bool(getattr(pcfg, 'use_custom_cursor', False)))
         self.custom_cursor_path_edit.blockSignals(True)
         self.custom_cursor_path_edit.setText(getattr(pcfg, 'custom_cursor_path', '') or '')

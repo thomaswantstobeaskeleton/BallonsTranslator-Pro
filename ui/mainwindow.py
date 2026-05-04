@@ -1,5 +1,7 @@
 import os.path as osp
 import os, re, traceback, sys
+import queue
+import threading
 import shutil
 import copy
 import numpy as np
@@ -62,7 +64,11 @@ from .spellcheck_panel import SpellCheckPanel
 from .pipeline_insights_widget import PipelineInsightsWidget
 from .image_edit import ImageEditMode
 from .mask_diagnostics_widget import MaskDiagnosticsWidget
+from .ocr_crop_inspector_widget import OcrCropInspectorWidget
+from .project_ops_dialog import ProjectOpsDialog
+from .reading_order_editor_dialog import ReadingOrderEditorDialog
 from utils.image_colorization import apply_colorization
+from utils.local_automation_api import LocalAutomationApiServer
 from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
@@ -526,9 +532,15 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.rerun_stage_requested.connect(self.on_rerun_stage_requested)
         self.pipelineInsightsPanel.apply_regex_profile_requested.connect(self.on_apply_regex_profile_requested)
         self.pipelineInsightsPanel.open_mask_diagnostics_requested.connect(self.on_open_mask_diagnostics_requested)
+        self.pipelineInsightsPanel.apply_project_ops_requested.connect(self.on_apply_project_ops_requested)
+        self.pipelineInsightsPanel.open_ocr_crop_inspector_requested.connect(self.on_open_ocr_crop_inspector_requested)
+        self.pipelineInsightsPanel.open_reading_order_editor_requested.connect(self.on_open_reading_order_editor_requested)
+        self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
         self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
         self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
         self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
+        self.ocrCropInspectorPanel = OcrCropInspectorWidget(self)
+        self.rightComicTransStackPanel.addWidget(self.ocrCropInspectorPanel)
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
         self.comicTransSplitter = QSplitter(Qt.Orientation.Horizontal)
@@ -701,11 +713,131 @@ class MainWindow(mainwindow_cls):
         module_manager.setInpainter()
         self.pipelineInsightsPanel.set_engine_registry(module_manager.get_engine_registry_snapshot())
         self._refresh_pipeline_provider_health()
+        self._api_cmd_queue = queue.Queue()
+        self._api_cmd_timer = QTimer(self)
+        self._api_cmd_timer.timeout.connect(self._drain_api_cmd_queue)
+        self._api_cmd_timer.start(40)
+        self._api_status_timer = QTimer(self)
+        self._api_status_timer.timeout.connect(self._refresh_api_status)
+        self._api_status_timer.start(500)
+        self._setup_local_automation_api()
 
-        self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
+    def _refresh_api_status(self):
+        enabled = bool(getattr(self, '_automation_api', None) is not None)
+        qd = 0
+        try:
+            qd = int(self._api_cmd_queue.qsize())
+        except Exception:
+            qd = 0
+        self.pipelineInsightsPanel.set_api_status(enabled, qd)
+
+    def _drain_api_cmd_queue(self):
+        for _ in range(8):
+            try:
+                item = self._api_cmd_queue.get_nowait()
+            except Exception:
+                return
+            try:
+                item['result'] = item['fn'](item.get('body') or {})
+            except Exception as e:
+                item['error'] = str(e)
+            item['ev'].set()
+
+    def _api_call_ui(self, fn, body: dict):
+        ev = threading.Event()
+        item = {'fn': fn, 'body': body or {}, 'ev': ev}
+        self._api_cmd_queue.put(item)
+        if not ev.wait(timeout=15.0):
+            raise RuntimeError('API command timeout')
+        if item.get('error'):
+            raise RuntimeError(item.get('error'))
+        return item.get('result') or {}
+
+    def _setup_local_automation_api(self):
+        if not bool(getattr(pcfg, 'automation_api_enabled', False)):
+            self._automation_api = None
+            return
+        handlers = {
+            'open_project': self._api_open_project,
+            'run_pipeline': self._api_run_pipeline,
+            'apply_edit': self._api_apply_edit,
+            'undo': self._api_undo,
+            'redo': self._api_redo,
+            'export': self._api_export,
+            'layout_review': self._api_layout_review,
+        }
+        try:
+            self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
+            self._automation_api.start()
+            self.pipelineInsightsPanel.add_event('API', self.tr('Local automation API started'))
+        except Exception as e:
+            self.pipelineInsightsPanel.add_warning('API', self.tr(f'Failed to start automation API: {e}'))
+
+    def _api_open_project(self, body: dict):
+        return self._api_call_ui(self._api_open_project_ui, body)
+
+    def _api_open_project_ui(self, body: dict):
+        path = str((body or {}).get('path', '')).strip()
+        if not path:
+            raise ValueError('path is required')
+        self.OpenProj(path)
+        return {'opened': path}
+
+    def _api_run_pipeline(self, body: dict):
+        return self._api_call_ui(self._api_run_pipeline_ui, body)
+
+    def _api_run_pipeline_ui(self, body: dict):
+        self.on_run_imgtrans()
+        return {'started': True}
+
+    def _api_apply_edit(self, body: dict):
+        return self._api_call_ui(self._api_apply_edit_ui, body)
+
+    def _api_apply_edit_ui(self, body: dict):
+        page = self.imgtrans_proj.current_img
+        blks = self.imgtrans_proj.pages.get(page, []) if page else []
+        idx = int((body or {}).get('index', -1))
+        text = str((body or {}).get('text', ''))
+        if idx < 0 or idx >= len(blks):
+            raise ValueError('invalid index')
+        blks[idx].translation = text
+        self.canvas.updateTextBlkList()
+        return {'page': page, 'index': idx}
+
+    def _api_undo(self, body: dict):
+        return self._api_call_ui(self._api_undo_ui, body)
+
+    def _api_undo_ui(self, body: dict):
+        self.on_undo()
+        return {'ok': True}
+
+    def _api_redo(self, body: dict):
+        return self._api_call_ui(self._api_redo_ui, body)
+
+    def _api_redo_ui(self, body: dict):
+        self.on_redo()
+        return {'ok': True}
+
+    def _api_export(self, body: dict):
+        return self._api_call_ui(self._api_export_ui, body)
+
+    def _api_export_ui(self, body: dict):
+        self.on_export_lptxt()
+        return {'ok': True}
+
+    def _api_layout_review(self, body: dict):
+        return self._api_call_ui(self._api_layout_review_ui, body)
+
+    def _api_layout_review_ui(self, body: dict):
+        mode = str((body or {}).get('mode', 'page')).strip().lower()
+        if mode == 'selected':
+            self.shortcutLayoutReviewSelected()
+        else:
+            self.shortcutLayoutReviewPage()
+        return {'ok': True, 'mode': mode}
+
         self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
         self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
-        self.titleBar.bubblyUIAction.setChecked(getattr(pcfg, 'bubbly_ui', True))
 
         self.drawingPanel.set_config(pcfg.drawpanel)
         self.drawingPanel.initDLModule(module_manager)
@@ -719,7 +851,6 @@ class MainWindow(mainwindow_cls):
         self.configPanel.reload_textstyle.connect(self.load_textstyle_from_proj_dir)
         self.configPanel.show_only_custom_font.connect(self.on_show_only_custom_font)
         self.configPanel.darkmode_changed.connect(self.on_config_darkmode_changed)
-        self.configPanel.bubbly_ui_changed.connect(self.on_config_bubbly_ui_changed)
         self.configPanel.custom_cursor_changed.connect(self._on_config_custom_cursor_changed)
         self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
         self.configPanel.dev_mode_changed.connect(self.on_dev_mode_changed)
@@ -841,6 +972,60 @@ class MainWindow(mainwindow_cls):
             return
         self.maskDiagnosticsPanel.set_mask(mask)
         self.rightComicTransStackPanel.setCurrentWidget(self.maskDiagnosticsPanel)
+
+    def on_apply_project_ops_requested(self):
+        page = self.imgtrans_proj.current_img
+        if not page:
+            self.pipelineInsightsPanel.add_warning('OPS', self.tr('No current page loaded.'))
+            return
+        blk_list = self.imgtrans_proj.pages.get(page, []) or []
+        if not blk_list:
+            self.pipelineInsightsPanel.add_warning('OPS', self.tr('No text blocks found on current page.'))
+            return
+        def _commit(items):
+            for i, row in enumerate(items or []):
+                if i < len(blk_list):
+                    blk_list[i].translation = str((row or {}).get('translation', ''))
+            self.canvas.updateTextBlkList()
+            self.pipelineInsightsPanel.add_event('OPS', self.tr('Committed ProjectOps changes to current page'))
+
+        dlg = ProjectOpsDialog(page, blk_list, _commit, self)
+        dlg.exec()
+
+    def on_open_ocr_crop_inspector_requested(self):
+        page = self.imgtrans_proj.current_img
+        if not page:
+            self.pipelineInsightsPanel.add_warning('OCR_INSPECT', self.tr('No current page loaded.'))
+            return
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        img = getattr(self.imgtrans_proj, 'img_array', None)
+        if img is None or not blks:
+            self.pipelineInsightsPanel.add_warning('OCR_INSPECT', self.tr('Missing image or OCR blocks on current page.'))
+            return
+        self.ocrCropInspectorPanel.set_page(img, blks)
+        self.rightComicTransStackPanel.setCurrentWidget(self.ocrCropInspectorPanel)
+
+    def on_open_reading_order_editor_requested(self):
+        page = self.imgtrans_proj.current_img
+        if not page:
+            self.pipelineInsightsPanel.add_warning('ORDER', self.tr('No current page loaded.'))
+            return
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        if not blks:
+            self.pipelineInsightsPanel.add_warning('ORDER', self.tr('No OCR blocks to reorder.'))
+            return
+
+        def _commit(new_order):
+            self.imgtrans_proj.pages[page] = list(new_order)
+            self.canvas.updateTextBlkList()
+            self.pipelineInsightsPanel.add_event('ORDER', self.tr('Applied reading order changes'))
+
+        dlg = ReadingOrderEditorDialog(blks, _commit, self)
+        dlg.exec()
+
+    def on_run_layout_review_requested(self):
+        self.shortcutLayoutReviewPage()
+        self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review agent run on current page'))
 
     def setupImgTransUI(self):
         self.centralStackWidget.setCurrentIndex(1)
@@ -1211,10 +1396,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.enable_module.connect(self.on_enable_module)
         self.titleBar.importtstyle_trigger.connect(self.import_tstyles)
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
-        self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
         self.titleBar.theme_light_trigger.connect(self._on_theme_light_triggered)
         self.titleBar.theme_dark_trigger.connect(self._on_theme_dark_triggered)
-        self.titleBar.bubbly_ui_trigger.connect(self._on_bubbly_ui_triggered)
         self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
         self.titleBar.re_run_detection_only_trigger.connect(self.on_re_run_detection_only)
         self.titleBar.re_run_ocr_only_trigger.connect(self.on_re_run_ocr_only)
@@ -1370,10 +1553,8 @@ class MainWindow(mainwindow_cls):
         dlg.show()
 
     def _on_theme_customizer_applied(self, font_family: str, font_size: int):
-        self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
         self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
         self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
-        self.titleBar.bubblyUIAction.setChecked(getattr(pcfg, 'bubbly_ui', True))
         self.resetStyleSheet()
         # Font is applied in resetStyleSheet() -> _apply_app_font() (pcfg already saved by dialog)
 
@@ -4286,40 +4467,21 @@ class MainWindow(mainwindow_cls):
         rt.sceneitem_list = None
         rt.background_list = None
 
-    def on_darkmode_triggered(self):
-        pcfg.darkmode = self.titleBar.darkModeAction.isChecked()
-        self.titleBar.themeLightAction.setChecked(not pcfg.darkmode)
-        self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
-        self.resetStyleSheet()
-
     def _on_theme_light_triggered(self):
         pcfg.darkmode = False
-        self.titleBar.darkModeAction.setChecked(False)
         self.titleBar.themeLightAction.setChecked(True)
         self.titleBar.themeDarkAction.setChecked(False)
         self.resetStyleSheet()
 
     def _on_theme_dark_triggered(self):
         pcfg.darkmode = True
-        self.titleBar.darkModeAction.setChecked(True)
         self.titleBar.themeLightAction.setChecked(False)
         self.titleBar.themeDarkAction.setChecked(True)
         self.resetStyleSheet()
 
-    def _on_bubbly_ui_triggered(self):
-        pcfg.bubbly_ui = self.titleBar.bubblyUIAction.isChecked()
-        self.resetStyleSheet()
-        self.save_config()
-
     def on_config_darkmode_changed(self, checked: bool):
-        self.titleBar.darkModeAction.setChecked(checked)
         self.titleBar.themeLightAction.setChecked(not checked)
         self.titleBar.themeDarkAction.setChecked(checked)
-        self.resetStyleSheet()
-        self.save_config()
-
-    def on_config_bubbly_ui_changed(self, checked: bool):
-        self.titleBar.bubblyUIAction.setChecked(checked)
         self.resetStyleSheet()
         self.save_config()
 

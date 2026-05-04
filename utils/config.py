@@ -295,6 +295,10 @@ class ModuleConfig(Config):
     text_normalization_profile: str = "balanced"
     runtime_http_timeout_sec: float = 60.0
     runtime_http_retries: int = 1
+    data_path_override: str = ""
+    automation_api_enabled: bool = False
+    automation_api_port: int = 39542
+    automation_api_key: str = ""
     user_replace_profiles: Dict = field(default_factory=dict)
     vertical_cjk_rotate_latin: bool = True
     vertical_cjk_punctuation_hang: bool = True
@@ -642,7 +646,7 @@ CONFIG_KEY_ORDER = (
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
     "enable_glossary_enforcement", "llm_glossary_map", "enable_back_translation_qa", "back_translation_drift_threshold", "llm_token_budget",
     "enable_text_normalization", "text_normalization_profile",
-    "runtime_http_timeout_sec", "runtime_http_retries",
+    "runtime_http_timeout_sec", "runtime_http_retries", "data_path_override", "automation_api_enabled", "automation_api_port", "automation_api_key",
     "user_replace_profiles",
     "vertical_cjk_rotate_latin", "vertical_cjk_punctuation_hang",
     "pipeline_retry_detect", "pipeline_retry_ocr", "pipeline_retry_translate", "pipeline_retry_inpaint",
