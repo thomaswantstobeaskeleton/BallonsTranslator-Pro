@@ -84,27 +84,34 @@ This analysis reviews `mayocream/koharu` architecture and documents concrete imp
 ## Implementation progress snapshot (updated)
 
 ### Completed or substantially implemented
+- ✅ **Layout review agent end-to-end wiring**: menu/shortcuts + Pipeline Insights trigger + local automation API route (`layout_review`) all invoke the same review flow.
+- ✅ **Theme settings cleanup**: removed legacy Bubbly UI mode and unified light/dark switching so theme controls are no longer duplicated.
+- ✅ **Edge-halo detector QA (initial implementation)** in mask diagnostics with edge-ring halo ratio scoring to flag likely cleanup artifacts.
+- ✅ **Auto-threshold tuner foundation** in mask diagnostics (Otsu recommendation + live mask fill metrics).
 - ✅ **Stage-level warnings panel with structured codes** (Pipeline Insights warnings: `MT_DRIFT`, `RERUN`, `HTTP_RETRY_FAIL`, etc.).
 - ✅ **Pipeline job IDs + event stream basics** (job sequence IDs + timeline events emitted from ModuleManager to UI).
 - ✅ **Selective stage intent controls** (rerun requests from pipeline panel; currently mapped to full run with stage intent retained in telemetry).
 - ✅ **Mask diagnostics view foundation** (raw/thresholded/dilated mask preview + threshold/dilation controls).
+- ✅ **OCR crop inspector (initial)** with per-block crop preview, OCR text, translation preview, and confidence listing from Pipeline Insights.
 - ✅ **Glossary enforcement mode** with UI editor and postprocess integration.
 - ✅ **Back-translation drift QA** with threshold setting and visible warnings.
 - ✅ **Token-budget-aware helper utilities** for chunk planning.
 - ✅ **Runtime HTTP controls in UI** (timeout/retry) applied to provider-backed review calls.
+- ✅ **Data path manager (initial)** with custom data path picker and free-space health indicator in settings.
 - ✅ **Engine/provider health surfaces** (provider readiness and engine registry snapshot in Pipeline Insights).
 - ✅ **Text normalization + regex replace profiles** (configurable postprocess and reusable profile editor/apply flow).
 - ✅ **Vertical CJK render controls (initial pass)**: rotate-latin toggle + punctuation hanging toggle exposed in settings and applied in scene text layout logic.
 
 ### In progress / partial
 - 🟡 **Dual-detector orchestration**: partial groundwork via detector options/retries; confidence-map fusion policy still pending.
-- 🟡 **Automation operation protocol**: UI and runtime observability in place; stable JSON op API contract not finalized.
-- 🟡 **Reading-order/editor tooling**: helper workflows exist, but dedicated graph-style order editor is still pending.
+- 🟡 **Automation operation protocol**: introduced a stable ProjectOps schema (`UpdateText`, `Batch`) with undo/redo-ready operation chunks and a full JSON ProjectOps Console (apply/undo/redo/commit) in Pipeline Insights; local localhost automation API routes (`open_project`, `run_pipeline`, `apply_edit`, `undo`, `redo`, `export`) are now implemented as an initial command surface with optional API-key auth, queued UI-thread dispatch, and live queue status in Pipeline Insights.
+- 🟡 **Credential storage separation**: keyring-backed storage added for video flow-fixer API keys with config fallback; full translator/LLM migration still pending.
+- 🟡 **Reading-order/editor tooling**: helper workflows + OCR crop inspector are in place; a dedicated Reading Order Editor (manual reorder) is now implemented, while graph-edge visualization and auto-order suggestions remain pending.
 
 ### Not yet implemented
-- ⏳ MCP-first command surface (`open_project`, `run_pipeline`, `apply_edit`, `undo`, `redo`, `export`) as a stable external API.
-- ⏳ Keyring-backed credential storage migration for translator/LLM keys.
-- ⏳ Bubble-aware adaptive cleanup expansion and edge-halo auto-detector QA.
+- ⏳ MCP-first command surface hardening (documented stable contract, richer validation, and external tool docs) for the new localhost routes (auth + queued UI-thread execution are now supported).
+- ⏳ Keyring-backed credential storage migration for all translator/LLM keys (beyond current flow-fixer keyring support).
+- ⏳ Bubble-aware adaptive cleanup expansion (inside/outside bubble differential dilation policy).
 - ⏳ Vertical CJK policy engine and renderer-level punctuation hanging/rotate toggles.
 - ⏳ PSD text/effect metadata fidelity mode.
 

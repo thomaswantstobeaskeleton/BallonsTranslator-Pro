@@ -6,6 +6,10 @@ class PipelineInsightsWidget(QWidget):
     rerun_stage_requested = Signal(str)
     apply_regex_profile_requested = Signal()
     open_mask_diagnostics_requested = Signal()
+    apply_project_ops_requested = Signal()
+    open_ocr_crop_inspector_requested = Signal()
+    open_reading_order_editor_requested = Signal()
+    run_layout_review_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,6 +51,21 @@ class PipelineInsightsWidget(QWidget):
         self.mask_diag_btn = QPushButton(self.tr('Mask Diagnostics'), self)
         self.mask_diag_btn.clicked.connect(self.open_mask_diagnostics_requested.emit)
         lay.addWidget(self.mask_diag_btn)
+        self.ops_btn = QPushButton(self.tr('Apply Project Ops'), self)
+        self.ops_btn.clicked.connect(self.apply_project_ops_requested.emit)
+        lay.addWidget(self.ops_btn)
+        self.ocr_inspector_btn = QPushButton(self.tr('OCR Crop Inspector'), self)
+        self.ocr_inspector_btn.clicked.connect(self.open_ocr_crop_inspector_requested.emit)
+        lay.addWidget(self.ocr_inspector_btn)
+        self.reading_order_btn = QPushButton(self.tr('Reading Order Editor'), self)
+        self.reading_order_btn.clicked.connect(self.open_reading_order_editor_requested.emit)
+        lay.addWidget(self.reading_order_btn)
+        self.layout_review_btn = QPushButton(self.tr('Layout Review Agent'), self)
+        self.layout_review_btn.clicked.connect(self.run_layout_review_requested.emit)
+        lay.addWidget(self.layout_review_btn)
+        self.api_status_label = QLabel(self.tr('Automation API: off'), self)
+        self.api_status_label.setObjectName('PipelineApiStatus')
+        lay.addWidget(self.api_status_label)
 
         self.warning_list = QListWidget(self)
         self.warning_list.setFrameShape(QFrame.NoFrame)
@@ -117,6 +136,9 @@ class PipelineInsightsWidget(QWidget):
         item.setToolTip(message)
         self.warning_list.addItem(item)
         self.warning_badge.setText(self.tr(f'Warnings: {self.warning_list.count()}'))
+        self._anim.stop()
+        self._anim.setDuration(140)
+        self._anim.start()
 
     def add_event(self, code: str, message: str):
         self.event_list.addItem(QListWidgetItem(f'[{code}] {message}'))
@@ -137,3 +159,6 @@ class PipelineInsightsWidget(QWidget):
         self.engine_list.clear()
         self.stage_progress.setValue(0)
         self.set_job_id('idle')
+
+    def set_api_status(self, enabled: bool, queue_depth: int = 0):
+        self.api_status_label.setText(self.tr(f'Automation API: {"on" if enabled else "off"} | queue={max(0, int(queue_depth))}'))

@@ -103,15 +103,6 @@ class ThemeCustomizerDialog(QDialog):
         font_layout.addWidget(self.font_size_spin)
         layout.addWidget(font_grp)
 
-        # --- UI style ---
-        ui_grp = QGroupBox(self.tr("UI style"))
-        ui_layout = QVBoxLayout(ui_grp)
-        self.bubbly_check = QCheckBox(self.tr("Advanced UI (rounder corners, gradients)"))
-        self.bubbly_check.setChecked(getattr(pcfg, "bubbly_ui", True))
-        self.bubbly_check.setToolTip(self.tr("Uncheck for a simpler, flatter look."))
-        ui_layout.addWidget(self.bubbly_check)
-        layout.addWidget(ui_grp)
-
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
@@ -155,6 +146,5 @@ class ThemeCustomizerDialog(QDialog):
         size = max(0, self.font_size_spin.value())
         pcfg.app_font_family = family
         pcfg.app_font_size = size
-        pcfg.bubbly_ui = self.bubbly_check.isChecked()
         save_config()
         self.theme_applied.emit(family, size)

@@ -26,6 +26,7 @@ from qtpy.QtGui import QIcon, QImage, QPixmap, QCloseEvent, QKeySequence, QShowE
 from qtpy.QtWidgets import QShortcut
 
 from utils.config import pcfg, save_config
+from utils.credential_store import get_secret, set_secret, has_keyring
 from utils.logger import logger as LOGGER
 
 
@@ -3911,7 +3912,7 @@ class VideoTranslatorDialog(QDialog):
         self.flow_fixer_openrouter_apikey_edit = QLineEdit()
         self.flow_fixer_openrouter_apikey_edit.setPlaceholderText(self.tr("Same as translator or paste key"))
         self.flow_fixer_openrouter_apikey_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.flow_fixer_openrouter_apikey_edit.setText((getattr(pcfg.module, "video_translator_flow_fixer_openrouter_apikey", None) or "").strip())
+        self.flow_fixer_openrouter_apikey_edit.setText(self._load_flow_fixer_secret("video_flow_fixer_openrouter_apikey", (getattr(pcfg.module, "video_translator_flow_fixer_openrouter_apikey", None) or "").strip()))
         self.flow_fixer_openrouter_apikey_edit.setToolTip(self.tr("OpenRouter API key for the flow-fixer model. Can be the same key as your main translator."))
         self.flow_fixer_openrouter_apikey_edit.textChanged.connect(self._save_options)
         g_flow_l.addWidget(self.flow_fixer_openrouter_apikey_edit, 5, 1)
@@ -3926,7 +3927,7 @@ class VideoTranslatorDialog(QDialog):
         self.flow_fixer_openai_apikey_edit = QLineEdit()
         self.flow_fixer_openai_apikey_edit.setPlaceholderText(self.tr("sk-... (platform.openai.com API key)"))
         self.flow_fixer_openai_apikey_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.flow_fixer_openai_apikey_edit.setText((getattr(pcfg.module, "video_translator_flow_fixer_openai_apikey", None) or "").strip())
+        self.flow_fixer_openai_apikey_edit.setText(self._load_flow_fixer_secret("video_flow_fixer_openai_apikey", (getattr(pcfg.module, "video_translator_flow_fixer_openai_apikey", None) or "").strip()))
         self.flow_fixer_openai_apikey_edit.setToolTip(self.tr("OpenAI API key (ChatGPT credits). Get one at platform.openai.com → API keys. Use gpt-4o-mini or gpt-3.5-turbo for cheap flow passes."))
         self.flow_fixer_openai_apikey_edit.textChanged.connect(self._save_options)
         g_flow_l.addWidget(self.flow_fixer_openai_apikey_edit, 7, 1)
@@ -4035,6 +4036,9 @@ class VideoTranslatorDialog(QDialog):
         )
         self.post_review_reasoning_effort_combo.currentIndexChanged.connect(self._save_options)
         g_flow_l.addWidget(self.post_review_reasoning_effort_combo, 19, 1)
+        self.flow_fixer_key_backend_label = QLabel(self.tr("Credential backend: OS keyring" if has_keyring() else "Credential backend: config fallback"))
+        self.flow_fixer_key_backend_label.setStyleSheet("color: #7f8c8d;")
+        g_flow_l.addWidget(self.flow_fixer_key_backend_label, 20, 0, 1, 2)
         g_flow_l.setColumnStretch(1, 1)
         main_col.addWidget(g_flow)
 
@@ -4407,9 +4411,13 @@ class VideoTranslatorDialog(QDialog):
         pcfg.module.video_translator_flow_fixer_enable_reasoning = self.check_flow_fixer_reasoning.isChecked()
         _idx_eff = self.flow_fixer_reasoning_effort_combo.currentIndex()
         pcfg.module.video_translator_flow_fixer_reasoning_effort = "high" if _idx_eff == 2 else ("low" if _idx_eff == 0 else "medium")
-        pcfg.module.video_translator_flow_fixer_openrouter_apikey = (self.flow_fixer_openrouter_apikey_edit.text() or "").strip()
+        _flow_or_key = (self.flow_fixer_openrouter_apikey_edit.text() or "").strip()
+        _flow_oa_key = (self.flow_fixer_openai_apikey_edit.text() or "").strip()
+        _saved_or = self._save_flow_fixer_secret("video_flow_fixer_openrouter_apikey", _flow_or_key)
+        _saved_oa = self._save_flow_fixer_secret("video_flow_fixer_openai_apikey", _flow_oa_key)
+        pcfg.module.video_translator_flow_fixer_openrouter_apikey = "" if _saved_or else _flow_or_key
         pcfg.module.video_translator_flow_fixer_openrouter_model = (self.flow_fixer_openrouter_model_edit.text() or "").strip() or "google/gemma-3n-e2b-it:free"
-        pcfg.module.video_translator_flow_fixer_openai_apikey = (self.flow_fixer_openai_apikey_edit.text() or "").strip()
+        pcfg.module.video_translator_flow_fixer_openai_apikey = "" if _saved_oa else _flow_oa_key
         pcfg.module.video_translator_flow_fixer_openai_model = (self.flow_fixer_openai_model_edit.text() or "").strip() or "gpt-4o-mini"
         pcfg.module.video_translator_post_review_enabled = self.check_post_review.isChecked()
         pcfg.module.video_translator_post_review_use_main_translator = self.check_post_review_use_main_llm.isChecked()
@@ -5214,3 +5222,9 @@ class VideoTranslatorDialog(QDialog):
         """Cancel button: stop the running pipeline."""
         if self.thread and self.thread.isRunning():
             self.thread.cancel()
+    def _load_flow_fixer_secret(self, provider_key: str, fallback: str = "") -> str:
+        secret = get_secret(provider_key)
+        return (secret if secret is not None else fallback) or ""
+
+    def _save_flow_fixer_secret(self, provider_key: str, value: str) -> bool:
+        return set_secret(provider_key, value or "")
