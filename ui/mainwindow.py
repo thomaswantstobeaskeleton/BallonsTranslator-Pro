@@ -2066,84 +2066,207 @@ class MainWindow(mainwindow_cls):
         return self._layout_review_config
 
     def shortcutLayoutReviewConfig(self):
-        """Configure provider/prompt for layout review."""
-        cfg = self._get_layout_review_config()
-        provider_items = ["heuristic", "local_api", "cloud_api"]
-        provider_idx = max(0, provider_items.index(cfg.provider) if cfg.provider in provider_items else 0)
-        provider, ok = QInputDialog.getItem(self, self.tr("Layout Review Provider"), self.tr("Provider"), provider_items, provider_idx, False)
-        if not ok:
-            return
-        model_name, ok = QInputDialog.getText(self, self.tr("Layout Review Model"), self.tr("Model name"), text=cfg.model_name)
-        if not ok:
-            return
-        prompt, ok = QInputDialog.getText(self, self.tr("Layout Review Prompt"), self.tr("Prompt"), text=cfg.prompt)
-        if not ok:
-            return
-        temperature, ok = QInputDialog.getDouble(
-            self, self.tr("Layout Review Temperature"), self.tr("Temperature"), float(cfg.temperature), 0.0, 2.0, 2
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.tr("Layout review agent settings"))
+        dlg.setMinimumWidth(560)
+
+        outer = QVBoxLayout(dlg)
+        form = QFormLayout()
+        outer.addLayout(form)
+
+        provider = QComboBox(dlg)
+        provider.addItems(["heuristic", "local_api", "cloud_api"])
+        provider.setCurrentText(getattr(pcfg.module, "layout_review_provider", "heuristic"))
+
+        use_translator = QCheckBox(
+            self.tr("Reuse current LLM_API_Translator API settings when possible"),
+            dlg,
         )
-        if not ok:
-            return
-        top_p, ok = QInputDialog.getDouble(
-            self, self.tr("Layout Review Top-p"), self.tr("Top-p"), float(cfg.top_p), 0.0, 1.0, 2
+        use_translator.setChecked(bool(getattr(pcfg.module, "layout_review_use_translator_settings", True)))
+
+        api_provider = QComboBox(dlg)
+        api_provider.addItems(["OpenAI", "Google", "Grok", "OpenRouter", "LLM Studio", "Ollama"])
+        api_provider.setCurrentText(getattr(pcfg.module, "layout_review_api_provider", "OpenAI"))
+
+        api_key = QLineEdit(getattr(pcfg.module, "layout_review_api_key", ""), dlg)
+        api_key.setEchoMode(QLineEdit.EchoMode.Password)
+
+        endpoint = QLineEdit(getattr(pcfg.module, "layout_review_api_endpoint", ""), dlg)
+        endpoint.setPlaceholderText(self.tr("Optional. Example: http://localhost:11434/v1"))
+
+        override_model = QLineEdit(getattr(pcfg.module, "layout_review_override_model", ""), dlg)
+        override_model.setPlaceholderText(self.tr("Optional custom model name"))
+
+        model_name = QLineEdit(getattr(pcfg.module, "layout_review_model_name", ""), dlg)
+        model_name.setPlaceholderText(self.tr("Optional. Blank = use selected/translator model"))
+
+        temperature = QDoubleSpinBox(dlg)
+        temperature.setRange(0.0, 2.0)
+        temperature.setSingleStep(0.05)
+        temperature.setDecimals(2)
+        temperature.setValue(float(getattr(pcfg.module, "layout_review_temperature", 0.0)))
+
+        top_p = QDoubleSpinBox(dlg)
+        top_p.setRange(0.0, 1.0)
+        top_p.setSingleStep(0.05)
+        top_p.setDecimals(2)
+        top_p.setValue(float(getattr(pcfg.module, "layout_review_top_p", 1.0)))
+
+        max_tokens = QSpinBox(dlg)
+        max_tokens.setRange(128, 32768)
+        max_tokens.setSingleStep(128)
+        max_tokens.setValue(int(getattr(pcfg.module, "layout_review_max_tokens", 2048)))
+
+        include_screenshot = QCheckBox(self.tr("Include page screenshot for vision-capable models"), dlg)
+        include_screenshot.setChecked(bool(getattr(pcfg.module, "layout_review_include_page_screenshot", True)))
+
+        screenshot_max_side = QSpinBox(dlg)
+        screenshot_max_side.setRange(256, 4096)
+        screenshot_max_side.setSingleStep(128)
+        screenshot_max_side.setValue(int(getattr(pcfg.module, "layout_review_screenshot_max_side", 1280)))
+
+        prompt = QPlainTextEdit(dlg)
+        prompt.setPlainText(getattr(pcfg.module, "layout_review_prompt", ""))
+        prompt.setMinimumHeight(110)
+
+        extra_params = QPlainTextEdit(dlg)
+        extra_params.setPlainText(getattr(pcfg.module, "layout_review_extra_params_json", "{}") or "{}")
+        extra_params.setMinimumHeight(80)
+        extra_params.setPlaceholderText(self.tr('Optional JSON, e.g. {"reasoning_effort": "low"}'))
+
+        form.addRow(self.tr("Provider"), provider)
+        form.addRow("", use_translator)
+        form.addRow(self.tr("API provider"), api_provider)
+        form.addRow(self.tr("API key"), api_key)
+        form.addRow(self.tr("Endpoint"), endpoint)
+        form.addRow(self.tr("Override model"), override_model)
+        form.addRow(self.tr("Model"), model_name)
+        form.addRow(self.tr("Temperature"), temperature)
+        form.addRow(self.tr("Top P"), top_p)
+        form.addRow(self.tr("Max tokens"), max_tokens)
+        form.addRow("", include_screenshot)
+        form.addRow(self.tr("Screenshot max side"), screenshot_max_side)
+        form.addRow(self.tr("Prompt"), prompt)
+        form.addRow(self.tr("Extra params JSON"), extra_params)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            dlg,
         )
-        if not ok:
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        outer.addWidget(buttons)
+
+        exec_fn = getattr(dlg, "exec", None) or dlg.exec_
+        if int(exec_fn()) != int(QDialog.Accepted):
             return
-        max_tokens, ok = QInputDialog.getInt(
-            self, self.tr("Layout Review Max Tokens"), self.tr("Max tokens"), int(cfg.max_tokens), 64, 8192, 32
+
+        pcfg.module.layout_review_provider = provider.currentText()
+        pcfg.module.layout_review_use_translator_settings = use_translator.isChecked()
+        pcfg.module.layout_review_api_provider = api_provider.currentText()
+        pcfg.module.layout_review_api_key = api_key.text().strip()
+        pcfg.module.layout_review_api_endpoint = endpoint.text().strip()
+        pcfg.module.layout_review_override_model = override_model.text().strip()
+        pcfg.module.layout_review_model_name = model_name.text().strip()
+        pcfg.module.layout_review_temperature = float(temperature.value())
+        pcfg.module.layout_review_top_p = float(top_p.value())
+        pcfg.module.layout_review_max_tokens = int(max_tokens.value())
+        pcfg.module.layout_review_include_page_screenshot = include_screenshot.isChecked()
+        pcfg.module.layout_review_screenshot_max_side = int(screenshot_max_side.value())
+        pcfg.module.layout_review_prompt = prompt.toPlainText().strip()
+        pcfg.module.layout_review_extra_params_json = extra_params.toPlainText().strip() or "{}"
+        save_config()
+
+        def _module_param_value(self, params: dict, key: str, default=None):
+        if not isinstance(params, dict):
+            return default
+        value = params.get(key, default)
+        if isinstance(value, dict) and "value" in value:
+            return value.get("value", default)
+        return value
+
+    def _current_translator_params_for_layout_review(self) -> dict:
+        all_params = getattr(pcfg.module, "translator_params", {}) or {}
+        translator_name = getattr(pcfg.module, "translator", "") or ""
+
+        if not isinstance(all_params, dict):
+            return {}
+
+        params = (
+            all_params.get(translator_name)
+            or all_params.get("LLM_API_Translator")
+            or all_params
         )
-        if not ok:
-            return
-        include_ss, ok = QInputDialog.getItem(
-            self,
-            self.tr("Layout Review Screenshot"),
-            self.tr("Attach page screenshot to provider context"),
-            ["true", "false"],
-            0 if getattr(cfg, "include_page_screenshot", True) else 1,
-            False,
+        return params if isinstance(params, dict) else {}
+
+    def _layout_review_config_from_pcfg(self) -> ReviewModelConfig:
+        import json
+
+        provider = getattr(pcfg.module, "layout_review_provider", "heuristic") or "heuristic"
+        if provider not in ("heuristic", "local_api", "cloud_api"):
+            provider = "heuristic"
+
+        extra = {}
+        raw_extra = getattr(pcfg.module, "layout_review_extra_params_json", "{}") or "{}"
+        try:
+            loaded = json.loads(raw_extra)
+            if isinstance(loaded, dict):
+                extra.update(loaded)
+        except Exception:
+            extra["raw_extra_params"] = raw_extra
+
+        model_name = getattr(pcfg.module, "layout_review_model_name", "") or ""
+
+        if bool(getattr(pcfg.module, "layout_review_use_translator_settings", True)):
+            params = self._current_translator_params_for_layout_review()
+
+            # Mirror the LLM_API_Translator / llm_ocr style settings.
+            key_map = [
+                ("provider", "api_provider"),
+                ("apikey", "api_key"),
+                ("api_key", "api_key"),
+                ("multiple_keys", "multiple_keys"),
+                ("endpoint", "endpoint"),
+                ("endpoint_preset", "endpoint_preset"),
+                ("override model", "override_model"),
+                ("override_model", "override_model"),
+                ("proxy", "proxy"),
+            ]
+            for src_key, dst_key in key_map:
+                val = self._module_param_value(params, src_key, None)
+                if val not in (None, ""):
+                    extra[dst_key] = val
+
+            if not model_name:
+                model_name = (
+                    self._module_param_value(params, "model", "")
+                    or self._module_param_value(params, "override model", "")
+                    or self._module_param_value(params, "override_model", "")
+                    or ""
+                )
+        else:
+            extra.update(
+                {
+                    "api_provider": getattr(pcfg.module, "layout_review_api_provider", "OpenAI"),
+                    "api_key": getattr(pcfg.module, "layout_review_api_key", ""),
+                    "endpoint": getattr(pcfg.module, "layout_review_api_endpoint", ""),
+                    "override_model": getattr(pcfg.module, "layout_review_override_model", ""),
+                }
+            )
+            if not model_name:
+                model_name = getattr(pcfg.module, "layout_review_override_model", "") or ""
+
+        return ReviewModelConfig(
+            provider=provider,
+            model_name=model_name,
+            prompt=getattr(pcfg.module, "layout_review_prompt", "") or "",
+            temperature=float(getattr(pcfg.module, "layout_review_temperature", 0.0)),
+            top_p=float(getattr(pcfg.module, "layout_review_top_p", 1.0)),
+            max_tokens=int(getattr(pcfg.module, "layout_review_max_tokens", 2048)),
+            include_page_screenshot=bool(getattr(pcfg.module, "layout_review_include_page_screenshot", True)),
+            screenshot_max_side=int(getattr(pcfg.module, "layout_review_screenshot_max_side", 1280)),
+            extra_params=extra,
         )
-        if not ok:
-            return
-        max_side, ok = QInputDialog.getInt(
-            self,
-            self.tr("Layout Review Screenshot Max Side"),
-            self.tr("Max image side (px)"),
-            int(getattr(cfg, "screenshot_max_side", 1280)),
-            256, 4096, 32
-        )
-        if not ok:
-            return
-        ep = cfg.extra_params if isinstance(cfg.extra_params, dict) else {}
-        api_base_url, ok = QInputDialog.getText(
-            self, self.tr("Layout Review API Base URL"), self.tr("API base URL (for local/cloud providers)"), text=str(ep.get("api_base_url", ""))
-        )
-        if not ok:
-            return
-        api_key, ok = QInputDialog.getText(
-            self, self.tr("Layout Review API Key"), self.tr("API key/token (optional)"), text=str(ep.get("api_key", ""))
-        )
-        if not ok:
-            return
-        api_path, ok = QInputDialog.getText(
-            self, self.tr("Layout Review API Path"), self.tr("API path"), text=str(ep.get("api_path", "/v1/chat/completions"))
-        )
-        if not ok:
-            return
-        cfg.provider = provider
-        cfg.model_name = model_name
-        cfg.prompt = prompt
-        cfg.temperature = temperature
-        cfg.top_p = top_p
-        cfg.max_tokens = max_tokens
-        cfg.include_page_screenshot = include_ss == "true"
-        cfg.screenshot_max_side = max_side
-        cfg.extra_params = {
-            "api_base_url": api_base_url.strip(),
-            "api_key": api_key.strip(),
-            "api_path": api_path.strip() or "/v1/chat/completions",
-        }
-        self._layout_review_config = cfg
-        self.statusBar().showMessage(self.tr(f"Layout review config updated ({provider})."), 4000)
 
     def _layout_review_local_api_handler(self, page_name, blocks, config: ReviewModelConfig) -> PageReviewResult:
         return self._layout_review_http_provider(page_name, blocks, config, provider_name="local_api")
