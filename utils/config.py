@@ -174,6 +174,28 @@ class ModuleConfig(Config):
     layout_stub_penalty_1word: float = 2000.0
     # Rendering parity: when True, translation panel uses NoWrap so line breaks match the canvas bubble (no extra wrap).
     layout_panel_preserve_line_breaks: bool = False
+        # Layout review agent
+    layout_review_provider: str = "heuristic"  # heuristic | local_api | cloud_api
+    layout_review_use_translator_settings: bool = True
+
+    # Used when not inheriting from LLM_API_Translator, or as overrides.
+    layout_review_api_provider: str = "OpenAI"
+    layout_review_api_key: str = ""
+    layout_review_api_endpoint: str = ""
+    layout_review_override_model: str = ""
+
+    layout_review_model_name: str = ""
+    layout_review_prompt: str = (
+        "Review manga/comic text box layout for overflow, off-center placement, "
+        "bad readability, boxes outside bubbles, and text that should be resized or re-centered. "
+        "Return only safe deterministic layout fix actions."
+    )
+    layout_review_temperature: float = 0.0
+    layout_review_top_p: float = 1.0
+    layout_review_max_tokens: int = 2048
+    layout_review_include_page_screenshot: bool = True
+    layout_review_screenshot_max_side: int = 1280
+    layout_review_extra_params_json: str = "{}"
     finish_code: int = 15
     run_preset_name: str = 'Full'
     # --- Section 6 / 6.1: Image upscaling & per-stage resizing ---
