@@ -18,7 +18,7 @@ from urllib import error as urlerror
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
-from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap
+from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap, QBrush, QColor
 
 from utils.logger import logger as LOGGER
 from utils.text_processing import is_cjk, full_len, half_len
@@ -35,7 +35,7 @@ from .misc import parse_stylesheet, set_html_family, QKEY, pixmap2ndarray
 from .custom_widget.animated_stack import AnimatedStackWidget
 from utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat, log_diagnostic_event
 from utils.layout_review_agent import ReviewModelConfig, PageReviewResult, BlockReviewResult, ReviewIssue, ReviewAction
-from utils.shortcuts import get_shortcut
+from utils.shortcuts import get_shortcut, is_single_key_sequence, shortcut_should_ignore_text_input
 from utils.proj_imgtrans import ProjImgTrans
 from utils.zip_batch import ZipBatchManager
 from .canvas import Canvas
@@ -67,7 +67,11 @@ from .mask_diagnostics_widget import MaskDiagnosticsWidget
 from .ocr_crop_inspector_widget import OcrCropInspectorWidget
 from .project_ops_dialog import ProjectOpsDialog
 from .reading_order_editor_dialog import ReadingOrderEditorDialog
+from .layout_review_report_dialog import LayoutReviewReportDialog
+from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
+from utils.structured_ocr_export import build_structured_ocr_export
+from utils.layered_psd_export import build_layered_psd_handoff
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
@@ -86,6 +90,7 @@ class PageListView(QListWidget):
     run_inpaint_images = Signal(list)
     run_detect_images = Signal(list)
     toggle_ignore_requested = Signal(list, bool)  # (pagenames, ignored)
+    set_completion_requested = Signal(list, str)  # (pagenames, todo|translated|reviewed|exported)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -121,6 +126,12 @@ class PageListView(QListWidget):
             include_act = menu.addAction(self.tr('Include in run'))
             include_act.setToolTip(self.tr('Do not skip these pages in full run and batch.'))
             menu.addSeparator()
+            completion_menu = menu.addMenu(QIcon(osp.join(shared.PROGRAM_PATH, 'icons', 'page_completion.svg')), self.tr('Page completion state'))
+            mark_todo_act = completion_menu.addAction(self.tr('Needs work'))
+            mark_translated_act = completion_menu.addAction(self.tr('Translated'))
+            mark_reviewed_act = completion_menu.addAction(self.tr('Reviewed'))
+            mark_exported_act = completion_menu.addAction(self.tr('Exported'))
+            menu.addSeparator()
             remove_act = menu.addAction(self.tr('Remove from Project'))
         rst = menu.exec_(e.globalPos())
 
@@ -142,6 +153,14 @@ class PageListView(QListWidget):
             self.toggle_ignore_requested.emit([item.text() for item in selected_items], True)
         elif selected_items and rst == include_act:
             self.toggle_ignore_requested.emit([item.text() for item in selected_items], False)
+        elif selected_items and rst == mark_todo_act:
+            self.set_completion_requested.emit([item.text() for item in selected_items], 'todo')
+        elif selected_items and rst == mark_translated_act:
+            self.set_completion_requested.emit([item.text() for item in selected_items], 'translated')
+        elif selected_items and rst == mark_reviewed_act:
+            self.set_completion_requested.emit([item.text() for item in selected_items], 'reviewed')
+        elif selected_items and rst == mark_exported_act:
+            self.set_completion_requested.emit([item.text() for item in selected_items], 'exported')
         elif selected_items and rst == remove_act:
             self.remove_images.emit([item.text() for item in selected_items])
 
@@ -394,6 +413,7 @@ class MainWindow(mainwindow_cls):
         self.pageList.remove_images.connect(self.on_remove_images)
         self.pageList.translate_images.connect(self.on_translate_images)
         self.pageList.toggle_ignore_requested.connect(self.on_toggle_page_ignored)
+        self.pageList.set_completion_requested.connect(self.on_set_page_completion_state)
         self.pageList.run_ocr_images.connect(self.on_run_ocr_images)
         self.pageList.run_translate_images.connect(self.on_run_translate_images)
         self.pageList.run_inpaint_images.connect(self.on_run_inpaint_images)
@@ -536,6 +556,7 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.open_ocr_crop_inspector_requested.connect(self.on_open_ocr_crop_inspector_requested)
         self.pipelineInsightsPanel.open_reading_order_editor_requested.connect(self.on_open_reading_order_editor_requested)
         self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
+        self.pipelineInsightsPanel.open_batch_style_requested.connect(self.on_open_batch_style_override)
         self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
         self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
         self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
@@ -838,6 +859,10 @@ class MainWindow(mainwindow_cls):
             'redo': self._api_redo,
             'export': self._api_export,
             'layout_review': self._api_layout_review,
+            'page_state': self._api_page_state,
+            'export_structured_ocr': self._api_export_structured_ocr,
+            'render_current_page': self._api_render_current_page,
+            'list_rendering_issues': self._api_list_rendering_issues,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -903,11 +928,101 @@ class MainWindow(mainwindow_cls):
 
     def _api_layout_review_ui(self, body: dict):
         mode = str((body or {}).get('mode', 'page')).strip().lower()
-        if mode == 'selected':
-            self.shortcutLayoutReviewSelected()
-        else:
-            self.shortcutLayoutReviewPage()
-        return {'ok': True, 'mode': mode}
+        apply = bool((body or {}).get('apply', True))
+        result, target_indices = self._layout_review_result_for_scope(mode)
+        summary = self._summarize_layout_review_result(result)
+        applied = 0
+        if apply and summary['actions'] > 0:
+            applied = self.st_manager.apply_review_result(result, target_block_indices=target_indices)
+            if self.imgtrans_proj and self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+        return {'ok': True, 'mode': mode, 'applied_actions': applied, 'summary': summary}
+
+
+    def _api_render_current_page(self, body: dict):
+        return self._api_call_ui(self._api_render_current_page_ui, body)
+
+    def _api_render_current_page_ui(self, body: dict):
+        from utils.io_utils import imwrite
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        qimg = self.canvas.render_result_img()
+        if qimg is None or qimg.isNull():
+            raise RuntimeError('render produced no image')
+        path = str((body or {}).get('path', '') or '').strip()
+        if not path:
+            base = osp.splitext(self.imgtrans_proj.current_img)[0]
+            path = osp.join(self.imgtrans_proj.result_dir(), base + (pcfg.imgsave_ext or '.png'))
+        arr = pixmap2ndarray(qimg, keep_alpha=False)
+        ext = osp.splitext(path)[1].lower() or pcfg.imgsave_ext or '.png'
+        imwrite(path, arr, ext=ext, quality=pcfg.imgsave_quality)
+        self.pipelineInsightsPanel.add_event('API', self.tr('Rendered current page to {0}').format(path))
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'path': path}
+
+    def _api_list_rendering_issues(self, body: dict):
+        return self._api_call_ui(self._api_list_rendering_issues_ui, body)
+
+    def _api_list_rendering_issues_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, merge_font_fallback_chain, resolve_writing_mode
+        pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img] or [])
+        out = []
+        for page in pages:
+            if not page or page not in self.imgtrans_proj.pages:
+                continue
+            for idx, blk in enumerate(self.imgtrans_proj.pages.get(page, []) or []):
+                ff = getattr(blk, 'fontformat', None)
+                if ff is None:
+                    continue
+                text = getattr(blk, 'translation', '') or '\n'.join(getattr(blk, 'text', []) or [])
+                x1, y1, x2, y2 = getattr(blk, 'xyxy', [0, 0, 1, 1])
+                box = (max(1.0, float(x2) - float(x1)), max(1.0, float(y2) - float(y1)))
+                mode = resolve_writing_mode(getattr(ff, 'writing_mode', 'auto'), text, box)
+                measured = estimate_text_bounds(text, getattr(ff, 'font_size', 24.0), mode, box[0], box[1], getattr(ff, 'line_spacing', 1.15), getattr(ff, 'letter_spacing', 1.0), getattr(ff, 'text_padding', 0.0), getattr(ff, 'stroke_width', 0.0), getattr(ff, 'shadow_radius', 0.0), getattr(ff, 'shadow_offset', [0.0, 0.0]))
+                missing = first_missing_glyphs(getattr(ff, 'font_family', ''), text) if text else []
+                overflow = measured[0] > box[0] or measured[1] > box[1]
+                if overflow or missing or bool((body or {}).get('include_ok', False)):
+                    out.append({
+                        'page': page, 'index': idx, 'writing_mode': getattr(ff, 'writing_mode', 'auto'),
+                        'resolved_writing_mode': mode, 'box': list(box), 'measured': [measured[0], measured[1]],
+                        'overflow': overflow, 'missing_glyphs': missing,
+                        'fallback_chain': merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', '')),
+                    })
+        return {'ok': True, 'issues': out, 'count': len(out)}
+
+    def _api_page_state(self, body: dict):
+        return self._api_call_ui(self._api_page_state_ui, body)
+
+    def _api_page_state_ui(self, body: dict):
+        action = str((body or {}).get('action', 'list')).strip().lower()
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = list((body or {}).get('pages') or self.imgtrans_proj.pages.keys())
+        if action == 'set':
+            state = str((body or {}).get('state', 'todo')).strip().lower()
+            for page in pages:
+                self.imgtrans_proj.set_page_completion_state(page, state)
+            self.imgtrans_proj.save()
+            self._update_page_list_state_style()
+        return {
+            'ok': True,
+            'states': {page: self.imgtrans_proj.get_page_completion_state(page) for page in pages if page in self.imgtrans_proj.pages},
+        }
+
+    def _api_export_structured_ocr(self, body: dict):
+        return self._api_call_ui(self._api_export_structured_ocr_ui, body)
+
+    def _api_export_structured_ocr_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = (body or {}).get('pages')
+        payload = build_structured_ocr_export(self.imgtrans_proj, pages=pages)
+        path = str((body or {}).get('path', '') or '').strip()
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        return {'ok': True, 'path': path, 'page_count': len(payload.get('pages', [])), 'payload': payload if not path else None}
 
     def _update_run_button_tooltip(self):
         base = self.tr('Run pipeline (same as Pipeline → Run).')
@@ -1029,6 +1144,81 @@ class MainWindow(mainwindow_cls):
     def on_run_layout_review_requested(self):
         self.shortcutLayoutReviewPage()
         self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review agent run on current page'))
+
+    def on_open_batch_style_override(self):
+        """Apply Koharu-inspired fixed font/alignment options across a page/project."""
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            self.pipelineInsightsPanel.add_warning('BATCH_STYLE', self.tr('Open a project before applying a batch text style override.'))
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.tr('Batch Text Style Override'))
+        dlg.setMinimumWidth(460)
+        outer = QVBoxLayout(dlg)
+        form = QFormLayout()
+        outer.addLayout(form)
+
+        scope = QComboBox(dlg)
+        scope.addItems([self.tr('Current page'), self.tr('Whole project')])
+
+        font_family = QLineEdit(dlg)
+        font_family.setPlaceholderText(self.tr('Leave blank to keep current font family'))
+
+        font_size = QDoubleSpinBox(dlg)
+        font_size.setRange(0.0, 300.0)
+        font_size.setDecimals(1)
+        font_size.setSingleStep(0.5)
+        font_size.setSpecialValueText(self.tr('Keep'))
+        font_size.setValue(0.0)
+
+        alignment = QComboBox(dlg)
+        alignment.addItem(self.tr('Keep'), -1)
+        alignment.addItem(self.tr('Left'), 0)
+        alignment.addItem(self.tr('Center'), 1)
+        alignment.addItem(self.tr('Right'), 2)
+
+        auto_fit = QCheckBox(self.tr('Enable auto-fit after override'), dlg)
+        auto_fit.setChecked(True)
+
+        form.addRow(self.tr('Scope'), scope)
+        form.addRow(self.tr('Font family'), font_family)
+        form.addRow(self.tr('Fixed font size (pt)'), font_size)
+        form.addRow(self.tr('Alignment'), alignment)
+        form.addRow('', auto_fit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dlg)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        outer.addWidget(buttons)
+        exec_fn = getattr(dlg, 'exec', None) or dlg.exec_
+        if int(exec_fn()) != int(QDialog.Accepted):
+            return
+
+        page_names = [self.imgtrans_proj.current_img] if scope.currentIndex() == 0 else list(self.imgtrans_proj.pages.keys())
+        family = font_family.text().strip()
+        size_pt = float(font_size.value())
+        align_value = int(alignment.currentData())
+        changed = 0
+        for page in page_names:
+            for blk in self.imgtrans_proj.pages.get(page, []) or []:
+                fmt = getattr(blk, 'fontformat', None)
+                if fmt is None:
+                    continue
+                if family:
+                    fmt.font_family = family
+                if size_pt > 0:
+                    fmt.font_size = pt2px(size_pt)
+                    fmt.auto_fit_font_size = False
+                if align_value >= 0:
+                    fmt.alignment = align_value
+                if auto_fit.isChecked():
+                    fmt.auto_fit_font_size = True
+                changed += 1
+        if self.imgtrans_proj.current_img in page_names:
+            self.st_manager.updateSceneTextitems()
+        self.imgtrans_proj.save()
+        self.canvas.setProjSaveState(False)
+        self.pipelineInsightsPanel.add_event('BATCH_STYLE', self.tr('Updated {0} text block style(s).').format(changed))
+        self.statusBar().showMessage(self.tr('Batch style override updated {0} text block(s).').format(changed), 5000)
 
     def _has_open_project(self) -> bool:
         return (
@@ -1291,7 +1481,7 @@ class MainWindow(mainwindow_cls):
             self.pageList.addItem(lstitem)
             if imgname == self.imgtrans_proj.current_img:
                 self.pageList.setCurrentItem(lstitem)
-        self._update_page_list_ignored_style()
+        self._update_page_list_state_style()
 
     def _ensure_first_page_loaded_and_autolayout(self):
         """After opening a project, ensure the first page is displayed. Use saved layout (no re-run of auto layout)."""
@@ -1466,6 +1656,9 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_export_trigger.connect(self.on_batch_export)
         self.titleBar.batch_export_as_trigger.connect(self.on_batch_export_as)
         self.titleBar.export_lptxt_trigger.connect(self.on_export_lptxt)
+        self.titleBar.export_structured_ocr_trigger.connect(self.on_export_structured_ocr_json)
+        if hasattr(self.titleBar, "export_layered_psd_handoff_trigger"):
+            self.titleBar.export_layered_psd_handoff_trigger.connect(self.on_export_layered_psd_handoff)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.show_batch_report_trigger.connect(self._show_batch_report_dialog)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
@@ -1512,7 +1705,12 @@ class MainWindow(mainwindow_cls):
             key = get_shortcut(action_id, sc) or default_key
             q = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
             q.setContext(context)
-            q.activated.connect(slot)
+            def _guarded_slot(fn=slot, shortcut=q):
+                k = shortcut.key().toString()
+                if is_single_key_sequence(k) and shortcut_should_ignore_text_input(QApplication.focusWidget()):
+                    return
+                return fn()
+            q.activated.connect(_guarded_slot)
             self._shortcuts_list.append((action_id, default_key, q))
             return q
 
@@ -1561,13 +1759,32 @@ class MainWindow(mainwindow_cls):
             ("draw.hand", "H", "hand"),
             ("draw.inpaint", "J", "inpaint"),
             ("draw.pen", "B", "pen"),
+            ("draw.text_eraser", "E", "textEraser"),
             ("draw.rect", "R", "rect"),
         ]
         for action_id, default_key, tool_name in drawpanel_shortcuts:
             key = get_shortcut(action_id, sc) or default_key
             shortcut = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
-            shortcut.activated.connect(partial(self.drawingPanel.shortcutSetCurrentToolByName, tool_name))
+            def _guarded_draw(name=tool_name, shortcut=shortcut):
+                k = shortcut.key().toString()
+                if is_single_key_sequence(k) and shortcut_should_ignore_text_input(QApplication.focusWidget()):
+                    return
+                return self.drawingPanel.shortcutSetCurrentToolByName(name)
+            shortcut.activated.connect(_guarded_draw)
             self.drawingPanel.setShortcutTip(tool_name, key or default_key)
+            self._shortcuts_list.append((action_id, default_key, shortcut))
+        for action_id, default_key, slot in [
+            ("draw.brush_size_up", "]", self.drawingPanel.on_incre_pensize),
+            ("draw.brush_size_down", "[", self.drawingPanel.on_decre_pensize),
+        ]:
+            key = get_shortcut(action_id, sc) or default_key
+            shortcut = QShortcut(QKeySequence.fromString(key) if key else QKeySequence(), self)
+            def _guarded_brush(fn=slot, shortcut=shortcut):
+                k = shortcut.key().toString()
+                if is_single_key_sequence(k) and shortcut_should_ignore_text_input(QApplication.focusWidget()):
+                    return
+                return fn()
+            shortcut.activated.connect(_guarded_brush)
             self._shortcuts_list.append((action_id, default_key, shortcut))
         self._draw_shortcut_tools = drawpanel_shortcuts
 
@@ -2083,39 +2300,84 @@ class MainWindow(mainwindow_cls):
             self.canvas.resize_to_fit_content_signal.emit()
 
     def shortcutLayoutReviewSelected(self):
-        """Run layout review/fix for selected textboxes."""
-        if self.centralStackWidget.currentIndex() != 1 or not self.canvas.gv.isVisible():
-            return
-        if not self.canvas.selected_text_items():
-            return
-        cfg = self._get_layout_review_config()
-        loops = self.st_manager.review_and_fix_selected_textboxes_with_provider(
-            config=cfg,
-            max_iters=2,
-        )
-        if loops <= 0:
-            self.statusBar().showMessage(self.tr("Layout review: no issues detected in selection."), 4000)
-            return
-        self.statusBar().showMessage(self.tr(f"Layout review applied to selection ({loops} iteration(s))."), 5000)
+        """Run layout review/fix for selected textboxes with a reviewable report."""
+        self._show_layout_review_report('selected')
 
     def shortcutLayoutReviewPage(self):
-        """Run layout review/fix for all textboxes on current page."""
+        """Run layout review/fix for all textboxes on current page with a reviewable report."""
+        self._show_layout_review_report('page')
+
+    def _layout_review_result_for_scope(self, mode: str):
         if self.centralStackWidget.currentIndex() != 1 or not self.canvas.gv.isVisible():
-            return
+            raise RuntimeError('No editable page is visible.')
+        mode = (mode or 'page').strip().lower()
+        if mode == 'selected':
+            if not self.canvas.selected_text_items():
+                raise RuntimeError('No selected text boxes.')
+            target_indices = None
+        else:
+            target_indices = [
+                blk.idx for blk in self.st_manager.textblk_item_list
+                if blk is not None
+            ]
+            if not target_indices:
+                raise RuntimeError('No text boxes on this page.')
         cfg = self._get_layout_review_config()
-        target_indices = [
-            blk.idx for blk in self.st_manager.textblk_item_list
-            if blk is not None and not getattr(blk.fontformat, "vertical", False)
-        ]
-        loops = self.st_manager.review_and_fix_selected_textboxes_with_provider(
+        result = self.st_manager.review_selected_textboxes_with_provider(
             config=cfg,
             target_block_indices=target_indices,
-            max_iters=2,
         )
-        if loops <= 0:
-            self.statusBar().showMessage(self.tr("Layout review: no page-level issues detected."), 4000)
+        return result, target_indices
+
+    def _summarize_layout_review_result(self, result: PageReviewResult) -> dict:
+        blocks = list(getattr(result, 'blocks', []) or [])
+        issues = sum(len(getattr(b, 'issues', []) or []) for b in blocks)
+        actions = sum(len(getattr(b, 'actions', []) or []) for b in blocks)
+        score = (sum(float(getattr(b, 'score_after', 1.0) or 0.0) for b in blocks) / len(blocks)) if blocks else 1.0
+        return {'blocks': len(blocks), 'issues': issues, 'actions': actions, 'score_after': max(0.0, min(1.0, score))}
+
+    def _layout_review_result_with_actions(self, result: PageReviewResult, selected_actions: list) -> PageReviewResult:
+        selected_ids = {id(action) for action in (selected_actions or [])}
+        blocks = []
+        for block in getattr(result, 'blocks', []) or []:
+            actions = [a for a in (getattr(block, 'actions', []) or []) if id(a) in selected_ids]
+            blocks.append(
+                BlockReviewResult(
+                    block_index=block.block_index,
+                    score_before=block.score_before,
+                    score_after=block.score_after if actions else block.score_before,
+                    issues=list(getattr(block, 'issues', []) or []),
+                    actions=actions,
+                )
+            )
+        return PageReviewResult(page_name=result.page_name, blocks=blocks)
+
+    def _show_layout_review_report(self, mode: str):
+        try:
+            result, target_indices = self._layout_review_result_for_scope(mode)
+        except Exception as e:
+            self.pipelineInsightsPanel.add_warning('LAYOUT_REVIEW', str(e))
+            self.statusBar().showMessage(self.tr('Layout review unavailable: {0}').format(str(e)), 5000)
             return
-        self.statusBar().showMessage(self.tr(f"Layout review applied to page ({loops} iteration(s))."), 5000)
+        summary = self._summarize_layout_review_result(result)
+        dlg = LayoutReviewReportDialog(result, self)
+        exec_fn = getattr(dlg, 'exec', None) or dlg.exec_
+        if int(exec_fn()) != int(QDialog.Accepted):
+            self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review closed without applying fixes.'))
+            return
+        selected_actions = dlg.selected_actions()
+        apply_result = self._layout_review_result_with_actions(result, selected_actions)
+        applied = self.st_manager.apply_review_result(apply_result, target_block_indices=target_indices)
+        if applied > 0:
+            if self.imgtrans_proj and self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Applied {0} layout fix action(s).').format(applied))
+            self.statusBar().showMessage(self.tr('Layout review applied {0} fix action(s).').format(applied), 5000)
+        else:
+            self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review found no applicable fixes.'))
+            self.statusBar().showMessage(self.tr('Layout review: no applicable fixes.'), 4000)
+        if summary['issues'] > 0:
+            self.pipelineInsightsPanel.add_warning('LAYOUT_REVIEW', self.tr('{0} issue(s), {1} proposed fix(es).').format(summary['issues'], summary['actions']))
 
     def _get_layout_review_config(self) -> ReviewModelConfig:
         return self._layout_review_config_from_pcfg()
@@ -3784,6 +4046,28 @@ class MainWindow(mainwindow_cls):
         if page_key == self.imgtrans_proj.current_img:
             self.st_manager.updateTranslation()
 
+    def _auto_mark_translated_pages_after_run(self):
+        if not getattr(pcfg, 'auto_mark_translated_pages', True):
+            return
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            return
+        pages = getattr(self, '_last_pages_to_process', None) or list(self.imgtrans_proj.pages.keys())
+        changed = 0
+        required_code = int(getattr(self, '_last_run_finish_code', 0) or getattr(pcfg.module, 'finish_code', 0) or 0)
+        for page in pages:
+            if page not in self.imgtrans_proj.pages:
+                continue
+            info = self.imgtrans_proj._ensure_image_info_entry(page)
+            finish_code = int(info.get('finish_code', 0) or 0)
+            if required_code and (finish_code & required_code) == required_code:
+                if self.imgtrans_proj.get_page_completion_state(page) in ('todo', 'translated'):
+                    self.imgtrans_proj.set_page_completion_state(page, 'translated')
+                    changed += 1
+        if changed:
+            self.imgtrans_proj.save()
+            self._update_page_list_state_style()
+            self.pipelineInsightsPanel.add_event('PAGE_STATE', self.tr('Auto-marked {0} page(s) as translated.').format(changed))
+
     def on_imgtrans_pipeline_finished(self):
         if getattr(self, '_detection_only_restore', None) is not None:
             det, ocr, trans, inp = self._detection_only_restore
@@ -3806,6 +4090,7 @@ class MainWindow(mainwindow_cls):
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
         self.postprocess_mt_toggle = True
+        self._auto_mark_translated_pages_after_run()
         if pcfg.module.empty_runcache and not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
             self.module_manager.unload_all_models()
             try:
@@ -4168,7 +4453,14 @@ class MainWindow(mainwindow_cls):
                 pages_to_process = list(self.imgtrans_proj.pages.keys())
                 if skip_ignored:
                     pages_to_process = [p for p in pages_to_process if not self.imgtrans_proj.is_page_ignored(p)]
+                if getattr(pcfg, 'skip_satisfied_pipeline_steps', False):
+                    before_count = len(pages_to_process)
+                    pages_to_process = [p for p in pages_to_process if not self.imgtrans_proj.get_page_progress(p)]
+                    skipped_count = before_count - len(pages_to_process)
+                    if skipped_count > 0 and hasattr(self, 'pipelineInsightsPanel'):
+                        self.pipelineInsightsPanel.add_event('SKIP', self.tr('Skipped {0} already-satisfied page(s).').format(skipped_count))
                 if not pages_to_process:
+                    self.statusBar().showMessage(self.tr('All pages already satisfy the enabled pipeline stages.'), 5000)
                     return
                 for page_name in pages_to_process:
                     self.imgtrans_proj.set_page_progress(page_name, 0)
@@ -4207,6 +4499,8 @@ class MainWindow(mainwindow_cls):
                     textblk.vertical = textblk.src_is_vertical
         
         # 如果有指定pages_to_process或者是continue_mode，则传递页面列表
+        self._last_pages_to_process = list(pages_to_process) if pages_to_process else None
+        self._last_run_finish_code = int(getattr(pcfg.module, 'finish_code', 0) or 0)
         self.module_manager.runImgtransPipeline(pages_to_process if (pages_to_process or continue_mode) else None)
 
     def on_transpanel_changed(self):
@@ -4387,6 +4681,53 @@ class MainWindow(mainwindow_cls):
         except Exception as e:
             create_error_dialog(e, self.tr('Failed to export as TEXT file'))
 
+
+    def on_export_layered_psd_handoff(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
+            return
+        default_dir = osp.join(self.imgtrans_proj.directory, 'psd_handoff')
+        out_dir = QFileDialog.getExistingDirectory(self, self.tr('Export layered PSD handoff'), default_dir)
+        if not out_dir:
+            return
+        try:
+            final_arr = None
+            qimg = self.canvas.render_result_img()
+            if qimg is not None and not qimg.isNull():
+                final_arr = pixmap2ndarray(qimg, keep_alpha=False)
+            manifest = build_layered_psd_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr)
+            warn = '\n'.join(manifest.get('warnings', []) or [])
+            msg = self.tr('Layered PSD handoff exported to {0}.').format(out_dir)
+            msg += '\n' + self.tr('Manifest: {0}').format(manifest.get('manifest_path', ''))
+            msg += '\n' + self.tr('Photoshop script: {0}').format(manifest.get('photoshop_jsx_path', ''))
+            if warn:
+                msg += '\n\n' + self.tr('Warnings:') + '\n' + warn
+            QMessageBox.information(self, self.tr('Export'), msg)
+            self.pipelineInsightsPanel.add_event('EXPORT', self.tr('Layered PSD handoff exported for {0}.').format(self.imgtrans_proj.current_img))
+        except Exception as e:
+            LOGGER.exception(e)
+            create_error_dialog(e, self.tr('Layered PSD handoff export failed'))
+
+    def on_export_structured_ocr_json(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        default_path = osp.join(self.imgtrans_proj.directory, 'structured_ocr_export.json')
+        savep = QFileDialog.getSaveFileName(self, self.tr('Export structured OCR JSON'), default_path, self.tr('JSON (*.json)'))
+        if not isinstance(savep, str):
+            savep = savep[0]
+        if not savep:
+            return
+        if Path(savep).suffix.lower() != '.json':
+            savep += '.json'
+        try:
+            payload = build_structured_ocr_export(self.imgtrans_proj)
+            with open(savep, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            create_info_dialog({'title': self.tr('Structured OCR exported'), 'text': self.tr('Exported {0} page(s) to {1}').format(len(payload.get('pages', [])), savep)})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export structured OCR JSON'))
+
     def on_export_lptxt(self):
         """Export translations to LPtxt format (for auto-labeling tools)."""
         if not self.imgtrans_proj or not self.imgtrans_proj.directory:
@@ -4540,34 +4881,62 @@ class MainWindow(mainwindow_cls):
         if self.imgtrans_proj.directory:
             self.imgtrans_proj.save()
             self.canvas.setProjSaveState(False)
-        self._update_page_list_ignored_style()
+        self._update_page_list_state_style()
 
-    def _update_page_list_ignored_style(self):
-        """Update page list items to show ignored state: tooltip, muted text, and darkened/lightened row background."""
-        from qtpy.QtGui import QBrush, QColor
+    def on_set_page_completion_state(self, pagenames: list, state: str):
+        """Persist user-visible completion state for selected pages."""
+        if not pagenames or self.imgtrans_proj.is_empty:
+            return
+        for name in pagenames:
+            self.imgtrans_proj.set_page_completion_state(name, state)
+        if self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        self._update_page_list_state_style()
+        self.pipelineInsightsPanel.add_event('PAGE_STATE', self.tr('Set {0} page(s) to {1}.').format(len(pagenames), state))
+
+    def _update_page_list_state_style(self):
+        """Update page list items for ignored + completion state visibility."""
         default_fg = self.pageList.palette().brush(self.pageList.foregroundRole())
         default_bg = self.pageList.palette().brush(self.pageList.backgroundRole())
-        # Ignored: muted foreground and distinct row background (darkened in light theme, lightened in dark theme)
         if getattr(pcfg, 'darkmode', False):
             ignored_fg = QBrush(QColor(120, 120, 120))
-            ignored_bg = QBrush(QColor(45, 45, 48))  # darker than list bg
+            ignored_bg = QBrush(QColor(45, 45, 48))
+            state_bg = {
+                'translated': QBrush(QColor(35, 58, 74)),
+                'reviewed': QBrush(QColor(43, 74, 50)),
+                'exported': QBrush(QColor(74, 61, 36)),
+            }
         else:
             ignored_fg = QBrush(QColor(100, 100, 100))
-            ignored_bg = QBrush(QColor(232, 232, 234))  # light gray row
+            ignored_bg = QBrush(QColor(232, 232, 234))
+            state_bg = {
+                'translated': QBrush(QColor(225, 244, 255)),
+                'reviewed': QBrush(QColor(224, 246, 228)),
+                'exported': QBrush(QColor(255, 241, 214)),
+            }
+        labels = {
+            'todo': self.tr('Needs work'),
+            'translated': self.tr('Translated'),
+            'reviewed': self.tr('Reviewed'),
+            'exported': self.tr('Exported'),
+        }
         for i in range(self.pageList.count()):
             item = self.pageList.item(i)
             if item is None:
                 continue
             name = item.text()
             is_ignored = self.imgtrans_proj.is_page_ignored(name) if not self.imgtrans_proj.is_empty else False
+            state = self.imgtrans_proj.get_page_completion_state(name) if not self.imgtrans_proj.is_empty else 'todo'
+            tips = [self.tr('Completion: {0}').format(labels.get(state, state))]
             if is_ignored:
-                item.setToolTip(self.tr('Ignored in run (right-click → Include in run to process)'))
+                tips.append(self.tr('Ignored in run (right-click → Include in run to process)'))
                 item.setForeground(ignored_fg)
                 item.setBackground(ignored_bg)
             else:
-                item.setToolTip('')
                 item.setForeground(default_fg)
-                item.setBackground(default_bg)
+                item.setBackground(state_bg.get(state, default_bg))
+            item.setToolTip('\n'.join(tips))
 
     def on_remove_images(self, image_names: list):
         if not image_names:

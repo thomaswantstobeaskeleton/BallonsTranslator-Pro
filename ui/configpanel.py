@@ -757,6 +757,16 @@ class ConfigPanel(Widget):
             discription=self.tr('When on, full run and batch queue skip pages marked as "Ignore in run" in the page list context menu.')
         )
         self.skip_ignored_in_run_checker.stateChanged.connect(self.on_skip_ignored_in_run_changed)
+        self.skip_satisfied_pipeline_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Skip already-satisfied pipeline pages'),
+            discription=self.tr('When on, full runs keep pages whose saved finish state already satisfies the enabled stages instead of resetting and rerunning them.')
+        )
+        self.skip_satisfied_pipeline_checker.stateChanged.connect(self.on_skip_satisfied_pipeline_changed)
+        self.auto_mark_translated_pages_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Auto-mark completed pipeline pages as translated'),
+            discription=self.tr('When a run finishes, pages whose saved finish state satisfies the enabled stages are marked Translated in the page list.')
+        )
+        self.auto_mark_translated_pages_checker.stateChanged.connect(self.on_auto_mark_translated_pages_changed)
         generalConfigPanel.addTextLabel(self.tr('Runtime HTTP controls'))
         self.runtime_http_timeout_spin = QDoubleSpinBox()
         self.runtime_http_timeout_spin.setRange(2.0, 300.0)
@@ -821,6 +831,79 @@ class ConfigPanel(Widget):
             discription=self.tr('Apply manga-style hanging for pause/stop punctuation in vertical CJK.')
         )
         self.vertical_cjk_punctuation_hang_checker.stateChanged.connect(self.on_vertical_cjk_punctuation_hang_changed)
+
+        generalConfigPanel.addTextLabel(self.tr('Rendering / Text Formatting'))
+        self.render_default_font_edit = QLineEdit(self)
+        self.render_default_font_edit.setPlaceholderText(self.tr('Empty = use project/default font'))
+        self.render_default_font_edit.textChanged.connect(self.on_render_default_font_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_font_edit,
+            self.tr('Rendering font'),
+            discription=self.tr('Default translated-text font family used by new manga presets and batch rendering helpers.')
+        ))
+        self.render_default_writing_mode_combo = QComboBox(self)
+        for label, value in [(self.tr('Auto'), 'auto'), (self.tr('Horizontal LTR'), 'horizontal_ltr'), (self.tr('Vertical RL'), 'vertical_rl'), (self.tr('RTL'), 'rtl')]:
+            self.render_default_writing_mode_combo.addItem(label, value)
+        self.render_default_writing_mode_combo.currentIndexChanged.connect(self.on_render_default_writing_mode_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_writing_mode_combo,
+            self.tr('Default writing mode'),
+            discription=self.tr('Auto uses script plus text-box geometry; per-textbox settings can override it.')
+        ))
+        self.render_default_fit_mode_combo = QComboBox(self)
+        for label, value in [(self.tr('Shrink to fit'), 'shrink'), (self.tr('Expand to fill'), 'expand'), (self.tr('Preserve size'), 'preserve'), (self.tr('Balance lines'), 'balance')]:
+            self.render_default_fit_mode_combo.addItem(label, value)
+        self.render_default_fit_mode_combo.currentIndexChanged.connect(self.on_render_default_fit_mode_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_fit_mode_combo,
+            self.tr('Default fit mode'),
+            discription=self.tr('Controls whether auto-layout shrinks, expands, preserves, or balances text in boxes.')
+        ))
+        self.render_default_stroke_width_spin = QDoubleSpinBox(self)
+        self.render_default_stroke_width_spin.setRange(0.0, 1.0)
+        self.render_default_stroke_width_spin.setSingleStep(0.01)
+        self.render_default_stroke_width_spin.setDecimals(3)
+        self.render_default_stroke_width_spin.valueChanged.connect(self.on_render_default_stroke_width_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_stroke_width_spin, self.tr('Default stroke width'), discription=self.tr('Relative manga outline width for presets/new styles.')))
+        self.render_default_shadow_radius_spin = QDoubleSpinBox(self)
+        self.render_default_shadow_radius_spin.setRange(0.0, 1.0)
+        self.render_default_shadow_radius_spin.setSingleStep(0.01)
+        self.render_default_shadow_radius_spin.setDecimals(3)
+        self.render_default_shadow_radius_spin.valueChanged.connect(self.on_render_default_shadow_radius_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_shadow_radius_spin, self.tr('Default shadow/glow radius'), discription=self.tr('Relative shadow/glow radius used by new text styles.')))
+        self.render_default_text_padding_spin = QDoubleSpinBox(self)
+        self.render_default_text_padding_spin.setRange(0.0, 64.0)
+        self.render_default_text_padding_spin.setSingleStep(1.0)
+        self.render_default_text_padding_spin.setDecimals(1)
+        self.render_default_text_padding_spin.valueChanged.connect(self.on_render_default_text_padding_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_text_padding_spin, self.tr('Default text padding'), discription=self.tr('Inset in image pixels to avoid clipped strokes/punctuation.')))
+        self.render_overflow_warnings_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Enable renderer overflow warnings'),
+            discription=self.tr('Layout review and diagnostics flag text whose measured bounds exceed the box.')
+        )
+        self.render_overflow_warnings_checker.stateChanged.connect(self.on_render_overflow_warnings_changed)
+        self.render_diagnostics_overlay_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Renderer diagnostics overlay'),
+            discription=self.tr('Draw text box, measured bounds, writing mode, and missing-glyph warnings on the canvas.')
+        )
+        self.render_diagnostics_overlay_checker.stateChanged.connect(self.on_render_diagnostics_overlay_changed)
+        self.render_fallback_latin_edit = QLineEdit(self)
+        self.render_fallback_latin_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_latin', text))
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_latin_edit, self.tr('Latin fallback fonts'), discription=self.tr('Comma-separated fallback font families.')))
+        self.render_fallback_cjk_edit = QLineEdit(self)
+        self.render_fallback_cjk_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_cjk', text))
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_cjk_edit, self.tr('CJK fallback fonts'), discription=self.tr('Comma-separated JP/CN fallback font families.')))
+        self.render_fallback_korean_edit = QLineEdit(self)
+        self.render_fallback_korean_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_korean', text))
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_korean_edit, self.tr('Korean fallback fonts'), discription=self.tr('Comma-separated Hangul fallback font families.')))
+        self.render_fallback_rtl_edit = QLineEdit(self)
+        self.render_fallback_rtl_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_rtl', text))
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_rtl_edit, self.tr('Arabic/Hebrew fallback fonts'), discription=self.tr('Comma-separated RTL fallback font families.')))
+        self.render_fallback_emoji_edit = QLineEdit(self)
+        self.render_fallback_emoji_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_emoji', text))
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_emoji_edit, self.tr('Emoji/symbol fallback fonts'), discription=self.tr('Comma-separated emoji/symbol fallback font families.')))
+        google_stub = QLabel(self.tr('Google/Web fonts: planned; use local installed fonts or the existing font installer for now.'))
+        generalConfigPanel.addSublock(ConfigSubBlock(google_stub, self.tr('Web font support'), discription=self.tr('Future stub only: no network font UI is exposed until download/cache handling is complete.')))
 
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
@@ -1386,6 +1469,12 @@ class ConfigPanel(Widget):
     def on_skip_ignored_in_run_changed(self):
         pcfg.skip_ignored_in_run = self.skip_ignored_in_run_checker.isChecked()
 
+    def on_skip_satisfied_pipeline_changed(self):
+        pcfg.skip_satisfied_pipeline_steps = self.skip_satisfied_pipeline_checker.isChecked()
+
+    def on_auto_mark_translated_pages_changed(self):
+        pcfg.auto_mark_translated_pages = self.auto_mark_translated_pages_checker.isChecked()
+
     def _open_context_menu_config(self):
         dlg = ContextMenuConfigDialog(self)
         dlg.exec()
@@ -1725,6 +1814,26 @@ class ConfigPanel(Widget):
     def on_vertical_cjk_punctuation_hang_changed(self):
         pcfg.vertical_cjk_punctuation_hang = self.vertical_cjk_punctuation_hang_checker.isChecked()
 
+
+    def on_render_default_font_changed(self, text: str):
+        pcfg.render_default_font_family = (text or '').strip()
+    def on_render_default_writing_mode_changed(self):
+        pcfg.render_default_writing_mode = str(self.render_default_writing_mode_combo.currentData() or 'auto')
+    def on_render_default_fit_mode_changed(self):
+        pcfg.render_default_fit_mode = str(self.render_default_fit_mode_combo.currentData() or 'shrink')
+    def on_render_default_stroke_width_changed(self):
+        pcfg.render_default_stroke_width = float(self.render_default_stroke_width_spin.value())
+    def on_render_default_shadow_radius_changed(self):
+        pcfg.render_default_shadow_radius = float(self.render_default_shadow_radius_spin.value())
+    def on_render_default_text_padding_changed(self):
+        pcfg.render_default_text_padding = float(self.render_default_text_padding_spin.value())
+    def on_render_overflow_warnings_changed(self):
+        pcfg.render_overflow_warnings = self.render_overflow_warnings_checker.isChecked()
+    def on_render_diagnostics_overlay_changed(self):
+        pcfg.render_diagnostics_overlay = self.render_diagnostics_overlay_checker.isChecked()
+    def on_render_fallback_changed(self, attr: str, text: str):
+        setattr(pcfg, attr, text or '')
+
     def on_fontcolor_flag_changed(self):
         pcfg.let_fntcolor_flag = self.let_fntcolor_combox.currentIndex()
 
@@ -1931,6 +2040,23 @@ class ConfigPanel(Widget):
             self.vertical_cjk_rotate_latin_checker.setChecked(bool(getattr(pcfg, 'vertical_cjk_rotate_latin', True)))
         if hasattr(self, 'vertical_cjk_punctuation_hang_checker'):
             self.vertical_cjk_punctuation_hang_checker.setChecked(bool(getattr(pcfg, 'vertical_cjk_punctuation_hang', True)))
+
+        if hasattr(self, 'render_default_font_edit'):
+            self.render_default_font_edit.setText(str(getattr(pcfg, 'render_default_font_family', '') or ''))
+            idx = self.render_default_writing_mode_combo.findData(getattr(pcfg, 'render_default_writing_mode', 'auto'))
+            self.render_default_writing_mode_combo.setCurrentIndex(max(0, idx))
+            idx = self.render_default_fit_mode_combo.findData(getattr(pcfg, 'render_default_fit_mode', 'shrink'))
+            self.render_default_fit_mode_combo.setCurrentIndex(max(0, idx))
+            self.render_default_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_stroke_width', 0.08)))
+            self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
+            self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
+            self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
+            self.render_diagnostics_overlay_checker.setChecked(bool(getattr(pcfg, 'render_diagnostics_overlay', False)))
+            self.render_fallback_latin_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_latin', '') or ''))
+            self.render_fallback_cjk_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_cjk', '') or ''))
+            self.render_fallback_korean_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_korean', '') or ''))
+            self.render_fallback_rtl_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_rtl', '') or ''))
+            self.render_fallback_emoji_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_emoji', '') or ''))
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)
@@ -2001,6 +2127,10 @@ class ConfigPanel(Widget):
             self.manual_mode_checker.setChecked(getattr(pcfg, 'manual_mode', False))
         if hasattr(self, 'skip_ignored_in_run_checker'):
             self.skip_ignored_in_run_checker.setChecked(getattr(pcfg, 'skip_ignored_in_run', True))
+        if hasattr(self, 'skip_satisfied_pipeline_checker'):
+            self.skip_satisfied_pipeline_checker.setChecked(getattr(pcfg, 'skip_satisfied_pipeline_steps', False))
+        if hasattr(self, 'auto_mark_translated_pages_checker'):
+            self.auto_mark_translated_pages_checker.setChecked(getattr(pcfg, 'auto_mark_translated_pages', True))
         if hasattr(self, 'smooth_scroll_spin'):
             self.smooth_scroll_spin.setValue(getattr(pcfg, 'smooth_scroll_duration_ms', 0))
             if hasattr(self, 'configContent') and hasattr(self.configContent, 'setSmoothScrollDuration'):

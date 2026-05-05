@@ -69,9 +69,15 @@ class FontFormat(Config):
     italic: bool = False
     alignment: int = 0
     vertical: bool = False
+    # Manga writing mode: auto | horizontal_ltr | vertical_rl | rtl. `vertical` remains the renderer switch for compatibility.
+    writing_mode: str = "auto"
+    # Fit behavior used by layout/review: shrink | expand | preserve | balance.
+    fit_mode: str = "shrink"
     font_weight: int = None
     line_spacing: float = 1.2
     letter_spacing: float = 1.15
+    # Extra inset in image pixels, persisted per style/text box.
+    text_padding: float = 0.0
     opacity: float = 1.
     shadow_radius: float = 0.
     shadow_strength: float = 1.
@@ -107,6 +113,10 @@ class FontFormat(Config):
     text_box_corner_radius: float = 0.0
     # Box outline shape to match balloon: "", "round", "elongated", "narrow", "ellipse", "diamond", "square", "bevel", "pentagon", "point"
     text_box_shape: str = ""
+    # Optional per-style fallback chain. Empty = use renderer config fallback chain.
+    fallback_font_chain: str = ""
+    # Last applied manga preset id, for diagnostics/review.
+    manga_preset: str = ""
     # #35: per-character stroke color (list of [r,g,b], one per character; used for text-on-path)
     stroke_rgb_per_char: List = field(default=None)  # optional
 
@@ -127,6 +137,12 @@ class FontFormat(Config):
             if 'family' in da:
                 self.font_family = da['family']
 
+        try:
+            from utils.text_rendering import normalize_fit_mode, normalize_writing_mode
+            self.writing_mode = normalize_writing_mode(getattr(self, "writing_mode", "auto"))
+            self.fit_mode = normalize_fit_mode(getattr(self, "fit_mode", "shrink"))
+        except Exception:
+            pass
         self.font_weight = fix_fontweight_qt(self.font_weight)
         self.deprecated_attributes = {}
 

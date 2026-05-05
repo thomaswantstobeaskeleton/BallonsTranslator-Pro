@@ -212,6 +212,8 @@ class Canvas(QGraphicsScene):
     set_balloon_shape_signal = Signal(str)
     resize_to_fit_content_signal = Signal()
     center_in_bubble_signal = Signal()
+    set_writing_mode_signal = Signal(str)
+    recenter_text_in_box_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1272,6 +1274,7 @@ class Canvas(QGraphicsScene):
 
             # --- Format ---
             format_act = layout_act = fit_to_bubble_act = auto_fit_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            writing_auto_act = writing_ltr_act = writing_vertical_act = writing_rtl_act = recenter_text_in_box_act = None
             resize_to_fit_content_act = center_in_bubble_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
@@ -1327,6 +1330,19 @@ class Canvas(QGraphicsScene):
                 if center_in_bubble_act is not None:
                     center_in_bubble_act.setToolTip(self.tr("Move the text box so its center aligns with the bubble center (no resize)."))
                 actions_map['format_center_in_bubble'] = center_in_bubble_act
+            if context_menu_visible('format_writing_mode') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                writing_sub = format_menu.addMenu(self.tr("Writing mode"))
+                writing_auto_act = writing_sub.addAction(self.tr("Auto"))
+                writing_ltr_act = writing_sub.addAction(self.tr("Horizontal LTR"))
+                writing_vertical_act = writing_sub.addAction(self.tr("Vertical RL"))
+                writing_rtl_act = writing_sub.addAction(self.tr("RTL"))
+                actions_map['format_writing_mode'] = writing_sub
+            if context_menu_visible('format_recenter_text_in_box') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                recenter_text_in_box_act = format_menu.addAction(self.tr("Recenter text in box"))
+                recenter_text_in_box_act.setToolTip(self.tr("Recenter the rendered ink inside the current text box without moving the box."))
+                actions_map['format_recenter_text_in_box'] = recenter_text_in_box_act
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
@@ -1639,6 +1655,16 @@ class Canvas(QGraphicsScene):
                 self.resize_to_fit_content_signal.emit()
             elif rst == center_in_bubble_act:
                 self.center_in_bubble_signal.emit()
+            elif rst == writing_auto_act:
+                self.set_writing_mode_signal.emit("auto")
+            elif rst == writing_ltr_act:
+                self.set_writing_mode_signal.emit("horizontal_ltr")
+            elif rst == writing_vertical_act:
+                self.set_writing_mode_signal.emit("vertical_rl")
+            elif rst == writing_rtl_act:
+                self.set_writing_mode_signal.emit("rtl")
+            elif rst == recenter_text_in_box_act:
+                self.recenter_text_in_box_signal.emit()
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

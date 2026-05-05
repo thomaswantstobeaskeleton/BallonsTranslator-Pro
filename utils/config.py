@@ -110,6 +110,7 @@ class ModuleConfig(Config):
     translation_soft_failure_continue: bool = True
     # Skip translation for pages that already have all blocks translated (non-empty translation). Speeds up re-runs.
     skip_already_translated: bool = False
+    skip_satisfied_pipeline_steps: bool = False
     # Optional: merge nearby text blocks using collision-based grouping (Dango-style). Off by default;  for word-level OCR or many small blocks.
     merge_nearby_blocks_collision: bool = False
     merge_nearby_blocks_gap_ratio: float = 1.5  # vertical expansion ratio for horizontal merge; 1.5 = Dango-style
@@ -566,6 +567,23 @@ class ProgramConfig(Config):
     manual_mode: bool = False
     # When True (default), full run and batch skip pages marked as "ignored" in the page list.
     skip_ignored_in_run: bool = True
+    # Automatically mark pages as translated when a pipeline run satisfies the enabled stage finish contract.
+    auto_mark_translated_pages: bool = True
+    # Rendering/text-formatting defaults and diagnostics.
+    render_default_writing_mode: str = "auto"
+    render_default_fit_mode: str = "shrink"
+    render_overflow_warnings: bool = True
+    render_diagnostics_overlay: bool = False
+    render_default_font_family: str = ""
+    render_default_stroke_width: float = 0.08
+    render_default_shadow_radius: float = 0.0
+    render_default_shadow_strength: float = 1.0
+    render_default_text_padding: float = 2.0
+    render_fallback_fonts_latin: str = "Arial, Noto Sans, DejaVu Sans"
+    render_fallback_fonts_cjk: str = "Noto Sans CJK JP, Noto Sans CJK SC, Yu Gothic, Microsoft YaHei"
+    render_fallback_fonts_korean: str = "Noto Sans CJK KR, Malgun Gothic"
+    render_fallback_fonts_rtl: str = "Noto Naskh Arabic, Arial, Segoe UI"
+    render_fallback_fonts_emoji: str = "Noto Color Emoji, Segoe UI Emoji, Apple Color Emoji"
     # Smooth scroll: animate scroll position on wheel (ms). 0 = off. 80–200 = subtle enhanced feel.
     smooth_scroll_duration_ms: int = 0
     # When True, briefly apply motion blur to scroll area viewport during scroll (can be costly).
@@ -685,7 +703,7 @@ CONFIG_KEY_ORDER = (
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
-    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",

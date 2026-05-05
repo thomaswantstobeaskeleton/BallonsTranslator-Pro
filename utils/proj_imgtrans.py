@@ -205,6 +205,7 @@ class ProjImgTrans:
                 else:
                     img_info['finish_code'] = RunStatus.FIN_ALL
             img_info.setdefault('ignored', False)
+            img_info.setdefault('completion_state', 'todo')
             
         set_img_failed = False
         if 'current_img' in proj_dict:
@@ -223,7 +224,7 @@ class ProjImgTrans:
     def _ensure_image_info_entry(self, pagename: str):
         if pagename not in self._image_info:
             LOGGER.warning(f"Missing page progress entry for {pagename}; creating default progress state.")
-            self._image_info[pagename] = {'finish_code': 0, 'ignored': False}
+            self._image_info[pagename] = {'finish_code': 0, 'ignored': False, 'completion_state': 'todo'}
         return self._image_info[pagename]
 
     def get_page_progress(self, pagename: str):
@@ -232,6 +233,18 @@ class ProjImgTrans:
 
     def set_page_progress(self, pagename, code):
         self._ensure_image_info_entry(pagename)['finish_code'] = code 
+
+    def get_page_completion_state(self, pagename: str) -> str:
+        state = str(self._ensure_image_info_entry(pagename).get('completion_state', 'todo') or 'todo')
+        return state if state in {'todo', 'translated', 'reviewed', 'exported'} else 'todo'
+
+    def set_page_completion_state(self, pagename: str, state: str):
+        if pagename not in self.pages:
+            return
+        state = str(state or 'todo').strip().lower()
+        if state not in {'todo', 'translated', 'reviewed', 'exported'}:
+            state = 'todo'
+        self._ensure_image_info_entry(pagename)['completion_state'] = state
 
     def is_page_ignored(self, pagename: str) -> bool:
         """True if this page is marked to be skipped in full/batch run."""
@@ -366,7 +379,7 @@ class ProjImgTrans:
             self.pages[imgname] = []
             self._pagename2idx[imgname] = ii
             self._idx2pagename[ii] = imgname
-            self._image_info[imgname] = {'finish_code': 0, 'ignored': False}
+            self._image_info[imgname] = {'finish_code': 0, 'ignored': False, 'completion_state': 'todo'}
         self.set_current_img_byidx(0)
         self.save()
         

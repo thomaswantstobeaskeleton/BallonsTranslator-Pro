@@ -10,6 +10,7 @@ from utils import shared
 from utils import config as C
 from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
+from utils.text_rendering import MANGA_PRESETS, normalize_fit_mode, normalize_writing_mode
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .textitem import TextBlkItem
 from .text_advanced_format import TextAdvancedFormatPanel
@@ -313,6 +314,41 @@ class FontFormatPanel(Widget):
         self.autoFitFontSizeChecker.setToolTip(self.tr("Auto fit font size to block: scale font so text fits the bounding box when layout runs."))
         self.autoFitFontSizeChecker.clicked.connect(lambda : self.on_param_changed('auto_fit_font_size', self.autoFitFontSizeChecker.isChecked()))
 
+        self.writingModeCombo = QComboBox(self)
+        self.writingModeCombo.setObjectName("WritingModeCombo")
+        self.writingModeCombo.addItem(self.tr("Writing: Auto"), "auto")
+        self.writingModeCombo.addItem(self.tr("Horizontal LTR"), "horizontal_ltr")
+        self.writingModeCombo.addItem(self.tr("Vertical RL"), "vertical_rl")
+        self.writingModeCombo.addItem(self.tr("RTL"), "rtl")
+        self.writingModeCombo.setToolTip(self.tr("Per-textbox writing mode. Auto uses script and text-box geometry."))
+        self.writingModeCombo.currentIndexChanged.connect(self._on_writing_mode_changed)
+
+        self.fitModeCombo = QComboBox(self)
+        self.fitModeCombo.setObjectName("FitModeCombo")
+        self.fitModeCombo.addItem(self.tr("Fit: Shrink"), "shrink")
+        self.fitModeCombo.addItem(self.tr("Expand to fill"), "expand")
+        self.fitModeCombo.addItem(self.tr("Preserve size"), "preserve")
+        self.fitModeCombo.addItem(self.tr("Balance lines"), "balance")
+        self.fitModeCombo.setToolTip(self.tr("Text fitting policy used by auto-layout and layout review."))
+        self.fitModeCombo.currentIndexChanged.connect(self._on_fit_mode_changed)
+
+        self.mangaPresetCombo = QComboBox(self)
+        self.mangaPresetCombo.setObjectName("MangaPresetCombo")
+        self.mangaPresetCombo.addItem(self.tr("Preset: none"), "")
+        for preset_id, preset in MANGA_PRESETS.items():
+            self.mangaPresetCombo.addItem(self.tr(preset.get("label", preset_id)), preset_id)
+        self.mangaPresetCombo.setToolTip(self.tr("Apply manga lettering presets: stroke, spacing, writing mode, fit mode, alignment, and padding."))
+        self.mangaPresetCombo.currentIndexChanged.connect(self._on_manga_preset_changed)
+
+        self.textPaddingSpinBox = QDoubleSpinBox(self)
+        self.textPaddingSpinBox.setObjectName("TextPaddingSpinBox")
+        self.textPaddingSpinBox.setRange(0.0, 64.0)
+        self.textPaddingSpinBox.setSingleStep(1.0)
+        self.textPaddingSpinBox.setDecimals(1)
+        self.textPaddingSpinBox.setSuffix(" px")
+        self.textPaddingSpinBox.setToolTip(self.tr("Extra text inset/padding to avoid clipping strokes and punctuation."))
+        self.textPaddingSpinBox.valueChanged.connect(self._on_text_padding_changed)
+
         self.textOnPathCombo = QComboBox(self)
         self.textOnPathCombo.setObjectName("TextOnPathCombo")
         self.textOnPathCombo.addItems([self.tr("Text on path: None"), self.tr("Circular"), self.tr("Arc")])
@@ -491,6 +527,10 @@ class FontFormatPanel(Widget):
         hl2.setContentsMargins(4, 0, 4, 0)
         hl2b = QHBoxLayout()
         hl2b.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hl2b.addWidget(self.writingModeCombo)
+        hl2b.addWidget(self.fitModeCombo)
+        hl2b.addWidget(self.mangaPresetCombo)
+        hl2b.addWidget(self.textPaddingSpinBox)
         hl2b.addWidget(self.textOnPathCombo)
         hl2b.addWidget(self.textOnPathArcDegreesSpinBox)
         hl2b.addWidget(self.warpStyleCombo)
@@ -576,6 +616,24 @@ class FontFormatPanel(Widget):
         else:
             func(param_name, value, C.active_format, is_global=False, blkitems=self.textblk_item, set_focus=True, **func_kwargs)
 
+    def _set_combo_by_data(self, combo: QComboBox, value):
+        idx = combo.findData(value)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _on_writing_mode_changed(self, index: int):
+        self.on_param_changed('writing_mode', self.writingModeCombo.itemData(index) or 'auto')
+
+    def _on_fit_mode_changed(self, index: int):
+        self.on_param_changed('fit_mode', self.fitModeCombo.itemData(index) or 'shrink')
+
+    def _on_manga_preset_changed(self, index: int):
+        preset = self.mangaPresetCombo.itemData(index) or ''
+        if preset:
+            self.on_param_changed('manga_preset', preset)
+
+    def _on_text_padding_changed(self, value: float):
+        self.on_param_changed('text_padding', float(value))
+
     def _on_text_on_path_combo_changed(self, index: int):
         self.textOnPathArcDegreesSpinBox.setVisible(index == 2)
         self.on_param_changed('text_on_path', index)
@@ -637,6 +695,18 @@ class FontFormatPanel(Widget):
         self.lineSpacingBox.setValue(font_format.line_spacing)
         self.letterSpacingBox.setValue(font_format.letter_spacing)
         self.verticalChecker.setChecked(font_format.vertical)
+        self.writingModeCombo.blockSignals(True)
+        self._set_combo_by_data(self.writingModeCombo, normalize_writing_mode(getattr(font_format, 'writing_mode', 'auto')))
+        self.writingModeCombo.blockSignals(False)
+        self.fitModeCombo.blockSignals(True)
+        self._set_combo_by_data(self.fitModeCombo, normalize_fit_mode(getattr(font_format, 'fit_mode', 'shrink')))
+        self.fitModeCombo.blockSignals(False)
+        self.mangaPresetCombo.blockSignals(True)
+        self._set_combo_by_data(self.mangaPresetCombo, getattr(font_format, 'manga_preset', '') or '')
+        self.mangaPresetCombo.blockSignals(False)
+        self.textPaddingSpinBox.blockSignals(True)
+        self.textPaddingSpinBox.setValue(float(getattr(font_format, 'text_padding', 0.0) or 0.0))
+        self.textPaddingSpinBox.blockSignals(False)
         self.autoFitFontSizeChecker.setChecked(bool(getattr(font_format, 'auto_fit_font_size', False)))
         self.opacityMainBox.setValue(font_format.opacity)
         text_on_path = getattr(font_format, 'text_on_path', 0)

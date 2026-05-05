@@ -10,6 +10,7 @@ class PipelineInsightsWidget(QWidget):
     open_ocr_crop_inspector_requested = Signal()
     open_reading_order_editor_requested = Signal()
     run_layout_review_requested = Signal()
+    open_batch_style_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,12 +62,20 @@ class PipelineInsightsWidget(QWidget):
         self.reading_order_btn.clicked.connect(self.open_reading_order_editor_requested.emit)
         lay.addWidget(self.reading_order_btn)
         self.layout_review_btn = QPushButton(self.tr('Layout Review Agent'), self)
+        self.layout_review_btn.setObjectName('PipelinePrimaryAction')
         self.layout_review_btn.clicked.connect(self.run_layout_review_requested.emit)
         lay.addWidget(self.layout_review_btn)
+        self.batch_style_btn = QPushButton(self.tr('Batch Text Style Override'), self)
+        self.batch_style_btn.clicked.connect(self.open_batch_style_requested.emit)
+        lay.addWidget(self.batch_style_btn)
         self.api_status_label = QLabel(self.tr('Automation API: off'), self)
         self.api_status_label.setObjectName('PipelineApiStatus')
         lay.addWidget(self.api_status_label)
 
+        self.empty_state = QLabel(self.tr('No warnings yet. Run the pipeline or layout review to populate actionable checks.'), self)
+        self.empty_state.setWordWrap(True)
+        self.empty_state.setObjectName('PipelineEmptyState')
+        lay.addWidget(self.empty_state)
         self.warning_list = QListWidget(self)
         self.warning_list.setFrameShape(QFrame.NoFrame)
         lay.addWidget(self.warning_list, 1)
@@ -135,6 +144,7 @@ class PipelineInsightsWidget(QWidget):
         item = QListWidgetItem(f'[{code}] {message}')
         item.setToolTip(message)
         self.warning_list.addItem(item)
+        self.empty_state.setVisible(False)
         self.warning_badge.setText(self.tr(f'Warnings: {self.warning_list.count()}'))
         self._anim.stop()
         self._anim.setDuration(140)
@@ -154,6 +164,7 @@ class PipelineInsightsWidget(QWidget):
 
     def reset(self):
         self.warning_list.clear()
+        self.empty_state.setVisible(True)
         self.warning_badge.setText(self.tr('Warnings: 0'))
         self.event_list.clear()
         self.engine_list.clear()
