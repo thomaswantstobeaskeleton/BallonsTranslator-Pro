@@ -42,11 +42,11 @@ else:
     from qtpy.QtWidgets import QAction
 
 class ShowPageListChecker(QCheckBox):
-    ...
+    pass
 
 
 class OpenBtn(QToolButton):
-    ...
+    pass
 
 
 class StatusButton(QPushButton):
@@ -525,9 +525,17 @@ class TitleBar(Widget):
         self.displayLanguageMenu.addActions(lang_actions)
 
         drawBoardAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'drawingtools_pen.svg')), self.tr('Drawing Board'), self)
-        drawBoardAction.setShortcut(QKeySequence.fromString(get_shortcut("view.draw_board", getattr(pcfg, "shortcuts", None))))
         texteditAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_textedit.svg')), self.tr('Text Editor'), self)
-        texteditAction.setShortcut(QKeySequence.fromString(get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None))))
+
+        # MainWindow owns the actual keyboard shortcuts for these actions.
+        # Keeping the same keys on these QActions causes Qt ambiguous shortcut overloads
+        # (for example P/T doing nothing because both QAction and QShortcut own the key).
+        drawBoardAction.setShortcut(QKeySequence())
+        texteditAction.setShortcut(QKeySequence())
+        draw_key = get_shortcut("view.draw_board", getattr(pcfg, "shortcuts", None)) or "P"
+        text_key = get_shortcut("view.text_edit", getattr(pcfg, "shortcuts", None)) or "T"
+        drawBoardAction.setToolTip(self.tr('Drawing Board') + f" ({draw_key})")
+        texteditAction.setToolTip(self.tr('Text Editor') + f" ({text_key})")
         importTextStyles = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-down.svg')), self.tr('Import Text Styles'), self)
         exportTextStyles = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-up.svg')), self.tr('Export Text Styles'), self)
         spellCheckPanelAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')), self.tr('Spell check panel'), self)
@@ -537,8 +545,12 @@ class TitleBar(Widget):
         keyboardShortcutsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.keyboard_shortcuts", getattr(pcfg, "shortcuts", None))))
         self.keyboard_shortcuts_trigger = keyboardShortcutsAction.triggered
         contextMenuOptionsAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_config_activate.svg')), self.tr('Context menu options...'), self)
-        contextMenuOptionsAction.setShortcut(QKeySequence.fromString(get_shortcut("view.context_menu_options", getattr(pcfg, "shortcuts", None))))
-        contextMenuOptionsAction.setToolTip(self.tr('Show or hide canvas right-click menu actions by category.'))
+        # MainWindow owns the Ctrl+Shift+O QShortcut; keep this QAction click-only to avoid ambiguity.
+        contextMenuOptionsAction.setShortcut(QKeySequence())
+        context_menu_key = get_shortcut("view.context_menu_options", getattr(pcfg, "shortcuts", None)) or "Ctrl+Shift+O"
+        contextMenuOptionsAction.setToolTip(
+            self.tr('Show or hide canvas right-click menu actions by category.') + f" ({context_menu_key})"
+        )
         self.context_menu_options_trigger = contextMenuOptionsAction.triggered
         themeLightAction = QAction(self.tr('Light'), self)
         themeLightAction.setToolTip(self.tr('Use light theme (Eva Light).'))
@@ -619,6 +631,16 @@ class TitleBar(Widget):
         nextPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Next Page'), self)
         prevPageAltAction = QAction(self.tr('Previous Page (alternate)'), self)
         nextPageAltAction = QAction(self.tr('Next Page (alternate)'), self)
+
+        # Page navigation shortcuts are registered as MainWindow QShortcuts.
+        # Keep menu QActions click-only; duplicate QAction shortcuts cause:
+        # QAction::event: Ambiguous shortcut overload: PgUp/PgDown/A/D
+        for _act in (prevPageAction, nextPageAction, prevPageAltAction, nextPageAltAction):
+            _act.setShortcut(QKeySequence())
+        prevPageAction.setToolTip(self.tr('Previous Page') + " (PageUp)")
+        nextPageAction.setToolTip(self.tr('Next Page') + " (PageDown)")
+        prevPageAltAction.setToolTip(self.tr('Previous Page (alternate)') + " (A)")
+        nextPageAltAction.setToolTip(self.tr('Next Page (alternate)') + " (D)")
         goMenu = QMenu(self.goToolBtn)
         goMenu.addActions([prevPageAction, nextPageAction])
         goMenu.addSeparator()
@@ -1480,9 +1502,44 @@ class TitleBar(Widget):
         self._omni_actions_cache = None
 
     def apply_shortcuts(self, shortcuts_dict):
-        """Apply keyboard shortcuts from config (action_id -> key string)."""
+        """Apply shortcuts to title-bar menu actions without duplicating MainWindow shortcuts.
+
+        MainWindow uses QShortcut for high-frequency canvas/navigation mode keys.
+        If these QAction menu entries also own the same keys, Qt reports
+        "QAction::event: Ambiguous shortcut overload" and the shortcut may do nothing.
+        """
+        mainwindow_owned_shortcuts = {
+            "view.text_edit",
+            "view.draw_board",
+            "go.prev_page",
+            "go.next_page",
+            "go.prev_page_alt",
+            "go.next_page_alt",
+            "canvas.textblock_mode",
+            "canvas.zoom_in",
+            "canvas.zoom_out",
+            "canvas.delete",
+            "canvas.space",
+            "canvas.select_all",
+            "canvas.escape",
+            "canvas.delete_line",
+            "canvas.create_textbox",
+            "view.context_menu_options",
+            "edit.omni_search",
+        }
+
+        shortcuts_dict = shortcuts_dict or {}
+
         for action_id, default_key, action in self._shortcut_actions_title:
-            key = (shortcuts_dict or {}).get(action_id) or default_key
+            key = shortcuts_dict.get(action_id) or default_key
+
+            if action_id in mainwindow_owned_shortcuts:
+                # QAction remains clickable from the menu, but keyboard ownership stays with MainWindow.
+                action.setShortcut(QKeySequence())
+                if key:
+                    action.setToolTip(action.text().replace("&", "") + f" ({key})")
+                continue
+
             action.setShortcut(QKeySequence.fromString(key) if key else QKeySequence())
 
     def eventFilter(self, obj, e):
@@ -1933,5 +1990,4 @@ class BottomBar(Widget):
         self._run_btn_pulse_up.setEndValue(up_sz)
         self._run_btn_pulse_down.setStartValue(up_sz)
         self._run_btn_pulse_down.setEndValue(icon_sz)
-
 
