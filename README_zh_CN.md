@@ -47,33 +47,6 @@ BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/B
 
 ---
 
-## 构建桌面可执行文件（Windows / macOS / Linux）
-
-已内置一键构建脚本：
-
-- **Windows：** 双击 `build_release.bat`
-- **macOS/Linux：** 运行 `bash build_release.sh`
-
-这些脚本会安装打包依赖并使用 `launch.spec` 执行 PyInstaller，输出到 `dist/`。
-
----
-
-## Windows 安装器 `.exe`（标准安装流程）
-
-如果要生成“正常软件安装包”（安装目录、开始菜单、可选桌面快捷方式）：
-
-1. 安装 **Inno Setup 6**（https://jrsoftware.org/isinfo.php）
-2. 运行 `build_windows_installer.bat`
-3. 在 `dist_installer/BallonsTranslatorPro-Setup.exe` 找到安装器
-
-该安装器会：
-- 安装到 `Program Files`
-- 在 Windows 注册卸载项
-- 添加开始菜单快捷方式
-- 可选添加桌面快捷方式
-
----
-
 ## 克隆 / 下载方式
 
 ### 方式 A — 下载 ZIP（最简单）
