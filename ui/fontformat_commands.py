@@ -127,6 +127,79 @@ def ffmt_change_vertical(param_name: str, values: bool, act_ffmt: FontFormat, is
     for blkitem, value in zip(blkitems, values):
         blkitem.setVertical(value)
 
+
+@font_formating(push_undostack=True)
+def ffmt_change_writing_mode(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    from utils.text_rendering import resolve_writing_mode, normalize_writing_mode
+    for blkitem, value in zip(blkitems, values):
+        mode = normalize_writing_mode(value)
+        blkitem.fontformat.writing_mode = mode
+        text = blkitem.toPlainText() if hasattr(blkitem, "toPlainText") else ""
+        rect = blkitem.absBoundingRect(qrect=True) if hasattr(blkitem, "absBoundingRect") else None
+        box = (rect.width(), rect.height()) if rect is not None else None
+        resolved = resolve_writing_mode(mode, text, box)
+        blkitem.setVertical(resolved == "vertical_rl")
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.writing_mode = mode
+            blkitem.blk.fontformat.vertical = resolved == "vertical_rl"
+
+@font_formating(push_undostack=True)
+def ffmt_change_fit_mode(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    from utils.text_rendering import normalize_fit_mode
+    for blkitem, value in zip(blkitems, values):
+        mode = normalize_fit_mode(value)
+        blkitem.fontformat.fit_mode = mode
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.fit_mode = mode
+
+@font_formating(push_undostack=True)
+def ffmt_change_text_padding(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        value = max(0.0, float(value or 0.0))
+        blkitem.fontformat.text_padding = value
+        blkitem.setPadding(value)
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.text_padding = value
+
+@font_formating(push_undostack=True)
+def ffmt_change_fallback_font_chain(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        blkitem.fontformat.fallback_font_chain = str(value or "")
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.fallback_font_chain = blkitem.fontformat.fallback_font_chain
+
+@font_formating(push_undostack=True)
+def ffmt_change_manga_preset(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    from utils.text_rendering import MANGA_PRESETS, normalize_writing_mode, resolve_writing_mode
+    for blkitem, value in zip(blkitems, values):
+        preset_id = str(value or "")
+        preset = MANGA_PRESETS.get(preset_id)
+        if not preset:
+            continue
+        for key, preset_value in preset.items():
+            if key == "label":
+                continue
+            if hasattr(blkitem.fontformat, key):
+                setattr(blkitem.fontformat, key, preset_value)
+        blkitem.fontformat.manga_preset = preset_id
+        # Apply renderer-facing fields immediately.
+        mode = normalize_writing_mode(preset.get("writing_mode", "auto"))
+        blkitem.fontformat.writing_mode = mode
+        rect = blkitem.absBoundingRect(qrect=True) if hasattr(blkitem, "absBoundingRect") else None
+        box = (rect.width(), rect.height()) if rect is not None else None
+        resolved = resolve_writing_mode(mode, blkitem.toPlainText() if hasattr(blkitem, "toPlainText") else "", box)
+        blkitem.setVertical(resolved == "vertical_rl")
+        if "stroke_width" in preset:
+            blkitem.setStrokeWidth(float(preset["stroke_width"]))
+        if "text_padding" in preset:
+            blkitem.setPadding(float(preset["text_padding"]))
+        if "alignment" in preset:
+            blkitem.setAlignment(int(preset["alignment"]))
+        if hasattr(blkitem, "set_fontformat"):
+            blkitem.set_fontformat(blkitem.fontformat)
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat = blkitem.fontformat.deepcopy()
+
 @font_formating()
 def ffmt_change_frgb(param_name: str, values: tuple, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     set_kwargs = global_default_set_kwargs if is_global else local_default_set_kwargs

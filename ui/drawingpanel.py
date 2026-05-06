@@ -438,7 +438,8 @@ class DrawingPanel(Widget):
         try:
             tool = f'{tool_name}Tool'
             tool: QStackedWidget = getattr(self, tool)
-            tool.setToolTip(f'{shortcut}')
+            base = tool.toolTip().split(' — ')[0] if tool.toolTip() else tool_name
+            tool.setToolTip(f'{base} — {shortcut}')
         except:
             LOGGER.error(f'{tool} not found in drawing panel')
 

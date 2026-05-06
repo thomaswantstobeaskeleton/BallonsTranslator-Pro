@@ -787,6 +787,14 @@ class TitleBar(Widget):
         exportLptxtAction.setToolTip(self.tr('Export translations in LPtxt format for auto-labeling tools (e.g. 气泡翻译器自动打标).'))
         self.export_lptxt_trigger = exportLptxtAction.triggered
         exportMenuTools.addAction(exportLptxtAction)
+        layeredPsdHandoffAction = QAction(self.tr('Export layered PSD handoff...'), self)
+        layeredPsdHandoffAction.setToolTip(self.tr('Export original/inpainted/mask/final helper layers plus editable text metadata and a Photoshop JSX rebuild script.'))
+        self.export_layered_psd_handoff_trigger = layeredPsdHandoffAction.triggered
+        exportMenuTools.addAction(layeredPsdHandoffAction)
+        structuredOcrExportAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'structured_ocr_export.svg')), self.tr('Export structured OCR JSON...'), self)
+        structuredOcrExportAction.setToolTip(self.tr('Export page/block geometry, OCR text, translations, completion state, and font hints as JSON for LLM/tooling workflows.'))
+        self.export_structured_ocr_trigger = structuredOcrExportAction.triggered
+        exportMenuTools.addAction(structuredOcrExportAction)
         sourcesMenu = QMenu(self.tr('Sources'), self)
         sourcesMenu.addAction(mangaSourceAction)
         queueMenu = QMenu(self.tr('Queue'), self)

@@ -69,7 +69,10 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
     ("draw.hand", "H", "Drawing", "Hand tool (pan)"),
     ("draw.inpaint", "J", "Drawing", "Inpaint brush"),
     ("draw.pen", "B", "Drawing", "Pen tool"),
+    ("draw.text_eraser", "E", "Drawing", "Text eraser / repair depth brush"),
     ("draw.rect", "R", "Drawing", "Rectangle select"),
+    ("draw.brush_size_up", "]", "Drawing", "Increase brush size"),
+    ("draw.brush_size_down", "[", "Drawing", "Decrease brush size"),
 ]
 
 
@@ -123,3 +126,26 @@ def auto_resolve_shortcut_conflicts(shortcuts_map: Dict[str, str]) -> Dict[str, 
         for aid in ids[1:]:
             out[aid] = ''
     return out
+
+
+def shortcut_should_ignore_text_input(focus_widget) -> bool:
+    """True when single-key tool/navigation shortcuts should not fire because the user is typing."""
+    if focus_widget is None:
+        return False
+    name = focus_widget.__class__.__name__.lower()
+    if any(token in name for token in ("lineedit", "textedit", "plaintextedit", "spinbox", "combobox", "keysequenceedit")):
+        return True
+    if hasattr(focus_widget, "textInteractionFlags"):
+        try:
+            return bool(int(focus_widget.textInteractionFlags()))
+        except Exception:
+            return True
+    return False
+
+
+def is_single_key_sequence(key: str) -> bool:
+    k = (key or "").strip()
+    if not k:
+        return False
+    lowered = k.lower()
+    return "+" not in k and lowered not in {"pageup", "pagedown", "escape", "space", "delete", "backspace", "tab", "enter", "return"}

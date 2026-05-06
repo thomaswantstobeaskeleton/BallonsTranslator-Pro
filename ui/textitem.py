@@ -14,6 +14,8 @@ from utils.textblock import TextBlock, FontFormat, TextAlignment, LineSpacingTyp
 from utils.text_layout import _merge_stub_lines_in_string
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
 from utils.fontformat import FontFormat, px2pt, pt2px
+from utils.config import pcfg
+from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, merge_font_fallback_chain, resolve_writing_mode
 from .misc import td_pattern, table_pattern, pixmap2ndarray, ndarray2pixmap
 from .image_edit import ImageEditMode
 from .scene_textlayout import VerticalTextDocumentLayout, HorizontalTextDocumentLayout, SceneTextLayout
@@ -483,6 +485,18 @@ class TextBlkItem(QGraphicsTextItem):
         if self._display_rect is not None:
             br.setHeight(self._display_rect.height())
             br.setWidth(self._display_rect.width())
+        if self.fontformat is not None:
+            try:
+                fs = self.layout.max_font_size(to_px=True) if self.layout is not None else pt2px(self.document().defaultFont().pointSizeF())
+                stroke_pad = fs * max(0.0, float(getattr(self.fontformat, 'stroke_width', 0.0) or 0.0))
+                shadow_pad = fs * max(0.0, float(getattr(self.fontformat, 'shadow_radius', 0.0) or 0.0))
+                off = getattr(self.fontformat, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0]
+                shadow_pad += fs * max(abs(float(off[0] if len(off) > 0 else 0.0)), abs(float(off[1] if len(off) > 1 else 0.0)))
+                pad = max(0.0, stroke_pad + shadow_pad)
+                if pad > 0:
+                    br = br.adjusted(-pad, -pad, pad, pad)
+            except Exception:
+                pass
         return br
 
     def padding(self) -> float:
@@ -733,6 +747,55 @@ class TextBlkItem(QGraphicsTextItem):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         if skew_x != 0 or skew_y != 0:
             painter.restore()
+
+
+    def _render_diagnostics(self):
+        ff = self.fontformat
+        if ff is None:
+            return None
+        br = self.boundingRect()
+        fs = self.layout.max_font_size(to_px=True) if self.layout is not None else pt2px(self.document().defaultFont().pointSizeF())
+        mode = resolve_writing_mode(getattr(ff, 'writing_mode', 'auto'), self.toPlainText(), (br.width(), br.height()))
+        measured = estimate_text_bounds(
+            self.toPlainText(), fs, mode, br.width(), br.height(),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+            shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+        )
+        families = merge_font_fallback_chain(getattr(ff, 'font_family', ''), self.toPlainText(), pcfg, getattr(ff, 'fallback_font_chain', ''))
+        missing = first_missing_glyphs(getattr(ff, 'font_family', ''), self.toPlainText()) if self.toPlainText() else []
+        return {
+            'mode': mode,
+            'measured': measured,
+            'overflow': measured[0] > br.width() or measured[1] > br.height(),
+            'fallback': ', '.join(families),
+            'missing': ''.join(missing),
+        }
+
+    def _draw_renderer_diagnostics_overlay(self, painter: QPainter):
+        if not bool(getattr(pcfg, 'render_diagnostics_overlay', False)):
+            return
+        diag = self._render_diagnostics()
+        if diag is None:
+            return
+        br = self.boundingRect()
+        painter.save()
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setPen(QPen(QColor(255, 128, 0, 190) if diag['overflow'] else QColor(0, 180, 255, 160), 1.5 / max(0.01, self.get_scale()), Qt.PenStyle.DashLine))
+        painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+        painter.drawRect(br)
+        measured_w, measured_h = diag['measured'][0], diag['measured'][1]
+        painter.setPen(QPen(QColor(255, 64, 64, 170), 1 / max(0.01, self.get_scale())))
+        painter.drawRect(QRectF(0, 0, measured_w, measured_h))
+        label = f"{diag['mode']} {measured_w:.0f}×{measured_h:.0f}"
+        if diag['missing']:
+            label += f" missing: {diag['missing']}"
+        painter.setPen(QColor(255, 128, 0) if diag['overflow'] else QColor(0, 128, 255))
+        painter.drawText(QPointF(2, max(10.0, 10.0 / max(0.01, self.get_scale()))), label)
+        painter.restore()
 
     def _text_mask_region(self):
         """Build QRegion from blk.text_mask for clipping (#1093 text eraser). Returns None if no mask or mask is full (no clip needed)."""
@@ -1101,6 +1164,20 @@ class TextBlkItem(QGraphicsTextItem):
 
     def set_fontformat(self, ffmat: FontFormat, set_char_format=False, set_stroke_width=True, set_effect=True):
         self.repainting = True
+        try:
+            from utils.text_rendering import normalize_vertical_punctuation, resolve_writing_mode
+            rect = self.absBoundingRect(qrect=True)
+            text = self.toPlainText()
+            resolved_mode = resolve_writing_mode(getattr(ffmat, 'writing_mode', 'auto'), text, (rect.width(), rect.height()))
+            ffmat.vertical = resolved_mode == 'vertical_rl'
+            if ffmat.vertical:
+                new_text = normalize_vertical_punctuation(text)
+                if new_text != text:
+                    self.setPlainText(new_text)
+                    if getattr(self, 'blk', None) is not None:
+                        self.blk.translation = new_text
+        except Exception:
+            pass
         if self.fontformat.vertical != ffmat.vertical:
             self.setVertical(ffmat.vertical)
 
@@ -1151,6 +1228,8 @@ class TextBlkItem(QGraphicsTextItem):
             self.setShadow(ffmat, repaint=False)
         if set_stroke_width:
             self.setStrokeWidth(ffmat.stroke_width, repaint_background=False)
+        if float(getattr(ffmat, 'text_padding', 0.0) or 0.0) > 0:
+            self.setPadding(float(getattr(ffmat, 'text_padding', 0.0) or 0.0))
         self.setOpacity(ffmat.opacity)
         
         alignment_qt_flag = [Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignCenter, Qt.AlignmentFlag.AlignRight][ffmat.alignment]

@@ -10,6 +10,13 @@ ActionType = Literal[
     "auto_fit",
     "center_in_bubble",
     "resize_to_fit_content",
+    "shrink_to_fit",
+    "switch_writing_mode",
+    "recenter",
+    "increase_padding",
+    "balance_lines",
+    "apply_manga_preset",
+    "flag_missing_glyphs",
 ]
 
 
@@ -46,6 +53,12 @@ class BlockSnapshot:
     font_size: float
     bubble_center: Optional[Tuple[float, float]] = None
     est_text_size: Optional[Tuple[float, float]] = None
+    writing_mode: str = "auto"
+    resolved_writing_mode: str = "horizontal_ltr"
+    overflow_status: bool = False
+    measured_bounds: Optional[Tuple[float, float]] = None
+    text_style: Dict[str, Any] = field(default_factory=dict)
+    font_fallback_warning: str = ""
 
 
 @dataclass
@@ -121,6 +134,9 @@ class LayoutReviewPlanner:
         est_w, est_h = blk.est_text_size or (0.0, 0.0)
         overflow_x = est_w > bw * 0.98
         overflow_y = est_h > bh * 0.98
+        if blk.overflow_status:
+            overflow_x = overflow_x or est_w > bw * 0.92
+            overflow_y = overflow_y or est_h > bh * 0.92
 
         score_before = 1.0
 
@@ -135,11 +151,26 @@ class LayoutReviewPlanner:
             )
             actions.append(
                 ReviewAction(
-                    action="auto_fit",
+                    action="shrink_to_fit",
                     block_index=blk.block_index,
-                    reason="Reduce font size to fit current box before resizing.",
+                    reason="Reduce font size using the selected fit policy before resizing.",
                 )
             )
+            actions.append(
+                ReviewAction(
+                    action="auto_fit",
+                    block_index=blk.block_index,
+                    reason="Compatibility action: reduce font size to fit current box before resizing.",
+                )
+            )
+            if (blk.text_style or {}).get("fit_mode") == "balance":
+                actions.append(
+                    ReviewAction(
+                        action="balance_lines",
+                        block_index=blk.block_index,
+                        reason="Rebalance line breaks to reduce overflow without changing wording.",
+                    )
+                )
             actions.append(
                 ReviewAction(
                     action="resize_to_fit_content",
@@ -191,6 +222,87 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.15
 
+
+        if blk.font_fallback_warning:
+            issues.append(
+                ReviewIssue(
+                    code="missing_glyphs",
+                    severity="warning",
+                    message=f"Selected font may not render: {blk.font_fallback_warning}",
+                    score_penalty=0.12,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="flag_missing_glyphs",
+                    block_index=blk.block_index,
+                    args={"glyphs": blk.font_fallback_warning},
+                    reason="Flag missing glyphs for font fallback or font-family correction.",
+                )
+            )
+            score_before -= 0.12
+
+        style = blk.text_style or {}
+        padding = float(style.get("text_padding", 0.0) or 0.0)
+        stroke_width = float(style.get("stroke_width", 0.0) or 0.0)
+        if blk.resolved_writing_mode == "vertical_rl" and style.get("fit_mode") in (None, "", "preserve"):
+            issues.append(
+                ReviewIssue(
+                    code="vertical_manga_preset_recommended",
+                    severity="info",
+                    message="Vertical CJK text would benefit from the vertical manga bubble preset.",
+                    score_penalty=0.04,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="apply_manga_preset",
+                    block_index=blk.block_index,
+                    args={"preset": "vertical_cjk_bubble"},
+                    reason="Apply vertical CJK bubble spacing, stroke, alignment, and padding.",
+                )
+            )
+            score_before -= 0.04
+        if stroke_width > 0 and padding < 1.0:
+            issues.append(
+                ReviewIssue(
+                    code="low_padding_with_stroke",
+                    severity="info",
+                    message="Outlined text has little inset and may clip at the box edge.",
+                    score_penalty=0.05,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": 2.0},
+                    reason="Add inset so stroke/shadow does not clip.",
+                )
+            )
+            score_before -= 0.05
+
+        # Mode sanity: auto-resolved vertical/RTL but persisted style is forced differently.
+        if blk.writing_mode not in ("auto", blk.resolved_writing_mode):
+            if blk.resolved_writing_mode in ("vertical_rl", "rtl"):
+                issues.append(
+                    ReviewIssue(
+                        code="writing_mode_mismatch",
+                        severity="info",
+                        message=f"Text appears better suited to {blk.resolved_writing_mode} writing mode.",
+                        score_penalty=0.08,
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="switch_writing_mode",
+                        block_index=blk.block_index,
+                        args={"writing_mode": blk.resolved_writing_mode},
+                        reason="Switch writing mode to match script and box geometry.",
+                    )
+                )
+                score_before -= 0.08
+
         score_after = max(score_before + 0.2 * (1 if actions else 0), 0.0)
         return issues, actions, max(score_before, 0.0), min(score_after, 1.0)
 
@@ -204,6 +316,13 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "auto_fit": [],
         "center_in_bubble": [],
         "resize_to_fit_content": [],
+        "shrink_to_fit": [],
+        "switch_writing_mode": [],
+        "recenter": [],
+        "increase_padding": [],
+        "balance_lines": [],
+        "apply_manga_preset": [],
+        "flag_missing_glyphs": [],
     }
     for blk in page_result.blocks:
         for action in blk.actions:
@@ -220,6 +339,13 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "auto_fit": [],
         "center_in_bubble": [],
         "resize_to_fit_content": [],
+        "shrink_to_fit": [],
+        "switch_writing_mode": [],
+        "recenter": [],
+        "increase_padding": [],
+        "balance_lines": [],
+        "apply_manga_preset": [],
+        "flag_missing_glyphs": [],
     }
     for action in actions:
         grouped[action.action].append(action)

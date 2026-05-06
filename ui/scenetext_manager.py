@@ -30,6 +30,15 @@ from utils.bubble_shape_model import get_bubble_shape_from_model as _bubble_shap
 from utils.box_size_check_model import check_box_size_from_model
 from utils.text_processing import seg_text, is_cjk
 from utils.text_layout import layout_text
+from utils.text_rendering import (
+    balance_lines,
+    fallback_chain_for_text,
+    fit_font_size_to_box,
+    merge_font_fallback_chain,
+    first_missing_glyphs,
+    normalize_vertical_punctuation,
+    resolve_writing_mode,
+)
 from utils.line_breaking import split_long_token_with_hyphenation
 from utils.layout_review_agent import (
     BlockSnapshot,
@@ -609,6 +618,10 @@ class SceneTextManager(QObject):
         self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
         self.canvas.resize_to_fit_content_signal.connect(self.onResizeToFitContent)
         self.canvas.center_in_bubble_signal.connect(self.onCenterInBubble)
+        if hasattr(self.canvas, "set_writing_mode_signal"):
+            self.canvas.set_writing_mode_signal.connect(self.onSetWritingMode)
+        if hasattr(self.canvas, "recenter_text_in_box_signal"):
+            self.canvas.recenter_text_in_box_signal.connect(self.onRecenterTextInBox)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -632,6 +645,29 @@ class SceneTextManager(QObject):
 
         self.prev_blkitem: TextBlkItem = None
         self._moving_blur_item: TextBlkItem = None  # reserved for optional drag effect cleanup
+
+
+    def onSetWritingMode(self, mode: str):
+        from ui import fontformat_commands as FC
+        blkitems = self.canvas.selected_text_items()
+        if not blkitems:
+            return
+        FC.ffmt_change_writing_mode('writing_mode', mode, self.formatpanel.global_format, False, blkitems)
+        self.updateSceneTextitems()
+        self.canvas.setProjSaveState(False)
+
+    def onRecenterTextInBox(self):
+        for blkitem in self.canvas.selected_text_items():
+            rect = blkitem.boundingRect()
+            doc_size = blkitem.document().size()
+            dx = (rect.width() - doc_size.width()) / 2.0
+            dy = (rect.height() - doc_size.height()) / 2.0
+            try:
+                blkitem.document().setDocumentMargin(max(0.0, blkitem.document().documentMargin() + min(dx, dy, 8.0)))
+            except Exception:
+                pass
+            blkitem.update()
+        self.canvas.setProjSaveState(False)
 
     def on_switch_textitem(self, switch_delta: int, key_event: QKeyEvent = None, current_editing_widget: Union[SourceTextEdit, TransTextEdit] = None):
         n_blk = len(self.textblk_item_list)
@@ -1286,6 +1322,20 @@ class SceneTextManager(QObject):
                         font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
                         est_text_size=est,
                         bubble_center=bubble_center,
+                        writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
+                        resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
+                        overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
+                        measured_bounds=est,
+                        text_style={
+                            'font_family': getattr(blk.fontformat, 'font_family', ''),
+                            'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
+                            'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
+                            'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
+                            'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
+                            'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
+                            'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                        },
+                        font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
                     )
                 )
             result = planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
@@ -1322,6 +1372,20 @@ class SceneTextManager(QObject):
                     font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
                     est_text_size=est,
                     bubble_center=self._estimate_block_bubble_center(blk),
+                    writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
+                    resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
+                    overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
+                    measured_bounds=est,
+                    text_style={
+                        'font_family': getattr(blk.fontformat, 'font_family', ''),
+                        'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
+                        'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
+                        'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
+                        'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
+                        'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
+                        'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                    },
+                    font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
                 )
             )
         return planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
@@ -1353,6 +1417,20 @@ class SceneTextManager(QObject):
                     font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
                     est_text_size=est,
                     bubble_center=self._estimate_block_bubble_center(blk),
+                    writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
+                    resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
+                    overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
+                    measured_bounds=est,
+                    text_style={
+                        'font_family': getattr(blk.fontformat, 'font_family', ''),
+                        'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
+                        'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
+                        'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
+                        'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
+                        'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
+                        'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                    },
+                    font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
                 )
             )
         provider_impl = provider or self._resolve_review_provider(cfg)
@@ -1399,17 +1477,44 @@ class SceneTextManager(QObject):
         review_result,
         target_block_indices: Optional[List[int]] = None,
     ) -> int:
-        """Apply actions from a precomputed review result and return number of actions applied."""
+        """Apply actions from a precomputed review result and return number of actions applied.
+
+        Provider/page review can target blocks that are not currently selected.  The
+        low-level auto-fit/center helpers intentionally operate on selection, so
+        this method temporarily selects the requested targets to make API/menu
+        invocations behave exactly like user-driven edits and remain undoable.
+        """
         pending_actions = [a for block_result in review_result.blocks for a in block_result.actions]
         if target_block_indices:
             pending_actions = filter_actions_by_block_indices(pending_actions, target_block_indices)
         if not pending_actions:
             return 0
-        selected = self._get_review_target_blocks(target_block_indices)
-        if not selected:
-            return 0
-        self._apply_layout_review_actions(pending_actions, selected)
-        return len(pending_actions)
+
+        selected_before = list(self.canvas.selected_text_items())
+        was_editing = self.canvas.editing_textblkitem
+        try:
+            if target_block_indices:
+                idx_set = set(target_block_indices)
+                for blk in self.textblk_item_list:
+                    if blk is not None:
+                        blk.setSelected(blk.idx in idx_set)
+            selected = self._get_review_target_blocks(target_block_indices)
+            if not selected:
+                return 0
+            self._apply_layout_review_actions(pending_actions, selected)
+            return len(pending_actions)
+        finally:
+            if target_block_indices:
+                for blk in self.textblk_item_list:
+                    if blk is not None:
+                        blk.setSelected(False)
+                for blk in selected_before:
+                    try:
+                        blk.setSelected(True)
+                    except Exception:
+                        continue
+                if was_editing is not None and was_editing in self.textblk_item_list:
+                    self.canvas.editing_textblkitem = was_editing
 
     def review_and_fix_selected_textboxes_with_provider(
         self,
@@ -1574,12 +1679,63 @@ class SceneTextManager(QObject):
             undo_stack.beginMacro("Layout review agent")
         try:
             # Keep existing action handlers first to preserve current behavior.
-            if grouped["auto_fit"]:
+            if grouped["auto_fit"] or grouped["shrink_to_fit"]:
                 self.onAutoFitFontToBox()
             if grouped["resize_to_fit_content"]:
                 self.onResizeToFitContent()
-            if grouped["center_in_bubble"]:
+            if grouped["center_in_bubble"] or grouped["recenter"]:
                 self.onCenterInBubble()
+            for action in grouped["switch_writing_mode"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                mode = str(action.args.get("writing_mode", "auto") or "auto")
+                blkitem.fontformat.writing_mode = mode
+                resolved = resolve_writing_mode(mode, blkitem.toPlainText(), (blkitem.absBoundingRect(qrect=True).width(), blkitem.absBoundingRect(qrect=True).height()))
+                blkitem.setVertical(resolved == "vertical_rl")
+                if resolved == "rtl":
+                    blkitem.setAlignment(2, restore_cursor=False)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.writing_mode = mode
+                    blkitem.blk.fontformat.vertical = resolved == "vertical_rl"
+                    blkitem.blk.vertical = resolved == "vertical_rl"
+            for action in grouped["increase_padding"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                padding = max(0.0, float(action.args.get("padding", 2.0) or 2.0))
+                blkitem.fontformat.text_padding = max(float(getattr(blkitem.fontformat, 'text_padding', 0.0) or 0.0), padding)
+                blkitem.setPadding(blkitem.fontformat.text_padding)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.text_padding = blkitem.fontformat.text_padding
+            for action in grouped["balance_lines"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                rect = blkitem.absBoundingRect(qrect=True)
+                fm = QFontMetricsF(blkitem.font())
+                avg_w = max(1.0, fm.horizontalAdvance('漢A') / 2.0)
+                balanced = balance_lines(blkitem.toPlainText().replace('\n', ''), max(2, int(rect.width() / avg_w)))
+                if balanced and balanced != blkitem.toPlainText():
+                    blkitem.setPlainText(balanced)
+                    if blkitem.blk is not None:
+                        blkitem.blk.translation = balanced
+            for action in grouped["apply_manga_preset"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                preset_id = str(action.args.get("preset", "default_manga_bubble") or "default_manga_bubble")
+                from utils.text_rendering import MANGA_PRESETS
+                preset = MANGA_PRESETS.get(preset_id)
+                if not preset:
+                    continue
+                for key, value in preset.items():
+                    if key != 'label' and hasattr(blkitem.fontformat, key):
+                        setattr(blkitem.fontformat, key, value)
+                blkitem.fontformat.manga_preset = preset_id
+                blkitem.set_fontformat(blkitem.fontformat)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat = blkitem.fontformat.deepcopy()
             for action in grouped["move"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -2095,13 +2251,28 @@ class SceneTextManager(QObject):
         src_is_cjk = is_cjk(pcfg.module.translate_source)
         tgt_is_cjk = is_cjk(pcfg.module.translate_target)
 
-        # disable for vertical writing
-        if blkitem.blk.vertical:
-            return
-        
-        old_br = blkitem.absBoundingRect(qrect=True)
-        old_br = [old_br.x(), old_br.y(), old_br.width(), old_br.height()]
+        old_br_q = blkitem.absBoundingRect(qrect=True)
+        old_br = [old_br_q.x(), old_br_q.y(), old_br_q.width(), old_br_q.height()]
         if old_br[2] < 1:
+            return
+
+        # Resolve per-textbox writing mode before deciding whether the horizontal auto-layout path applies.
+        raw_text_for_mode = text if text is not None else blkitem.toPlainText()
+        resolved_mode = resolve_writing_mode(getattr(blkitem.fontformat, 'writing_mode', 'auto'), raw_text_for_mode, (old_br[2], old_br[3]))
+        blkitem.fontformat.vertical = resolved_mode == 'vertical_rl'
+        if blkitem.blk is not None:
+            blkitem.blk.fontformat.writing_mode = getattr(blkitem.fontformat, 'writing_mode', 'auto')
+            blkitem.blk.fontformat.vertical = blkitem.fontformat.vertical
+            blkitem.blk.vertical = blkitem.fontformat.vertical
+        if resolved_mode == 'rtl':
+            blkitem.setAlignment(2, restore_cursor=False)
+        if resolved_mode == 'vertical_rl':
+            new_text = normalize_vertical_punctuation(raw_text_for_mode)
+            if new_text != raw_text_for_mode:
+                blkitem.setPlainText(new_text)
+                if blkitem.blk is not None:
+                    blkitem.blk.translation = new_text
+            blkitem.setVertical(True)
             return
 
         blk_font = blkitem.font()
@@ -2128,6 +2299,23 @@ class SceneTextManager(QObject):
 
         if not text.strip():
             return
+        fit_mode = getattr(fmt, 'fit_mode', 'shrink')
+        if fit_mode in ('shrink', 'expand', 'preserve', 'balance'):
+            fitted_size, fitted_text, fit_diag = fit_font_size_to_box(
+                text, blk_font.pointSizeF(), (old_br[2], old_br[3]), fit_mode,
+                getattr(fmt, 'writing_mode', 'auto'),
+                min_font_size=float(getattr(pcfg.module, 'layout_font_size_min', 8.0)),
+                max_font_size=float(getattr(pcfg.module, 'layout_font_size_max', 72.0)),
+                line_spacing=float(getattr(fmt, 'line_spacing', 1.15) or 1.15),
+                letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
+                padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),
+                stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+            )
+            if fit_mode in ('shrink', 'expand') and abs(fitted_size - blk_font.pointSizeF()) > 0.2:
+                blk_font.setPointSizeF(max(1.0, fitted_size))
+                blk_font.setPointSize(max(1, int(round(fitted_size))))
+            if fitted_text != text:
+                text = fitted_text
 
         # When mask not passed, try to get block's mask from project so we only run bubble/balloon logic when a bubble was detected
         if mask is None and img is not None:
