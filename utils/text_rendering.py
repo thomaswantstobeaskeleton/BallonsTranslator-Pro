@@ -6,7 +6,7 @@ import sys
 import unicodedata
 import ctypes.util
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple, Dict
 
 
 WRITING_MODE_AUTO = "auto"
@@ -127,6 +127,8 @@ class TextRenderDiagnostics:
     line_count: int = 0
     column_count: int = 0
     line_break_strategy: str = LINE_BREAK_AUTO
+    overflow_axes: List[str] = None
+    recommended_actions: List[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -141,6 +143,8 @@ class TextRenderDiagnostics:
             "line_count": self.line_count,
             "column_count": self.column_count,
             "line_break_strategy": self.line_break_strategy,
+            "overflow_axes": list(self.overflow_axes or []),
+            "recommended_actions": list(self.recommended_actions or []),
         }
 
 
@@ -293,19 +297,235 @@ def kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_AUTO) -> 
     return lines
 
 
+def line_break_opportunities(text: str, strategy: str = LINE_BREAK_AUTO) -> List[Dict[str, object]]:
+    """Return script-aware break opportunities for diagnostics and layout review.
+
+    The helper is intentionally renderer-independent: UI/API callers can explain
+    why a line was rebalanced without needing QTextLayout. `allowed=False`
+    captures basic kinsoku bans such as starting a line with closing punctuation
+    or ending a line after opening punctuation.
+    """
+    strategy = normalize_line_break_strategy(strategy)
+    text = text or ""
+    opportunities: List[Dict[str, object]] = []
+    for idx in range(1, len(text)):
+        prev_ch = text[idx - 1]
+        next_ch = text[idx]
+        allowed = True
+        reason = "default"
+        if strategy != LINE_BREAK_LOOSE and next_ch in CLOSING_PUNCT:
+            allowed = False
+            reason = "kinsoku_no_line_start_closing_punctuation"
+        elif strategy != LINE_BREAK_LOOSE and prev_ch in OPENING_PUNCT:
+            allowed = False
+            reason = "kinsoku_no_line_end_opening_punctuation"
+        elif _is_cjk_char(prev_ch) or _is_cjk_char(next_ch):
+            reason = "cjk_character_boundary"
+        elif prev_ch.isspace() or next_ch.isspace():
+            reason = "word_boundary"
+        opportunities.append({"index": idx, "allowed": allowed, "reason": reason, "before": prev_ch, "after": next_ch})
+    return opportunities
+
+
+
+def optimal_kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_BALANCED) -> List[str]:
+    """Dynamic-programming wrap that balances manga lettering while honoring kinsoku.
+
+    The greedy wrapper is still used for fast/default layout. This DP helper is
+    used for deliberate balance/fix passes where avoiding a one-character final
+    line and reducing ragged columns matter more than speed. It works on
+    characters for CJK text and on existing word chunks for Latin/RTL text, then
+    rejects breaks that would start a line with closing punctuation or end a
+    line after opening punctuation.
+    """
+    strategy = normalize_line_break_strategy(strategy)
+    text = (text or "").strip()
+    if not text:
+        return []
+    max_chars = max(1, int(max_chars or 1))
+    if "\n" in text:
+        out: List[str] = []
+        for para in text.splitlines():
+            out.extend(optimal_kinsoku_wrap(para, max_chars, strategy))
+        return [ln for ln in out if ln]
+    if strategy == LINE_BREAK_LOOSE or len(text) <= max_chars:
+        return kinsoku_wrap(text, max_chars, strategy)
+
+    # Tokenize similarly to kinsoku_wrap, but split Latin words only at spaces.
+    tokens: List[str] = []
+    buf = ""
+    for ch in text:
+        if ch.isspace():
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            continue
+        if _is_cjk_char(ch) or ch in OPENING_PUNCT or ch in CLOSING_PUNCT:
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            tokens.append(ch)
+        else:
+            buf += ch
+    if buf:
+        tokens.append(buf)
+    n = len(tokens)
+    if n == 0:
+        return []
+
+    lengths = [len(tok) for tok in tokens]
+    prefix = [0]
+    for ln in lengths:
+        prefix.append(prefix[-1] + ln)
+
+    def chunk(i: int, j: int) -> str:
+        return "".join(tokens[i:j])
+
+    def valid_break(i: int, j: int) -> bool:
+        if i >= j:
+            return False
+        line = chunk(i, j)
+        if len(line) > max_chars + 2:
+            return False
+        if strategy != LINE_BREAK_LOOSE:
+            if line[0] in CLOSING_PUNCT:
+                return False
+            if line[-1] in OPENING_PUNCT:
+                return False
+        return True
+
+    target = max(1.0, min(float(max_chars), max(1.0, len(text) / max(1, math.ceil(len(text) / max_chars)))))
+    dp = [float("inf")] * (n + 1)
+    nxt = [-1] * (n + 1)
+    dp[n] = 0.0
+    for i in range(n - 1, -1, -1):
+        for j in range(i + 1, n + 1):
+            ln = prefix[j] - prefix[i]
+            if ln > max_chars + 2:
+                break
+            if not valid_break(i, j):
+                continue
+            dangling_penalty = 25.0 if (j == n and ln == 1 and i > 0) else 0.0
+            overflow_penalty = 100.0 * max(0, ln - max_chars)
+            ragged_penalty = (target - min(target, float(ln))) ** 2
+            score = ragged_penalty + dangling_penalty + overflow_penalty + dp[j]
+            if score < dp[i]:
+                dp[i] = score
+                nxt[i] = j
+    if nxt[0] < 0:
+        return kinsoku_wrap(text, max_chars, strategy)
+    lines: List[str] = []
+    i = 0
+    while i < n and nxt[i] > i:
+        j = nxt[i]
+        lines.append(chunk(i, j))
+        i = j
+    return [ln for ln in lines if ln]
+
 def balance_lines(text: str, max_chars: int, strategy: str = LINE_BREAK_BALANCED) -> str:
-    lines = kinsoku_wrap(text, max_chars, strategy)
+    strategy = normalize_line_break_strategy(strategy)
+    if strategy == LINE_BREAK_BALANCED:
+        lines = optimal_kinsoku_wrap(text, max_chars, strategy)
+    else:
+        lines = kinsoku_wrap(text, max_chars, strategy)
     if len(lines) <= 2:
         return "\n".join(lines) if lines else (text or "")
     total = sum(len(ln) for ln in lines)
     target = max(1, int(math.ceil(total / len(lines))))
-    return "\n".join(kinsoku_wrap(text, min(max_chars, max(target, max_chars // 2)), strategy))
+    return "\n".join(optimal_kinsoku_wrap(text, min(max_chars, max(target, max_chars // 2)), strategy))
 
 
 def vertical_columns(text: str, max_chars_per_column: int, strategy: str = LINE_BREAK_CJK_STRICT) -> List[str]:
     """Return logical vertical-rl columns. Each string is top-to-bottom; list order is right-to-left."""
     normalized = normalize_vertical_punctuation(text).replace("\n", "")
     return kinsoku_wrap(normalized, max_chars_per_column, strategy)
+
+
+
+
+def vertical_layout_plan(
+    text: str,
+    max_chars_per_column: int,
+    font_size: float = 24.0,
+    line_spacing: float = 1.1,
+    letter_spacing: float = 1.0,
+    strategy: str = LINE_BREAK_CJK_STRICT,
+) -> Dict[str, object]:
+    """Build a renderer-independent vertical-RL glyph placement plan.
+
+    Columns are ordered right-to-left and glyphs top-to-bottom. Punctuation
+    records a placement class so the Qt renderer, layout review agent, PSD
+    handoff, and automation API can agree on what needs centering/rotation/hang
+    without using a rotate-horizontal fallback.
+    """
+    fs = max(1.0, float(font_size or 1.0))
+    col_advance = fs * max(0.1, float(line_spacing or 1.0))
+    glyph_advance = fs * max(0.1, float(letter_spacing or 1.0))
+    cols = vertical_columns(text, max_chars_per_column, strategy)
+    glyphs: List[Dict[str, object]] = []
+    for col_idx, col in enumerate(cols):
+        x = -col_idx * col_advance
+        for row_idx, ch in enumerate(col):
+            cls = vertical_punctuation_class(ch)
+            glyphs.append({
+                "char": ch,
+                "column": col_idx,
+                "row": row_idx,
+                "x": x,
+                "y": row_idx * glyph_advance,
+                "punctuation_class": cls,
+                "center": cls in {"center", "punct"},
+                "rotate": cls == "rotate",
+                "hang": cls == "center" and ch in {"、", "。", "，", "．"},
+            })
+    return {
+        "columns": cols,
+        "glyphs": glyphs,
+        "column_count": len(cols),
+        "max_rows": max((len(c) for c in cols), default=0),
+        "column_advance": col_advance,
+        "glyph_advance": glyph_advance,
+        "strategy": normalize_line_break_strategy(strategy),
+    }
+
+
+def relative_luminance(rgb: Sequence[float]) -> float:
+    vals = []
+    for c in list(rgb or [0, 0, 0])[:3]:
+        c = max(0.0, min(255.0, float(c))) / 255.0
+        vals.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    while len(vals) < 3:
+        vals.append(0.0)
+    return 0.2126 * vals[0] + 0.7152 * vals[1] + 0.0722 * vals[2]
+
+
+def contrast_ratio(rgb_a: Sequence[float], rgb_b: Sequence[float]) -> float:
+    l1 = relative_luminance(rgb_a)
+    l2 = relative_luminance(rgb_b)
+    hi, lo = max(l1, l2), min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def suggest_manga_effects_for_background(
+    fill_rgb: Sequence[float],
+    background_rgb: Sequence[float],
+    current_stroke_width: float = 0.0,
+    min_ratio: float = 4.5,
+) -> Dict[str, object]:
+    """Suggest conservative lettering effects when text blends into a bubble/page."""
+    ratio = contrast_ratio(fill_rgb, background_rgb)
+    fill_lum = relative_luminance(fill_rgb)
+    bg_lum = relative_luminance(background_rgb)
+    stroke_rgb = [0, 0, 0] if fill_lum > bg_lum else [255, 255, 255]
+    stroke_width = max(float(current_stroke_width or 0.0), 0.06 if ratio < min_ratio else float(current_stroke_width or 0.0))
+    return {
+        "contrast_ratio": round(ratio, 2),
+        "needs_effect": ratio < min_ratio,
+        "recommended_stroke_rgb": stroke_rgb,
+        "recommended_stroke_width": stroke_width,
+        "recommended_shadow_radius": 0.04 if ratio < min_ratio else 0.0,
+        "reason": "low_text_background_contrast" if ratio < min_ratio else "contrast_ok",
+    }
 
 
 def estimate_text_bounds(
@@ -405,7 +625,13 @@ def fit_font_size_to_box(
 
     if fit_mode == FIT_MODE_PRESERVE:
         is_over, bounds = over(current)
-        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy)
+        axes = []
+        if bounds[0] > box_w:
+            axes.append("x")
+        if bounds[1] > box_h:
+            axes.append("y")
+        actions = ["shrink_to_fit"] if axes else []
+        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions)
         return current, text_out, diag
 
     target_largest = fit_mode in (FIT_MODE_EXPAND, FIT_MODE_BALANCE)
@@ -423,7 +649,19 @@ def fit_font_size_to_box(
         best = min(current, best)
     bounds = estimate_text_bounds(text_out, best, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, line_break_strategy=line_break_strategy)
     overflow = bounds[0] > box_w or bounds[1] > box_h
-    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy)
+    axes = []
+    if bounds[0] > box_w:
+        axes.append("x")
+    if bounds[1] > box_h:
+        axes.append("y")
+    actions = []
+    if overflow:
+        actions.append("shrink_to_fit")
+    if fit_mode == FIT_MODE_BALANCE or (overflow and resolved != WRITING_MODE_VERTICAL_RL):
+        actions.append("balance_lines")
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        actions.append("check_vertical_punctuation")
+    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions)
     return best, text_out, diag
 
 

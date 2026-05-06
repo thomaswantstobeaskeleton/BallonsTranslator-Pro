@@ -1,61 +1,93 @@
-# Koharu Issue Backlog
+# Koharu Issue Backlog for BallonsTranslator-Pro
 
-_Refreshed: 2026-05-06 from GitHub REST API, 649 issues across 8 paginated requests plus topic searches._
+_Last refreshed: 2026-05-06 via GitHub REST API across 649 all-state `mayocream/koharu` issues/PRs. This backlog is living input for each Koharu-inspired implementation pass._
 
-This living backlog intentionally filters out dependency-only churn and tracks Koharu issues that map to BallonsTranslator-Pro implementation work. Text rendering, typography, vertical/RTL, fitting, and lettering quality stay highest priority.
+## Implemented or advanced in this pass
 
-| Issue | Title | Category | Labels | Maps? | Implemented here? | Priority | Implementation notes | Deferred reason |
+| Issue | Title | Category | Labels | Maps to BallonsTranslator-Pro | Already implemented here? | Priority | Implementation notes | Deferred reason |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| [#624](https://github.com/mayocream/koharu/pull/624) | feat(renderer): Advanced Typesetting (DP Line Breaking, Hyphenation, Kinsoku Shori) | Text rendering / typography / fonts | dependencies, area: app, area: renderer, area: llm | yes | partial | P0 | Advanced DP line breaking/kisoku influenced current line-break strategies; full DP/shaping still deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#602](https://github.com/mayocream/koharu/issues/602) | Issues with Arabic Text Rendering and Pipeline Export | Vertical CJK / RTL / punctuation | bug, renderer | yes | partial | P0 | Arabic/RTL rendering maps to writing-mode RTL and this pass adds Qt RTL text direction and fallback diagnostics. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#595](https://github.com/mayocream/koharu/issues/595) | Feature: Font UX improvements (local names, favorites, family/weight selection) | Text rendering / typography / fonts | ui, feature request, font | yes | partial | P0 | Font UX maps to per-style fallback chain, fallback diagnostics, and explicit fallback glyph runs added this pass. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#594](https://github.com/mayocream/koharu/issues/594) | Feature: Advanced text formatting (gradients, line spacing, kerning) | Text rendering / typography / fonts | renderer, feature request, font | yes | partial | P0 | Advanced formatting maps to existing effects plus this pass improves fallback/RTL/line-break diagnostics. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#593](https://github.com/mayocream/koharu/issues/593) | Feature: Text presets (save font style/size/color configurations) | Text rendering / typography / fonts | ui, feature request, font | yes | partial | P0 | Text presets exist; this pass makes presets carry fallback/line-break strategy and automation apply. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#587](https://github.com/mayocream/koharu/issues/587) | Text boxes in exported PSD do not match original positions | PSD/export/layers | bug, psd, export, high | yes | partial | P1 | PSD handoff exists; native positional editable PSD fidelity remains deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#583](https://github.com/mayocream/koharu/issues/583) | auto font size exaggerates the font size, in arabic that is. | Vertical CJK / RTL / punctuation | bug, renderer, rtl, arabic, text layout | yes | partial | P0 | Arabic auto-size/RTL issue maps to RTL text direction and review/fitting fields. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#558](https://github.com/mayocream/koharu/issues/558) | [Bug] PSD export rasterizes all text layers, making them uneditable | PSD/export/layers | bug, psd, export, text layer | yes | partial | P1 | Editable PSD text layer request maps to handoff manifest/JSX; native writer deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#545](https://github.com/mayocream/koharu/issues/545) | [Bug] Intermittent text rendering overlap and restricted rendering area at 125% scaling | Text fitting / layout / overflow | bug, renderer, windows, needs repro, text layout, dpi scaling | yes | partial | P0 | DPI/overlap maps to diagnostics, measured bounds, and layout review fixes. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#542](https://github.com/mayocream/koharu/pull/542) | Add regression test for global and individual font changes | Text rendering / typography / fonts | area: ui | yes | partial | P1 | Regression tests for font changes; this pass adds fallback/strategy tests. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#515](https://github.com/mayocream/koharu/issues/515) | Custom/granular processing of all images | UI/UX/editor workflow | feature request, workflow | yes | partial | P2 | Granular all-image processing maps to existing pipeline controls; bulk typography QA remains candidate. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#493](https://github.com/mayocream/koharu/issues/493) | [Feature request]: Adding a textless page layer instead of using inpainting. | PSD/export/layers | inpaint, feature request | yes | no | P2 | Textless layer request maps to clean/inpainted export; robust layer pack next. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#462](https://github.com/mayocream/koharu/issues/462) | Rendered CJK text should horizontally center too. | Text fitting / layout / overflow | bug, renderer, good first issue, text layout | yes | partial | P0 | CJK centering maps to recenter and measured-bound work. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#213](https://github.com/mayocream/koharu/issues/213) | [bug] Arabic text rendering is reversed | Vertical CJK / RTL / punctuation | bug, renderer, good first issue | yes | partial | P0 | Arabic reversed text maps to added RTL document text direction. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#211](https://github.com/mayocream/koharu/issues/211) | [Feature request] Text/Font tool: Basic typesetting tools: outline, outline weight, outline color, text align left, text align right, center | Text rendering / typography / fonts | none | yes | yes | P1 | Basic outline/weight/color/alignment controls exist; kept as implemented baseline. |  |
-| [#158](https://github.com/mayocream/koharu/pull/158) | Fix vertical column pitch | Vertical CJK / RTL / punctuation | none | yes | partial | P0 | Vertical column pitch maps to line-break/vertical spacing; further pitch metrics deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#126](https://github.com/mayocream/koharu/issues/126) | [Bug] Korean text (Hangul) incorrectly rendered vertically in tall text blocks | Vertical CJK / RTL / punctuation | bug, renderer | yes | partial | P0 | Hangul vertical issue maps to script-aware auto mode and Korean fallback chains. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#120](https://github.com/mayocream/koharu/issues/120) | [renderer] newline breaks not handled well | Text fitting / layout / overflow | bug, renderer | yes | partial | P0 | Newline breaks maps to line-break strategy and balance tests. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#117](https://github.com/mayocream/koharu/issues/117) | POC Feature Request: Intelligent Word Splitting for Enhanced Text Rendering | Text fitting / layout / overflow | renderer, feature request, text layout | yes | partial | P0 | Intelligent word splitting maps to kinsoku/balanced strategies; hyphenation/DP deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#102](https://github.com/mayocream/koharu/issues/102) | [render] faster and WYSIWYG renderer | Text rendering / typography / fonts | renderer | yes | partial | P1 | WYSIWYG renderer maps to diagnostics overlay and explicit fallback runs. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#77](https://github.com/mayocream/koharu/issues/77) | [renderer] list and select font | Text rendering / typography / fonts | renderer | yes | partial | P0 | List/select font maps to config and fallback panel; favorites/localized names still deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#75](https://github.com/mayocream/koharu/issues/75) | [renderer] use detected font color to render | Text rendering / typography / fonts | renderer | yes | partial | P2 | Detected font color rendering maps to existing font/color hints. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#74](https://github.com/mayocream/koharu/issues/74) | [renderer] use average text size | Text fitting / layout / overflow | renderer | yes | partial | P1 | Average text size maps to measured bounds and fitting diagnostics. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#651](https://github.com/mayocream/koharu/pull/651) | Add page completion state | Automation/API/headless/MCP | area: ui, area: app, area: rpc, area: core, area: tests | yes | yes | P2 | Page completion/API state implemented in earlier pass. |  |
-| [#650](https://github.com/mayocream/koharu/pull/650) | Skip already-satisfied pipeline steps | Automation/API/headless/MCP | area: app | yes | yes | P2 | Skip satisfied pipeline work implemented in earlier pass. |  |
-| [#649](https://github.com/mayocream/koharu/issues/649) | [Feature Request] Enable global font size override from "Auto" across all images | Text rendering / typography / fonts | ui, renderer, feature request | yes | partial | P0 | Global font override maps to batch style override; font fallback controls improved this pass. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#648](https://github.com/mayocream/koharu/issues/648) | Is there a feature to change basic alignment settings or modify the entire project at once? | Text rendering / typography / fonts | none | yes | partial | P0 | Project-wide alignment/style maps to batch styling and rendering presets. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#640](https://github.com/mayocream/koharu/issues/640) | It would be nice to have a feature to render with fixed font options. | Text rendering / typography / fonts | none | yes | partial | P0 | Fixed font options map to batch style plus fallback/strategy controls. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#637](https://github.com/mayocream/koharu/pull/637) | feat: port mask-aware collision detection and squeezing from MangaTra… | Text fitting / layout / overflow | area: renderer, area: ml | yes | partial | P0 | Mask-aware collision/squeezing remains highest next layout candidate. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#630](https://github.com/mayocream/koharu/pull/630) | Fix: Centering Inconsistencies on Text Render | Text fitting / layout / overflow | area: app, area: renderer | yes | partial | P0 | Centering inconsistencies map to recenter, bounds diagnostics, and review actions. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#555](https://github.com/mayocream/koharu/issues/555) | [Feature Request] Global Structured OCR Export (XML/HTML) with Speaker Assignment for LLM Integration | OCR/detection/inpainting | ocr, llm, feature request, workflow, export | yes | yes | P3 | Structured OCR export exists. |  |
-| [#639](https://github.com/mayocream/koharu/issues/639) | Dictionary | Translation/provider/model setup | none | yes | no | P2 | Dictionary/glossary workflow remains deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
-| [#638](https://github.com/mayocream/koharu/issues/638) | Shared gpu Memory | Performance/runtime/GPU | help wanted | yes | no | P3 | GPU memory controls deferred. | Deferred portions require larger renderer/export/runtime work; see next batch candidates. |
+| [#624](https://github.com/mayocream/koharu/pull/624) | Advanced Typesetting (DP Line Breaking, Hyphenation, Kinsoku Shori) | Text fitting / layout / overflow | area: renderer, area: app, area: llm | yes | partial → advanced | P0 | Added reusable kinsoku break-opportunity diagnostics, dynamic-programming balanced wrapping, fit diagnostics with overflow axes/actions, and QA exposure so line-balancing decisions are explainable to UI/API/review flows. | Full DP hyphenation remains deferred because BT-Pro currently uses PyQt text layout rather than Koharu's Rust renderer. |
+| [#598](https://github.com/mayocream/koharu/pull/598) / [#597](https://github.com/mayocream/koharu/issues/597) | Manual text direction toggle / render controls | Vertical CJK / RTL / punctuation | area: ui | yes | partial → advanced | P0 | Added vertical-RL layout plans with glyph positions, punctuation classes, center/rotate/hang metadata; Rendering QA now flags horizontal CJK in tall bubbles and can switch to vertical mode in project-wide fixes. | Full OpenType `vert`/`vrt2` glyph substitution remains deferred pending optional shaping dependencies. |
+| [#602](https://github.com/mayocream/koharu/issues/602) | Issues with Arabic Text Rendering and Pipeline Export | Vertical CJK / RTL / punctuation | bug, renderer | yes | partial | P0 | RTL diagnostics remain wired through writing-mode resolution and QA; PSD handoff now includes fit/writing/fallback diagnostics per editable text layer. | HarfBuzz Arabic shaping and native editable PSD text serialization are still deferred. |
+| [#649](https://github.com/mayocream/koharu/issues/649) | Global font size override from Auto across all images | Text rendering / typography / fonts | ui, renderer, feature request | yes | partial → advanced | P0 | Project Typography QA fixes now apply conservative global rendering fixes through a checked-row preview queue: shrink-to-fit, vertical switch, punctuation normalization, fallback chain, padding, and contrast stroke. | A richer visual before/after approval queue remains next-batch work. |
+| [#648](https://github.com/mayocream/koharu/issues/648) | Change basic alignment settings / entire project at once | Text rendering / typography / fonts | none | yes | partial → advanced | P0 | Existing batch styling is complemented by project-wide QA/fix actions and API reports with structured row data. | Still need a dedicated multi-select project style dialog with previews. |
+| [#640](https://github.com/mayocream/koharu/issues/640) | Render with fixed font options | Text rendering / typography / fonts | none | yes | partial → advanced | P0 | Fit diagnostics and export/PSD manifests now persist actual fit/style/fallback context for fixed-font handoff and QA. | Native font weight/favorite UX remains deferred. |
+| [#630](https://github.com/mayocream/koharu/pull/630) | Centering inconsistencies on text render | Text fitting / layout / overflow | area: app, area: renderer | yes | partial → advanced | P0 | Fit diagnostics now report measured bounds, overflow axes, and review actions; export manifests preserve page status and QA diagnostics for later review. | Full render-after-fix image diff verification remains deferred. |
+| [#626](https://github.com/mayocream/koharu/pull/626) | Memory-efficient streaming ZIP export | PSD/export/layers | area: ui, area: tauri | yes | partial | P1 | Batch rendered export now writes `export_manifest.json` with exported/missing pages, completion state, paths, options, and warnings; successful exports are marked Exported and API export can run batch export without dialogs. | Streaming ZIP internals are deferred; current improvement focuses on status/handoff reliability. |
+| [#614](https://github.com/mayocream/koharu/pull/614) | Translation data import/export via XML | PSD/export/layers | area: ui, area: app, area: rpc | yes | partial | P2 | PSD handoff and structured API exports now carry richer editable text metadata and renderer diagnostics. | XML import/export itself remains deferred. |
+| [#651](https://github.com/mayocream/koharu/pull/651) | Page completion state | Automation/API/headless/MCP | area: ui, rpc, core, tests | yes | yes | P2 | Export manifests include completion state per page; API exports can run status-producing batch handoffs. | No deferral for this pass. |
+| [#601](https://github.com/mayocream/koharu/issues/601) | Drag to reorder text boxes | UI/UX/editor workflow | ui, feature request | yes | no | P1 | Relevant to editing workflow. | Deferred because this pass prioritized lettering QA/export/API vertical slices; reorder needs scene/list drag-drop command work. |
+| [#610](https://github.com/mayocream/koharu/issues/610) | Bulk process folders of CBZs or image subfolders | Batch/project workflow | none | yes | partial | P1 | Existing batch queue remains; headless export route and export manifests reduce clicks after processing. | Parent/child CBZ project expansion remains deferred. |
 
-## Newly implemented in 2026-05-06 extended pass
+## Backlog by category
 
-- Issue-inspired typography/font work from #595/#602/#583/#213/#77: explicit per-character fallback font runs, per-style fallback chain UI, after-fallback missing-glyph diagnostics, RTL document text direction, and layout-review fallback actions.
-- Issue-inspired automation/headless work from API/RPC themes (#651 and related workflow issues): added `fix_rendering_issues` to run connected layout-review fixes from automation and report remaining renderer diagnostics.
-- Continued issue-inspired line-breaking work from #624/#120/#117: fixed final fit diagnostics to honor selected line-break strategy and added regression tests.
-- Issue-inspired project formatting work from #649/#648/#640: expanded batch style override to apply manga presets, writing mode, fit mode, line-break strategy, fallback chains, and padding by page/project.
-- Issue-inspired QA/export work from #545/#630/#595/#77: added project Typography QA reports plus conservative project-wide rendering fixes.
-- Issue-inspired review handoff work from #545/#630/#649: added sortable Typography QA preview rows and Markdown export before applying fixes.
+### Text rendering / typography / fonts
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#649](https://github.com/mayocream/koharu/issues/649) | Enable global font size override from Auto across all images | ui, renderer, feature request | yes | partial | P0 | Continue with previewed project-wide style queue and undoable whole-project style transactions. |
+| [#648](https://github.com/mayocream/koharu/issues/648) | Change alignment settings / entire project at once | none | yes | partial | P0 | Add dedicated batch style dialog previews. |
+| [#640](https://github.com/mayocream/koharu/issues/640) | Fixed font options | none | yes | partial | P0 | Add font favorites/localized names/weight matching. |
+| [#595](https://github.com/mayocream/koharu/issues/595) | Font list/display issues | renderer/ui | yes | partial | P1 | Existing fallback UI helps; localized display names deferred. |
+| [#77](https://github.com/mayocream/koharu/issues/77) | Custom font support | renderer | yes | partial | P1 | Google font installer exists; robust font package manager deferred. |
+
+### Vertical CJK / RTL / punctuation
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#624](https://github.com/mayocream/koharu/pull/624) | Advanced typesetting / kinsoku | area: renderer | yes | partial | P0 | This pass adds explainable break opportunities, dynamic-programming balanced wrapping, and vertical plans; hyphenation deferred. |
+| [#598](https://github.com/mayocream/koharu/pull/598) | Manual text direction toggle | area: ui | yes | partial | P0 | Existing controls plus QA/project fixes; next: preview thumbnails. |
+| [#602](https://github.com/mayocream/koharu/issues/602) | Arabic rendering/export | bug, renderer | yes | partial | P0 | Need shaping engine experiment. |
+| [#213](https://github.com/mayocream/koharu/issues/213) | RTL / vertical edge cases | renderer | yes | partial | P1 | Continue HarfBuzz/ICU evaluation. |
+
+### Text fitting / layout / overflow
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#637](https://github.com/mayocream/koharu/pull/637) | Mask-aware collision detection and squeezing | area: renderer, area: ml | yes | partial | P0 | Next major renderer candidate; needs bubble mask geometry. |
+| [#630](https://github.com/mayocream/koharu/pull/630) | Text centering inconsistencies | area: app, area: renderer | yes | partial | P0 | Diagnostics/actions exist; next: render verification pass. |
+| [#74](https://github.com/mayocream/koharu/issues/74) | Average text size | renderer | yes | partial | P1 | Bounds estimates and fit diagnostics advanced. |
+
+### PSD/export/layers
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#626](https://github.com/mayocream/koharu/pull/626) | Streaming ZIP export | io/ui | yes | partial | P1 | Added export manifests and headless export route; streaming archive deferred. |
+| [#614](https://github.com/mayocream/koharu/pull/614) | Translation data import/export XML | ui/app/rpc | yes | partial | P2 | Structured OCR/PSD handoff exists; XML deferred. |
+| [#587](https://github.com/mayocream/koharu/issues/587) | PSD text layer fidelity | export | yes | partial | P1 | Handoff includes editable metadata; native PSD writing deferred. |
+| [#558](https://github.com/mayocream/koharu/issues/558) | Layer/export issues | export | yes | partial | P1 | Helper layers exist; richer mask/vector layers deferred. |
+
+### Automation/API/headless/MCP
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#651](https://github.com/mayocream/koharu/pull/651) | Page completion state | rpc/core/ui | yes | yes | P2 | Implemented in earlier pass; export manifest consumes it. |
+| [#613](https://github.com/mayocream/koharu/pull/613) | Batch translation with cross-page limits | llm/rpc | yes | partial | P1 | Existing batch queue/API; cross-page token scheduler deferred. |
+| [#612](https://github.com/mayocream/koharu/pull/612) | Granular pipeline control and batch process dialog | ui | yes | partial | P1 | Existing controls; API export and manifests improve headless batch handoff. |
+
+### UI/UX/editor workflow
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#601](https://github.com/mayocream/koharu/issues/601) | Drag to reorder text boxes | ui, feature request | yes | no | P1 | Deferred; needs text list ordering model and undo commands. |
+| [#636](https://github.com/mayocream/koharu/issues/636) | Text box snaps to speech bubble center | none | yes | partial | P1 | Recenter remains explicit; need better move/lock controls. |
+| [#646](https://github.com/mayocream/koharu/issues/646) | Eraser tool doesn't work | none | yes | unknown | P2 | Needs reproduction against BT-Pro drawing tools. |
+
+### Performance/runtime/GPU and setup/provider/model
+
+| Issue | Title | Labels | Maps? | Implemented? | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| [#652](https://github.com/mayocream/koharu/issues/652) | FLUX.2 Klein inpainting fails on macOS Metal | bug, macos | yes | no | P2 | Deferred; platform-specific model/runtime diagnostic. |
+| [#638](https://github.com/mayocream/koharu/issues/638) | Shared GPU Memory | help wanted | yes | no | P3 | Deferred; requires runtime/GPU scheduler design. |
+| [#625](https://github.com/mayocream/koharu/issues/625) | OCR model recommendation | none | yes | partial | P2 | Existing model diagnostics; better recommendation wizard deferred. |
 
 ## Next batch candidates
 
-1. Mask-aware collision detection and text squeezing for bubble boundaries (#637).
-2. Native editable PSD text-layer writer or richer handoff verification for PSD position/editability issues (#587/#558).
-3. Font UX polish: local names, favorites, font weights, and per-script preview samples (#595/#77).
-4. HarfBuzz/ICU shaping experiment for Arabic joining, OpenType vertical alternates, and glyph-run fallback (#602/#213/#583).
-5. Layout review second-pass render verification with before/after screenshots and score deltas (#630/#545).
-6. Add before/after screenshots for Typography QA reports (#545/#630).
-7. Dictionary/glossary workflow integration (#639).
-8. Runtime/GPU memory profile controls and safer model fallback guidance (#638/#652).
+1. Mask-aware collision detection/squeezing using bubble masks and text bounds (#637).
+2. Before/after thumbnails for the checked-row Typography QA fix queue (#649/#648/#630).
+3. Native editable PSD text writer or stronger Photoshop/GIMP handoff validation (#587/#558/#602).
+4. Text block drag-to-reorder with undo and reading-order export impact (#601).
+5. HarfBuzz/ICU shaping experiment for Arabic joining and vertical OpenType alternates (#602/#213/#624).
+6. Streaming ZIP/CBZ export and parent/child batch processing (#626/#610).
+7. Provider/model setup wizard with model recommendation and failure retry diagnostics (#625/#652).
+8. Runtime GPU memory profiles and safer device fallback guidance (#638/#600).
