@@ -35,7 +35,7 @@ from utils.text_rendering import (
     fallback_chain_for_text,
     fit_font_size_to_box,
     merge_font_fallback_chain,
-    first_missing_glyphs,
+    missing_glyphs_after_fallback,
     normalize_vertical_punctuation,
     resolve_writing_mode,
 )
@@ -1334,8 +1334,9 @@ class SceneTextManager(QObject):
                             'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
                             'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                             'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
                         },
-                        font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
+                        font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                     )
                 )
             result = planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
@@ -1384,8 +1385,9 @@ class SceneTextManager(QObject):
                         'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
                         'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                         'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
                     },
-                    font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
+                    font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                 )
             )
         return planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
@@ -1429,8 +1431,9 @@ class SceneTextManager(QObject):
                         'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
                         'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                         'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
+                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
                     },
-                    font_fallback_warning=', '.join(first_missing_glyphs(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText())),
+                    font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                 )
             )
         provider_impl = provider or self._resolve_review_provider(cfg)
@@ -1708,6 +1711,14 @@ class SceneTextManager(QObject):
                 blkitem.setPadding(blkitem.fontformat.text_padding)
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.text_padding = blkitem.fontformat.text_padding
+            for action in grouped["set_line_break_strategy"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                strategy = str(action.args.get("line_break_strategy", "auto") or "auto")
+                blkitem.fontformat.line_break_strategy = strategy
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.line_break_strategy = strategy
             for action in grouped["balance_lines"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -1733,6 +1744,18 @@ class SceneTextManager(QObject):
                     if key != 'label' and hasattr(blkitem.fontformat, key):
                         setattr(blkitem.fontformat, key, value)
                 blkitem.fontformat.manga_preset = preset_id
+                blkitem.set_fontformat(blkitem.fontformat)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat = blkitem.fontformat.deepcopy()
+            for action in grouped["apply_font_fallback"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                chain = str(action.args.get("fallback_chain", "") or "")
+                if chain:
+                    existing = str(getattr(blkitem.fontformat, 'fallback_font_chain', '') or '')
+                    if not existing:
+                        blkitem.fontformat.fallback_font_chain = chain
                 blkitem.set_fontformat(blkitem.fontformat)
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat = blkitem.fontformat.deepcopy()
@@ -2310,6 +2333,7 @@ class SceneTextManager(QObject):
                 letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
                 padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+                line_break_strategy=getattr(fmt, 'line_break_strategy', 'auto'),
             )
             if fit_mode in ('shrink', 'expand') and abs(fitted_size - blk_font.pointSizeF()) > 0.2:
                 blk_font.setPointSizeF(max(1.0, fitted_size))

@@ -16,6 +16,8 @@ ActionType = Literal[
     "increase_padding",
     "balance_lines",
     "apply_manga_preset",
+    "set_line_break_strategy",
+    "apply_font_fallback",
     "flag_missing_glyphs",
 ]
 
@@ -163,7 +165,7 @@ class LayoutReviewPlanner:
                     reason="Compatibility action: reduce font size to fit current box before resizing.",
                 )
             )
-            if (blk.text_style or {}).get("fit_mode") == "balance":
+            if (blk.text_style or {}).get("fit_mode") == "balance" or (blk.text_style or {}).get("line_break_strategy") != "balanced":
                 actions.append(
                     ReviewAction(
                         action="balance_lines",
@@ -240,11 +242,40 @@ class LayoutReviewPlanner:
                     reason="Flag missing glyphs for font fallback or font-family correction.",
                 )
             )
+            chain = str((blk.text_style or {}).get("fallback_chain", "") or "")
+            if chain:
+                actions.append(
+                    ReviewAction(
+                        action="apply_font_fallback",
+                        block_index=blk.block_index,
+                        args={"fallback_chain": chain},
+                        reason="Apply the configured fallback font chain to unsupported glyph runs.",
+                    )
+                )
             score_before -= 0.12
 
         style = blk.text_style or {}
         padding = float(style.get("text_padding", 0.0) or 0.0)
         stroke_width = float(style.get("stroke_width", 0.0) or 0.0)
+        if blk.resolved_writing_mode == "vertical_rl" and style.get("line_break_strategy") not in ("cjk_strict", "balanced"):
+            issues.append(
+                ReviewIssue(
+                    code="vertical_cjk_line_break_policy",
+                    severity="info",
+                    message="Vertical CJK text should use strict kinsoku line breaking.",
+                    score_penalty=0.04,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="set_line_break_strategy",
+                    block_index=blk.block_index,
+                    args={"line_break_strategy": "cjk_strict"},
+                    reason="Use strict CJK punctuation guards for vertical lettering.",
+                )
+            )
+            score_before -= 0.04
+
         if blk.resolved_writing_mode == "vertical_rl" and style.get("fit_mode") in (None, "", "preserve"):
             issues.append(
                 ReviewIssue(
@@ -322,6 +353,8 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "increase_padding": [],
         "balance_lines": [],
         "apply_manga_preset": [],
+        "set_line_break_strategy": [],
+        "apply_font_fallback": [],
         "flag_missing_glyphs": [],
     }
     for blk in page_result.blocks:
@@ -345,6 +378,8 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "increase_padding": [],
         "balance_lines": [],
         "apply_manga_preset": [],
+        "set_line_break_strategy": [],
+        "apply_font_fallback": [],
         "flag_missing_glyphs": [],
     }
     for action in actions:

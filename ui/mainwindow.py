@@ -557,6 +557,7 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.open_reading_order_editor_requested.connect(self.on_open_reading_order_editor_requested)
         self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
         self.pipelineInsightsPanel.open_batch_style_requested.connect(self.on_open_batch_style_override)
+        self.pipelineInsightsPanel.open_typography_qa_requested.connect(self.on_open_typography_qa_report)
         self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
         self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
         self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
@@ -863,6 +864,10 @@ class MainWindow(mainwindow_cls):
             'export_structured_ocr': self._api_export_structured_ocr,
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
+            'apply_rendering_preset': self._api_apply_rendering_preset,
+            'fix_rendering_issues': self._api_fix_rendering_issues,
+            'export_rendering_qa': self._api_export_rendering_qa,
+            'apply_project_rendering_fixes': self._api_apply_project_rendering_fixes,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -965,7 +970,7 @@ class MainWindow(mainwindow_cls):
     def _api_list_rendering_issues_ui(self, body: dict):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
-        from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, merge_font_fallback_chain, resolve_writing_mode
+        from utils.text_rendering import estimate_text_bounds, merge_font_fallback_chain, missing_glyphs_after_fallback, resolve_writing_mode
         pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img] or [])
         out = []
         for page in pages:
@@ -979,8 +984,8 @@ class MainWindow(mainwindow_cls):
                 x1, y1, x2, y2 = getattr(blk, 'xyxy', [0, 0, 1, 1])
                 box = (max(1.0, float(x2) - float(x1)), max(1.0, float(y2) - float(y1)))
                 mode = resolve_writing_mode(getattr(ff, 'writing_mode', 'auto'), text, box)
-                measured = estimate_text_bounds(text, getattr(ff, 'font_size', 24.0), mode, box[0], box[1], getattr(ff, 'line_spacing', 1.15), getattr(ff, 'letter_spacing', 1.0), getattr(ff, 'text_padding', 0.0), getattr(ff, 'stroke_width', 0.0), getattr(ff, 'shadow_radius', 0.0), getattr(ff, 'shadow_offset', [0.0, 0.0]))
-                missing = first_missing_glyphs(getattr(ff, 'font_family', ''), text) if text else []
+                measured = estimate_text_bounds(text, getattr(ff, 'font_size', 24.0), mode, box[0], box[1], getattr(ff, 'line_spacing', 1.15), getattr(ff, 'letter_spacing', 1.0), getattr(ff, 'text_padding', 0.0), getattr(ff, 'stroke_width', 0.0), getattr(ff, 'shadow_radius', 0.0), getattr(ff, 'shadow_offset', [0.0, 0.0]), line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'))
+                missing = missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', '')) if text else []
                 overflow = measured[0] > box[0] or measured[1] > box[1]
                 if overflow or missing or bool((body or {}).get('include_ok', False)):
                     out.append({
@@ -988,6 +993,7 @@ class MainWindow(mainwindow_cls):
                         'resolved_writing_mode': mode, 'box': list(box), 'measured': [measured[0], measured[1]],
                         'overflow': overflow, 'missing_glyphs': missing,
                         'fallback_chain': merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', '')),
+                        'line_break_strategy': getattr(ff, 'line_break_strategy', 'auto'),
                     })
         return {'ok': True, 'issues': out, 'count': len(out)}
 
@@ -1009,6 +1015,101 @@ class MainWindow(mainwindow_cls):
             'ok': True,
             'states': {page: self.imgtrans_proj.get_page_completion_state(page) for page in pages if page in self.imgtrans_proj.pages},
         }
+
+
+
+
+    def _api_export_rendering_qa(self, body: dict):
+        return self._api_call_ui(self._api_export_rendering_qa_ui, body)
+
+    def _api_export_rendering_qa_ui(self, body: dict):
+        from utils.rendering_qa import build_project_rendering_qa
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = (body or {}).get('pages')
+        include_ok = bool((body or {}).get('include_ok', False))
+        report = build_project_rendering_qa(self.imgtrans_proj, pages=pages, include_ok=include_ok, config_obj=pcfg)
+        path = str((body or {}).get('path', '') or '').strip()
+        if path:
+            if path.lower().endswith(('.md', '.markdown')):
+                from utils.rendering_qa import rendering_qa_to_markdown
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(rendering_qa_to_markdown(report))
+            else:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(report, f, ensure_ascii=False, indent=2)
+        return {'ok': True, 'path': path, 'summary': report.get('summary', {}), 'report': None if path else report}
+
+    def _api_apply_project_rendering_fixes(self, body: dict):
+        return self._api_call_ui(self._api_apply_project_rendering_fixes_ui, body)
+
+    def _api_apply_project_rendering_fixes_ui(self, body: dict):
+        from utils.rendering_qa import apply_project_rendering_fixes
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = (body or {}).get('pages')
+        result = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg)
+        if result.get('applied_count'):
+            if self.imgtrans_proj.current_img in (pages or [self.imgtrans_proj.current_img]):
+                self.st_manager.updateSceneTextitems()
+            if self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Applied project rendering fixes: {0} text boxes').format(result.get('applied_count', 0)))
+        return {'ok': True, **result}
+
+    def _api_fix_rendering_issues(self, body: dict):
+        return self._api_call_ui(self._api_fix_rendering_issues_ui, body)
+
+    def _api_fix_rendering_issues_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        mode = str((body or {}).get('mode', 'page') or 'page').strip().lower()
+        result, target_indices = self._layout_review_result_for_scope(mode)
+        summary_before = self._summarize_layout_review_result(result)
+        applied = self.st_manager.apply_review_result(result, target_block_indices=target_indices)
+        if self.imgtrans_proj and self.imgtrans_proj.directory and applied:
+            self.imgtrans_proj.save()
+        issues_after = self._api_list_rendering_issues_ui({'pages': [self.imgtrans_proj.current_img]})
+        self.pipelineInsightsPanel.add_event('API', self.tr('Fixed rendering issues: {0} actions').format(applied))
+        return {
+            'ok': True,
+            'mode': mode,
+            'applied_actions': applied,
+            'summary_before': summary_before,
+            'remaining_issues': issues_after.get('count', 0),
+        }
+
+    def _api_apply_rendering_preset(self, body: dict):
+        return self._api_call_ui(self._api_apply_rendering_preset_ui, body)
+
+    def _api_apply_rendering_preset_ui(self, body: dict):
+        from utils.text_rendering import MANGA_PRESETS
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        preset_id = str((body or {}).get('preset', '') or '').strip()
+        if preset_id not in MANGA_PRESETS:
+            raise ValueError(f'unknown preset: {preset_id}')
+        indices = (body or {}).get('indices')
+        page = self.imgtrans_proj.current_img
+        blks = self.imgtrans_proj.pages.get(page, [])
+        target = list(range(len(blks))) if indices is None else [int(i) for i in indices]
+        preset = MANGA_PRESETS[preset_id]
+        applied = 0
+        for idx in target:
+            if idx < 0 or idx >= len(blks):
+                continue
+            fmt = blks[idx].fontformat
+            for key, value in preset.items():
+                if key != 'label' and hasattr(fmt, key):
+                    setattr(fmt, key, value)
+            fmt.manga_preset = preset_id
+            applied += 1
+        self.canvas.updateTextBlkList()
+        if self.imgtrans_proj and self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+        self.pipelineInsightsPanel.add_event('API', self.tr('Applied rendering preset {0} to {1} text boxes').format(preset_id, applied))
+        return {'ok': True, 'page': page, 'preset': preset_id, 'applied': applied}
 
     def _api_export_structured_ocr(self, body: dict):
         return self._api_call_ui(self._api_export_structured_ocr_ui, body)
@@ -1147,6 +1248,7 @@ class MainWindow(mainwindow_cls):
 
     def on_open_batch_style_override(self):
         """Apply Koharu-inspired fixed font/alignment options across a page/project."""
+        from utils.text_rendering import MANGA_PRESETS
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             self.pipelineInsightsPanel.add_warning('BATCH_STYLE', self.tr('Open a project before applying a batch text style override.'))
             return
@@ -1179,10 +1281,52 @@ class MainWindow(mainwindow_cls):
         auto_fit = QCheckBox(self.tr('Enable auto-fit after override'), dlg)
         auto_fit.setChecked(True)
 
+        writing_mode = QComboBox(dlg)
+        writing_mode.addItem(self.tr('Keep'), '')
+        writing_mode.addItem(self.tr('Auto'), 'auto')
+        writing_mode.addItem(self.tr('Horizontal LTR'), 'horizontal_ltr')
+        writing_mode.addItem(self.tr('Vertical RL'), 'vertical_rl')
+        writing_mode.addItem(self.tr('RTL'), 'rtl')
+
+        fit_mode = QComboBox(dlg)
+        fit_mode.addItem(self.tr('Keep'), '')
+        fit_mode.addItem(self.tr('Shrink to fit'), 'shrink')
+        fit_mode.addItem(self.tr('Expand to fill'), 'expand')
+        fit_mode.addItem(self.tr('Preserve size'), 'preserve')
+        fit_mode.addItem(self.tr('Balance lines'), 'balance')
+
+        line_break = QComboBox(dlg)
+        line_break.addItem(self.tr('Keep'), '')
+        line_break.addItem(self.tr('Auto'), 'auto')
+        line_break.addItem(self.tr('Strict CJK kinsoku'), 'cjk_strict')
+        line_break.addItem(self.tr('Balanced lettering'), 'balanced')
+        line_break.addItem(self.tr('Loose SFX'), 'loose')
+
+        preset = QComboBox(dlg)
+        preset.addItem(self.tr('Keep'), '')
+        for preset_id, preset_def in MANGA_PRESETS.items():
+            preset.addItem(self.tr(preset_def.get('label', preset_id)), preset_id)
+
+        fallback_chain = QLineEdit(dlg)
+        fallback_chain.setPlaceholderText(self.tr('Leave blank to keep current per-style fallback chain'))
+
+        padding = QDoubleSpinBox(dlg)
+        padding.setRange(-1.0, 64.0)
+        padding.setDecimals(1)
+        padding.setSingleStep(1.0)
+        padding.setSpecialValueText(self.tr('Keep'))
+        padding.setValue(-1.0)
+
         form.addRow(self.tr('Scope'), scope)
+        form.addRow(self.tr('Manga preset'), preset)
         form.addRow(self.tr('Font family'), font_family)
         form.addRow(self.tr('Fixed font size (pt)'), font_size)
         form.addRow(self.tr('Alignment'), alignment)
+        form.addRow(self.tr('Writing mode'), writing_mode)
+        form.addRow(self.tr('Fit mode'), fit_mode)
+        form.addRow(self.tr('Line-break strategy'), line_break)
+        form.addRow(self.tr('Fallback font chain'), fallback_chain)
+        form.addRow(self.tr('Text padding (px)'), padding)
         form.addRow('', auto_fit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dlg)
@@ -1197,12 +1341,23 @@ class MainWindow(mainwindow_cls):
         family = font_family.text().strip()
         size_pt = float(font_size.value())
         align_value = int(alignment.currentData())
+        writing_value = str(writing_mode.currentData() or '')
+        fit_value = str(fit_mode.currentData() or '')
+        line_break_value = str(line_break.currentData() or '')
+        preset_value = str(preset.currentData() or '')
+        fallback_value = fallback_chain.text().strip()
+        padding_value = float(padding.value())
         changed = 0
         for page in page_names:
             for blk in self.imgtrans_proj.pages.get(page, []) or []:
                 fmt = getattr(blk, 'fontformat', None)
                 if fmt is None:
                     continue
+                if preset_value and preset_value in MANGA_PRESETS:
+                    for key, value in MANGA_PRESETS[preset_value].items():
+                        if key != 'label' and hasattr(fmt, key):
+                            setattr(fmt, key, value)
+                    fmt.manga_preset = preset_value
                 if family:
                     fmt.font_family = family
                 if size_pt > 0:
@@ -1210,6 +1365,17 @@ class MainWindow(mainwindow_cls):
                     fmt.auto_fit_font_size = False
                 if align_value >= 0:
                     fmt.alignment = align_value
+                if writing_value:
+                    fmt.writing_mode = writing_value
+                    fmt.vertical = writing_value == 'vertical_rl'
+                if fit_value:
+                    fmt.fit_mode = fit_value
+                if line_break_value:
+                    fmt.line_break_strategy = line_break_value
+                if fallback_value:
+                    fmt.fallback_font_chain = fallback_value
+                if padding_value >= 0:
+                    fmt.text_padding = padding_value
                 if auto_fit.isChecked():
                     fmt.auto_fit_font_size = True
                 changed += 1
@@ -1219,6 +1385,39 @@ class MainWindow(mainwindow_cls):
         self.canvas.setProjSaveState(False)
         self.pipelineInsightsPanel.add_event('BATCH_STYLE', self.tr('Updated {0} text block style(s).').format(changed))
         self.statusBar().showMessage(self.tr('Batch style override updated {0} text block(s).').format(changed), 5000)
+
+
+    def on_open_typography_qa_report(self):
+        """Export/apply Koharu-inspired renderer QA across the current page or project."""
+        from ui.typography_qa_dialog import TypographyQAReportDialog
+        from utils.rendering_qa import apply_project_rendering_fixes
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('Open a project before running typography QA.'))
+            return
+        dlg = TypographyQAReportDialog(self.imgtrans_proj, self.imgtrans_proj.current_img, pcfg, self)
+        exec_fn = getattr(dlg, 'exec', None) or dlg.exec_
+        if int(exec_fn()) != int(QDialog.Accepted):
+            return
+        report = dlg.report()
+        out_path = dlg.write_report()
+        applied = None
+        pages = dlg.selected_pages()
+        if dlg.should_apply_fixes():
+            applied = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg)
+            if applied.get('applied_count'):
+                if self.imgtrans_proj.current_img in pages:
+                    self.st_manager.updateSceneTextitems()
+                if self.imgtrans_proj.directory:
+                    self.imgtrans_proj.save()
+                self.canvas.setProjSaveState(False)
+        summary = report.get('summary', {})
+        msg = self.tr('Typography QA: {0} issue text boxes across {1} pages.').format(summary.get('issues', 0), summary.get('pages', 0))
+        if applied is not None:
+            msg += ' ' + self.tr('Applied fixes to {0} text boxes.').format(applied.get('applied_count', 0))
+        if out_path:
+            msg += ' ' + self.tr('Saved: {0}').format(out_path)
+        self.pipelineInsightsPanel.add_event('TYPO_QA', msg)
+        self.statusBar().showMessage(msg, 7000)
 
     def _has_open_project(self) -> bool:
         return (

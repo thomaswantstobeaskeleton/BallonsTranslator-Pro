@@ -134,3 +134,24 @@ def test_external_provider_uses_handler():
         ReviewModelConfig(provider="cloud_api", prompt="custom"),
     )
     assert result.page_name == "p2"
+
+
+def test_planner_proposes_fallback_application_for_missing_glyphs():
+    planner = LayoutReviewPlanner()
+    rst = planner.review_page(
+        "p1",
+        [
+            BlockSnapshot(
+                block_index=7,
+                xyxy=(0, 0, 120, 80),
+                text="مرحبا",
+                font_size=18,
+                est_text_size=(80, 30),
+                font_fallback_warning="م",
+                text_style={"fallback_chain": "Primary, Noto Naskh Arabic"},
+            )
+        ],
+    )
+    actions = [a.action for a in rst.blocks[0].actions]
+    assert "flag_missing_glyphs" in actions
+    assert "apply_font_fallback" in actions

@@ -373,3 +373,14 @@ def ffmt_change_skew_y(param_name: str, values, act_ffmt: FontFormat, is_global:
         if blkitem.blk is not None:
             blkitem.blk.skew_y = v
         blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_fallback_font_chain(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        chain = str(value or '').strip()
+        blkitem.fontformat.fallback_font_chain = chain
+        if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+            blkitem.blk.fontformat.fallback_font_chain = chain
+        blkitem.set_fontformat(blkitem.fontformat)
+        blkitem.update()
