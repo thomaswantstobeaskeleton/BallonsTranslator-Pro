@@ -1,12 +1,18 @@
 from utils.text_rendering import (
     FIT_MODE_EXPAND,
     FIT_MODE_PRESERVE,
+    LINE_BREAK_BALANCED,
+    LINE_BREAK_CJK_STRICT,
+    LINE_BREAK_LOOSE,
     WRITING_MODE_HORIZONTAL_LTR,
     WRITING_MODE_RTL,
     WRITING_MODE_VERTICAL_RL,
     fit_font_size_to_box,
+    font_fallback_runs,
     kinsoku_wrap,
     merge_font_fallback_chain,
+    missing_glyphs_after_fallback,
+    normalize_line_break_strategy,
     normalize_vertical_punctuation,
     resolve_writing_mode,
     vertical_columns,
@@ -65,3 +71,20 @@ def test_merge_font_fallback_chain_deduplicates_script_chain():
         render_fallback_fonts_emoji = "Noto Color Emoji"
 
     assert merge_font_fallback_chain("Arial", "かな", Cfg(), "Noto Sans CJK JP") == ["Arial", "Noto Sans CJK JP"]
+
+
+def test_line_break_strategy_normalization_and_balanced_dangling_line():
+    assert normalize_line_break_strategy("cjk-strict") == LINE_BREAK_CJK_STRICT
+    balanced = kinsoku_wrap("１２３４５", 2, LINE_BREAK_BALANCED)
+    assert balanced[-1] != "５"
+
+
+def test_line_break_strategy_loose_allows_sfx_punctuation_wrap():
+    strict = kinsoku_wrap("ドン！！", 2, LINE_BREAK_CJK_STRICT)
+    loose = kinsoku_wrap("ドン！！", 2, LINE_BREAK_LOOSE)
+    assert strict != loose
+
+
+def test_font_fallback_helpers_degrade_gracefully_without_qtgui():
+    assert font_fallback_runs("abc", "Primary", None, "Fallback") == []
+    assert missing_glyphs_after_fallback("Primary", "abc", None, "Fallback") == []

@@ -10,7 +10,7 @@ from utils import shared
 from utils import config as C
 from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
-from utils.text_rendering import MANGA_PRESETS, normalize_fit_mode, normalize_writing_mode
+from utils.text_rendering import MANGA_PRESETS, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .textitem import TextBlkItem
 from .text_advanced_format import TextAdvancedFormatPanel
@@ -332,6 +332,15 @@ class FontFormatPanel(Widget):
         self.fitModeCombo.setToolTip(self.tr("Text fitting policy used by auto-layout and layout review."))
         self.fitModeCombo.currentIndexChanged.connect(self._on_fit_mode_changed)
 
+        self.lineBreakCombo = QComboBox(self)
+        self.lineBreakCombo.setObjectName("LineBreakStrategyCombo")
+        self.lineBreakCombo.addItem(self.tr("Break: Auto"), "auto")
+        self.lineBreakCombo.addItem(self.tr("Strict CJK"), "cjk_strict")
+        self.lineBreakCombo.addItem(self.tr("Balanced"), "balanced")
+        self.lineBreakCombo.addItem(self.tr("Loose SFX"), "loose")
+        self.lineBreakCombo.setToolTip(self.tr("Line-break strategy: CJK kinsoku, balanced dangling-line cleanup, or loose SFX wrapping."))
+        self.lineBreakCombo.currentIndexChanged.connect(self._on_line_break_changed)
+
         self.mangaPresetCombo = QComboBox(self)
         self.mangaPresetCombo.setObjectName("MangaPresetCombo")
         self.mangaPresetCombo.addItem(self.tr("Preset: none"), "")
@@ -339,6 +348,16 @@ class FontFormatPanel(Widget):
             self.mangaPresetCombo.addItem(self.tr(preset.get("label", preset_id)), preset_id)
         self.mangaPresetCombo.setToolTip(self.tr("Apply manga lettering presets: stroke, spacing, writing mode, fit mode, alignment, and padding."))
         self.mangaPresetCombo.currentIndexChanged.connect(self._on_manga_preset_changed)
+
+        self.fallbackChainEdit = LineEdit(parent=self)
+        self.fallbackChainEdit.setObjectName("FallbackFontChainEdit")
+        self.fallbackChainEdit.setPlaceholderText(self.tr("Style fallback fonts"))
+        self.fallbackChainEdit.setToolTip(self.tr("Optional comma-separated fallback fonts for this text style. Empty uses Rendering/Text Formatting defaults."))
+        self.fallbackChainEdit.editingFinished.connect(self._on_fallback_chain_changed)
+
+        self.fontFallbackWarningLabel = QLabel(self)
+        self.fontFallbackWarningLabel.setObjectName("FontFallbackWarningLabel")
+        self.fontFallbackWarningLabel.setToolTip(self.tr("Shows missing-glyph diagnostics after configured fallback chains are considered."))
 
         self.textPaddingSpinBox = QDoubleSpinBox(self)
         self.textPaddingSpinBox.setObjectName("TextPaddingSpinBox")
@@ -529,7 +548,9 @@ class FontFormatPanel(Widget):
         hl2b.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl2b.addWidget(self.writingModeCombo)
         hl2b.addWidget(self.fitModeCombo)
+        hl2b.addWidget(self.lineBreakCombo)
         hl2b.addWidget(self.mangaPresetCombo)
+        hl2b.addWidget(self.fallbackChainEdit)
         hl2b.addWidget(self.textPaddingSpinBox)
         hl2b.addWidget(self.textOnPathCombo)
         hl2b.addWidget(self.textOnPathArcDegreesSpinBox)
@@ -543,6 +564,7 @@ class FontFormatPanel(Widget):
         hl3.addLayout(stroke_hlayout)
         hl3.addLayout(lettersp_hlayout)
         hl3.addLayout(opacity_hlayout)
+        hl3.addWidget(self.fontFallbackWarningLabel)
         hl3.setContentsMargins(6, 0, 6, 0)
         hl3.setSpacing(16)
         hl4 = QHBoxLayout()
@@ -626,10 +648,16 @@ class FontFormatPanel(Widget):
     def _on_fit_mode_changed(self, index: int):
         self.on_param_changed('fit_mode', self.fitModeCombo.itemData(index) or 'shrink')
 
+    def _on_line_break_changed(self, index: int):
+        self.on_param_changed('line_break_strategy', self.lineBreakCombo.itemData(index) or 'auto')
+
     def _on_manga_preset_changed(self, index: int):
         preset = self.mangaPresetCombo.itemData(index) or ''
         if preset:
             self.on_param_changed('manga_preset', preset)
+
+    def _on_fallback_chain_changed(self):
+        self.on_param_changed('fallback_font_chain', self.fallbackChainEdit.text().strip())
 
     def _on_text_padding_changed(self, value: float):
         self.on_param_changed('text_padding', float(value))
@@ -677,6 +705,30 @@ class FontFormatPanel(Widget):
             mul = 0.01
         self.lineSpacingBox.setValue(self.lineSpacingBox.value() + delta * mul)
 
+
+    def _update_font_fallback_warning(self, font_format: FontFormat):
+        text = ''
+        if self.textblk_item is not None:
+            try:
+                text = self.textblk_item.toPlainText()
+            except Exception:
+                text = ''
+        if not text:
+            self.fontFallbackWarningLabel.setText('')
+            return
+        missing = missing_glyphs_after_fallback(
+            getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', '')
+        )
+        chain = merge_font_fallback_chain(
+            getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', '')
+        )
+        if missing:
+            self.fontFallbackWarningLabel.setText(self.tr('Missing glyphs: ') + ''.join(missing))
+            self.fontFallbackWarningLabel.setToolTip(self.tr('No configured font renders these characters. Chain: ') + ', '.join(chain))
+        else:
+            self.fontFallbackWarningLabel.setText(self.tr('Fallback OK') if len(chain) > 1 else '')
+            self.fontFallbackWarningLabel.setToolTip(self.tr('Merged font chain: ') + ', '.join(chain))
+
     def set_active_format(self, font_format: FontFormat, multi_size=False):
         C.active_format = font_format
         self.familybox.blockSignals(True)
@@ -701,9 +753,16 @@ class FontFormatPanel(Widget):
         self.fitModeCombo.blockSignals(True)
         self._set_combo_by_data(self.fitModeCombo, normalize_fit_mode(getattr(font_format, 'fit_mode', 'shrink')))
         self.fitModeCombo.blockSignals(False)
+        self.lineBreakCombo.blockSignals(True)
+        self._set_combo_by_data(self.lineBreakCombo, normalize_line_break_strategy(getattr(font_format, 'line_break_strategy', 'auto')))
+        self.lineBreakCombo.blockSignals(False)
         self.mangaPresetCombo.blockSignals(True)
         self._set_combo_by_data(self.mangaPresetCombo, getattr(font_format, 'manga_preset', '') or '')
         self.mangaPresetCombo.blockSignals(False)
+        self.fallbackChainEdit.blockSignals(True)
+        self.fallbackChainEdit.setText(str(getattr(font_format, 'fallback_font_chain', '') or ''))
+        self.fallbackChainEdit.blockSignals(False)
+        self._update_font_fallback_warning(font_format)
         self.textPaddingSpinBox.blockSignals(True)
         self.textPaddingSpinBox.setValue(float(getattr(font_format, 'text_padding', 0.0) or 0.0))
         self.textPaddingSpinBox.blockSignals(False)

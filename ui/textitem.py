@@ -15,7 +15,7 @@ from utils.text_layout import _merge_stub_lines_in_string
 from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
 from utils.fontformat import FontFormat, px2pt, pt2px
 from utils.config import pcfg
-from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, merge_font_fallback_chain, resolve_writing_mode
+from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, font_fallback_runs, merge_font_fallback_chain, missing_glyphs_after_fallback, resolve_writing_mode
 from .misc import td_pattern, table_pattern, pixmap2ndarray, ndarray2pixmap
 from .image_edit import ImageEditMode
 from .scene_textlayout import VerticalTextDocumentLayout, HorizontalTextDocumentLayout, SceneTextLayout
@@ -764,9 +764,10 @@ class TextBlkItem(QGraphicsTextItem):
             stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
             shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
             shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
         )
         families = merge_font_fallback_chain(getattr(ff, 'font_family', ''), self.toPlainText(), pcfg, getattr(ff, 'fallback_font_chain', ''))
-        missing = first_missing_glyphs(getattr(ff, 'font_family', ''), self.toPlainText()) if self.toPlainText() else []
+        missing = missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), self.toPlainText(), pcfg, getattr(ff, 'fallback_font_chain', '')) if self.toPlainText() else []
         return {
             'mode': mode,
             'measured': measured,
@@ -790,7 +791,7 @@ class TextBlkItem(QGraphicsTextItem):
         measured_w, measured_h = diag['measured'][0], diag['measured'][1]
         painter.setPen(QPen(QColor(255, 64, 64, 170), 1 / max(0.01, self.get_scale())))
         painter.drawRect(QRectF(0, 0, measured_w, measured_h))
-        label = f"{diag['mode']} {measured_w:.0f}×{measured_h:.0f}"
+        label = f"{diag['mode']} {getattr(ff, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
         if diag['missing']:
             label += f" missing: {diag['missing']}"
         painter.setPen(QColor(255, 128, 0) if diag['overflow'] else QColor(0, 128, 255))
@@ -1219,6 +1220,7 @@ class TextBlkItem(QGraphicsTextItem):
         if set_char_format:
             cursor.setCharFormat(format)
         cursor.clearSelection()
+        self._apply_font_fallback_runs(ffmat, format)
         # https://stackoverflow.com/questions/37160039/set-default-character-format-in-qtextdocument
         cursor.movePosition(QTextCursor.MoveOperation.Start)
         self.setTextCursor(cursor)
@@ -1235,6 +1237,13 @@ class TextBlkItem(QGraphicsTextItem):
         alignment_qt_flag = [Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignCenter, Qt.AlignmentFlag.AlignRight][ffmat.alignment]
         doc = self.document()
         op = doc.defaultTextOption()
+        resolved_mode = resolve_writing_mode(getattr(ffmat, 'writing_mode', 'auto'), self.toPlainText(), (self.boundingRect().width(), self.boundingRect().height()))
+        if resolved_mode == 'rtl':
+            op.setTextDirection(Qt.LayoutDirection.RightToLeft)
+            if ffmat.alignment == 0:
+                alignment_qt_flag = Qt.AlignmentFlag.AlignRight
+        else:
+            op.setTextDirection(Qt.LayoutDirection.LeftToRight)
         op.setAlignment(alignment_qt_flag)
         doc.setDefaultTextOption(op)
         
@@ -1258,6 +1267,41 @@ class TextBlkItem(QGraphicsTextItem):
         self.repainting = False
         if set_effect or set_stroke_width:
             self.repaint_background()
+
+
+    def _apply_font_fallback_runs(self, ffmat: FontFormat, base_format: QTextCharFormat):
+        """Apply per-character fallback fonts for glyphs missing in the primary family.
+
+        Qt's default font substitution is platform-dependent and can still leave
+        tofu boxes in mixed-script manga lettering. Applying explicit fallback
+        char formats makes CJK/RTL/emoji fallback deterministic while preserving
+        the primary font for supported glyphs.
+        """
+        text = self.toPlainText()
+        if not text:
+            return
+        runs = font_fallback_runs(
+            text,
+            getattr(ffmat, 'font_family', ''),
+            pcfg,
+            getattr(ffmat, 'fallback_font_chain', ''),
+        )
+        if not runs:
+            return
+        doc = self.document()
+        run_cursor = QTextCursor(doc)
+        for start, end, family in runs:
+            if end <= start or not family:
+                continue
+            cfmt = QTextCharFormat()
+            cfmt.merge(base_format)
+            cfont = cfmt.font()
+            cfont.setFamily(family)
+            cfmt.setFont(cfont)
+            run_cursor.setPosition(start)
+            run_cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            run_cursor.mergeCharFormat(cfmt)
+        run_cursor.clearSelection()
 
     def updateBlkFormat(self):
         fmt = self.get_fontformat()

@@ -859,6 +859,15 @@ class ConfigPanel(Widget):
             self.tr('Default fit mode'),
             discription=self.tr('Controls whether auto-layout shrinks, expands, preserves, or balances text in boxes.')
         ))
+        self.render_default_line_break_combo = QComboBox(self)
+        for label, value in [(self.tr('Auto'), 'auto'), (self.tr('Strict CJK kinsoku'), 'cjk_strict'), (self.tr('Balanced lettering'), 'balanced'), (self.tr('Loose SFX'), 'loose')]:
+            self.render_default_line_break_combo.addItem(label, value)
+        self.render_default_line_break_combo.currentIndexChanged.connect(self.on_render_default_line_break_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_line_break_combo,
+            self.tr('Default line-break strategy'),
+            discription=self.tr('Controls CJK punctuation guards, dangling final lines, and loose SFX wrapping for new text styles.')
+        ))
         self.render_default_stroke_width_spin = QDoubleSpinBox(self)
         self.render_default_stroke_width_spin.setRange(0.0, 1.0)
         self.render_default_stroke_width_spin.setSingleStep(0.01)
@@ -1821,6 +1830,8 @@ class ConfigPanel(Widget):
         pcfg.render_default_writing_mode = str(self.render_default_writing_mode_combo.currentData() or 'auto')
     def on_render_default_fit_mode_changed(self):
         pcfg.render_default_fit_mode = str(self.render_default_fit_mode_combo.currentData() or 'shrink')
+    def on_render_default_line_break_changed(self):
+        pcfg.render_default_line_break_strategy = str(self.render_default_line_break_combo.currentData() or 'auto')
     def on_render_default_stroke_width_changed(self):
         pcfg.render_default_stroke_width = float(self.render_default_stroke_width_spin.value())
     def on_render_default_shadow_radius_changed(self):
@@ -2047,6 +2058,8 @@ class ConfigPanel(Widget):
             self.render_default_writing_mode_combo.setCurrentIndex(max(0, idx))
             idx = self.render_default_fit_mode_combo.findData(getattr(pcfg, 'render_default_fit_mode', 'shrink'))
             self.render_default_fit_mode_combo.setCurrentIndex(max(0, idx))
+            idx = self.render_default_line_break_combo.findData(getattr(pcfg, 'render_default_line_break_strategy', 'auto'))
+            self.render_default_line_break_combo.setCurrentIndex(max(0, idx))
             self.render_default_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_stroke_width', 0.08)))
             self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))

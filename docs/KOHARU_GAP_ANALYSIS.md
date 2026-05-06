@@ -148,3 +148,86 @@ Relevant public Koharu issues reviewed via the GitHub API and documentation page
 - **Full HarfBuzz/OpenType shaping pipeline**: deferred because adding and packaging a shaping stack requires dependency and platform validation. Current implementation uses PyQt text layout plus explicit vertical/CJK heuristics and diagnostics.
 - **Google/web font renderer integration**: deferred as a labeled future stub. Font downloads require cache, licensing, offline behavior, and Windows Program Files write-safety work.
 - **Full shortcut ownership rewrite**: deferred because existing QAction/QShortcut menu integration is broad. This pass adds guards and conflict tests without destabilizing menu accelerators.
+
+## 2026-05-06 Progress audit addendum — typography line-breaking and automation preset pass
+
+| Area | Implemented | Partially implemented | Missing | Newly implemented in this pass | Deferred with reason | File references |
+| --- | --- | --- | --- | --- | --- | --- |
+| Text rendering / line breaking | Writing mode, vertical CJK, fitting, fallback diagnostics, presets, padding/effects, and diagnostics existed before this addendum. | The renderer still uses Qt text layout plus Python heuristics rather than a full HarfBuzz/ICU shaping stack. | Native glyph-run fallback and full OpenType vertical alternates. | Added persistent per-style line-break strategy (`auto`, `cjk_strict`, `balanced`, `loose`), strategy-aware CJK kinsoku wrapping, balanced dangling-line cleanup, loose SFX wrapping, preset defaults, diagnostics serialization, and tests. | Full ICU segmentation is deferred to avoid adding heavy packaging/dependency risk in this pass. | `utils/text_rendering.py`, `utils/fontformat.py`, `tests/test_text_rendering.py` |
+| Text/style panel | Writing mode, fit mode, presets, effects, and padding controls existed. | The panel is dense; further UX grouping is still desirable. | Dedicated live mini-preview remains absent because the canvas is the connected preview. | Added a connected Line-break Strategy combo that writes to the selected text style and persists with project data. | A separate preview widget is deferred to avoid dead UI and duplication of canvas rendering. | `ui/text_panel.py` |
+| Settings/config | Rendering defaults/fallback font chains/diagnostic toggles existed. | Defaults currently apply through helpers/presets rather than every legacy text creation path. | Google/web font download/cache integration. | Added default line-break strategy to config persistence and the Rendering/Text Formatting config section. | Web fonts remain a labeled future stub because cache, licensing, and Windows permission behavior need separate validation. | `utils/config.py`, `ui/configpanel.py` |
+| Layout review agent | Selected/page review, provider settings, heuristic fallback, reports, style-aware snapshots, and actions existed. | Provider responses remain conservative and normalized. | Multimodal second-pass re-render scoring. | Added line-break strategy to snapshots, heuristic issue detection for vertical CJK with weak wrapping, and a safe `set_line_break_strategy` review action. | Second-pass visual scoring is deferred until provider/runtime cost is validated. | `utils/layout_review_agent.py`, `ui/scenetext_manager.py` |
+| Automation/API | Local API already supported layout review, rendering, page state, structured OCR, and rendering diagnostics. | No streaming progress channel for every long action yet. | Full headless server/MCP protocol parity. | Added `apply_rendering_preset` automation action to apply connected manga presets to current-page text boxes and save project data. | Full MCP parity is deferred to avoid duplicating existing local automation infrastructure. | `ui/mainwindow.py` |
+| Koharu issue harvesting | Gap analysis had issue references for #651/#650/#649/#640/#648/#555. | Some dependency-only Koharu issues are tracked only as low-priority signals. | Continuous auto-sync tooling is not yet checked into the repo. | Refreshed `docs/KOHARU_ISSUE_BACKLOG.md` from 649 GitHub issues across 7 REST pages and recorded issue-inspired implementation notes/next candidates. | Automated scheduled refresh is deferred because this repository does not have a task runner for docs refreshes. | `docs/KOHARU_ISSUE_BACKLOG.md` |
+
+### Issue-inspired items implemented in this addendum
+
+- Koharu #624 / #649 / #640 / #648 / #630 inspired the per-style line-break strategy, strict CJK kinsoku, balanced final-line cleanup, style panel control, config default, diagnostics/API payloads, and layout-review fix action.
+- Koharu API/RPC/editor workflow issues such as #651 inspired the `apply_rendering_preset` automation action so external tools can apply connected lettering presets without adding fake UI.
+
+### Deferred Koharu items after this addendum
+
+- Mask-aware collision squeezing (#637): useful but requires deeper mask/balloon geometry integration and should be handled in the next layout-review batch.
+- Native editable PSD writing: still deferred because the current safe handoff avoids silently producing raster-only fake PSD text layers.
+- Full HarfBuzz/ICU shaping: deferred until a cross-platform dependency strategy is selected.
+- Shortcut ownership registry rewrite: still deferred; no new QAction/QShortcut ambiguity was introduced by this pass.
+
+## 2026-05-06 Follow-up progress audit — font fallback, RTL, review fixes
+
+| Area | Implemented | Partially implemented | Missing | Newly implemented in this pass | Deferred with reason | File references |
+| --- | --- | --- | --- | --- | --- | --- |
+| Font fallback / missing glyphs | Global per-script fallback chains and diagnostics existed. | Previous pass warned about missing glyphs but still relied mostly on platform font substitution. | Font favorites/localized family names and full glyph shaping remain absent. | Added explicit per-character fallback font runs, after-fallback missing-glyph detection, per-style fallback-chain UI, and a fallback status label in the text panel. | Font favorites and localized names are deferred to a larger font browser pass. | `utils/text_rendering.py`, `ui/textitem.py`, `ui/text_panel.py`, `ui/fontformat_commands.py` |
+| RTL lettering | Writing-mode auto detects Arabic/Hebrew and layout review can flag mode mismatches. | Arabic joining still depends on Qt shaping and installed fonts. | HarfBuzz-level shaping and bidi run inspection. | RTL writing mode now sets the QTextDocument text direction to right-to-left and right-aligns left-default text, reducing reversed/incorrect Arabic rendering cases inspired by Koharu #602/#583/#213. | Full shaping is deferred until dependency strategy is validated. | `ui/textitem.py`, `utils/text_rendering.py` |
+| Layout review agent | Selected/page review, provider settings, reporting, and style-aware actions are connected. | Provider responses are still normalized to conservative safe actions. | Second-pass visual verification after applying fixes. | Added `apply_font_fallback` review action, fed review snapshots with after-fallback missing-glyph diagnostics, and added regression coverage for fallback actions. | Screenshot-based re-review is deferred due runtime/provider cost. | `utils/layout_review_agent.py`, `ui/scenetext_manager.py`, `tests/test_layout_review_agent.py` |
+| Automation/API | Local automation supports render/list issues/layout review/presets. | No streaming progress for every long-running fix action. | Full MCP protocol parity. | Added `fix_rendering_issues` automation action that runs connected layout-review fixes and reports remaining renderer issues. | MCP parity is deferred to avoid duplicating existing local API infrastructure. | `ui/mainwindow.py` |
+| Issue backlog quality | Previous backlog existed but included dependency-only noise. | Manual categorization is still used. | A checked-in refresh script/scheduled bot. | Rebuilt the backlog from 649 current issues while filtering dependency churn and prioritizing text/font/RTL/layout/export/API issues. | Automated refresh script deferred until docs tooling is chosen. | `docs/KOHARU_ISSUE_BACKLOG.md` |
+
+### Issue-inspired items implemented in this follow-up
+
+- Koharu #595/#77 inspired per-style fallback-chain controls and live fallback diagnostics.
+- Koharu #602/#583/#213 inspired RTL document direction handling and fallback-aware Arabic diagnostics.
+- Koharu #624/#120/#117 inspired fixing final fit bounds so selected line-break strategy affects overflow diagnostics consistently.
+- Koharu API/RPC workflow themes (#651 and related issues) inspired `fix_rendering_issues` for headless layout-review repair.
+
+### Deferred after this follow-up
+
+- Font favorites, localized font names, and rich family/weight previews (#595/#77) are deferred to a dedicated font-browser pass.
+- Full HarfBuzz/ICU shaping for Arabic and OpenType vertical alternates (#602/#213/#583) remains deferred for dependency/package validation.
+- Native PSD editable text-layer writing (#587/#558) remains deferred; current handoff is intentionally explicit rather than fake PSD text.
+
+## 2026-05-06 Extended progress audit — project typography QA and bulk preset controls
+
+| Area | Implemented | Partially implemented | Missing | Newly implemented in this pass | Deferred with reason | File references |
+| --- | --- | --- | --- | --- | --- | --- |
+| Project typography QA | Per-textbox diagnostics, layout review, and current-page issue listing existed. | Previous automation/UI flows focused on selected/current page more than whole-project QA. | Visual before/after screenshots in the QA report. | Added pure project-level rendering QA that scans pages/text boxes for overflow, missing glyphs, weak vertical CJK line breaks, RTL alignment, and stroke padding; reports summaries and safe suggestions. | Screenshot diffs are deferred because project-wide rendering can be expensive and should be optional. | `utils/rendering_qa.py`, `tests/test_rendering_qa.py` |
+| Bulk text formatting controls | Batch font family/size/alignment override existed. | Some preset/style operations still require the text panel for fine details. | Full project font favorite/weight browser. | Expanded the connected batch style override dialog to support manga presets, writing mode, fit mode, line-break strategy, fallback chain, and padding across current page or whole project. | Font favorite/weight browser remains deferred to a dedicated font UX pass. | `ui/mainwindow.py` |
+| Pipeline Insights UX | Layout review and batch style buttons existed. | No dedicated project typography QA entry point. | Rich table preview of every warning before export/apply. | Added a Typography QA Report action that exports JSON, can include clean boxes, and optionally applies conservative fixes while saving/refreshing the project. | Table preview is deferred to avoid a large new widget in this pass. | `ui/pipeline_insights_widget.py`, `ui/mainwindow.py` |
+| Automation/API | Local API could list current rendering issues and run current-page fixes. | Long-running progress events are still coarse. | Streaming progress for every project page. | Added project-level `export_rendering_qa` and `apply_project_rendering_fixes` automation actions. | Streaming events are deferred until API transport supports long-running event channels. | `ui/mainwindow.py`, `utils/rendering_qa.py` |
+| Issue-inspired coverage | Backlog tracked #649/#648/#640/#637/#595/#77/#602/#583. | Native PSD and shaping gaps remain. | Native PSD text writer, HarfBuzz/ICU shaping, mask-aware squeezing. | This pass implements issue-inspired project-wide style/QA controls for #649/#648/#640, font QA controls for #595/#77, and layout issue reporting for #545/#630. | Deferred items remain next-batch candidates with dependency/runtime reasons. | `docs/KOHARU_ISSUE_BACKLOG.md` |
+
+### Issue-inspired items implemented in this extended pass
+
+- Koharu #649/#648/#640 inspired project-wide manga preset/style override expansion beyond font size/alignment.
+- Koharu #595/#77 inspired project-level font fallback QA and fallback-chain batch application.
+- Koharu #545/#630 inspired typography QA reporting of overflow/placement-risk signals before export.
+- Koharu API/RPC workflow themes inspired project-level `export_rendering_qa` and `apply_project_rendering_fixes` endpoints.
+
+### Deferred after this extended pass
+
+- Mask-aware squeezing (#637) remains the next highest-impact layout implementation because it requires bubble/mask geometry scoring.
+- Native PSD editable text writer (#587/#558) remains deferred; the handoff path is still the safe export story.
+- Rich QA preview tables and screenshot diffs are deferred until the lightweight JSON/action pipeline proves stable.
+
+## 2026-05-06 QA preview follow-up — reviewable typography reports
+
+| Area | Implemented | Partially implemented | Missing | Newly implemented in this pass | Deferred with reason | File references |
+| --- | --- | --- | --- | --- | --- | --- |
+| Typography QA preview | JSON project QA and conservative fixes existed. | Previous UI exported/applied without a row-level preview. | Screenshot diff thumbnails are still absent. | Added a reusable Typography QA dialog with sortable warning rows, summaries, JSON/Markdown export, and optional conservative fixes. | Screenshot thumbnails are deferred until rendering cost and cache behavior are profiled. | `ui/typography_qa_dialog.py`, `ui/mainwindow.py` |
+| QA export formats | JSON report export existed. | Markdown handoff was only documented as future-friendly. | CSV and PSD-linked QA metadata. | Added flattened QA rows plus Markdown conversion and automation support for `.md` output. | CSV/PSD metadata is deferred until native PSD handoff evolves. | `utils/rendering_qa.py`, `tests/test_rendering_qa.py` |
+| Main window maintainability | Project QA was wired but inline. | Main window still owns many workflow dialogs. | Full workflow-dialog extraction. | Moved Typography QA UI into a focused helper dialog module to avoid further `mainwindow.py` bloat while keeping connected behavior. | Other legacy dialogs are deferred because they are outside this typography pass. | `ui/typography_qa_dialog.py`, `ui/mainwindow.py` |
+
+### Issue-inspired items implemented in this QA preview follow-up
+
+- Koharu #545/#630 inspired previewable typography warning rows before applying fixes.
+- Koharu #649/#648/#640 inspired reviewable project-wide style/fix workflows rather than silent bulk changes.
+- Koharu automation/API themes inspired Markdown QA export from `export_rendering_qa` for headless review handoff.

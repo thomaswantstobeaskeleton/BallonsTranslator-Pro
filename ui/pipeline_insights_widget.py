@@ -11,6 +11,7 @@ class PipelineInsightsWidget(QWidget):
     open_reading_order_editor_requested = Signal()
     run_layout_review_requested = Signal()
     open_batch_style_requested = Signal()
+    open_typography_qa_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,6 +69,10 @@ class PipelineInsightsWidget(QWidget):
         self.batch_style_btn = QPushButton(self.tr('Batch Text Style Override'), self)
         self.batch_style_btn.clicked.connect(self.open_batch_style_requested.emit)
         lay.addWidget(self.batch_style_btn)
+        self.typography_qa_btn = QPushButton(self.tr('Typography QA Report'), self)
+        self.typography_qa_btn.clicked.connect(self.open_typography_qa_requested.emit)
+        self.typography_qa_btn.setToolTip(self.tr('Export or apply project-wide rendering QA fixes for overflow, fallback fonts, RTL, and vertical CJK.'))
+        lay.addWidget(self.typography_qa_btn)
         self.api_status_label = QLabel(self.tr('Automation API: off'), self)
         self.api_status_label.setObjectName('PipelineApiStatus')
         lay.addWidget(self.api_status_label)

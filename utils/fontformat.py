@@ -78,6 +78,8 @@ class FontFormat(Config):
     letter_spacing: float = 1.15
     # Extra inset in image pixels, persisted per style/text box.
     text_padding: float = 0.0
+    # Line breaking strategy: auto | cjk_strict | balanced | loose.
+    line_break_strategy: str = "auto"
     opacity: float = 1.
     shadow_radius: float = 0.
     shadow_strength: float = 1.
@@ -138,9 +140,10 @@ class FontFormat(Config):
                 self.font_family = da['family']
 
         try:
-            from utils.text_rendering import normalize_fit_mode, normalize_writing_mode
+            from utils.text_rendering import normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy
             self.writing_mode = normalize_writing_mode(getattr(self, "writing_mode", "auto"))
             self.fit_mode = normalize_fit_mode(getattr(self, "fit_mode", "shrink"))
+            self.line_break_strategy = normalize_line_break_strategy(getattr(self, "line_break_strategy", "auto"))
         except Exception:
             pass
         self.font_weight = fix_fontweight_qt(self.font_weight)
