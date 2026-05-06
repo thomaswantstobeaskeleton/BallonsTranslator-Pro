@@ -14,9 +14,14 @@ from utils.text_rendering import (
     missing_glyphs_after_fallback,
     normalize_line_break_strategy,
     normalize_vertical_punctuation,
+    optimal_kinsoku_wrap,
     resolve_writing_mode,
     vertical_columns,
+    vertical_layout_plan,
     vertical_punctuation_class,
+    line_break_opportunities,
+    contrast_ratio,
+    suggest_manga_effects_for_background,
 )
 
 
@@ -88,3 +93,31 @@ def test_line_break_strategy_loose_allows_sfx_punctuation_wrap():
 def test_font_fallback_helpers_degrade_gracefully_without_qtgui():
     assert font_fallback_runs("abc", "Primary", None, "Fallback") == []
     assert missing_glyphs_after_fallback("Primary", "abc", None, "Fallback") == []
+
+
+def test_vertical_layout_plan_marks_centered_and_hanging_punctuation():
+    plan = vertical_layout_plan("あ、い。", 3, font_size=20)
+    assert plan["column_count"] >= 1
+    punct = [g for g in plan["glyphs"] if g["char"] in {"、", "。"}]
+    assert punct and all(g["center"] for g in punct)
+    assert any(g["hang"] for g in punct)
+
+
+def test_line_break_opportunities_explain_kinsoku_bans():
+    ops = line_break_opportunities("（あ）", "cjk_strict")
+    assert any(op["allowed"] is False and op["reason"].startswith("kinsoku") for op in ops)
+
+
+def test_contrast_effect_suggestion_recommends_stroke_for_low_contrast():
+    assert contrast_ratio([0, 0, 0], [255, 255, 255]) > 10
+    suggestion = suggest_manga_effects_for_background([230, 230, 230], [255, 255, 255], 0.0)
+    assert suggestion["needs_effect"] is True
+    assert suggestion["recommended_stroke_width"] > 0
+
+
+def test_optimal_kinsoku_wrap_balances_without_punctuation_violations():
+    lines = optimal_kinsoku_wrap("これはとても長い（テスト）です。", 6)
+    assert len(lines) >= 3
+    assert max(len(line) for line in lines) - min(len(line) for line in lines) <= 3
+    assert all(line[0] not in "）】」』、。" for line in lines)
+    assert all(line[-1] not in "（【「『" for line in lines)

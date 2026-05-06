@@ -42,8 +42,11 @@ class TypographyQAReportDialog(QDialog):
         self.scope_combo = QComboBox(self)
         self.scope_combo.addItems([self.tr("Current page"), self.tr("Whole project")])
         self.include_ok_check = QCheckBox(self.tr("Include text boxes without warnings"), self)
-        self.apply_fixes_check = QCheckBox(self.tr("Apply conservative fixes after export"), self)
-        self.apply_fixes_check.setToolTip(self.tr("Shrinks overflow text, applies strict vertical CJK breaks, right-aligns RTL, increases stroke padding, and fills empty fallback chains."))
+        self.apply_fixes_check = QCheckBox(self.tr("Apply checked conservative fixes after export"), self)
+        self.apply_fixes_check.setToolTip(self.tr("Only checked rows in the preview are changed. Fixes include shrink/balance, strict vertical CJK breaks, punctuation normalization, RTL alignment, stroke padding, contrast stroke, and fallback chains."))
+        self.select_all_check = QCheckBox(self.tr("Select all issue rows for fixing"), self)
+        self.select_all_check.setChecked(True)
+        self.select_all_check.stateChanged.connect(self._on_select_all_changed)
 
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit(self)
@@ -56,6 +59,7 @@ class TypographyQAReportDialog(QDialog):
         form.addRow(self.tr("Scope"), self.scope_combo)
         form.addRow("", self.include_ok_check)
         form.addRow("", self.apply_fixes_check)
+        form.addRow("", self.select_all_check)
         form.addRow(self.tr("Report path"), path_row)
 
         refresh_row = QHBoxLayout()
@@ -68,9 +72,9 @@ class TypographyQAReportDialog(QDialog):
         outer.addLayout(refresh_row)
 
         self.table = QTableWidget(self)
-        self.table.setColumnCount(9)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            self.tr("Page"), self.tr("#"), self.tr("Severity"), self.tr("Warnings"),
+            self.tr("Fix"), self.tr("Page"), self.tr("#"), self.tr("Severity"), self.tr("Warnings"),
             self.tr("Suggestions"), self.tr("Mode"), self.tr("Fit"), self.tr("Break"), self.tr("Missing"),
         ])
         self.table.setAlternatingRowColors(True)
@@ -84,6 +88,7 @@ class TypographyQAReportDialog(QDialog):
         outer.addWidget(buttons)
         self.scope_combo.currentIndexChanged.connect(self.refresh_report)
         self.include_ok_check.stateChanged.connect(self.refresh_report)
+        self._rows = []
         self.refresh_report()
 
     def selected_pages(self):
@@ -98,6 +103,22 @@ class TypographyQAReportDialog(QDialog):
 
     def should_apply_fixes(self) -> bool:
         return self.apply_fixes_check.isChecked()
+
+    def selected_fixes(self):
+        fixes = []
+        for r, row in enumerate(getattr(self, "_rows", []) or []):
+            item = self.table.item(r, 0)
+            if item is None or item.checkState() != Qt.CheckState.Checked:
+                continue
+            row_data = item.data(Qt.ItemDataRole.UserRole) if hasattr(Qt, "ItemDataRole") else item.data(Qt.UserRole)
+            if isinstance(row_data, dict):
+                row = row_data
+            fixes.append({
+                "page": row.get("page", ""),
+                "index": int(row.get("index", -1)),
+                "actions": list(row.get("suggestions", []) or []),
+            })
+        return fixes
 
     def report_path(self) -> str:
         return self.path_edit.text().strip()
@@ -118,22 +139,38 @@ class TypographyQAReportDialog(QDialog):
             )
         )
         rows = flatten_rendering_qa_rows(self._report)
+        self._rows = rows
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
+            fix_item = QTableWidgetItem("")
+            fix_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            fix_item.setCheckState(Qt.CheckState.Checked if row.get("warnings") else Qt.CheckState.Unchecked)
+            try:
+                fix_item.setData(Qt.ItemDataRole.UserRole, row)
+            except AttributeError:
+                fix_item.setData(Qt.UserRole, row)
+            self.table.setItem(r, 0, fix_item)
             values = [
                 row.get("page", ""), row.get("index", ""), row.get("severity", ""),
                 ", ".join(row.get("warnings", [])), ", ".join(row.get("suggestions", [])),
                 row.get("writing_mode", ""), row.get("fit_mode", ""), row.get("line_break_strategy", ""),
                 row.get("missing_glyphs", ""),
             ]
-            for c, value in enumerate(values):
+            for c, value in enumerate(values, start=1):
                 item = QTableWidgetItem(str(value))
-                if c == 1:
+                if c == 2:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, c, item)
         self.table.resizeColumnsToContents()
         self.table.setSortingEnabled(True)
+
+    def _on_select_all_changed(self):
+        state = Qt.CheckState.Checked if self.select_all_check.isChecked() else Qt.CheckState.Unchecked
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item is not None:
+                item.setCheckState(state)
 
     def write_report(self, path: str = "") -> str:
         path = path or self.report_path()

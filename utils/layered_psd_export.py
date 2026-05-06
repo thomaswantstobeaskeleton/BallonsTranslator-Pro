@@ -62,13 +62,17 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
         else:
             warnings.append("Final rendered composite was not available; render the page first for a flattened reference layer.")
 
+    from utils.rendering_qa import analyze_text_block
+
     text_layers = []
     for idx, blk in enumerate(project.pages.get(page_name, []) or []):
         ff = getattr(blk, "fontformat", None)
         xyxy = list(getattr(blk, "xyxy", [0, 0, 0, 0]) or [0, 0, 0, 0])
+        text_value = getattr(blk, "translation", "") or "\n".join(getattr(blk, "text", []) or [])
+        diagnostics = analyze_text_block(blk, page_name, idx)
         text_layers.append({
             "name": f"translated_text_{idx + 1:03d}",
-            "text": getattr(blk, "translation", "") or "\n".join(getattr(blk, "text", []) or []),
+            "text": text_value,
             "xyxy": xyxy,
             "font_family": getattr(ff, "font_family", "") if ff else "",
             "font_size_px": getattr(ff, "font_size", 24.0) if ff else 24.0,
@@ -80,7 +84,14 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "line_spacing": getattr(ff, "line_spacing", 1.2) if ff else 1.2,
             "letter_spacing": getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
             "opacity": getattr(ff, "opacity", 1.0) if ff else 1.0,
+            "fit_mode": getattr(ff, "fit_mode", "shrink") if ff else "shrink",
+            "line_break_strategy": getattr(ff, "line_break_strategy", "auto") if ff else "auto",
+            "text_padding": getattr(ff, "text_padding", 0.0) if ff else 0.0,
+            "fallback_font_chain": getattr(ff, "fallback_font_chain", "") if ff else "",
+            "rendering_diagnostics": diagnostics,
         })
+        for warning in diagnostics.get("warnings", []) if isinstance(diagnostics, dict) else []:
+            warnings.append(f"Text layer {idx + 1}: {warning}")
     if not text_layers:
         warnings.append("No translated text layers were found for this page.")
 
@@ -128,6 +139,8 @@ def _build_photoshop_jsx(manifest_path: str, manifest: Dict) -> str:
             f"  lyr.textItem.contents = {text};",
             f"  lyr.textItem.position = [{float(x1):.2f}, {float(y1):.2f}];",
             f"  lyr.textItem.size = {size_pt:.2f};",
+            f"  lyr.opacity = {max(0.0, min(100.0, float(layer.get('opacity', 1.0)) * 100.0)):.2f};",
+            "  // Style notes: writing_mode=" + json.dumps(str(layer.get('writing_mode', 'auto'))) + ", fit_mode=" + json.dumps(str(layer.get('fit_mode', 'shrink'))) + ", fallback_chain=" + json.dumps(str(layer.get('fallback_font_chain', ''))) + ";",
             "}",
         ])
     lines.append("if (doc) { alert('Editable text layers created. Save as PSD from Photoshop.'); }")

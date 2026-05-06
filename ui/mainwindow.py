@@ -925,8 +925,31 @@ class MainWindow(mainwindow_cls):
         return self._api_call_ui(self._api_export_ui, body)
 
     def _api_export_ui(self, body: dict):
-        self.on_export_lptxt()
-        return {'ok': True}
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        kind = str((body or {}).get('kind', 'rendered_batch') or 'rendered_batch').strip().lower()
+        if kind in {'rendered', 'rendered_batch', 'images'}:
+            out_dir = str((body or {}).get('out_dir', '') or '').strip()
+            if not out_dir:
+                out_dir = osp.join(self.imgtrans_proj.directory, 'exports')
+            ext = str((body or {}).get('ext', '') or '').strip().lower() or None
+            also_pdf = bool((body or {}).get('also_pdf', False))
+            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)))
+            self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
+            return {'ok': True, **(result or {})}
+        if kind in {'current_page', 'render_current_page'}:
+            return self._api_render_current_page_ui(body)
+        if kind in {'structured_ocr', 'ocr_json'}:
+            return self._api_export_structured_ocr_ui(body)
+        if kind in {'psd_handoff', 'layered_psd'}:
+            if not self.imgtrans_proj.current_img:
+                raise ValueError('select a page first')
+            out_dir = str((body or {}).get('out_dir', '') or '').strip() or osp.join(self.imgtrans_proj.directory, 'psd_handoff')
+            qimg = self.canvas.render_result_img()
+            final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
+            manifest = build_layered_psd_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr)
+            return {'ok': True, 'manifest': manifest}
+        raise ValueError(f'unknown export kind: {kind}')
 
     def _api_layout_review(self, body: dict):
         return self._api_call_ui(self._api_layout_review_ui, body)
@@ -970,32 +993,17 @@ class MainWindow(mainwindow_cls):
     def _api_list_rendering_issues_ui(self, body: dict):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
-        from utils.text_rendering import estimate_text_bounds, merge_font_fallback_chain, missing_glyphs_after_fallback, resolve_writing_mode
+        from utils.rendering_qa import build_project_rendering_qa, flatten_rendering_qa_rows
         pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img] or [])
-        out = []
-        for page in pages:
-            if not page or page not in self.imgtrans_proj.pages:
-                continue
-            for idx, blk in enumerate(self.imgtrans_proj.pages.get(page, []) or []):
-                ff = getattr(blk, 'fontformat', None)
-                if ff is None:
-                    continue
-                text = getattr(blk, 'translation', '') or '\n'.join(getattr(blk, 'text', []) or [])
-                x1, y1, x2, y2 = getattr(blk, 'xyxy', [0, 0, 1, 1])
-                box = (max(1.0, float(x2) - float(x1)), max(1.0, float(y2) - float(y1)))
-                mode = resolve_writing_mode(getattr(ff, 'writing_mode', 'auto'), text, box)
-                measured = estimate_text_bounds(text, getattr(ff, 'font_size', 24.0), mode, box[0], box[1], getattr(ff, 'line_spacing', 1.15), getattr(ff, 'letter_spacing', 1.0), getattr(ff, 'text_padding', 0.0), getattr(ff, 'stroke_width', 0.0), getattr(ff, 'shadow_radius', 0.0), getattr(ff, 'shadow_offset', [0.0, 0.0]), line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'))
-                missing = missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', '')) if text else []
-                overflow = measured[0] > box[0] or measured[1] > box[1]
-                if overflow or missing or bool((body or {}).get('include_ok', False)):
-                    out.append({
-                        'page': page, 'index': idx, 'writing_mode': getattr(ff, 'writing_mode', 'auto'),
-                        'resolved_writing_mode': mode, 'box': list(box), 'measured': [measured[0], measured[1]],
-                        'overflow': overflow, 'missing_glyphs': missing,
-                        'fallback_chain': merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', '')),
-                        'line_break_strategy': getattr(ff, 'line_break_strategy', 'auto'),
-                    })
-        return {'ok': True, 'issues': out, 'count': len(out)}
+        include_ok = bool((body or {}).get('include_ok', False))
+        report = build_project_rendering_qa(self.imgtrans_proj, pages=pages, include_ok=include_ok, config_obj=pcfg)
+        rows = flatten_rendering_qa_rows(report)
+        issues = []
+        for page in report.get('pages', []) or []:
+            for block in page.get('blocks', []) or []:
+                if include_ok or block.get('warnings'):
+                    issues.append(block)
+        return {'ok': True, 'issues': issues, 'rows': rows, 'count': len(issues), 'summary': report.get('summary', {})}
 
     def _api_page_state(self, body: dict):
         return self._api_call_ui(self._api_page_state_ui, body)
@@ -1048,7 +1056,8 @@ class MainWindow(mainwindow_cls):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
         pages = (body or {}).get('pages')
-        result = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg)
+        selected_fixes = (body or {}).get('selected_fixes')
+        result = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg, selected_fixes=selected_fixes)
         if result.get('applied_count'):
             if self.imgtrans_proj.current_img in (pages or [self.imgtrans_proj.current_img]):
                 self.st_manager.updateSceneTextitems()
@@ -1403,7 +1412,10 @@ class MainWindow(mainwindow_cls):
         applied = None
         pages = dlg.selected_pages()
         if dlg.should_apply_fixes():
-            applied = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg)
+            selected_fixes = dlg.selected_fixes()
+            if not selected_fixes:
+                self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('No typography QA rows were checked; no fixes applied.'))
+            applied = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg, selected_fixes=selected_fixes) if selected_fixes else {'applied_count': 0}
             if applied.get('applied_count'):
                 if self.imgtrans_proj.current_img in pages:
                     self.st_manager.updateSceneTextitems()
@@ -3820,6 +3832,24 @@ class MainWindow(mainwindow_cls):
                 except Exception as e:
                     LOGGER.exception(e)
                     msg += '\n' + self.tr('PDF export failed: {}').format(str(e))
+            from utils.export_manifest import mark_exported_pages, write_export_manifest
+            marked_exported = mark_exported_pages(self.imgtrans_proj, exported_paths)
+            manifest = write_export_manifest(
+                self.imgtrans_proj,
+                out_dir,
+                exported_paths,
+                missing,
+                export_kind='rendered_images',
+                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export)},
+            )
+            msg += '\n' + self.tr('Export manifest: {0}').format(manifest.get('manifest_path', ''))
+            if marked_exported:
+                msg += '\n' + self.tr('Marked {0} page(s) as Exported.').format(marked_exported)
+                try:
+                    self.imgtrans_proj.save()
+                    self._update_page_list_state_style()
+                except Exception as e:
+                    LOGGER.warning('Failed to save exported page completion state: %s', e)
             if missing:
                 msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
             if clean_after_export and self.imgtrans_proj is not None:
@@ -3827,9 +3857,11 @@ class MainWindow(mainwindow_cls):
                 msg += '\n' + self.tr('Cache cleaned.')
             if show_message:
                 QMessageBox.information(self, self.tr('Export'), msg)
+            return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'manifest': manifest, 'marked_exported': marked_exported}
         except Exception as e:
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
+            return {'exported': 0, 'missing': [], 'paths': [], 'error': str(e)}
 
     def on_validate_project(self):
         """Check project: missing images, invalid JSON, duplicate/overlapping blocks."""
