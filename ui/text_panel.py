@@ -12,6 +12,7 @@ from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
 from utils.text_rendering import MANGA_PRESETS, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
+from .custom_widget.flow_layout import FlowLayout
 from .textitem import TextBlkItem
 from .text_advanced_format import TextAdvancedFormatPanel
 from .text_style_presets import TextStylePresetPanel
@@ -52,6 +53,26 @@ class IncrementalBtn(QPushButton):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setFixedSize(13, 13)
+
+
+def _set_combo_tooltip_to_current(combo: QComboBox, prefix: str = ""):
+    text = combo.currentText()
+    combo.setToolTip((prefix + "\n" if prefix else "") + text)
+
+
+def _make_format_group(title: str, widgets: list, parent=None, tooltip: str = None) -> QGroupBox:
+    group = QGroupBox(title, parent)
+    group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+    if tooltip:
+        group.setToolTip(tooltip)
+    layout = FlowLayout(group, isTight=True)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setHorizontalSpacing(8)
+    layout.setVerticalSpacing(6)
+    for widget in widgets:
+        widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        layout.addWidget(widget)
+    return group
 
 
 class AlignmentBtnGroup(QFrame):
@@ -320,8 +341,10 @@ class FontFormatPanel(Widget):
         self.writingModeCombo.addItem(self.tr("Horizontal LTR"), "horizontal_ltr")
         self.writingModeCombo.addItem(self.tr("Vertical RL"), "vertical_rl")
         self.writingModeCombo.addItem(self.tr("RTL"), "rtl")
-        self.writingModeCombo.setToolTip(self.tr("Per-textbox writing mode. Auto uses script and text-box geometry."))
+        self.writingModeCombo.setMinimumWidth(150)
+        self.writingModeCombo.setToolTip(self.tr("Current selection/style writing mode. Auto uses script and text-box geometry; project defaults live in Settings → Text Rendering Defaults."))
         self.writingModeCombo.currentIndexChanged.connect(self._on_writing_mode_changed)
+        self.writingModeCombo.currentTextChanged.connect(lambda _t: _set_combo_tooltip_to_current(self.writingModeCombo, self.tr("Current selection/style writing mode.")))
 
         self.fitModeCombo = QComboBox(self)
         self.fitModeCombo.setObjectName("FitModeCombo")
@@ -329,8 +352,10 @@ class FontFormatPanel(Widget):
         self.fitModeCombo.addItem(self.tr("Expand to fill"), "expand")
         self.fitModeCombo.addItem(self.tr("Preserve size"), "preserve")
         self.fitModeCombo.addItem(self.tr("Balance lines"), "balance")
-        self.fitModeCombo.setToolTip(self.tr("Text fitting policy used by auto-layout and layout review."))
+        self.fitModeCombo.setMinimumWidth(140)
+        self.fitModeCombo.setToolTip(self.tr("Current selection/style fitting policy used by auto-layout and layout review."))
         self.fitModeCombo.currentIndexChanged.connect(self._on_fit_mode_changed)
+        self.fitModeCombo.currentTextChanged.connect(lambda _t: _set_combo_tooltip_to_current(self.fitModeCombo, self.tr("Current selection/style fitting policy.")))
 
         self.lineBreakCombo = QComboBox(self)
         self.lineBreakCombo.setObjectName("LineBreakStrategyCombo")
@@ -338,26 +363,54 @@ class FontFormatPanel(Widget):
         self.lineBreakCombo.addItem(self.tr("Strict CJK"), "cjk_strict")
         self.lineBreakCombo.addItem(self.tr("Balanced"), "balanced")
         self.lineBreakCombo.addItem(self.tr("Loose SFX"), "loose")
-        self.lineBreakCombo.setToolTip(self.tr("Line-break strategy: CJK kinsoku, balanced dangling-line cleanup, or loose SFX wrapping."))
+        self.lineBreakCombo.setMinimumWidth(135)
+        self.lineBreakCombo.setToolTip(self.tr("Current selection/style line-break strategy: CJK kinsoku, balanced dangling-line cleanup, or loose SFX wrapping."))
         self.lineBreakCombo.currentIndexChanged.connect(self._on_line_break_changed)
+        self.lineBreakCombo.currentTextChanged.connect(lambda _t: _set_combo_tooltip_to_current(self.lineBreakCombo, self.tr("Current selection/style line-break strategy.")))
 
         self.mangaPresetCombo = QComboBox(self)
         self.mangaPresetCombo.setObjectName("MangaPresetCombo")
         self.mangaPresetCombo.addItem(self.tr("Preset: none"), "")
         for preset_id, preset in MANGA_PRESETS.items():
             self.mangaPresetCombo.addItem(self.tr(preset.get("label", preset_id)), preset_id)
-        self.mangaPresetCombo.setToolTip(self.tr("Apply manga lettering presets: stroke, spacing, writing mode, fit mode, alignment, and padding."))
+        self.mangaPresetCombo.setMinimumWidth(150)
+        self.mangaPresetCombo.setToolTip(self.tr("Apply manga lettering presets to the current selection/style: stroke, spacing, writing mode, fit mode, alignment, and padding."))
         self.mangaPresetCombo.currentIndexChanged.connect(self._on_manga_preset_changed)
+        self.mangaPresetCombo.currentTextChanged.connect(lambda _t: _set_combo_tooltip_to_current(self.mangaPresetCombo, self.tr("Manga lettering preset for current selection/style.")))
 
         self.fallbackChainEdit = LineEdit(parent=self)
         self.fallbackChainEdit.setObjectName("FallbackFontChainEdit")
-        self.fallbackChainEdit.setPlaceholderText(self.tr("Style fallback fonts"))
-        self.fallbackChainEdit.setToolTip(self.tr("Optional comma-separated fallback fonts for this text style. Empty uses Rendering/Text Formatting defaults."))
+        self.fallbackChainEdit.setPlaceholderText(self.tr("Current style fallback fonts"))
+        self.fallbackChainEdit.setMinimumWidth(190)
+        self.fallbackChainEdit.setToolTip(self.tr("Current selection/style fallback fonts. Empty uses Settings → Text Rendering Defaults fallback chains."))
         self.fallbackChainEdit.editingFinished.connect(self._on_fallback_chain_changed)
 
         self.fontFallbackWarningLabel = QLabel(self)
         self.fontFallbackWarningLabel.setObjectName("FontFallbackWarningLabel")
+        self.fontFallbackWarningLabel.setWordWrap(True)
         self.fontFallbackWarningLabel.setToolTip(self.tr("Shows missing-glyph diagnostics after configured fallback chains are considered."))
+
+        self.formatScopeLabel = QLabel(self)
+        self.formatScopeLabel.setObjectName("FormatScopeLabel")
+        self.formatScopeLabel.setWordWrap(True)
+        self.formatScopeLabel.setToolTip(self.tr("Shows whether the controls edit the global text style or the currently selected textbox/style override."))
+
+        self.useProjectDefaultsBtn = QPushButton(self.tr("Use project text defaults"), self)
+        self.useProjectDefaultsBtn.setToolTip(self.tr("Apply Settings → Project text rendering defaults to the current style/selection: writing mode, fit mode, line breaks, padding, and clear fallback override."))
+        self.useProjectDefaultsBtn.clicked.connect(self._on_use_project_text_defaults)
+
+        self.clearFallbackOverrideBtn = QPushButton(self.tr("Use global fallback fonts"), self)
+        self.clearFallbackOverrideBtn.setToolTip(self.tr("Clear this style/textbox fallback chain so renderer per-script fallback fonts from Settings are used."))
+        self.clearFallbackOverrideBtn.clicked.connect(self._on_clear_fallback_override)
+
+        self.resetPathEffectsBtn = QPushButton(self.tr("Reset path/warp effects"), self)
+        self.resetPathEffectsBtn.setToolTip(self.tr("Reset text-on-path, warp, and rounded-box effects for the current style/selection."))
+        self.resetPathEffectsBtn.clicked.connect(self._on_reset_path_effects)
+
+        self.letteringDiagnosticsLabel = QLabel(self)
+        self.letteringDiagnosticsLabel.setObjectName("LetteringDiagnosticsLabel")
+        self.letteringDiagnosticsLabel.setWordWrap(True)
+        self.letteringDiagnosticsLabel.setToolTip(self.tr("Live estimate for the active text box/style: writing mode, fit result, overflow, fallback glyphs, and quality score."))
 
         self.textPaddingSpinBox = QDoubleSpinBox(self)
         self.textPaddingSpinBox.setObjectName("TextPaddingSpinBox")
@@ -368,10 +421,31 @@ class FontFormatPanel(Widget):
         self.textPaddingSpinBox.setToolTip(self.tr("Extra text inset/padding to avoid clipping strokes and punctuation."))
         self.textPaddingSpinBox.valueChanged.connect(self._on_text_padding_changed)
 
+        self.fitMinFontSizeSpinBox = QDoubleSpinBox(self)
+        self.fitMinFontSizeSpinBox.setObjectName("FitMinFontSizeSpinBox")
+        self.fitMinFontSizeSpinBox.setRange(0.0, 200.0)
+        self.fitMinFontSizeSpinBox.setSingleStep(1.0)
+        self.fitMinFontSizeSpinBox.setDecimals(1)
+        self.fitMinFontSizeSpinBox.setPrefix(self.tr("Min "))
+        self.fitMinFontSizeSpinBox.setSuffix(" px")
+        self.fitMinFontSizeSpinBox.setToolTip(self.tr("Current selection/style fit minimum font size. 0 = use project engine default."))
+        self.fitMinFontSizeSpinBox.valueChanged.connect(self._on_fit_font_size_min_changed)
+
+        self.fitMaxFontSizeSpinBox = QDoubleSpinBox(self)
+        self.fitMaxFontSizeSpinBox.setObjectName("FitMaxFontSizeSpinBox")
+        self.fitMaxFontSizeSpinBox.setRange(0.0, 300.0)
+        self.fitMaxFontSizeSpinBox.setSingleStep(1.0)
+        self.fitMaxFontSizeSpinBox.setDecimals(1)
+        self.fitMaxFontSizeSpinBox.setPrefix(self.tr("Max "))
+        self.fitMaxFontSizeSpinBox.setSuffix(" px")
+        self.fitMaxFontSizeSpinBox.setToolTip(self.tr("Current selection/style fit maximum font size. 0 = use project engine default."))
+        self.fitMaxFontSizeSpinBox.valueChanged.connect(self._on_fit_font_size_max_changed)
+
         self.textOnPathCombo = QComboBox(self)
         self.textOnPathCombo.setObjectName("TextOnPathCombo")
         self.textOnPathCombo.addItems([self.tr("Text on path: None"), self.tr("Circular"), self.tr("Arc")])
-        self.textOnPathCombo.setToolTip(self.tr("Draw text along a circle or arc (e.g. for balloons, SFX)."))
+        self.textOnPathCombo.setMinimumWidth(150)
+        self.textOnPathCombo.setToolTip(self.tr("Current selection/style: draw text along a circle or arc (e.g. for balloons, SFX)."))
         self.textOnPathCombo.currentIndexChanged.connect(self._on_text_on_path_combo_changed)
 
         self.textOnPathArcDegreesSpinBox = QDoubleSpinBox(self)
@@ -388,7 +462,8 @@ class FontFormatPanel(Widget):
         self.warpStyleCombo.addItems([
             self.tr("Warp: None"), self.tr("Arc"), self.tr("Arch"), self.tr("Bulge"), self.tr("Flag")
         ])
-        self.warpStyleCombo.setToolTip(self.tr("Photoshop-like text warp (#1093)."))
+        self.warpStyleCombo.setMinimumWidth(125)
+        self.warpStyleCombo.setToolTip(self.tr("Current selection/style Photoshop-like text warp (#1093)."))
         self.warpStyleCombo.currentIndexChanged.connect(self._on_warp_style_changed)
 
         self.warpStrengthSpinBox = QDoubleSpinBox(self)
@@ -544,20 +619,38 @@ class FontFormatPanel(Widget):
         hl2.addWidget(self.autoFitFontSizeChecker)
         hl2.setSpacing(FONTFORMAT_SPACING)
         hl2.setContentsMargins(4, 0, 4, 0)
-        hl2b = QHBoxLayout()
-        hl2b.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hl2b.addWidget(self.writingModeCombo)
-        hl2b.addWidget(self.fitModeCombo)
-        hl2b.addWidget(self.lineBreakCombo)
-        hl2b.addWidget(self.mangaPresetCombo)
-        hl2b.addWidget(self.fallbackChainEdit)
-        hl2b.addWidget(self.textPaddingSpinBox)
-        hl2b.addWidget(self.textOnPathCombo)
-        hl2b.addWidget(self.textOnPathArcDegreesSpinBox)
-        hl2b.addWidget(self.warpStyleCombo)
-        hl2b.addWidget(self.warpStrengthSpinBox)
-        hl2b.addWidget(self.boxCornerRadiusSpinBox)
-        hl2b.setSpacing(FONTFORMAT_SPACING)
+        layout_group = _make_format_group(
+            self.tr("Selection layout overrides"),
+            [self.writingModeCombo, self.fitModeCombo, self.lineBreakCombo, self.mangaPresetCombo, self.textPaddingSpinBox, self.fitMinFontSizeSpinBox, self.fitMaxFontSizeSpinBox],
+            self,
+            self.tr("Current style/textbox controls. Project defaults are in Settings → Project text rendering defaults.")
+        )
+        fallback_group = _make_format_group(
+            self.tr("Selection font fallback"),
+            [self.fallbackChainEdit, self.clearFallbackOverrideBtn],
+            self,
+            self.tr("Empty fallback chain means use Settings fallback fonts.")
+        )
+        effects_group = _make_format_group(
+            self.tr("Selection shape/path effects"),
+            [self.textOnPathCombo, self.textOnPathArcDegreesSpinBox, self.warpStyleCombo, self.warpStrengthSpinBox, self.boxCornerRadiusSpinBox, self.resetPathEffectsBtn],
+            self,
+            self.tr("Optional decorative effects for the current style/textbox.")
+        )
+        defaults_group = _make_format_group(
+            self.tr("Selection defaults / reset"),
+            [self.useProjectDefaultsBtn],
+            self,
+            self.tr("Apply project text defaults without changing font family, size, colors, or stroke.")
+        )
+        hl2b = QVBoxLayout()
+        hl2b.addWidget(self.formatScopeLabel)
+        hl2b.addWidget(self.letteringDiagnosticsLabel)
+        hl2b.addWidget(layout_group)
+        hl2b.addWidget(fallback_group)
+        hl2b.addWidget(effects_group)
+        hl2b.addWidget(defaults_group)
+        hl2b.setSpacing(6)
         hl2b.setContentsMargins(4, 4, 4, 0)
         hl3 = QHBoxLayout()
         hl3.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -589,7 +682,8 @@ class FontFormatPanel(Widget):
         self.vlayout.setSpacing(0)
 
         # Ensure format controls remain visible when panel is narrow or sections are collapsed
-        self.setMinimumHeight(320)
+        self.setMinimumHeight(360)
+        self.setMinimumWidth(330)
 
         self.focusOnColorDialog = False
         C.active_format = self.global_format
@@ -662,6 +756,12 @@ class FontFormatPanel(Widget):
     def _on_text_padding_changed(self, value: float):
         self.on_param_changed('text_padding', float(value))
 
+    def _on_fit_font_size_min_changed(self, value: float):
+        self.on_param_changed('fit_font_size_min', float(value))
+
+    def _on_fit_font_size_max_changed(self, value: float):
+        self.on_param_changed('fit_font_size_max', float(value))
+
     def _on_text_on_path_combo_changed(self, index: int):
         self.textOnPathArcDegreesSpinBox.setVisible(index == 2)
         self.on_param_changed('text_on_path', index)
@@ -678,6 +778,43 @@ class FontFormatPanel(Widget):
 
     def _on_box_corner_radius_changed(self, value: float):
         self.on_param_changed('text_box_corner_radius', value)
+
+    def _current_format_for_reset(self):
+        return self.global_format if self.global_mode() else C.active_format
+
+    def _apply_format_params(self, params):
+        for param_name, value in params:
+            self.on_param_changed(param_name, value)
+        fmt = self._current_format_for_reset()
+        if fmt is not None:
+            self.set_active_format(fmt)
+
+    def _on_use_project_text_defaults(self):
+        self._apply_format_params([
+            ('writing_mode', normalize_writing_mode(getattr(pcfg, 'render_default_writing_mode', 'auto'))),
+            ('fit_mode', normalize_fit_mode(getattr(pcfg, 'render_default_fit_mode', 'shrink'))),
+            ('line_break_strategy', normalize_line_break_strategy(getattr(pcfg, 'render_default_line_break_strategy', 'auto'))),
+            ('text_padding', float(getattr(pcfg, 'render_default_text_padding', 0.0) or 0.0)),
+            ('fallback_font_chain', ''),
+        ])
+
+    def _on_clear_fallback_override(self):
+        self._apply_format_params([('fallback_font_chain', '')])
+
+    def _on_reset_path_effects(self):
+        self._apply_format_params([
+            ('text_on_path', 0),
+            ('text_on_path_arc_degrees', 180.0),
+            ('warp_style', 0),
+            ('warp_strength', 0.5),
+            ('text_box_corner_radius', 0.0),
+        ])
+
+    def _update_format_scope_label(self):
+        if self.global_mode():
+            self.formatScopeLabel.setText(self.tr("Editing Global Font Format / active style defaults. Use Apply to all blocks for a page-wide change."))
+        else:
+            self.formatScopeLabel.setText(self.tr("Editing the current selected textbox/style override. Project defaults remain unchanged."))
 
     def update_text_style_label(self):
         if self.global_mode():
@@ -704,6 +841,53 @@ class FontFormatPanel(Widget):
         else:
             mul = 0.01
         self.lineSpacingBox.setValue(self.lineSpacingBox.value() + delta * mul)
+
+
+    def _update_lettering_diagnostics(self, font_format: FontFormat):
+        text = ''
+        box = (0.0, 0.0)
+        if self.textblk_item is not None:
+            try:
+                text = self.textblk_item.toPlainText()
+            except Exception:
+                text = ''
+            try:
+                rect = self.textblk_item.absBoundingRect(qrect=True)
+                box = (float(rect.width()), float(rect.height()))
+            except Exception:
+                box = (0.0, 0.0)
+        if not text:
+            self.letteringDiagnosticsLabel.setText(self.tr("Lettering diagnostics: select a textbox to see fit, fallback, and overflow status."))
+            return
+        try:
+            from utils.text_rendering import fit_font_size_to_box, missing_glyphs_after_fallback
+            fitted_size, _text_out, diag = fit_font_size_to_box(
+                text,
+                float(getattr(font_format, 'font_size', 24.0) or 24.0),
+                box,
+                getattr(font_format, 'fit_mode', 'shrink'),
+                getattr(font_format, 'writing_mode', 'auto'),
+                min_font_size=float(getattr(font_format, 'fit_font_size_min', 0.0) or getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0)),
+                max_font_size=float(getattr(font_format, 'fit_font_size_max', 0.0) or getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0)),
+                line_spacing=float(getattr(font_format, 'line_spacing', 1.15) or 1.15),
+                letter_spacing=float(getattr(font_format, 'letter_spacing', 1.0) or 1.0),
+                padding=float(getattr(font_format, 'text_padding', 0.0) or 0.0),
+                stroke_width=float(getattr(font_format, 'stroke_width', 0.0) or 0.0),
+                line_break_strategy=getattr(font_format, 'line_break_strategy', 'auto'),
+            )
+            missing = missing_glyphs_after_fallback(getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', ''))
+            status = self.tr("OK") if not diag.overflow and not missing else self.tr("Needs review")
+            self.letteringDiagnosticsLabel.setText(
+                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · missing {missing}").format(
+                    status=status,
+                    mode=diag.resolved_writing_mode,
+                    fit=fitted_size,
+                    quality=getattr(diag, 'quality_score', 1.0),
+                    missing=''.join(missing) if missing else self.tr('none'),
+                )
+            )
+        except Exception as exc:
+            self.letteringDiagnosticsLabel.setText(self.tr("Lettering diagnostics unavailable: {0}").format(exc))
 
 
     def _update_font_fallback_warning(self, font_format: FontFormat):
@@ -763,9 +947,16 @@ class FontFormatPanel(Widget):
         self.fallbackChainEdit.setText(str(getattr(font_format, 'fallback_font_chain', '') or ''))
         self.fallbackChainEdit.blockSignals(False)
         self._update_font_fallback_warning(font_format)
+        self._update_lettering_diagnostics(font_format)
         self.textPaddingSpinBox.blockSignals(True)
         self.textPaddingSpinBox.setValue(float(getattr(font_format, 'text_padding', 0.0) or 0.0))
         self.textPaddingSpinBox.blockSignals(False)
+        self.fitMinFontSizeSpinBox.blockSignals(True)
+        self.fitMinFontSizeSpinBox.setValue(float(getattr(font_format, 'fit_font_size_min', 0.0) or 0.0))
+        self.fitMinFontSizeSpinBox.blockSignals(False)
+        self.fitMaxFontSizeSpinBox.blockSignals(True)
+        self.fitMaxFontSizeSpinBox.setValue(float(getattr(font_format, 'fit_font_size_max', 0.0) or 0.0))
+        self.fitMaxFontSizeSpinBox.blockSignals(False)
         self.autoFitFontSizeChecker.setChecked(bool(getattr(font_format, 'auto_fit_font_size', False)))
         self.opacityMainBox.setValue(font_format.opacity)
         text_on_path = getattr(font_format, 'text_on_path', 0)
@@ -792,6 +983,7 @@ class FontFormatPanel(Widget):
         self.formatBtnGroup.strikethroughBtn.setChecked(font_format.strikethrough)
         self.formatBtnGroup.italicBtn.setChecked(font_format.italic)
         self.alignBtnGroup.setAlignment(font_format.alignment)
+        self._update_format_scope_label()
         
         self.familybox.blockSignals(False)
         self.textadvancedfmt_panel.set_active_format(font_format)

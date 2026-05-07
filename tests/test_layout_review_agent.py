@@ -155,3 +155,49 @@ def test_planner_proposes_fallback_application_for_missing_glyphs():
     actions = [a.action for a in rst.blocks[0].actions]
     assert "flag_missing_glyphs" in actions
     assert "apply_font_fallback" in actions
+
+
+def test_planner_uses_recommended_box_and_vertical_punctuation_actions():
+    planner = LayoutReviewPlanner()
+    rst = planner.review_page(
+        "p1",
+        [
+            BlockSnapshot(
+                block_index=8,
+                xyxy=(0, 0, 60, 80),
+                text="第12話?!",
+                font_size=20,
+                est_text_size=(90, 120),
+                overflow_status=True,
+                resolved_writing_mode="vertical_rl",
+                text_style={"recommended_box_size": [100, 140], "line_break_strategy": "auto"},
+                quality_score=0.62,
+            )
+        ],
+    )
+    actions = [a.action for a in rst.blocks[0].actions]
+    issues = [i.code for i in rst.blocks[0].issues]
+    assert "resize_to_recommended_box" in actions
+    assert "normalize_vertical_punctuation" in actions
+    assert "low_lettering_quality_score" in issues
+
+
+def test_planner_proposes_rtl_alignment_and_contrast_stroke():
+    planner = LayoutReviewPlanner()
+    rst = planner.review_page(
+        "p1",
+        [
+            BlockSnapshot(
+                block_index=9,
+                xyxy=(0, 0, 120, 80),
+                text="مرحبا",
+                font_size=18,
+                est_text_size=(80, 30),
+                resolved_writing_mode="rtl",
+                text_style={"alignment": 0, "contrast_ratio": 2.5, "stroke_width": 0.0},
+            )
+        ],
+    )
+    actions = [a.action for a in rst.blocks[0].actions]
+    assert "set_alignment" in actions
+    assert "apply_contrast_stroke" in actions

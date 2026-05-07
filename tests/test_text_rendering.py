@@ -22,6 +22,11 @@ from utils.text_rendering import (
     line_break_opportunities,
     contrast_ratio,
     suggest_manga_effects_for_background,
+    split_long_word,
+    infer_reading_order,
+    sort_blocks_for_reading_order,
+    vertical_bracket_pair_hints,
+    vertical_punctuation_adjustment,
 )
 
 
@@ -121,3 +126,62 @@ def test_optimal_kinsoku_wrap_balances_without_punctuation_violations():
     assert max(len(line) for line in lines) - min(len(line) for line in lines) <= 3
     assert all(line[0] not in "）】」』、。" for line in lines)
     assert all(line[-1] not in "（【「『" for line in lines)
+
+
+def test_vertical_layout_plan_marks_tate_chu_yoko_groups():
+    plan = vertical_layout_plan("第12話!?", 6, font_size=18)
+    assert any(group["text"] == "12" for group in plan["tate_chu_yoko_groups"])
+    assert any(g.get("tate_chu_yoko") for g in plan["glyphs"])
+
+
+def test_fit_diagnostics_include_safe_inner_bounds_and_quality():
+    _size, _text, diag = fit_font_size_to_box("Outlined", 30, (120, 60), FIT_MODE_PRESERVE, stroke_width=0.2, padding=4)
+    d = diag.to_dict()
+    assert d["effect_margin"] > 0
+    assert d["safe_inner_bounds"][0] < 120
+    assert 0 <= d["quality_score"] <= 1
+
+
+def test_reading_order_infers_manga_rtl_and_sorts_rows_right_to_left():
+    class B:
+        def __init__(self, x1, y1, text="かな"):
+            self.xyxy = [x1, y1, x1 + 20, y1 + 20]
+            self.translation = text
+
+    left = B(10, 0)
+    right = B(80, 0)
+    blocks, order = sort_blocks_for_reading_order([left, right], "auto")
+    assert order == "rtl"
+    assert blocks == [right, left]
+
+
+def test_fit_diagnostics_recommend_box_for_shadow_overflow():
+    _size, _text, diag = fit_font_size_to_box(
+        "Shadowed text that is too long",
+        26,
+        (80, 32),
+        FIT_MODE_PRESERVE,
+        stroke_width=0.1,
+        shadow_radius=0.2,
+        shadow_offset=[0.2, 0.1],
+    )
+    d = diag.to_dict()
+    assert d["overflow"] is True
+    assert d["box_scale_hint"] >= 1.0
+    assert d["recommended_box_size"][0] >= 80
+
+
+def test_vertical_layout_plan_exposes_offsets_and_bracket_pairs():
+    plan = vertical_layout_plan("「あ、い」", 5, font_size=20)
+    comma = next(g for g in plan["glyphs"] if g["char"] == "、")
+    assert comma["offset"]["dx"] != 0
+    assert comma["hang"] is True
+    assert plan["bracket_pairs"]
+    assert vertical_punctuation_adjustment("「", 20)["rotate_degrees"] == 90.0
+    assert vertical_bracket_pair_hints("「あ」")[0]["open"] == "「"
+
+
+def test_split_long_word_respects_soft_hyphen_boundaries():
+    parts = split_long_word("extra­ordinary", 7)
+    assert len(parts) >= 2
+    assert all("­" not in p for p in parts)

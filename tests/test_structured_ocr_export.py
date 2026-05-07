@@ -23,6 +23,11 @@ class Block:
         return "こんにちは"
 
 
+class BlockAt(Block):
+    def __init__(self, x):
+        self.xyxy = [x, 2, x + 30, 40]
+
+
 class Project:
     directory = "/tmp/proj"
     current_img = "p1.png"
@@ -41,3 +46,15 @@ def test_structured_ocr_export_contains_page_block_geometry_and_font():
     assert page["blocks"][0]["source_text"] == "こんにちは"
     assert page["blocks"][0]["font"]["alignment"] == 1
     assert page["blocks"][0]["xyxy"] == [1.0, 2.0, 30.0, 40.0]
+
+
+def test_structured_ocr_export_can_sort_blocks_by_reading_order():
+    class P(Project):
+        pages = {"p1.png": [BlockAt(1), BlockAt(80)]}
+
+    out = build_structured_ocr_export(P(), reading_order="rtl")
+    blocks = out["pages"][0]["blocks"]
+    assert out["pages"][0]["reading_order"] == "rtl"
+    assert blocks[0]["source_index"] == 1
+    assert blocks[1]["source_index"] == 0
+    assert blocks[0]["font"]["writing_mode"] == "auto"

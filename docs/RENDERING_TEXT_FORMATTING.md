@@ -4,12 +4,19 @@ BallonsTranslator-Pro now exposes manga-lettering controls in the text format pa
 
 ## Per-textbox controls
 
-Use the text/style panel while one or more text boxes are selected:
+Use the text/style panel while one or more text boxes are selected. The top of the panel now states whether you are editing the **Global Font Format / active style defaults** or the **current selected textbox/style override**. The format panel itself is scrollable, so the translation editor below remains usable even when advanced controls are expanded.
 
-- **Writing mode**: Auto, Horizontal LTR, Vertical RL, or RTL. Auto uses the translated script plus box geometry: CJK text in a tall box becomes vertical-rl, Arabic/Hebrew becomes RTL, and other text stays horizontal.
-- **Fit mode**: Shrink, Expand, Preserve, or Balance lines. Auto-layout and layout review use the selected policy when fitting text to a constrained box.
-- **Manga preset**: Default manga bubble, Vertical JP/CN bubble, SFX bold, Caption/narration box, and Small aside text. Presets set font size, stroke, spacing, alignment, writing mode, and padding.
-- **Text padding**: Insets text inside the box so strokes, shadows, and vertical punctuation are less likely to clip.
+The everyday lettering controls are grouped by ownership:
+
+- **Selection layout overrides**: Writing mode, fit mode, line-break strategy, manga preset, and text padding for the current style/textbox.
+  - **Writing mode**: Auto, Horizontal LTR, Vertical RL, or RTL. Auto uses the translated script plus box geometry: CJK text in a tall box becomes vertical-rl, Arabic/Hebrew becomes RTL, and other text stays horizontal.
+  - **Fit mode**: Shrink, Expand, Preserve, or Balance lines. Auto-layout and layout review use the selected policy when fitting text to a constrained box.
+  - **Manga preset**: Default manga bubble, Vertical JP/CN bubble, SFX bold, Caption/narration box, and Small aside text. Presets set font size, stroke, spacing, alignment, writing mode, and padding.
+  - **Text padding**: Insets text inside the box so strokes, shadows, and vertical punctuation are less likely to clip.
+- **Selection font fallback**: Optional per-style/per-textbox fallback font chain. Empty means use the global per-script fallback fonts from Settings. The **Use global fallback fonts** button clears the override without changing the global defaults.
+- **Selection shape/path effects**: Text-on-path, arc span, warp, warp strength, and rounded text-box corners. The **Reset path/warp effects** button returns these decorative effects to neutral values.
+- **Selection defaults / reset**: **Use project text defaults** applies Settings → Project text rendering defaults for writing mode, fit mode, line breaks, padding, and clears fallback overrides. It does not change font family, size, colors, or stroke.
+- **Live lettering diagnostics**: the panel estimates resolved writing mode, fit size, overflow/fallback status, and a quality score for the selected textbox so likely final-lettering issues are visible before exporting.
 
 Right-click selected text boxes and use **Format → Writing mode** or **Format → Recenter text in box** for quick lettering fixes.
 
@@ -81,6 +88,7 @@ RTL writing mode now also sets the underlying Qt document text direction to righ
 Automation additions:
 
 - `POST /fix_rendering_issues` runs the connected layout-review repair path on the selected scope and returns applied action count plus remaining renderer diagnostics.
+- `POST /list_rendering_issues` also returns an `action_summary` map so automation clients can see which fixes are needed before applying them.
 
 ## Project typography QA and batch controls
 
@@ -103,4 +111,30 @@ Automation additions:
 
 ### QA preview table and Markdown handoff
 
-The Typography QA dialog now previews report rows before export or fixing. Each row shows page, text-box index, severity, warning codes, suggested fix actions, writing mode, fit mode, line-break strategy, and unresolved glyphs. Reports can be saved as JSON or Markdown (`.md`), and the `export_rendering_qa` automation action uses the same extension-based output behavior.
+The Typography QA dialog now previews report rows before export or fixing. Each row shows page, text-box index, severity, quality score, warning codes, suggested fix actions, writing mode, fit mode, line-break strategy, and unresolved glyphs. Warning-type filtering plus **Check visible warnings** and **Clear checks** reduce project-wide fixing clicks. Reports can be saved as JSON or Markdown (`.md`), and the `export_rendering_qa` automation action uses the same extension-based output behavior.
+
+## New in this pass: project-wide style repair and export helpers
+
+The **Batch Text Style Override** workflow now has safer Koharu-style bulk lettering controls for project cleanup requests such as “change Auto font settings across all images”:
+
+- optional **Only update blocks currently using auto font size** scope, so hand-tuned lettering is not overwritten;
+- batch stroke width, shadow radius, fit minimum, and fit maximum controls;
+- shared backend behavior with the local automation API (`POST /apply_text_style_batch`) for headless style normalization.
+
+Vertical CJK diagnostics now expose per-punctuation offset, rotation, scale, hanging-punctuation, and bracket-pair hints in `vertical_layout_plan()`. These hints make QA/export output more explicit today and provide a stable contract for future custom painting/OpenType vertical-alternate work.
+
+Batch export can also copy available helper images into the export folder:
+
+- `clean/` contains inpainted clean pages when present;
+- `masks/` contains mask images when present;
+- the export manifest records `include_intermediate` and helper paths.
+
+This reduces the number of manual project-folder lookups needed for lettering review, PSD/GIMP handoff, and archive delivery.
+
+## SVG text handoff
+
+For vector-editor interoperability, **Tools → Export → Export SVG text handoff...** writes the current page as an SVG containing editable `<text>` elements. The SVG records writing mode, font family, size, stroke, alignment, and per-block diagnostics in a companion manifest. Vertical CJK text is emitted with `writing-mode="vertical-rl"`; RTL text is emitted with `direction="rtl"`. This is meant for SVG-capable editors and automation clients, while layered PSD handoff remains the Photoshop-oriented path.
+
+## Layout review resize and punctuation actions
+
+The layout review agent now consumes effect-aware `recommended_box_size` diagnostics. When text cannot fit safely after stroke/shadow/padding are considered, review can propose a targeted **resize to recommended box** action instead of only running generic auto-fit. It also proposes vertical punctuation normalization, RTL right-alignment, low-contrast outline application, and low-quality-score flags so the same conservative fixes are available from UI review, project QA, and automation.

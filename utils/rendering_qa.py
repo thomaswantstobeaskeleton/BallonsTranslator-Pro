@@ -11,9 +11,12 @@ from .text_rendering import (
     LINE_BREAK_CJK_STRICT,
     estimate_text_bounds,
     fallback_chain_for_text,
+    lettering_quality_score,
+    safe_inner_bounds,
     fit_font_size_to_box,
     line_break_opportunities,
     normalize_vertical_punctuation,
+    resolve_fit_font_size_bounds,
     suggest_manga_effects_for_background,
     vertical_layout_plan,
     merge_font_fallback_chain,
@@ -58,19 +61,37 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     missing = missing_glyphs_after_fallback(
         getattr(fmt, "font_family", ""), text, config_obj, getattr(fmt, "fallback_font_chain", "")
     ) if text else []
+    style_min, style_max = resolve_fit_font_size_bounds(
+        getattr(fmt, "fit_font_size_min", 0.0),
+        getattr(fmt, "fit_font_size_max", 0.0),
+        getattr(getattr(config_obj, "module", None), "layout_font_size_min", 6.0),
+        getattr(getattr(config_obj, "module", None), "layout_font_size_max", 96.0),
+    )
     fitted_size, fitted_text, fit_diag = fit_font_size_to_box(
         text,
         float(getattr(fmt, "font_size", 24.0) or 24.0),
         (box_w, box_h),
         getattr(fmt, "fit_mode", FIT_MODE_SHRINK),
         getattr(fmt, "writing_mode", "auto"),
+        min_font_size=style_min,
+        max_font_size=style_max,
         line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
         letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
     )
     overflow = measured[0] > box_w or measured[1] > box_h
+    inner_bounds, effect_margin = safe_inner_bounds(
+        (box_w, box_h),
+        float(getattr(fmt, "font_size", 24.0) or 24.0),
+        stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+    )
     explicit_horizontal_on_tall_cjk = (
         getattr(fmt, "writing_mode", "auto") == "horizontal_ltr"
         and resolve_writing_mode("auto", text, (box_w, box_h)) == "vertical_rl"
@@ -107,6 +128,14 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if effect_suggestion.get("needs_effect") and float(getattr(fmt, "stroke_width", 0.0) or 0.0) <= 0:
         warnings.append("low_contrast_no_effect")
         suggestions.append({"action": "apply_contrast_stroke", **effect_suggestion, "reason": "Light lettering on a light bubble/page may need an outline or soft shadow."})
+    recommended_box = list(getattr(fit_diag, "recommended_box_size", (box_w, box_h)))
+    if overflow and (recommended_box[0] > box_w * 1.02 or recommended_box[1] > box_h * 1.02):
+        suggestions.append({"action": "resize_to_recommended_box", "recommended_box_size": recommended_box, "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0), "reason": "Effect-aware fit diagnostics recommend a larger text box."})
+    if (inner_bounds[0] < box_w * 0.62 or inner_bounds[1] < box_h * 0.62) and effect_margin > 0:
+        warnings.append("unsafe_effect_bounds")
+        suggestions.append({"action": "increase_box_or_reduce_effect", "effect_margin": effect_margin, "safe_inner_bounds": list(inner_bounds), "recommended_box_size": recommended_box, "reason": "Stroke/shadow/padding leave little safe text area inside this box."})
+
+    quality_score = lettering_quality_score(overflow, missing, float(effect_suggestion.get("contrast_ratio", 7.0) or 7.0), effect_margin, (box_w, box_h))
 
     vertical_plan = None
     break_ops = []
@@ -127,13 +156,22 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "writing_mode": getattr(fmt, "writing_mode", "auto"),
         "resolved_writing_mode": mode,
         "fit_mode": getattr(fmt, "fit_mode", FIT_MODE_SHRINK),
+        "fit_font_size_min": getattr(fmt, "fit_font_size_min", 0.0),
+        "fit_font_size_max": getattr(fmt, "fit_font_size_max", 0.0),
+        "resolved_fit_font_size_min": style_min,
+        "resolved_fit_font_size_max": style_max,
         "line_break_strategy": getattr(fmt, "line_break_strategy", "auto"),
         "font_family": getattr(fmt, "font_family", ""),
         "fallback_chain": merge_font_fallback_chain(getattr(fmt, "font_family", ""), text, config_obj, getattr(fmt, "fallback_font_chain", "")),
         "missing_glyphs": missing,
         "overflow": overflow,
         "fit_diagnostics": fit_diag.to_dict(),
+        "safe_inner_bounds": [inner_bounds[0], inner_bounds[1]],
+        "effect_margin": effect_margin,
+        "quality_score": quality_score,
         "suggested_font_size": fitted_size,
+        "recommended_box_size": recommended_box,
+        "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
         "suggested_text": fitted_text if fitted_text != text else "",
         "contrast_effect": effect_suggestion,
         "vertical_layout_plan": vertical_plan,
@@ -205,6 +243,9 @@ def flatten_rendering_qa_rows(report: Dict) -> List[Dict]:
                 "box": block.get("box", []),
                 "measured": block.get("measured", []),
                 "text_length": block.get("text_length", 0),
+                "quality_score": block.get("quality_score", 1.0),
+                "effect_margin": block.get("effect_margin", 0.0),
+                "safe_inner_bounds": block.get("safe_inner_bounds", []),
             })
     return rows
 
@@ -226,18 +267,26 @@ def rendering_qa_to_markdown(report: Dict) -> str:
     if rows:
         lines += [
             "",
-            "| Page | # | Severity | Warnings | Suggestions | Mode | Fit | Break | Missing |",
-            "| --- | ---: | --- | --- | --- | --- | --- | --- | --- |",
+            "| Page | # | Severity | Quality | Warnings | Suggestions | Mode | Fit | Break | Missing |",
+            "| --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
         ]
         for row in rows:
             warnings = ", ".join(row.get("warnings", []))
             suggestions = ", ".join(row.get("suggestions", []))
             lines.append(
-                f"| {row.get('page', '')} | {row.get('index', '')} | {row.get('severity', '')} | "
+                f"| {row.get('page', '')} | {row.get('index', '')} | {row.get('severity', '')} | {row.get('quality_score', '')} | "
                 f"{warnings} | {suggestions} | {row.get('writing_mode', '')} | "
                 f"{row.get('fit_mode', '')} | {row.get('line_break_strategy', '')} | {row.get('missing_glyphs', '')} |"
             )
     return "\n".join(lines) + "\n"
+
+def summarize_suggested_actions(report: Dict) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in flatten_rendering_qa_rows(report):
+        for action in row.get("suggestions", []) or []:
+            counts[action] = counts.get(action, 0) + 1
+    return counts
+
 
 def _selected_fix_map(selected_fixes: Optional[Sequence[Dict]]) -> Optional[Dict[Tuple[str, int], Set[str]]]:
     if selected_fixes is None:
@@ -314,6 +363,22 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
                 if chain:
                     fmt.fallback_font_chain = chain
                     changed.append("fallback_font_chain")
+            if "overflow" in diag["warnings"] and wants("resize_to_recommended_box"):
+                rec = diag.get("recommended_box_size", []) or []
+                if len(rec) >= 2:
+                    try:
+                        rec_w, rec_h = float(rec[0]), float(rec[1])
+                    except Exception:
+                        rec_w = rec_h = 0.0
+                    if rec_w > box_w * 1.02 or rec_h > box_h * 1.02:
+                        xyxy = list(getattr(blk, "xyxy", [0, 0, box_w, box_h]) or [0, 0, box_w, box_h])
+                        if len(xyxy) >= 4:
+                            cx = (float(xyxy[0]) + float(xyxy[2])) / 2.0
+                            cy = (float(xyxy[1]) + float(xyxy[3])) / 2.0
+                            new_w = max(box_w, rec_w)
+                            new_h = max(box_h, rec_h)
+                            blk.xyxy = [cx - new_w / 2.0, cy - new_h / 2.0, cx + new_w / 2.0, cy + new_h / 2.0]
+                            changed.append("textbox_size")
             if "overflow" in diag["warnings"] and (wants("shrink_to_fit") or wants("balance_lines")):
                 fit_mode = getattr(fmt, "fit_mode", FIT_MODE_SHRINK)
                 if fit_mode in (FIT_MODE_SHRINK, FIT_MODE_EXPAND, FIT_MODE_PRESERVE, FIT_MODE_BALANCE):

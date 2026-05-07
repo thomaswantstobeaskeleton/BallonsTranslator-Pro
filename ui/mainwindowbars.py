@@ -53,6 +53,10 @@ class StatusButton(QPushButton):
     pass
 
 
+class BottomModeToolButton(QToolButton):
+    pass
+
+
 class TitleBarToolBtn(QToolButton):
     pass
 
@@ -791,6 +795,10 @@ class TitleBar(Widget):
         layeredPsdHandoffAction.setToolTip(self.tr('Export original/inpainted/mask/final helper layers plus editable text metadata and a Photoshop JSX rebuild script.'))
         self.export_layered_psd_handoff_trigger = layeredPsdHandoffAction.triggered
         exportMenuTools.addAction(layeredPsdHandoffAction)
+        svgTextHandoffAction = QAction(self.tr('Export SVG text handoff...'), self)
+        svgTextHandoffAction.setToolTip(self.tr('Export current page as an SVG with editable translated text elements for vector editors.'))
+        self.export_svg_text_handoff_trigger = svgTextHandoffAction.triggered
+        exportMenuTools.addAction(svgTextHandoffAction)
         structuredOcrExportAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'structured_ocr_export.svg')), self.tr('Export structured OCR JSON...'), self)
         structuredOcrExportAction.setToolTip(self.tr('Export page/block geometry, OCR text, translations, completion state, and font hints as JSON for LLM/tooling workflows.'))
         self.export_structured_ocr_trigger = structuredOcrExportAction.triggered
@@ -1847,9 +1855,14 @@ class BottomBar(Widget):
         self.texteditChecker.setObjectName('TexteditChecker')
         self.texteditChecker.setToolTip(self.tr('Text editor'))
         self.texteditChecker.clicked.connect(self.onTextEditCheckerPressed)
-        self.spellCheckChecker = QCheckBox()
+        self.spellCheckChecker = BottomModeToolButton(self)
         self.spellCheckChecker.setObjectName('SpellCheckChecker')
-        self.spellCheckChecker.setToolTip(self.tr('Spell check panel'))
+        self.spellCheckChecker.setCheckable(True)
+        self.spellCheckChecker.setAutoRaise(True)
+        self.spellCheckChecker.setFixedSize(44, 40)
+        self.spellCheckChecker.setToolTip(self.tr('Spell check panel: review OCR/translation spelling issues'))
+        self.spellCheckChecker.setAccessibleName(self.tr('Spell check panel'))
+        self.spellCheckChecker.setAccessibleDescription(self.tr('Toggle the spell check side panel.'))
         self._set_spellcheck_icon(False)
         self.spellCheckChecker.clicked.connect(self.onSpellCheckCheckerPressed)
         self.textblockChecker = QCheckBox()

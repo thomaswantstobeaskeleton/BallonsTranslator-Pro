@@ -61,6 +61,7 @@ from .context_menu_config_dialog import ContextMenuConfigDialog
 from .batch_queue_dialog import BatchQueueDialog
 from .export_dialog import ExportFormatDialog
 from .spellcheck_panel import SpellCheckPanel
+from .google_font_dialog import GoogleFontInstallDialog
 from .pipeline_insights_widget import PipelineInsightsWidget
 from .image_edit import ImageEditMode
 from .mask_diagnostics_widget import MaskDiagnosticsWidget
@@ -72,8 +73,8 @@ from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
 from utils.layered_psd_export import build_layered_psd_handoff
+from utils.svg_text_export import build_svg_text_handoff
 from utils.local_automation_api import LocalAutomationApiServer
-from utils.google_fonts import install_google_font_family
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
 from modules.text_normalization import normalize_text
@@ -592,7 +593,7 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.setStretchFactor(1, 10)
         self.comicTransSplitter.setStretchFactor(2, 1)
         # Allow user to resize the right panel by dragging the splitter (wider or narrower)
-        self.rightComicTransStackPanel.setMinimumWidth(280)
+        self.rightComicTransStackPanel.setMinimumWidth(340)
         self.rightComicTransStackPanel.setMaximumWidth(860)
         self._comic_trans_splitter_initialized = False
         self.imgtrans_progress_msgbox = ImgtransProgressMessageBox()
@@ -861,6 +862,7 @@ class MainWindow(mainwindow_cls):
             'export': self._api_export,
             'layout_review': self._api_layout_review,
             'page_state': self._api_page_state,
+            'list_pages': self._api_list_pages,
             'export_structured_ocr': self._api_export_structured_ocr,
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
@@ -868,6 +870,7 @@ class MainWindow(mainwindow_cls):
             'fix_rendering_issues': self._api_fix_rendering_issues,
             'export_rendering_qa': self._api_export_rendering_qa,
             'apply_project_rendering_fixes': self._api_apply_project_rendering_fixes,
+            'apply_text_style_batch': self._api_apply_text_style_batch,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -934,13 +937,20 @@ class MainWindow(mainwindow_cls):
                 out_dir = osp.join(self.imgtrans_proj.directory, 'exports')
             ext = str((body or {}).get('ext', '') or '').strip().lower() or None
             also_pdf = bool((body or {}).get('also_pdf', False))
-            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)))
+            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)))
             self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
             return {'ok': True, **(result or {})}
         if kind in {'current_page', 'render_current_page'}:
             return self._api_render_current_page_ui(body)
         if kind in {'structured_ocr', 'ocr_json'}:
             return self._api_export_structured_ocr_ui(body)
+        if kind in {'svg_handoff', 'svg_text', 'editable_svg'}:
+            if not self.imgtrans_proj.current_img:
+                raise ValueError('select a page first')
+            out_dir = str((body or {}).get('out_dir', '') or '').strip() or osp.join(self.imgtrans_proj.directory, 'svg_handoff')
+            final_path = str((body or {}).get('final_image_path', '') or '').strip() or None
+            manifest = build_svg_text_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image_path=final_path)
+            return {'ok': True, 'manifest': manifest}
         if kind in {'psd_handoff', 'layered_psd'}:
             if not self.imgtrans_proj.current_img:
                 raise ValueError('select a page first')
@@ -993,7 +1003,7 @@ class MainWindow(mainwindow_cls):
     def _api_list_rendering_issues_ui(self, body: dict):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
-        from utils.rendering_qa import build_project_rendering_qa, flatten_rendering_qa_rows
+        from utils.rendering_qa import build_project_rendering_qa, flatten_rendering_qa_rows, summarize_suggested_actions
         pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img] or [])
         include_ok = bool((body or {}).get('include_ok', False))
         report = build_project_rendering_qa(self.imgtrans_proj, pages=pages, include_ok=include_ok, config_obj=pcfg)
@@ -1003,7 +1013,44 @@ class MainWindow(mainwindow_cls):
             for block in page.get('blocks', []) or []:
                 if include_ok or block.get('warnings'):
                     issues.append(block)
-        return {'ok': True, 'issues': issues, 'rows': rows, 'count': len(issues), 'summary': report.get('summary', {})}
+        return {'ok': True, 'issues': issues, 'rows': rows, 'count': len(issues), 'summary': report.get('summary', {}), 'action_summary': summarize_suggested_actions(report)}
+
+
+    def _api_list_pages(self, body: dict):
+        return self._api_call_ui(self._api_list_pages_ui, body)
+
+    def _api_list_pages_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        from utils.text_rendering import sort_blocks_for_reading_order
+        order = str((body or {}).get('reading_order', '') or getattr(pcfg, 'render_default_reading_order', 'auto') or 'auto')
+        include_blocks = bool((body or {}).get('include_blocks', True))
+        pages_out = []
+        for page_index, page_name in enumerate(list(self.imgtrans_proj.pages.keys())):
+            blocks = list(self.imgtrans_proj.pages.get(page_name, []) or [])
+            sorted_blocks, resolved_order = sort_blocks_for_reading_order(blocks, order)
+            entry = {
+                'index': page_index,
+                'name': page_name,
+                'completion_state': self.imgtrans_proj.get_page_completion_state(page_name) if hasattr(self.imgtrans_proj, 'get_page_completion_state') else 'todo',
+                'textboxes': len(blocks),
+                'reading_order': resolved_order,
+            }
+            if include_blocks:
+                original_index = {id(block): i for i, block in enumerate(blocks)}
+                entry['blocks'] = [
+                    {
+                        'index': i,
+                        'source_index': original_index.get(id(block), i),
+                        'xyxy': list(getattr(block, 'xyxy', []) or []),
+                        'text': getattr(block, 'translation', '') or (block.get_text() if hasattr(block, 'get_text') else ''),
+                        'writing_mode': getattr(getattr(block, 'fontformat', None), 'writing_mode', 'auto'),
+                        'fit_mode': getattr(getattr(block, 'fontformat', None), 'fit_mode', 'shrink'),
+                    }
+                    for i, block in enumerate(sorted_blocks)
+                ]
+            pages_out.append(entry)
+        return {'ok': True, 'count': len(pages_out), 'pages': pages_out}
 
     def _api_page_state(self, body: dict):
         return self._api_call_ui(self._api_page_state_ui, body)
@@ -1089,6 +1136,34 @@ class MainWindow(mainwindow_cls):
             'remaining_issues': issues_after.get('count', 0),
         }
 
+
+    def _api_apply_text_style_batch(self, body: dict):
+        return self._api_call_ui(self._api_apply_text_style_batch_ui, body)
+
+    def _api_apply_text_style_batch_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        from utils.text_style_batch import apply_text_style_batch
+        updates = (body or {}).get('updates') or {}
+        pages = (body or {}).get('pages')
+        indices = (body or {}).get('indices')
+        result = apply_text_style_batch(
+            self.imgtrans_proj,
+            updates,
+            pages=pages,
+            indices=indices,
+            only_auto_sized=bool((body or {}).get('only_auto_sized', False)),
+            dry_run=bool((body or {}).get('dry_run', False)),
+        )
+        if result.get('changed') and not result.get('dry_run'):
+            if self.imgtrans_proj.current_img in (result.get('touched_pages') or []):
+                self.st_manager.updateSceneTextitems()
+            if self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        self.pipelineInsightsPanel.add_event('API', self.tr('Batch text style API updated {0} text boxes').format(result.get('changed', 0)))
+        return {'ok': True, **result}
+
     def _api_apply_rendering_preset(self, body: dict):
         return self._api_call_ui(self._api_apply_rendering_preset_ui, body)
 
@@ -1127,7 +1202,7 @@ class MainWindow(mainwindow_cls):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
         pages = (body or {}).get('pages')
-        payload = build_structured_ocr_export(self.imgtrans_proj, pages=pages)
+        payload = build_structured_ocr_export(self.imgtrans_proj, pages=pages, reading_order=str((body or {}).get('reading_order', '') or getattr(pcfg, 'render_default_reading_order', 'auto') or 'auto'))
         path = str((body or {}).get('path', '') or '').strip()
         if path:
             with open(path, 'w', encoding='utf-8') as f:
@@ -1289,6 +1364,8 @@ class MainWindow(mainwindow_cls):
 
         auto_fit = QCheckBox(self.tr('Enable auto-fit after override'), dlg)
         auto_fit.setChecked(True)
+        only_auto = QCheckBox(self.tr('Only update blocks currently using auto font size'), dlg)
+        only_auto.setToolTip(self.tr('Use this for Koharu-style global Auto font cleanup without touching hand-tuned lettering.'))
 
         writing_mode = QComboBox(dlg)
         writing_mode.addItem(self.tr('Keep'), '')
@@ -1326,6 +1403,34 @@ class MainWindow(mainwindow_cls):
         padding.setSpecialValueText(self.tr('Keep'))
         padding.setValue(-1.0)
 
+        stroke_width = QDoubleSpinBox(dlg)
+        stroke_width.setRange(-1.0, 1.0)
+        stroke_width.setDecimals(3)
+        stroke_width.setSingleStep(0.01)
+        stroke_width.setSpecialValueText(self.tr('Keep'))
+        stroke_width.setValue(-1.0)
+
+        shadow_radius = QDoubleSpinBox(dlg)
+        shadow_radius.setRange(-1.0, 1.0)
+        shadow_radius.setDecimals(3)
+        shadow_radius.setSingleStep(0.01)
+        shadow_radius.setSpecialValueText(self.tr('Keep'))
+        shadow_radius.setValue(-1.0)
+
+        fit_min = QDoubleSpinBox(dlg)
+        fit_min.setRange(-1.0, 200.0)
+        fit_min.setDecimals(1)
+        fit_min.setSingleStep(1.0)
+        fit_min.setSpecialValueText(self.tr('Keep'))
+        fit_min.setValue(-1.0)
+
+        fit_max = QDoubleSpinBox(dlg)
+        fit_max.setRange(-1.0, 300.0)
+        fit_max.setDecimals(1)
+        fit_max.setSingleStep(1.0)
+        fit_max.setSpecialValueText(self.tr('Keep'))
+        fit_max.setValue(-1.0)
+
         form.addRow(self.tr('Scope'), scope)
         form.addRow(self.tr('Manga preset'), preset)
         form.addRow(self.tr('Font family'), font_family)
@@ -1336,7 +1441,12 @@ class MainWindow(mainwindow_cls):
         form.addRow(self.tr('Line-break strategy'), line_break)
         form.addRow(self.tr('Fallback font chain'), fallback_chain)
         form.addRow(self.tr('Text padding (px)'), padding)
+        form.addRow(self.tr('Stroke width (relative)'), stroke_width)
+        form.addRow(self.tr('Shadow radius (relative)'), shadow_radius)
+        form.addRow(self.tr('Fit min size (px)'), fit_min)
+        form.addRow(self.tr('Fit max size (px)'), fit_max)
         form.addRow('', auto_fit)
+        form.addRow('', only_auto)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dlg)
         buttons.accepted.connect(dlg.accept)
@@ -1347,53 +1457,40 @@ class MainWindow(mainwindow_cls):
             return
 
         page_names = [self.imgtrans_proj.current_img] if scope.currentIndex() == 0 else list(self.imgtrans_proj.pages.keys())
+        updates = {}
         family = font_family.text().strip()
+        if family:
+            updates['font_family'] = family
         size_pt = float(font_size.value())
+        if size_pt > 0:
+            updates['font_size'] = pt2px(size_pt)
+            updates['auto_fit_font_size'] = False
         align_value = int(alignment.currentData())
-        writing_value = str(writing_mode.currentData() or '')
-        fit_value = str(fit_mode.currentData() or '')
-        line_break_value = str(line_break.currentData() or '')
-        preset_value = str(preset.currentData() or '')
+        if align_value >= 0:
+            updates['alignment'] = align_value
+        for key, widget in [('writing_mode', writing_mode), ('fit_mode', fit_mode), ('line_break_strategy', line_break), ('preset', preset)]:
+            value = str(widget.currentData() or '')
+            if value:
+                updates[key] = value
         fallback_value = fallback_chain.text().strip()
-        padding_value = float(padding.value())
-        changed = 0
-        for page in page_names:
-            for blk in self.imgtrans_proj.pages.get(page, []) or []:
-                fmt = getattr(blk, 'fontformat', None)
-                if fmt is None:
-                    continue
-                if preset_value and preset_value in MANGA_PRESETS:
-                    for key, value in MANGA_PRESETS[preset_value].items():
-                        if key != 'label' and hasattr(fmt, key):
-                            setattr(fmt, key, value)
-                    fmt.manga_preset = preset_value
-                if family:
-                    fmt.font_family = family
-                if size_pt > 0:
-                    fmt.font_size = pt2px(size_pt)
-                    fmt.auto_fit_font_size = False
-                if align_value >= 0:
-                    fmt.alignment = align_value
-                if writing_value:
-                    fmt.writing_mode = writing_value
-                    fmt.vertical = writing_value == 'vertical_rl'
-                if fit_value:
-                    fmt.fit_mode = fit_value
-                if line_break_value:
-                    fmt.line_break_strategy = line_break_value
-                if fallback_value:
-                    fmt.fallback_font_chain = fallback_value
-                if padding_value >= 0:
-                    fmt.text_padding = padding_value
-                if auto_fit.isChecked():
-                    fmt.auto_fit_font_size = True
-                changed += 1
+        if fallback_value:
+            updates['fallback_font_chain'] = fallback_value
+        for key, widget in [('text_padding', padding), ('stroke_width', stroke_width), ('shadow_radius', shadow_radius), ('fit_font_size_min', fit_min), ('fit_font_size_max', fit_max)]:
+            value = float(widget.value())
+            if value >= 0:
+                updates[key] = value
+        if auto_fit.isChecked() and 'font_size' not in updates:
+            updates['auto_fit_font_size'] = True
+        from utils.text_style_batch import apply_text_style_batch
+        result = apply_text_style_batch(self.imgtrans_proj, updates, pages=page_names, only_auto_sized=only_auto.isChecked())
+        changed = int(result.get('changed', 0))
         if self.imgtrans_proj.current_img in page_names:
             self.st_manager.updateSceneTextitems()
         self.imgtrans_proj.save()
         self.canvas.setProjSaveState(False)
         self.pipelineInsightsPanel.add_event('BATCH_STYLE', self.tr('Updated {0} text block style(s).').format(changed))
         self.statusBar().showMessage(self.tr('Batch style override updated {0} text block(s).').format(changed), 5000)
+
 
 
     def on_open_typography_qa_report(self):
@@ -1870,6 +1967,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.export_structured_ocr_trigger.connect(self.on_export_structured_ocr_json)
         if hasattr(self.titleBar, "export_layered_psd_handoff_trigger"):
             self.titleBar.export_layered_psd_handoff_trigger.connect(self.on_export_layered_psd_handoff)
+        if hasattr(self.titleBar, "export_svg_text_handoff_trigger"):
+            self.titleBar.export_svg_text_handoff_trigger.connect(self.on_export_svg_text_handoff)
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.show_batch_report_trigger.connect(self._show_batch_report_dialog)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
@@ -2906,37 +3005,16 @@ class MainWindow(mainwindow_cls):
         self.canvas.undo()
 
     def on_install_google_font(self):
-        family, ok = QInputDialog.getText(
-            self,
-            self.tr("Install Google Font"),
-            self.tr("Font family name (example: Bangers, Noto Sans JP, Comic Neue):"),
-        )
-        if not ok:
-            return
-        family = (family or "").strip()
-        if not family:
-            return
         target_dir = osp.join(shared.PROGRAM_PATH, "fonts", "google")
-        try:
-            installed = install_google_font_family(family, target_dir)
-            from qtpy.QtGui import QFontDatabase
-            added = 0
-            for fp in installed:
-                idx = QFontDatabase.addApplicationFont(fp)
-                if idx >= 0:
-                    added += 1
-                    for fam_name in QFontDatabase.applicationFontFamilies(idx):
-                        shared.CUSTOM_FONTS.append(fam_name)
-                        if isinstance(shared.FONT_FAMILIES, set):
-                            shared.FONT_FAMILIES.add(fam_name)
-            self.on_show_only_custom_font(False)
-            QMessageBox.information(
-                self,
-                self.tr("Google Font Installed"),
-                self.tr(f"Installed {len(installed)} font files for '{family}'. Registered: {added}."),
-            )
-        except Exception as e:
-            QMessageBox.warning(self, self.tr("Google Font Install Failed"), str(e))
+        dlg = GoogleFontInstallDialog(self, target_dir=target_dir)
+        dlg.font_installed.connect(self._on_google_font_installed)
+        dlg.exec()
+
+    def _on_google_font_installed(self, installed, registered, target_dir):
+        # Refresh right-panel font selectors immediately while preserving the user's
+        # current "show only custom fonts" preference.
+        self.on_show_only_custom_font(bool(getattr(pcfg, 'let_show_only_custom_fonts_flag', False)))
+        LOGGER.info("Installed Google font files to %s: %s; registered families: %s", target_dir, installed, registered)
 
     def on_page_search(self):
         if self.canvas.gv.isVisible():
@@ -3751,9 +3829,10 @@ class MainWindow(mainwindow_cls):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         export_as_zip = dlg.get_export_as_zip()
+        archive_format = dlg.get_archive_format()
         zip_path = (dlg.get_zip_path() or '').strip()
         if export_as_zip and not zip_path:
-            QMessageBox.information(self, self.tr('Export'), self.tr('Choose a path for the ZIP file.'))
+            QMessageBox.information(self, self.tr('Export'), self.tr('Choose a path for the archive file.'))
             return
         out_dir = dlg.get_folder()
         if not export_as_zip and not out_dir:
@@ -3771,6 +3850,7 @@ class MainWindow(mainwindow_cls):
                 also_pdf=dlg.get_also_pdf(),
                 show_message=not export_as_zip,
                 clean_after_export=dlg.get_clean_after_export() if not export_as_zip else False,
+                include_intermediate=dlg.get_include_intermediate(),
             )
             if export_as_zip and zip_path and osp.isdir(out_dir):
                 import zipfile
@@ -3779,7 +3859,7 @@ class MainWindow(mainwindow_cls):
                         for f in files:
                             path = osp.join(root, f)
                             zf.write(path, osp.relpath(path, out_dir))
-                msg = self.tr('Exported as ZIP: {}').format(zip_path)
+                msg = self.tr('Exported as {0}: {1}').format('CBZ' if archive_format == 'cbz' else 'ZIP', zip_path)
                 if dlg.get_clean_after_export():
                     self.imgtrans_proj.clean_mask_and_inpainted_cache()
                     msg += '\n' + self.tr('Cache cleaned.')
@@ -3792,13 +3872,14 @@ class MainWindow(mainwindow_cls):
                 except Exception:
                     pass
 
-    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False):
+    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False):
         try:
             from utils.io_utils import imread, imwrite
             result_dir = self.imgtrans_proj.result_dir()
             exported = 0
             missing = []
             exported_paths = []  # (pagename, path) in page order for PDF
+            helper_paths = []
             page_order = list(self.imgtrans_proj.pages.keys())
             for i, pagename in enumerate(page_order):
                 result_path = self.imgtrans_proj.get_result_path(pagename)
@@ -3815,6 +3896,22 @@ class MainWindow(mainwindow_cls):
                     imwrite(dest, img, **kw)
                     exported += 1
                     exported_paths.append((pagename, dest))
+                    if include_intermediate:
+                        import shutil
+                        for kind, getter, subdir in [
+                            ('clean', self.imgtrans_proj.get_inpainted_path, 'clean'),
+                            ('mask', self.imgtrans_proj.get_mask_path, 'masks'),
+                        ]:
+                            try:
+                                src = getter(pagename, get_last_modified=True)
+                            except TypeError:
+                                src = getter(pagename)
+                            if src and osp.exists(src):
+                                helper_dir = osp.join(out_dir, subdir)
+                                os.makedirs(helper_dir, exist_ok=True)
+                                helper_dest = osp.join(helper_dir, f"{i + 1:03d}{osp.splitext(src)[1] or use_ext}")
+                                shutil.copy2(src, helper_dest)
+                                helper_paths.append((pagename, kind, helper_dest))
                 else:
                     missing.append(pagename)
             msg = self.tr('Exported {0} page(s) to {1}.').format(exported, out_dir)
@@ -3840,7 +3937,7 @@ class MainWindow(mainwindow_cls):
                 exported_paths,
                 missing,
                 export_kind='rendered_images',
-                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export)},
+                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'helper_paths': helper_paths},
             )
             msg += '\n' + self.tr('Export manifest: {0}').format(manifest.get('manifest_path', ''))
             if marked_exported:
@@ -3850,6 +3947,8 @@ class MainWindow(mainwindow_cls):
                     self._update_page_list_state_style()
                 except Exception as e:
                     LOGGER.warning('Failed to save exported page completion state: %s', e)
+            if helper_paths:
+                msg += '\n' + self.tr('Included {0} clean/mask helper image(s).').format(len(helper_paths))
             if missing:
                 msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
             if clean_after_export and self.imgtrans_proj is not None:
@@ -3857,11 +3956,11 @@ class MainWindow(mainwindow_cls):
                 msg += '\n' + self.tr('Cache cleaned.')
             if show_message:
                 QMessageBox.information(self, self.tr('Export'), msg)
-            return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'manifest': manifest, 'marked_exported': marked_exported}
+            return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'helper_paths': helper_paths, 'manifest': manifest, 'marked_exported': marked_exported}
         except Exception as e:
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
-            return {'exported': 0, 'missing': [], 'paths': [], 'error': str(e)}
+            return {'exported': 0, 'missing': [], 'paths': [], 'helper_paths': [], 'error': str(e)}
 
     def on_validate_project(self):
         """Check project: missing images, invalid JSON, duplicate/overlapping blocks."""
@@ -4912,6 +5011,29 @@ class MainWindow(mainwindow_cls):
         except Exception as e:
             create_error_dialog(e, self.tr('Failed to export as TEXT file'))
 
+
+
+    def on_export_svg_text_handoff(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
+            return
+        default_dir = osp.join(self.imgtrans_proj.directory, 'svg_handoff')
+        out_dir = QFileDialog.getExistingDirectory(self, self.tr('Export SVG text handoff'), default_dir)
+        if not out_dir:
+            return
+        try:
+            manifest = build_svg_text_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir)
+            warn = '\n'.join(manifest.get('warnings', []) or [])
+            msg = self.tr('SVG text handoff exported to {0}.').format(out_dir)
+            msg += '\n' + self.tr('SVG: {0}').format(manifest.get('svg_path', ''))
+            msg += '\n' + self.tr('Manifest: {0}').format(manifest.get('manifest_path', ''))
+            if warn:
+                msg += '\n\n' + self.tr('Warnings:') + '\n' + warn
+            QMessageBox.information(self, self.tr('Export'), msg)
+            self.pipelineInsightsPanel.add_event('EXPORT', self.tr('SVG text handoff exported for {0}.').format(self.imgtrans_proj.current_img))
+        except Exception as e:
+            LOGGER.exception(e)
+            create_error_dialog(e, self.tr('SVG text handoff export failed'))
 
     def on_export_layered_psd_handoff(self):
         if not self.imgtrans_proj or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:

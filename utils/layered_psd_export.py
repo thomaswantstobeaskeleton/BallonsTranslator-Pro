@@ -76,6 +76,8 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "xyxy": xyxy,
             "font_family": getattr(ff, "font_family", "") if ff else "",
             "font_size_px": getattr(ff, "font_size", 24.0) if ff else 24.0,
+            "fit_font_size_min": getattr(ff, "fit_font_size_min", 0.0) if ff else 0.0,
+            "fit_font_size_max": getattr(ff, "fit_font_size_max", 0.0) if ff else 0.0,
             "fill_rgb": getattr(ff, "frgb", [0, 0, 0]) if ff else [0, 0, 0],
             "stroke_rgb": getattr(ff, "srgb", [0, 0, 0]) if ff else [0, 0, 0],
             "stroke_width": getattr(ff, "stroke_width", 0.0) if ff else 0.0,
@@ -88,6 +90,8 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "line_break_strategy": getattr(ff, "line_break_strategy", "auto") if ff else "auto",
             "text_padding": getattr(ff, "text_padding", 0.0) if ff else 0.0,
             "fallback_font_chain": getattr(ff, "fallback_font_chain", "") if ff else "",
+            "lettering_quality_score": diagnostics.get("quality_score", 1.0) if isinstance(diagnostics, dict) else 1.0,
+            "safe_inner_bounds": diagnostics.get("safe_inner_bounds", []) if isinstance(diagnostics, dict) else [],
             "rendering_diagnostics": diagnostics,
         })
         for warning in diagnostics.get("warnings", []) if isinstance(diagnostics, dict) else []:
@@ -140,7 +144,7 @@ def _build_photoshop_jsx(manifest_path: str, manifest: Dict) -> str:
             f"  lyr.textItem.position = [{float(x1):.2f}, {float(y1):.2f}];",
             f"  lyr.textItem.size = {size_pt:.2f};",
             f"  lyr.opacity = {max(0.0, min(100.0, float(layer.get('opacity', 1.0)) * 100.0)):.2f};",
-            "  // Style notes: writing_mode=" + json.dumps(str(layer.get('writing_mode', 'auto'))) + ", fit_mode=" + json.dumps(str(layer.get('fit_mode', 'shrink'))) + ", fallback_chain=" + json.dumps(str(layer.get('fallback_font_chain', ''))) + ";",
+            "  // Style notes: writing_mode=" + json.dumps(str(layer.get('writing_mode', 'auto'))) + ", fit_mode=" + json.dumps(str(layer.get('fit_mode', 'shrink'))) + ", fit_min=" + json.dumps(str(layer.get('fit_font_size_min', 0))) + ", fit_max=" + json.dumps(str(layer.get('fit_font_size_max', 0))) + ", fallback_chain=" + json.dumps(str(layer.get('fallback_font_chain', ''))) + ";",
             "}",
         ])
     lines.append("if (doc) { alert('Editable text layers created. Save as PSD from Photoshop.'); }")

@@ -54,8 +54,8 @@ class ExportFormatDialog(QDialog):
         self.also_pdf_check.setChecked(False)
         form.addRow('', self.also_pdf_check)
 
-        self.export_as_zip_check = QCheckBox(self.tr('Export as ZIP'))
-        self.export_as_zip_check.setToolTip(self.tr('Export pages to a temporary folder, then pack into a single ZIP file.'))
+        self.export_as_zip_check = QCheckBox(self.tr('Export as archive (ZIP/CBZ)'))
+        self.export_as_zip_check.setToolTip(self.tr('Export pages to a temporary folder, then pack into a ZIP or manga-reader CBZ archive.'))
         self.export_as_zip_check.setChecked(False)
         self.export_as_zip_check.toggled.connect(self._on_export_as_zip_toggled)
         form.addRow('', self.export_as_zip_check)
@@ -64,15 +64,25 @@ class ExportFormatDialog(QDialog):
         self.zip_row_container = QWidget()
         zip_row = QHBoxLayout(self.zip_row_container)
         zip_row.setContentsMargins(0, 0, 0, 0)
-        zip_row.addWidget(QLabel(self.tr('ZIP file path:')))
+        self.archive_format_combo = QComboBox(self)
+        self.archive_format_combo.addItem(self.tr('ZIP archive (.zip)'), 'zip')
+        self.archive_format_combo.addItem(self.tr('Comic Book ZIP (.cbz)'), 'cbz')
+        self.archive_format_combo.currentIndexChanged.connect(self._on_archive_format_changed)
+        zip_row.addWidget(self.archive_format_combo)
+        zip_row.addWidget(QLabel(self.tr('Archive path:')))
         self.zip_path_label = QLabel(self.tr('(none)'))
         self.zip_path_label.setMinimumWidth(280)
         self._zip_path = ''
-        self.zip_path_btn = QPushButton(self.tr('Choose ZIP file...'))
+        self.zip_path_btn = QPushButton(self.tr('Choose archive file...'))
         self.zip_path_btn.clicked.connect(self._pick_zip_path)
         zip_row.addWidget(self.zip_path_label)
         zip_row.addWidget(self.zip_path_btn)
         form.addRow('', self.zip_row_container)
+
+        self.include_intermediate_check = QCheckBox(self.tr('Include clean/mask helper images'))
+        self.include_intermediate_check.setToolTip(self.tr('Copy available inpainted clean pages and masks into clean/ and masks/ subfolders beside the rendered export.'))
+        self.include_intermediate_check.setChecked(False)
+        form.addRow('', self.include_intermediate_check)
 
         self.clean_after_export_check = QCheckBox(self.tr('Clean cache after export'))
         self.clean_after_export_check.setToolTip(self.tr('Remove mask and inpainted caches for this project after export (saves disk space).'))
@@ -108,14 +118,15 @@ class ExportFormatDialog(QDialog):
             self.zip_path_label.setText(self.tr('(none)'))
 
     def _pick_zip_path(self):
-        title = self.tr('Save ZIP as')
+        title = self.tr('Save archive as')
         path, _ = QFileDialog.getSaveFileName(
             self, title, self._zip_path or self._out_dir or '',
-            self.tr('ZIP archives (*.zip)'),
+            self.tr('Archives (*.zip *.cbz)'),
         )
         if path:
-            if not path.lower().endswith('.zip'):
-                path += '.zip'
+            wanted = '.cbz' if self.get_archive_format() == 'cbz' else '.zip'
+            if not path.lower().endswith(('.zip', '.cbz')):
+                path += wanted
             self._zip_path = osp.normpath(path)
             self.zip_path_label.setText(self._zip_path)
 
@@ -124,6 +135,18 @@ class ExportFormatDialog(QDialog):
 
     def get_zip_path(self) -> str:
         return (self._zip_path or '').strip()
+
+    def get_archive_format(self) -> str:
+        return str(self.archive_format_combo.currentData() or 'zip')
+
+    def _on_archive_format_changed(self):
+        if self._zip_path:
+            base, _ext = osp.splitext(self._zip_path)
+            self._zip_path = base + ('.cbz' if self.get_archive_format() == 'cbz' else '.zip')
+            self.zip_path_label.setText(self._zip_path)
+
+    def get_include_intermediate(self) -> bool:
+        return self.include_intermediate_check.isChecked()
 
     def get_clean_after_export(self) -> bool:
         return self.clean_after_export_check.isChecked()

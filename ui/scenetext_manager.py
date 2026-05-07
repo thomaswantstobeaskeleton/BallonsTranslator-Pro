@@ -4,7 +4,7 @@ import numpy as np
 import copy
 import base64
 
-from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem
+from qtpy.QtWidgets import QApplication, QWidget, QGraphicsItem, QScrollArea, QSizePolicy
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF, QPoint
 from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
@@ -584,8 +584,18 @@ class TextPanel(Widget):
         layout = QVBoxLayout(self)
         self.textEditList = TextEditListScrollArea(self)
         self.formatpanel = FontFormatPanel(app, self)
-        layout.addWidget(self.formatpanel)
-        layout.addWidget(self.textEditList)
+        self.formatPanelScroll = QScrollArea(self)
+        self.formatPanelScroll.setObjectName("FormatPanelScroll")
+        self.formatPanelScroll.setWidget(self.formatpanel)
+        self.formatPanelScroll.setWidgetResizable(True)
+        self.formatPanelScroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.formatPanelScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.formatPanelScroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.formatPanelScroll.setMinimumHeight(240)
+        self.formatPanelScroll.setMaximumHeight(420)
+        self.formatPanelScroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        layout.addWidget(self.formatPanelScroll)
+        layout.addWidget(self.textEditList, 1)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(7)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1335,6 +1345,7 @@ class SceneTextManager(QObject):
                             'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                             'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
                         'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
+                        'alignment': getattr(blk.fontformat, 'alignment', 0),
                         },
                         font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                     )
@@ -1386,6 +1397,7 @@ class SceneTextManager(QObject):
                         'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                         'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
                         'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
+                        'alignment': getattr(blk.fontformat, 'alignment', 0),
                     },
                     font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                 )
@@ -1432,6 +1444,7 @@ class SceneTextManager(QObject):
                         'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
                         'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
                         'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
+                        'alignment': getattr(blk.fontformat, 'alignment', 0),
                     },
                     font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
                 )
@@ -1657,6 +1670,11 @@ class SceneTextManager(QObject):
                 scale = float(action.args.get("scale", 1.0) or 1.0)
                 if scale <= 0 or abs(scale - 1.0) < 1e-6:
                     continue
+            elif action.action == "resize_to_recommended_box":
+                width = float(action.args.get("width", 0.0) or 0.0)
+                height = float(action.args.get("height", 0.0) or 0.0)
+                if width <= 0 or height <= 0:
+                    continue
             elif action.action == "set_font_size":
                 size_pt = float(action.args.get("font_size", 0.0) or 0.0)
                 if size_pt <= 0:
@@ -1686,8 +1704,50 @@ class SceneTextManager(QObject):
                 self.onAutoFitFontToBox()
             if grouped["resize_to_fit_content"]:
                 self.onResizeToFitContent()
+            for action in grouped["resize_to_recommended_box"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                rect = blkitem.absBoundingRect(qrect=True)
+                new_w = max(1.0, float(action.args.get("width", rect.width()) or rect.width()))
+                new_h = max(1.0, float(action.args.get("height", rect.height()) or rect.height()))
+                if new_w <= rect.width() * 1.01 and new_h <= rect.height() * 1.01:
+                    continue
+                cx = rect.x() + rect.width() / 2.0
+                cy = rect.y() + rect.height() / 2.0
+                blkitem.oldRect = rect
+                blkitem.setRect([cx - new_w / 2.0, cy - new_h / 2.0, new_w, new_h], repaint=True)
+                self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
             if grouped["center_in_bubble"] or grouped["recenter"]:
                 self.onCenterInBubble()
+            for action in grouped["normalize_vertical_punctuation"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                new_text = normalize_vertical_punctuation(blkitem.toPlainText())
+                if new_text and new_text != blkitem.toPlainText():
+                    blkitem.setPlainText(new_text)
+                    if blkitem.blk is not None:
+                        blkitem.blk.translation = new_text
+            for action in grouped["set_alignment"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                alignment = int(action.args.get("alignment", 1) or 1)
+                alignment = max(0, min(2, alignment))
+                blkitem.fontformat.alignment = alignment
+                blkitem.setAlignment(alignment, restore_cursor=False)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.alignment = alignment
+            for action in grouped["apply_contrast_stroke"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                stroke = max(0.0, float(action.args.get("stroke_width", 0.06) or 0.06))
+                blkitem.fontformat.stroke_width = max(float(getattr(blkitem.fontformat, "stroke_width", 0.0) or 0.0), stroke)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.stroke_width = blkitem.fontformat.stroke_width
+                blkitem.set_fontformat(blkitem.fontformat)
             for action in grouped["switch_writing_mode"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -2327,8 +2387,8 @@ class SceneTextManager(QObject):
             fitted_size, fitted_text, fit_diag = fit_font_size_to_box(
                 text, blk_font.pointSizeF(), (old_br[2], old_br[3]), fit_mode,
                 getattr(fmt, 'writing_mode', 'auto'),
-                min_font_size=float(getattr(pcfg.module, 'layout_font_size_min', 8.0)),
-                max_font_size=float(getattr(pcfg.module, 'layout_font_size_max', 72.0)),
+                min_font_size=float(getattr(fmt, 'fit_font_size_min', 0.0) or getattr(pcfg.module, 'layout_font_size_min', 8.0)),
+                max_font_size=float(getattr(fmt, 'fit_font_size_max', 0.0) or getattr(pcfg.module, 'layout_font_size_max', 72.0)),
                 line_spacing=float(getattr(fmt, 'line_spacing', 1.15) or 1.15),
                 letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
                 padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),

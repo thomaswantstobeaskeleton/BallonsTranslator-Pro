@@ -346,6 +346,9 @@ class RowIndexLabel(QStackedWidget):
         self.addWidget(self.show_label)
         self.addWidget(self.lineedit)
         self.setCurrentIndex(0)
+        self.setToolTip(self.tr("Drag this row to reorder text boxes, or double-click/type a number to jump it to a position."))
+        self.show_label.setToolTip(self.toolTip())
+        self.lineedit.setToolTip(self.tr("Enter a 1-based text box order index."))
 
         if text is not None:
             self.setText(text)
@@ -423,7 +426,8 @@ class TransPairWidget(Widget):
         vlayout.addWidget(SeparatorWidget(self))
         spacing = 7
         vlayout.setSpacing(spacing)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip(self.tr("Click to select. Drag the number handle to reorder this text box in reading/order/export sequence."))
         self.setContentsMargins(0, 0, 0, 0)
         vlayout.setContentsMargins(0, spacing, spacing, spacing)
 

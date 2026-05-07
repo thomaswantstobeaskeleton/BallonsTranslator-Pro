@@ -47,6 +47,15 @@ class TypographyQAReportDialog(QDialog):
         self.select_all_check = QCheckBox(self.tr("Select all issue rows for fixing"), self)
         self.select_all_check.setChecked(True)
         self.select_all_check.stateChanged.connect(self._on_select_all_changed)
+        self.issue_filter_combo = QComboBox(self)
+        self.issue_filter_combo.addItem(self.tr("All warning types"), "")
+        self.issue_filter_combo.setToolTip(self.tr("Filter the preview table to a warning type before selecting/applying fixes."))
+        self.issue_filter_combo.currentIndexChanged.connect(self._apply_issue_filter)
+        self.check_visible_btn = QPushButton(self.tr("Check visible warnings"), self)
+        self.check_visible_btn.setToolTip(self.tr("Select only warning rows currently visible after filtering."))
+        self.check_visible_btn.clicked.connect(self._check_visible_warning_rows)
+        self.clear_checks_btn = QPushButton(self.tr("Clear checks"), self)
+        self.clear_checks_btn.clicked.connect(self._clear_checked_rows)
 
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit(self)
@@ -60,6 +69,11 @@ class TypographyQAReportDialog(QDialog):
         form.addRow("", self.include_ok_check)
         form.addRow("", self.apply_fixes_check)
         form.addRow("", self.select_all_check)
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(self.issue_filter_combo, 1)
+        filter_row.addWidget(self.check_visible_btn)
+        filter_row.addWidget(self.clear_checks_btn)
+        form.addRow(self.tr("Warning filter"), filter_row)
         form.addRow(self.tr("Report path"), path_row)
 
         refresh_row = QHBoxLayout()
@@ -72,9 +86,9 @@ class TypographyQAReportDialog(QDialog):
         outer.addLayout(refresh_row)
 
         self.table = QTableWidget(self)
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
-            self.tr("Fix"), self.tr("Page"), self.tr("#"), self.tr("Severity"), self.tr("Warnings"),
+            self.tr("Fix"), self.tr("Page"), self.tr("#"), self.tr("Severity"), self.tr("Quality"), self.tr("Warnings"),
             self.tr("Suggestions"), self.tr("Mode"), self.tr("Fit"), self.tr("Break"), self.tr("Missing"),
         ])
         self.table.setAlternatingRowColors(True)
@@ -140,6 +154,7 @@ class TypographyQAReportDialog(QDialog):
         )
         rows = flatten_rendering_qa_rows(self._report)
         self._rows = rows
+        self._refresh_issue_filter_options(rows)
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
@@ -152,7 +167,7 @@ class TypographyQAReportDialog(QDialog):
                 fix_item.setData(Qt.UserRole, row)
             self.table.setItem(r, 0, fix_item)
             values = [
-                row.get("page", ""), row.get("index", ""), row.get("severity", ""),
+                row.get("page", ""), row.get("index", ""), row.get("severity", ""), row.get("quality_score", ""),
                 ", ".join(row.get("warnings", [])), ", ".join(row.get("suggestions", [])),
                 row.get("writing_mode", ""), row.get("fit_mode", ""), row.get("line_break_strategy", ""),
                 row.get("missing_glyphs", ""),
@@ -164,6 +179,37 @@ class TypographyQAReportDialog(QDialog):
                 self.table.setItem(r, c, item)
         self.table.resizeColumnsToContents()
         self.table.setSortingEnabled(True)
+        self._apply_issue_filter()
+
+    def _refresh_issue_filter_options(self, rows):
+        current = self.issue_filter_combo.currentData() if hasattr(self, 'issue_filter_combo') else ''
+        warnings = sorted({w for row in rows for w in (row.get("warnings", []) or [])})
+        self.issue_filter_combo.blockSignals(True)
+        self.issue_filter_combo.clear()
+        self.issue_filter_combo.addItem(self.tr("All warning types"), "")
+        for warning in warnings:
+            self.issue_filter_combo.addItem(warning, warning)
+        idx = self.issue_filter_combo.findData(current)
+        self.issue_filter_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.issue_filter_combo.blockSignals(False)
+
+    def _apply_issue_filter(self):
+        selected = self.issue_filter_combo.currentData() if hasattr(self, 'issue_filter_combo') else ''
+        for r, row in enumerate(getattr(self, '_rows', []) or []):
+            visible = not selected or selected in (row.get("warnings", []) or [])
+            self.table.setRowHidden(r, not visible)
+
+    def _check_visible_warning_rows(self):
+        for r, row in enumerate(getattr(self, '_rows', []) or []):
+            item = self.table.item(r, 0)
+            if item is not None:
+                item.setCheckState(Qt.CheckState.Checked if (not self.table.isRowHidden(r) and row.get("warnings")) else Qt.CheckState.Unchecked)
+
+    def _clear_checked_rows(self):
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item is not None:
+                item.setCheckState(Qt.CheckState.Unchecked)
 
     def _on_select_all_changed(self):
         state = Qt.CheckState.Checked if self.select_all_check.isChecked() else Qt.CheckState.Unchecked
