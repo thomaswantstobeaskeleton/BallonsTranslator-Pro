@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set
 
 from .fontformat import FontFormat
+from .textbox_masking import centered_resize_xyxy, mask_aware_textbox_diagnostics
 from .text_rendering import (
     FIT_MODE_BALANCE,
     FIT_MODE_EXPAND,
@@ -144,6 +145,24 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if (inner_bounds[0] < box_w * 0.62 or inner_bounds[1] < box_h * 0.62) and effect_margin > 0:
         warnings.append("unsafe_effect_bounds")
         suggestions.append({"action": "increase_box_or_reduce_effect", "effect_margin": effect_margin, "safe_inner_bounds": list(inner_bounds), "recommended_box_size": recommended_box, "reason": "Stroke/shadow/padding leave little safe text area inside this box."})
+    mask_diag = mask_aware_textbox_diagnostics(
+        (box_w, box_h),
+        (measured[0], measured[1]),
+        getattr(blk, "text_mask", None),
+        effect_margin=effect_margin,
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+    )
+    if mask_diag.get("mask", {}).get("has_mask"):
+        hidden_ratio = float(mask_diag.get("mask", {}).get("hidden_ratio", 0.0) or 0.0)
+        if hidden_ratio > 0.25:
+            warnings.append("text_mask_restricts_visible_area")
+            suggestions.append({"action": "review_text_mask", "hidden_ratio": hidden_ratio, "reason": "The text eraser mask hides a large part of the textbox; check whether lettering is being clipped."})
+        if mask_diag.get("mask", {}).get("edge_hidden"):
+            warnings.append("text_mask_erases_edge")
+            suggestions.append({"action": "increase_padding", "padding": max(2.0, float(getattr(fmt, "text_padding", 0.0) or 0.0) + 1.0), "reason": "The text mask erases the textbox edge; add inset so stroke/shadow does not hit the erased boundary."})
+        if mask_diag.get("mask_overflow"):
+            warnings.append("mask_visible_area_overflow")
+            suggestions.append({"action": "resize_to_mask_safe_box", "recommended_box_size": mask_diag.get("recommended_box_size", recommended_box), "mask_overflow_axes": mask_diag.get("mask_overflow_axes", []), "reason": "Measured lettering exceeds the visible area left by the text eraser mask."})
     preset_suggestion = getattr(fit_diag, "preset_suggestion", "") or ""
     if preset_suggestion and preset_suggestion != getattr(fmt, "preset", ""):
         if preset_suggestion in {"vertical_cjk_bubble", "sfx_bold", "caption_box"}:
@@ -196,6 +215,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "recommended_box_size": recommended_box,
         "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
         "ink_clip_risk": bool(getattr(fit_diag, "ink_clip_risk", False)),
+        "mask_diagnostics": mask_diag,
         "preset_suggestion": preset_suggestion,
         "suggested_text": fitted_text if fitted_text != text else "",
         "contrast_effect": effect_suggestion,
@@ -271,6 +291,7 @@ def flatten_rendering_qa_rows(report: Dict) -> List[Dict]:
                 "quality_score": block.get("quality_score", 1.0),
                 "effect_margin": block.get("effect_margin", 0.0),
                 "safe_inner_bounds": block.get("safe_inner_bounds", []),
+                "mask_visible_area_ratio": (block.get("mask_diagnostics", {}) or {}).get("visible_area_ratio", 1.0),
             })
     return rows
 
@@ -396,14 +417,16 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
                     except Exception:
                         rec_w = rec_h = 0.0
                     if rec_w > box_w * 1.02 or rec_h > box_h * 1.02:
-                        xyxy = list(getattr(blk, "xyxy", [0, 0, box_w, box_h]) or [0, 0, box_w, box_h])
-                        if len(xyxy) >= 4:
-                            cx = (float(xyxy[0]) + float(xyxy[2])) / 2.0
-                            cy = (float(xyxy[1]) + float(xyxy[3])) / 2.0
-                            new_w = max(box_w, rec_w)
-                            new_h = max(box_h, rec_h)
-                            blk.xyxy = [cx - new_w / 2.0, cy - new_h / 2.0, cx + new_w / 2.0, cy + new_h / 2.0]
-                            changed.append("textbox_size")
+                        blk.xyxy = centered_resize_xyxy(getattr(blk, "xyxy", [0, 0, box_w, box_h]), [rec_w, rec_h])
+                        changed.append("textbox_size")
+            if "mask_visible_area_overflow" in diag["warnings"] and wants("resize_to_mask_safe_box"):
+                for suggestion in diag.get("suggestions", []) or []:
+                    if suggestion.get("action") == "resize_to_mask_safe_box":
+                        rec = suggestion.get("recommended_box_size", []) or []
+                        if len(rec) >= 2:
+                            blk.xyxy = centered_resize_xyxy(getattr(blk, "xyxy", [0, 0, box_w, box_h]), rec)
+                            changed.append("mask_safe_textbox_size")
+                        break
             if "overflow" in diag["warnings"] and wants("tighten_letter_spacing"):
                 for suggestion in diag.get("suggestions", []) or []:
                     if suggestion.get("action") == "tighten_letter_spacing":

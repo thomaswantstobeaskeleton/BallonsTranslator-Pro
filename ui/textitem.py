@@ -791,7 +791,7 @@ class TextBlkItem(QGraphicsTextItem):
         measured_w, measured_h = diag['measured'][0], diag['measured'][1]
         painter.setPen(QPen(QColor(255, 64, 64, 170), 1 / max(0.01, self.get_scale())))
         painter.drawRect(QRectF(0, 0, measured_w, measured_h))
-        label = f"{diag['mode']} {getattr(ff, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
+        label = f"{diag['mode']} {getattr(self.fontformat, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
         if diag['missing']:
             label += f" missing: {diag['missing']}"
         painter.setPen(QColor(255, 128, 0) if diag['overflow'] else QColor(0, 128, 255))

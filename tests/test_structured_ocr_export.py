@@ -58,3 +58,18 @@ def test_structured_ocr_export_can_sort_blocks_by_reading_order():
     assert blocks[0]["source_index"] == 1
     assert blocks[1]["source_index"] == 0
     assert blocks[0]["font"]["writing_mode"] == "auto"
+
+
+def test_structured_ocr_export_includes_vertical_render_hints():
+    class VBlock(Block):
+        translation = "第12話?!"
+        fontformat = FontFormat(font_family="Arial", font_size=24, writing_mode="vertical_rl", line_break_strategy="cjk_strict")
+
+    class P(Project):
+        pages = {"p1.png": [VBlock()]}
+
+    out = build_structured_ocr_export(P())
+    hints = out["pages"][0]["blocks"][0]["render_hints"]
+    assert hints["resolved_writing_mode"] == "vertical_rl"
+    assert hints["vertical_columns"]
+    assert any(group["text"] == "12" for group in hints["tate_chu_yoko_groups"])

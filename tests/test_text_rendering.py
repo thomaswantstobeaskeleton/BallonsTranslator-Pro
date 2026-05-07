@@ -275,3 +275,16 @@ def test_rendering_preset_pack_roundtrip_and_font_diagnostics(tmp_path):
     result2 = import_preset_pack(target, str(path), overwrite=False)
     assert result2["imported_count"] == 1
     assert any(pid.startswith("custom:boom_") for pid in target.render_custom_manga_presets)
+
+
+def test_kinsoku_wrap_avoids_small_kana_and_iteration_mark_line_start():
+    lines = kinsoku_wrap("おおきいっぽい", 4, LINE_BREAK_CJK_STRICT)
+    assert all(line[0] not in "ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヶヵゝゞ々ーｰ" for line in lines)
+
+
+def test_vertical_tate_chu_yoko_groups_are_index_precise():
+    plan = vertical_layout_plan("第12話1", 10, font_size=18)
+    compact = [g for g in plan["glyphs"] if g.get("tate_chu_yoko")]
+    assert "".join(g["char"] for g in compact) == "12"
+    trailing = [g for g in plan["glyphs"] if g["char"] == "1" and g["index"] == 4][0]
+    assert trailing.get("tate_chu_yoko") is False

@@ -670,7 +670,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_fit_to_mask_safe_box': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
     'format_layout_review_selected': True, 'format_layout_review_page': True, 'format_layout_review_config': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,
