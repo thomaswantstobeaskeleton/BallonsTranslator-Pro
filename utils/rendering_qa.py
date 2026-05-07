@@ -22,6 +22,7 @@ from .text_rendering import (
     merge_font_fallback_chain,
     missing_glyphs_after_fallback,
     resolve_writing_mode,
+    recommended_tight_letter_spacing,
 )
 
 
@@ -106,6 +107,12 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if overflow:
         warnings.append("overflow")
         suggestions.append({"action": "shrink_to_fit", "reason": "Measured text bounds exceed textbox bounds."})
+        if measured[0] > box_w and float(getattr(fmt, "letter_spacing", 1.0) or 1.0) > 0.92:
+            suggestions.append({
+                "action": "tighten_letter_spacing",
+                "letter_spacing": recommended_tight_letter_spacing(float(getattr(fmt, "letter_spacing", 1.0) or 1.0), measured[0] / max(1.0, box_w)),
+                "reason": "Wide lettering can often fit by tightening tracking before shrinking the font.",
+            })
     if missing:
         warnings.append("missing_glyphs")
         chain = fallback_chain_for_text(text, config_obj)
@@ -397,6 +404,14 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
                             new_h = max(box_h, rec_h)
                             blk.xyxy = [cx - new_w / 2.0, cy - new_h / 2.0, cx + new_w / 2.0, cy + new_h / 2.0]
                             changed.append("textbox_size")
+            if "overflow" in diag["warnings"] and wants("tighten_letter_spacing"):
+                for suggestion in diag.get("suggestions", []) or []:
+                    if suggestion.get("action") == "tighten_letter_spacing":
+                        new_spacing = max(0.80, min(float(getattr(fmt, "letter_spacing", 1.0) or 1.0), float(suggestion.get("letter_spacing", 0.94) or 0.94)))
+                        if new_spacing < float(getattr(fmt, "letter_spacing", 1.0) or 1.0):
+                            fmt.letter_spacing = new_spacing
+                            changed.append("letter_spacing")
+                        break
             if "overflow" in diag["warnings"] and (wants("shrink_to_fit") or wants("balance_lines")):
                 fit_mode = getattr(fmt, "fit_mode", FIT_MODE_SHRINK)
                 if fit_mode in (FIT_MODE_SHRINK, FIT_MODE_EXPAND, FIT_MODE_PRESERVE, FIT_MODE_BALANCE):

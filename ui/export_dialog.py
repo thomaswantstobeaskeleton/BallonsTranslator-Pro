@@ -84,6 +84,16 @@ class ExportFormatDialog(QDialog):
         self.include_intermediate_check.setChecked(False)
         form.addRow('', self.include_intermediate_check)
 
+        self.open_folder_after_export_check = QCheckBox(self.tr('Open output folder when done'))
+        self.open_folder_after_export_check.setToolTip(self.tr('Use the persisted Settings default for this export.'))
+        try:
+            from utils.config import pcfg
+            self.open_folder_after_export_check.setChecked(bool(getattr(pcfg, 'export_open_folder_after_batch', False)))
+        except Exception:
+            self.open_folder_after_export_check.setChecked(False)
+        self.open_folder_after_export_check.toggled.connect(self._on_open_folder_after_export_toggled)
+        form.addRow('', self.open_folder_after_export_check)
+
         self.clean_after_export_check = QCheckBox(self.tr('Clean cache after export'))
         self.clean_after_export_check.setToolTip(self.tr('Remove mask and inpainted caches for this project after export (saves disk space).'))
         self.clean_after_export_check.setChecked(False)
@@ -145,8 +155,18 @@ class ExportFormatDialog(QDialog):
             self._zip_path = base + ('.cbz' if self.get_archive_format() == 'cbz' else '.zip')
             self.zip_path_label.setText(self._zip_path)
 
+    def _on_open_folder_after_export_toggled(self, checked: bool):
+        try:
+            from utils.config import pcfg
+            pcfg.export_open_folder_after_batch = bool(checked)
+        except Exception:
+            pass
+
     def get_include_intermediate(self) -> bool:
         return self.include_intermediate_check.isChecked()
+
+    def get_open_folder_after_export(self) -> bool:
+        return self.open_folder_after_export_check.isChecked()
 
     def get_clean_after_export(self) -> bool:
         return self.clean_after_export_check.isChecked()

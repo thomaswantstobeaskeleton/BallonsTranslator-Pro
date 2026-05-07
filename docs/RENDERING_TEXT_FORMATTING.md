@@ -147,3 +147,17 @@ The layout review agent now consumes effect-aware `recommended_box_size` diagnos
 - **Configurable vertical plans:** `vertical_layout_plan()` now records whether latin glyph rotation and punctuation hanging were enabled, and Typography QA uses the live Config values. This makes UI, API, SVG/PSD handoff, and tests agree on vertical punctuation intent.
 - **Editor comfort setting:** Config → General → Rendering / Text Formatting includes **Text editor top padding**. It updates the side text editor list immediately, fixing the cramped first-visible-row feel even after scrolling while keeping dense manga editing workflows fast.
 - **Automation workflow helper:** local automation clients can call `POST /recent_projects` to retrieve recent project paths, existence checks, and JSON/folder type before opening or running a project.
+
+## 2026-05-07 pass: favorite fonts, visual fit, archive/export workflow
+
+- **Favorite lettering fonts:** Settings → Project text rendering defaults now includes **Favorite lettering fonts**. Enter comma-separated manga/comic font families there, then use the **Favorites** combo in the text formatting panel to apply one instantly to the current style or selected text box. The **★** button captures the currently selected font into the persisted favorites list.
+- **Visual-advance fit estimates:** Renderer diagnostics and layout review no longer treat every character as the same width. CJK punctuation, brackets, emoji/symbols, combining marks, and Latin runs use script-aware visual advance units, making overflow warnings and recommended box sizes less noisy for manga punctuation-heavy text.
+- **Letter-spacing review fix:** When wide text overflows horizontally, Typography QA / layout review can suggest and apply a conservative **tighten letter spacing** action before shrinking fonts or resizing boxes. This preserves lettering weight where possible.
+- **Export workflow polish:** Batch export has a persistent **Open output folder when done** option, and the automation export route can create ZIP/CBZ archives (`kind=archive`, `kind=zip`, or `kind=cbz`) from rendered pages plus optional clean/mask helper images.
+
+## 2026-05-07 pass: reusable manga lettering presets
+
+- **Save current style as a preset:** The text formatting panel now includes **Save preset** next to the manga preset picker. It captures the current font family, weight, size, colors, stroke, shadow, spacing, writing mode, fit mode, line-break strategy, padding, opacity, and fallback chain into a persisted custom preset.
+- **Built-in + custom preset parity:** Custom presets appear beside built-in presets and can be applied from the text panel, batch style override, layout review preset actions, and automation. Presets can be imported/exported as JSON packs for team handoff, with missing-font diagnostics when the current machine lacks a preset font family.
+- **Recent font recall:** Font choices are remembered as recent lettering fonts and shown alongside favorites, reducing repeated scrolling through long font lists while lettering a chapter.
+- **Automation:** Local clients can call `rendering_presets` with `action=list`, `action=save`, `action=save_current`, `action=import`, `action=export`, or `action=delete` to inspect, create, share, or prune reusable rendering presets.

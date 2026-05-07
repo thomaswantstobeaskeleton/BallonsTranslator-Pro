@@ -2,6 +2,25 @@
 
 _Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issues/PRs, 652 all-state items scanned. This backlog is maintained as an implementation source, not a one-time audit._
 
+## Newly implemented / advanced in this pass (continued once more 2026-05-07)
+
+| Issue | Title | Category | Relevant labels | Maps to BT-Pro? | Implemented here? | Priority | Implementation notes | Deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [#593](https://github.com/mayocream/koharu/issues/593) | Feature: Text presets (save font style/size/color configurations) | Text rendering / typography / fonts; UI/UX/editor workflow | ui, feature request, font | yes | **partial → advanced** | P0 | Added persisted custom manga lettering presets saved from the active text style/textbox, merged with built-ins in the text panel, direct formatting command path, batch style override, layout-review action application, JSON import/export packs with missing-font diagnostics, and automation `rendering_presets`. | Thumbnail previews and per-project preset pack sync remain deferred. |
+| [#595](https://github.com/mayocream/koharu/issues/595) | Feature: Font UX improvements (local names, favorites, family/weight selection) | Text rendering / typography / fonts; UI/UX/editor workflow | ui, feature request, font | yes | **advanced** | P1 | Favorite fonts now work with recent font recall, custom presets preserve font weight/family/fallback settings, preset packs warn about missing fonts, and the preset picker reduces repeated font-list navigation. | Localized family names and full weight/style browser remain deferred. |
+| [#612](https://github.com/mayocream/koharu/pull/612) / [#648](https://github.com/mayocream/koharu/issues/648) | Automation workflow / project-wide style changes | Automation/API/headless/MCP; Batch/project workflow | area: ui / workflow | yes | **advanced** | P1 | Added `rendering_presets` automation for listing/saving preset styles and custom-preset support in project/page batch style application. | Event-streamed preset operations and preset pack sync remain deferred. |
+
+## Newly implemented / advanced in this pass (continued again 2026-05-07)
+
+GitHub issue refresh: `gh` was unavailable in this container, so this pass used the GitHub REST API and topic searches across rendering/font/text, PSD/export/layer, shortcut/keybind, API/headless/automation, OCR/detector/inpaint/translator, settings/provider/model, workflow/editor/batch/export/onboarding/setup, and feature/enhancement/UX terms. The local harvest merged **249 non-PR issues** from multiple pages/searches, including current high-priority open requests #653, #652, #649, #648, #640, #610, #602, #601, #597, #595, #594, #593, #592, #591, #589, #587, and #583.
+
+| Issue | Title | Category | Relevant labels | Maps to BT-Pro? | Implemented here? | Priority | Implementation notes | Deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [#594](https://github.com/mayocream/koharu/issues/594) | Feature: Advanced text formatting (gradients, line spacing, kerning) | Text rendering / typography / fonts; Text fitting / layout / overflow | renderer, feature request, font | yes | **advanced** | P0 | Added visual-advance based fit estimates so CJK punctuation, emoji/symbols, combining marks, and Latin spacing no longer measure as raw character counts; fit diagnostics/layout review now suggest a conservative `tighten_letter_spacing` action before shrinking/resizing wide lettering. | True kerning/OpenType shaping still needs optional shaping dependencies. |
+| [#595](https://github.com/mayocream/koharu/issues/595) | Feature: Font UX improvements (local names, favorites, family/weight selection) | Text rendering / typography / fonts; UI/UX/editor workflow | ui, feature request, font | yes | **partial → advanced** | P1 | Added persistent favorite lettering fonts in Rendering settings plus a one-click Favorites picker and ★ capture button in the text formatting panel. | Weight/style browser and localized family names remain deferred. |
+| [#626](https://github.com/mayocream/koharu/pull/626) / [#610](https://github.com/mayocream/koharu/issues/610) | Streaming ZIP export / bulk CBZ workflow | PSD/export/layers; Batch/project workflow; Automation/API/headless/MCP | area: ui / workflow | yes | **advanced** | P1 | Extended automation export with `kind=archive|zip|cbz`, creating ZIP/CBZ archives from rendered batch output plus manifests/helper images when requested. | True streaming archive progress/cancel remains deferred. |
+| [#591](https://github.com/mayocream/koharu/issues/591) / [#587](https://github.com/mayocream/koharu/issues/587) | Export interop / PSD position fidelity | PSD/export/layers; UI/UX/editor workflow | export, psd, interop | yes | **workflow advanced** | P1 | Added a persistent “open output folder after batch export” setting and export-dialog checkbox so rendered pages, CBZ/ZIP, manifests, clean/mask helpers, and handoff files are immediately discoverable after export. | Native editable PSD text writer remains deferred. |
+
 ## Newly implemented / advanced in this pass (continued 2026-05-07)
 
 | Issue | Title | Category | Relevant labels | Maps to BT-Pro? | Implemented here? | Priority | Implementation notes | Deferred reason |
@@ -30,8 +49,8 @@ _Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issue
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [#649](https://github.com/mayocream/koharu/issues/649) | Enable global font size override from Auto across all images | ui, renderer, feature request | yes | partial → **advanced** | P0 | Batch style dialog/API can update current page or project and optionally only auto-sized blocks; fit min/max clamps and fixed font size are supported. | Visual before/after preview still deferred. |
 | [#594](https://github.com/mayocream/koharu/issues/594) | Advanced text formatting (gradients, line spacing, kerning) | renderer, feature request, font | yes | partial | P0 | Existing style panel covers spacing/effects; gradients/kerning remain. | Needs renderer/UI design. |
-| [#593](https://github.com/mayocream/koharu/issues/593) | Text presets (save font style/size/color configurations) | ui, feature request, font | yes | partial | P1 | Built-in manga presets exist. | User-saved preset library deferred. |
-| [#595](https://github.com/mayocream/koharu/issues/595) | Font UX improvements | ui, feature request, font | yes | partial | P1 | Google Fonts installer and fallback diagnostics exist. | Favorites/localized names deferred. |
+| [#593](https://github.com/mayocream/koharu/issues/593) | Text presets (save font style/size/color configurations) | ui, feature request, font | yes | partial → **advanced** | P0 | Built-in and user-saved custom manga presets now exist across UI, batch style, layout review, and automation. | Preset import/export packs and thumbnails deferred. |
+| [#595](https://github.com/mayocream/koharu/issues/595) | Font UX improvements | ui, feature request, font | yes | partial → **advanced** | P1 | Google Fonts installer, fallback diagnostics, favorite fonts, recent fonts, and font-preserving custom presets exist. | Localized names and full weight/style browser deferred. |
 | [#77](https://github.com/mayocream/koharu/issues/77) | Custom font support | renderer | yes | partial | P1 | Google/web font install flow exists. | Robust font package manager deferred. |
 
 ## Vertical CJK / RTL / punctuation
@@ -87,12 +106,14 @@ _Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issue
 
 ## Next batch candidates
 
-1. True ink-bound glyph measurement / OpenType shaping for clipping-free advanced formatting (#594/#572/#624).
-2. Mask-aware collision detection/squeezing using bubble masks and text bounds (#637).
-3. Before/after thumbnails for checked-row Typography QA fixes (#649/#648/#630).
-4. Native editable PSD text writer or stronger Photoshop/GIMP handoff validation (#587/#558/#602).
-5. Canvas-side text block drag-to-reorder with undo/read-order preview (#601/#660).
-6. HarfBuzz/ICU shaping experiment for Arabic joining and vertical OpenType alternates (#602/#583/#213/#624).
-7. Streaming ZIP/CBZ export with progress/cancel and parent/child batch processing (#626/#610).
-8. Provider/model setup wizard with OCR model recommendation and failure retry diagnostics (#625/#652).
-9. Runtime GPU memory profiles and safer device fallback guidance (#638/#600).
+1. Shared per-project preset packs with thumbnail previews for lettering teams (#593/#595).
+2. Weight/style-aware font browser with localized family names and deeper missing-font diagnostics (#595).
+3. True ink-bound glyph measurement / OpenType shaping for clipping-free advanced formatting (#594/#572/#624).
+4. Mask-aware collision detection/squeezing using bubble masks and text bounds (#637).
+5. Before/after thumbnails for checked-row Typography QA fixes (#649/#648/#630).
+6. Native editable PSD text writer or stronger Photoshop/GIMP handoff validation (#587/#558/#602).
+7. Canvas-side text block drag-to-reorder with undo/read-order preview (#601/#660).
+8. HarfBuzz/ICU shaping experiment for Arabic joining and vertical OpenType alternates (#602/#583/#213/#624).
+9. Streaming ZIP/CBZ export with progress/cancel and parent/child batch processing (#626/#610).
+10. Provider/model setup wizard with OCR model recommendation and failure retry diagnostics (#625/#652).
+11. Runtime GPU memory profiles and safer device fallback guidance (#638/#600).

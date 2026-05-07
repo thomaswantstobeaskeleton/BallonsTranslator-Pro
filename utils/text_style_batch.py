@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from .text_rendering import MANGA_PRESETS, normalize_fit_mode, normalize_line_break_strategy, normalize_writing_mode
+from .text_rendering import MANGA_PRESETS, manga_presets, normalize_fit_mode, normalize_line_break_strategy, normalize_writing_mode
 
 
 def _target_pages(project, pages: Optional[Iterable[str]]) -> List[str]:
@@ -17,8 +17,9 @@ def normalize_text_style_updates(updates: Dict) -> Dict:
     """Return a safe, renderer-style update dict for project-wide style application."""
     updates = dict(updates or {})
     out: Dict = {}
-    if updates.get("preset") in MANGA_PRESETS:
-        out["preset"] = str(updates.get("preset"))
+    preset_id = str(updates.get("preset", "") or "")
+    if preset_id and (preset_id in MANGA_PRESETS or preset_id.startswith("custom:")):
+        out["preset"] = preset_id
     for key in ("font_family", "fallback_font_chain"):
         val = str(updates.get(key, "") or "").strip()
         if val:
@@ -64,6 +65,7 @@ def apply_text_style_batch(
     indices: Optional[Sequence[int]] = None,
     only_auto_sized: bool = False,
     dry_run: bool = False,
+    config_obj=None,
 ) -> Dict:
     """Apply a safe batch text-style override to project blocks.
 
@@ -92,8 +94,9 @@ def apply_text_style_batch(
                 continue
             if not dry_run:
                 preset_id = updates.get("preset")
-                if preset_id in MANGA_PRESETS:
-                    for key, value in MANGA_PRESETS[preset_id].items():
+                presets = manga_presets(config_obj if config_obj is not None else getattr(project, "config", None)) if preset_id else {}
+                if preset_id in presets:
+                    for key, value in presets[preset_id].items():
                         if key != "label" and hasattr(fmt, key):
                             setattr(fmt, key, value)
                     fmt.manga_preset = preset_id

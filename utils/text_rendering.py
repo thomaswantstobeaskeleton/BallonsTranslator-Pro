@@ -120,6 +120,32 @@ MANGA_PRESETS = {
     },
 }
 
+STYLE_PRESET_FIELDS = (
+    "font_family",
+    "font_size",
+    "font_weight",
+    "bold",
+    "italic",
+    "frgb",
+    "srgb",
+    "stroke_width",
+    "shadow_radius",
+    "shadow_strength",
+    "shadow_color",
+    "shadow_offset",
+    "line_spacing",
+    "letter_spacing",
+    "alignment",
+    "writing_mode",
+    "fit_mode",
+    "line_break_strategy",
+    "text_padding",
+    "fit_font_size_min",
+    "fit_font_size_max",
+    "opacity",
+    "fallback_font_chain",
+)
+
 
 @dataclass
 class TextRenderDiagnostics:
@@ -189,6 +215,106 @@ def normalize_reading_order(order: Optional[str]) -> str:
     aliases = {"right_to_left": READING_ORDER_RTL, "left_to_right": READING_ORDER_LTR, "top_to_bottom": READING_ORDER_TTB}
     order = aliases.get(order, order)
     return order if order in READING_ORDERS else READING_ORDER_AUTO
+
+
+def preset_id_from_label(label: str, existing: Optional[Sequence[str]] = None) -> str:
+    """Return a stable custom preset id from a user-facing label."""
+    base = re.sub(r"[^a-z0-9]+", "_", (label or "").strip().lower()).strip("_") or "custom_preset"
+    existing_set = {str(x) for x in (existing or [])}
+    candidate = f"custom:{base}"
+    n = 2
+    while candidate in existing_set or candidate in MANGA_PRESETS:
+        candidate = f"custom:{base}_{n}"
+        n += 1
+    return candidate
+
+
+def sanitize_manga_preset(preset: Dict[str, object], label: str = "") -> Dict[str, object]:
+    """Clamp a user-saved manga lettering preset to supported, serializable fields."""
+    src = dict(preset or {})
+    out: Dict[str, object] = {"label": str(src.get("label") or label or "Custom preset").strip() or "Custom preset"}
+    for key in STYLE_PRESET_FIELDS:
+        if key not in src:
+            continue
+        value = src.get(key)
+        if key in {"writing_mode", "fit_mode", "line_break_strategy"}:
+            if key == "writing_mode":
+                value = normalize_writing_mode(value)
+            elif key == "fit_mode":
+                value = normalize_fit_mode(value)
+            else:
+                value = normalize_line_break_strategy(value)
+        elif key in {"font_size", "stroke_width", "shadow_radius", "shadow_strength", "line_spacing", "letter_spacing", "text_padding", "fit_font_size_min", "fit_font_size_max", "opacity"}:
+            try:
+                value = float(value)
+            except Exception:
+                continue
+            if key == "opacity":
+                value = max(0.0, min(1.0, value))
+            elif key == "font_size":
+                value = max(1.0, min(512.0, value))
+            else:
+                value = max(0.0, value)
+        elif key in {"bold", "italic"}:
+            value = bool(value)
+        elif key in {"alignment"}:
+            try:
+                value = max(0, min(2, int(value)))
+            except Exception:
+                continue
+        elif key in {"frgb", "srgb", "shadow_color", "shadow_offset"}:
+            try:
+                seq = list(value or [])
+                limit = 2 if key == "shadow_offset" else 3
+                value = [float(v) if key == "shadow_offset" else int(max(0, min(255, int(v)))) for v in seq[:limit]]
+                while len(value) < limit:
+                    value.append(0.0 if key == "shadow_offset" else 0)
+            except Exception:
+                continue
+        elif key == "font_weight":
+            if value is None:
+                continue
+            try:
+                value = int(value)
+            except Exception:
+                continue
+        else:
+            value = str(value or "").strip()
+        out[key] = value
+    return out
+
+
+def custom_manga_presets(config_obj=None) -> Dict[str, Dict[str, object]]:
+    raw = getattr(config_obj, "render_custom_manga_presets", {}) if config_obj is not None else {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, object]] = {}
+    for preset_id, preset in raw.items():
+        pid = str(preset_id or "").strip()
+        if not pid:
+            continue
+        if not pid.startswith("custom:"):
+            pid = "custom:" + pid
+        out[pid] = sanitize_manga_preset(preset, label=pid.split(":", 1)[-1].replace("_", " "))
+    return out
+
+
+def manga_presets(config_obj=None) -> Dict[str, Dict[str, object]]:
+    """Built-in presets plus persisted user presets for UI/API/batch code."""
+    presets = {k: dict(v) for k, v in MANGA_PRESETS.items()}
+    presets.update(custom_manga_presets(config_obj))
+    return presets
+
+
+def preset_from_font_format(font_format, label: str = "Custom preset") -> Dict[str, object]:
+    values: Dict[str, object] = {"label": label}
+    for key in STYLE_PRESET_FIELDS:
+        if hasattr(font_format, key):
+            value = getattr(font_format, key)
+            if isinstance(value, (list, tuple)):
+                value = list(value)
+            values[key] = value
+    return sanitize_manga_preset(values, label=label)
 
 
 def contains_cjk(text: str) -> bool:
@@ -341,6 +467,47 @@ def normalize_vertical_punctuation(text: str) -> str:
     for src, dst in VERTICAL_PUNCT_MAP.items():
         out = out.replace(src, dst)
     return out
+
+
+def glyph_advance_units(text: str, mode: str = WRITING_MODE_HORIZONTAL_LTR) -> float:
+    """Estimate visual advance units more accurately than raw len().
+
+    CJK lettering has full-width ideographs but many punctuation marks occupy
+    half/centered cells, while emoji/symbols often need a wider cell. This
+    dependency-free estimate improves fit diagnostics and layout review without
+    requiring platform font metrics.
+    """
+    mode = normalize_writing_mode(mode)
+    total = 0.0
+    for ch in text or "":
+        if ch == "\n":
+            continue
+        if ch.isspace():
+            total += 0.35
+        elif ch in VERTICAL_CENTER_PUNCT or unicodedata.category(ch).startswith("P"):
+            total += 0.55 if mode != WRITING_MODE_VERTICAL_RL else 0.80
+        elif _is_cjk_char(ch) or KOREAN_RE.match(ch):
+            total += 1.0
+        elif ord(ch) >= 0x1F000:
+            total += 1.2
+        elif unicodedata.combining(ch):
+            total += 0.0
+        else:
+            total += 0.56
+    return total
+
+
+def max_visual_line_units(lines: Sequence[str], mode: str = WRITING_MODE_HORIZONTAL_LTR) -> float:
+    return max((glyph_advance_units(line, mode) for line in lines or []), default=0.0)
+
+
+def recommended_tight_letter_spacing(current: float, overflow_ratio: float, floor: float = 0.88) -> float:
+    """Return a conservative manga-lettering tracking value for overflow fixes."""
+    cur = max(0.1, float(current or 1.0))
+    if overflow_ratio <= 1.0:
+        return cur
+    # Do not over-condense; leave shrinking/resizing to the next review action.
+    return round(max(float(floor), min(cur, cur / min(1.12, overflow_ratio))), 3)
 
 
 def vertical_tate_chu_yoko_groups(text: str) -> List[Dict[str, object]]:
@@ -863,7 +1030,7 @@ def estimate_text_bounds(
         max_chars = max(1, int(usable_h / max(1.0, cjk_avg)))
         cols = vertical_columns(text, max_chars, line_break_strategy)
         measured_w = max(1, len(cols)) * leading
-        measured_h = max((len(c) for c in cols), default=0) * cjk_avg
+        measured_h = max((glyph_advance_units(c, mode) for c in cols), default=0.0) * cjk_avg
         line_count = max((len(c) for c in cols), default=0)
         col_count = len(cols)
     else:
@@ -875,7 +1042,7 @@ def estimate_text_bounds(
             lines = kinsoku_wrap(text, max_chars, line_break_strategy)
         else:
             lines = wrap_latin_text(text, max_chars, split_long_words=True)
-        measured_w = max((len(ln) for ln in lines), default=0) * avg
+        measured_w = max_visual_line_units(lines, mode) * fs * max(0.1, float(letter_spacing or 1.0))
         measured_h = max(1, len(lines)) * leading
         line_count = len(lines)
         col_count = 0
@@ -935,6 +1102,8 @@ def fit_font_size_to_box(
         clip = ink_clip_risk((box_w, box_h), (bounds[0], bounds[1]), margin)
         if clip and "increase_padding" not in actions:
             actions.append("increase_padding")
+        if axes and float(letter_spacing or 1.0) > 0.9:
+            actions.append("tighten_letter_spacing")
         preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
         diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
         return current, text_out, diag
@@ -975,6 +1144,8 @@ def fit_font_size_to_box(
     clip = ink_clip_risk((box_w, box_h), (bounds[0], bounds[1]), margin)
     if clip and "increase_padding" not in actions:
         actions.append("increase_padding")
+    if axes and float(letter_spacing or 1.0) > 0.9:
+        actions.append("tighten_letter_spacing")
     preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
     diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
     return best, text_out, diag
