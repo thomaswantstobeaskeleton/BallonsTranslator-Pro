@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Seque
 ActionType = Literal[
     "move",
     "resize",
+    "resize_to_recommended_box",
     "set_font_size",
     "auto_fit",
     "center_in_bubble",
@@ -19,6 +20,9 @@ ActionType = Literal[
     "set_line_break_strategy",
     "apply_font_fallback",
     "flag_missing_glyphs",
+    "normalize_vertical_punctuation",
+    "set_alignment",
+    "apply_contrast_stroke",
 ]
 
 
@@ -61,6 +65,7 @@ class BlockSnapshot:
     measured_bounds: Optional[Tuple[float, float]] = None
     text_style: Dict[str, Any] = field(default_factory=dict)
     font_fallback_warning: str = ""
+    quality_score: float = 1.0
 
 
 @dataclass
@@ -151,6 +156,21 @@ class LayoutReviewPlanner:
                     score_penalty=0.25,
                 )
             )
+            recommended = (blk.text_style or {}).get("recommended_box_size") or ()
+            try:
+                rec_w = float(recommended[0])
+                rec_h = float(recommended[1])
+            except Exception:
+                rec_w = rec_h = 0.0
+            if rec_w > bw * 1.02 or rec_h > bh * 1.02:
+                actions.append(
+                    ReviewAction(
+                        action="resize_to_recommended_box",
+                        block_index=blk.block_index,
+                        args={"width": max(bw, rec_w), "height": max(bh, rec_h)},
+                        reason="Use effect-aware fit diagnostics to resize the box just enough for the measured lettering.",
+                    )
+                )
             actions.append(
                 ReviewAction(
                     action="shrink_to_fit",
@@ -254,6 +274,74 @@ class LayoutReviewPlanner:
                 )
             score_before -= 0.12
 
+
+        if blk.resolved_writing_mode == "vertical_rl" and any(seq in (blk.text or "") for seq in ("?!", "!?", "!!", "??", "...")):
+            issues.append(
+                ReviewIssue(
+                    code="vertical_punctuation_normalization",
+                    severity="info",
+                    message="Vertical CJK punctuation can use compact vertical forms.",
+                    score_penalty=0.03,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="normalize_vertical_punctuation",
+                    block_index=blk.block_index,
+                    reason="Normalize repeated punctuation for vertical manga lettering.",
+                )
+            )
+            score_before -= 0.03
+
+        if blk.resolved_writing_mode == "rtl" and int((blk.text_style or {}).get("alignment", 0) or 0) == 0:
+            issues.append(
+                ReviewIssue(
+                    code="rtl_alignment",
+                    severity="info",
+                    message="RTL text is currently left aligned.",
+                    score_penalty=0.05,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="set_alignment",
+                    block_index=blk.block_index,
+                    args={"alignment": 2},
+                    reason="Right-align RTL text for more predictable editing and export.",
+                )
+            )
+            score_before -= 0.05
+
+        if float((blk.text_style or {}).get("contrast_ratio", 7.0) or 7.0) < 4.5 and float((blk.text_style or {}).get("stroke_width", 0.0) or 0.0) <= 0:
+            issues.append(
+                ReviewIssue(
+                    code="low_contrast_no_effect",
+                    severity="warning",
+                    message="Text/background contrast is low and no outline is set.",
+                    score_penalty=0.10,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="apply_contrast_stroke",
+                    block_index=blk.block_index,
+                    args={"stroke_width": 0.06},
+                    reason="Add a conservative manga outline for low-contrast lettering.",
+                )
+            )
+            score_before -= 0.10
+
+        if float(getattr(blk, "quality_score", 1.0) or 1.0) < 0.7:
+            issues.append(
+                ReviewIssue(
+                    code="low_lettering_quality_score",
+                    severity="info",
+                    message="Renderer diagnostics assigned a low lettering quality score.",
+                    score_penalty=0.04,
+                )
+            )
+            score_before -= 0.04
+
         style = blk.text_style or {}
         padding = float(style.get("text_padding", 0.0) or 0.0)
         stroke_width = float(style.get("stroke_width", 0.0) or 0.0)
@@ -343,6 +431,7 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
     grouped: Dict[ActionType, List[ReviewAction]] = {
         "move": [],
         "resize": [],
+        "resize_to_recommended_box": [],
         "set_font_size": [],
         "auto_fit": [],
         "center_in_bubble": [],
@@ -356,6 +445,9 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "set_line_break_strategy": [],
         "apply_font_fallback": [],
         "flag_missing_glyphs": [],
+        "normalize_vertical_punctuation": [],
+        "set_alignment": [],
+        "apply_contrast_stroke": [],
     }
     for blk in page_result.blocks:
         for action in blk.actions:
@@ -368,6 +460,7 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
     grouped: Dict[ActionType, List[ReviewAction]] = {
         "move": [],
         "resize": [],
+        "resize_to_recommended_box": [],
         "set_font_size": [],
         "auto_fit": [],
         "center_in_bubble": [],
@@ -381,6 +474,9 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "set_line_break_strategy": [],
         "apply_font_fallback": [],
         "flag_missing_glyphs": [],
+        "normalize_vertical_punctuation": [],
+        "set_alignment": [],
+        "apply_contrast_stroke": [],
     }
     for action in actions:
         grouped[action.action].append(action)

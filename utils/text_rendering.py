@@ -32,6 +32,12 @@ LINE_BREAK_BALANCED = "balanced"
 LINE_BREAK_LOOSE = "loose"
 LINE_BREAK_STRATEGIES = {LINE_BREAK_AUTO, LINE_BREAK_CJK_STRICT, LINE_BREAK_BALANCED, LINE_BREAK_LOOSE}
 
+READING_ORDER_AUTO = "auto"
+READING_ORDER_RTL = "rtl"
+READING_ORDER_LTR = "ltr"
+READING_ORDER_TTB = "ttb"
+READING_ORDERS = {READING_ORDER_AUTO, READING_ORDER_RTL, READING_ORDER_LTR, READING_ORDER_TTB}
+
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 KOREAN_RE = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
 RTL_RE = re.compile(r"[\u0590-\u05ff\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
@@ -48,6 +54,7 @@ VERTICAL_PUNCT_MAP = {
 }
 VERTICAL_CENTER_PUNCT = set("、。，．・：；！？⁈⁉‼⁇…⋯")
 VERTICAL_ROTATE_PUNCT = set("—―ー～-()[]{}<>（）［］｛｝〈〉《》「」『』【】〔〕")
+VERTICAL_OPEN_TO_CLOSE = {"（": "）", "［": "］", "｛": "｝", "〈": "〉", "《": "》", "「": "」", "『": "』", "【": "】", "〔": "〕", "(": ")", "[": "]", "{": "}"}
 
 MANGA_PRESETS = {
     "default_manga_bubble": {
@@ -129,6 +136,11 @@ class TextRenderDiagnostics:
     line_break_strategy: str = LINE_BREAK_AUTO
     overflow_axes: List[str] = None
     recommended_actions: List[str] = None
+    safe_inner_bounds: Tuple[float, float] = (0.0, 0.0)
+    effect_margin: float = 0.0
+    quality_score: float = 1.0
+    recommended_box_size: Tuple[float, float] = (0.0, 0.0)
+    box_scale_hint: float = 1.0
 
     def to_dict(self) -> dict:
         return {
@@ -145,6 +157,11 @@ class TextRenderDiagnostics:
             "line_break_strategy": self.line_break_strategy,
             "overflow_axes": list(self.overflow_axes or []),
             "recommended_actions": list(self.recommended_actions or []),
+            "safe_inner_bounds": list(self.safe_inner_bounds),
+            "effect_margin": self.effect_margin,
+            "quality_score": self.quality_score,
+            "recommended_box_size": list(self.recommended_box_size),
+            "box_scale_hint": self.box_scale_hint,
         }
 
 
@@ -161,6 +178,13 @@ def normalize_fit_mode(mode: Optional[str]) -> str:
 def normalize_line_break_strategy(strategy: Optional[str]) -> str:
     strategy = str(strategy or LINE_BREAK_AUTO).strip().lower().replace("-", "_")
     return strategy if strategy in LINE_BREAK_STRATEGIES else LINE_BREAK_AUTO
+
+
+def normalize_reading_order(order: Optional[str]) -> str:
+    order = str(order or READING_ORDER_AUTO).strip().lower().replace("-", "_")
+    aliases = {"right_to_left": READING_ORDER_RTL, "left_to_right": READING_ORDER_LTR, "top_to_bottom": READING_ORDER_TTB}
+    order = aliases.get(order, order)
+    return order if order in READING_ORDERS else READING_ORDER_AUTO
 
 
 def contains_cjk(text: str) -> bool:
@@ -188,6 +212,57 @@ def script_bucket(text: str) -> str:
     return "latin"
 
 
+
+def infer_reading_order(blocks: Sequence[object], default: str = READING_ORDER_AUTO) -> str:
+    """Infer manga page reading order from textbox geometry and script hints.
+
+    RTL manga pages commonly have right-to-left columns; webtoon/caption-heavy
+    pages often read top-to-bottom. This is intentionally conservative and can
+    be overridden by config/API callers.
+    """
+    order = normalize_reading_order(default)
+    if order != READING_ORDER_AUTO:
+        return order
+    boxes = []
+    cjk = rtl = 0
+    for blk in blocks or []:
+        xyxy = getattr(blk, "xyxy", None) or [0, 0, 0, 0]
+        if len(xyxy) >= 4:
+            x1, y1, x2, y2 = [float(v or 0.0) for v in xyxy[:4]]
+            boxes.append((x1, y1, x2, y2))
+        text = str(getattr(blk, "translation", "") or getattr(blk, "rich_text", "") or " ".join(getattr(blk, "text", []) or []))
+        if contains_rtl(text):
+            rtl += 1
+        if contains_cjk(text):
+            cjk += 1
+    if rtl:
+        return READING_ORDER_RTL
+    if len(boxes) >= 3:
+        page_w = max((b[2] for b in boxes), default=0.0) - min((b[0] for b in boxes), default=0.0)
+        page_h = max((b[3] for b in boxes), default=0.0) - min((b[1] for b in boxes), default=0.0)
+        if page_h > page_w * 1.8:
+            return READING_ORDER_TTB
+    return READING_ORDER_RTL if cjk else READING_ORDER_LTR
+
+
+def reading_order_key(block: object, order: str = READING_ORDER_AUTO, row_tolerance: float = 40.0) -> Tuple[float, float, float]:
+    xyxy = getattr(block, "xyxy", None) or [0, 0, 0, 0]
+    x1, y1, x2, y2 = [float(v or 0.0) for v in (list(xyxy) + [0, 0, 0, 0])[:4]]
+    row = round(y1 / max(1.0, float(row_tolerance or 1.0)))
+    order = normalize_reading_order(order)
+    if order == READING_ORDER_RTL:
+        return (row, -x1, y1)
+    if order == READING_ORDER_LTR:
+        return (row, x1, y1)
+    if order == READING_ORDER_TTB:
+        return (y1, x1, -x2)
+    return (row, x1, y1)
+
+
+def sort_blocks_for_reading_order(blocks: Sequence[object], order: str = READING_ORDER_AUTO, row_tolerance: float = 40.0) -> Tuple[List[object], str]:
+    resolved = infer_reading_order(blocks, order)
+    return sorted(list(blocks or []), key=lambda b: reading_order_key(b, resolved, row_tolerance)), resolved
+
 def resolve_writing_mode(mode: Optional[str], text: str, box_size: Optional[Tuple[float, float]] = None) -> str:
     mode = normalize_writing_mode(mode)
     if mode != WRITING_MODE_AUTO:
@@ -206,6 +281,101 @@ def normalize_vertical_punctuation(text: str) -> str:
         out = out.replace(src, dst)
     return out
 
+
+def vertical_tate_chu_yoko_groups(text: str) -> List[Dict[str, object]]:
+    """Find short ASCII digit/Latin punctuation runs that should stay upright in vertical text.
+
+    This is a renderer-neutral tate-chu-yoko hint: the current Qt renderer can
+    consume it when available, while QA/PSD/API paths can already expose the
+    intent. Groups are intentionally limited to 2 characters, matching common
+    manga lettering for dates, issue numbers, and compact !?/!! marks.
+    """
+    groups: List[Dict[str, object]] = []
+    text = normalize_vertical_punctuation(text or "")
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch.isascii() and (ch.isdigit() or ch.isalpha() or ch in "!?+-"):
+            j = i + 1
+            while j < len(text) and j - i < 2 and text[j].isascii() and (text[j].isdigit() or text[j].isalpha() or text[j] in "!?+-"):
+                j += 1
+            if j - i >= 2:
+                groups.append({"start": i, "end": j, "text": text[i:j], "orientation": "upright_compact"})
+                i = j
+                continue
+        i += 1
+    return groups
+
+
+def effect_margin_px(font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0) -> float:
+    fs = max(1.0, float(font_size or 1.0))
+    shadow_offset = shadow_offset or (0.0, 0.0)
+    sx = abs(float(shadow_offset[0] if len(shadow_offset) > 0 else 0.0))
+    sy = abs(float(shadow_offset[1] if len(shadow_offset) > 1 else 0.0))
+    return max(0.0, float(padding or 0.0)) + fs * max(0.0, float(stroke_width or 0.0)) + fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(sx, sy)
+
+
+def safe_inner_bounds(box_size: Tuple[float, float], font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0) -> Tuple[Tuple[float, float], float]:
+    """Return effect-aware inner width/height and total margin for diagnostics."""
+    w, h = box_size or (0.0, 0.0)
+    margin = effect_margin_px(font_size, stroke_width, shadow_radius, shadow_offset, padding)
+    return (max(1.0, float(w or 0.0) - 2 * margin), max(1.0, float(h or 0.0) - 2 * margin)), margin
+
+
+def lettering_quality_score(overflow: bool, missing_glyphs: Sequence[str] = (), contrast_ratio_value: float = 7.0, effect_margin: float = 0.0, box_size: Tuple[float, float] = (0.0, 0.0)) -> float:
+    """Small 0..1 score used by QA/API to sort lettering issues."""
+    score = 1.0
+    if overflow:
+        score -= 0.35
+    if missing_glyphs:
+        score -= min(0.30, 0.08 * len(set(missing_glyphs)))
+    if contrast_ratio_value < 4.5:
+        score -= min(0.25, (4.5 - contrast_ratio_value) / 10.0)
+    min_side = max(1.0, min(float(box_size[0] or 0.0), float(box_size[1] or 0.0)))
+    if effect_margin > min_side * 0.18:
+        score -= 0.15
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+
+def vertical_punctuation_adjustment(ch: str, font_size: float = 24.0) -> Dict[str, float | bool | str]:
+    """Return renderer-neutral positioning hints for vertical punctuation.
+
+    Qt text items can use these values for custom painting later, while QA, PSD
+    handoff, and tests can already reason about punctuation that should be
+    centered, rotated, or hung inside vertical CJK columns.
+    """
+    cls = vertical_punctuation_class(ch)
+    fs = max(1.0, float(font_size or 1.0))
+    out: Dict[str, float | bool | str] = {"class": cls, "dx": 0.0, "dy": 0.0, "rotate_degrees": 0.0, "scale": 1.0, "hang": False}
+    if cls == "center":
+        out.update({"dx": -0.12 * fs, "dy": -0.08 * fs})
+        if ch in {"、", "。", "，", "．"}:
+            out.update({"dx": 0.18 * fs, "dy": -0.18 * fs, "hang": True})
+    elif cls == "rotate":
+        out.update({"rotate_degrees": 90.0})
+        if ch in VERTICAL_OPEN_TO_CLOSE or ch in set(VERTICAL_OPEN_TO_CLOSE.values()):
+            out.update({"dy": -0.05 * fs, "scale": 0.96})
+    return out
+
+
+def vertical_bracket_pair_hints(text: str) -> List[Dict[str, int | str]]:
+    """Pair simple Japanese/Chinese brackets for vertical-layout diagnostics."""
+    stack: List[Tuple[str, int]] = []
+    pairs: List[Dict[str, int | str]] = []
+    close_to_open = {v: k for k, v in VERTICAL_OPEN_TO_CLOSE.items()}
+    for idx, ch in enumerate(normalize_vertical_punctuation(text or "")):
+        if ch in VERTICAL_OPEN_TO_CLOSE:
+            stack.append((ch, idx))
+        elif ch in close_to_open:
+            want = close_to_open[ch]
+            for pos in range(len(stack) - 1, -1, -1):
+                open_ch, open_idx = stack[pos]
+                if open_ch == want:
+                    pairs.append({"open_index": open_idx, "close_index": idx, "open": open_ch, "close": ch})
+                    del stack[pos:]
+                    break
+    return pairs
 
 def vertical_punctuation_class(ch: str) -> str:
     if ch in VERTICAL_CENTER_PUNCT:
@@ -422,6 +592,66 @@ def optimal_kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_B
         i = j
     return [ln for ln in lines if ln]
 
+def split_long_word(word: str, max_chars: int, marker: str = "‐") -> List[str]:
+    """Split a single long Latin token at readable boundaries for narrow bubbles.
+
+    This is a dependency-free fallback inspired by Koharu word-splitting requests:
+    prefer camelCase, separators, and vowel/consonant-ish boundaries before hard
+    splitting. CJK text is handled by character wrapping elsewhere.
+    """
+    word = (word or "").replace("\u200b", "")
+    max_chars = max(2, int(max_chars or 2))
+    if len(word) <= max_chars:
+        return [word] if word else []
+    pieces: List[str] = []
+    rest = word
+    vowels = set("aeiouAEIOU")
+    while len(rest) > max_chars:
+        window = rest[:max_chars]
+        cut = -1
+        for i in range(len(window) - 1, max(1, max_chars // 2), -1):
+            if window[i] in "-_/:\u00ad" or (window[i - 1].islower() and window[i].isupper()) or (window[i - 1] in vowels and window[i] not in vowels):
+                cut = i + (0 if window[i] in "-_/:" else 0)
+                break
+        if cut <= 1:
+            cut = max_chars - 1
+        chunk = rest[:cut].rstrip("-_/:\u00ad")
+        if chunk and not chunk.endswith(marker):
+            chunk += marker
+        pieces.append(chunk)
+        rest = rest[cut:].lstrip("-_/:\u00ad")
+    if rest:
+        pieces.append(rest)
+    return [p for p in pieces if p]
+
+
+def wrap_latin_text(text: str, max_chars: int, split_long_words: bool = True) -> List[str]:
+    lines: List[str] = []
+    for para in (text or "").splitlines() or [text or ""]:
+        words = para.split()
+        cur = ""
+        for raw_word in words or [para]:
+            word_parts = split_long_word(raw_word, max_chars) if split_long_words and len(raw_word) > max_chars else [raw_word]
+            for word in word_parts:
+                cand = word if not cur else cur + " " + word
+                if cur and len(cand) > max_chars:
+                    lines.append(cur)
+                    cur = word
+                else:
+                    cur = cand
+        if cur:
+            lines.append(cur)
+    return [ln for ln in lines if ln]
+
+
+def resolve_fit_font_size_bounds(style_min: float = 0.0, style_max: float = 0.0, global_min: float = 6.0, global_max: float = 96.0) -> Tuple[float, float]:
+    lo = float(style_min or 0.0) if float(style_min or 0.0) > 0 else float(global_min or 6.0)
+    hi = float(style_max or 0.0) if float(style_max or 0.0) > 0 else float(global_max or 96.0)
+    lo = max(1.0, lo)
+    hi = max(lo, hi)
+    return lo, hi
+
+
 def balance_lines(text: str, max_chars: int, strategy: str = LINE_BREAK_BALANCED) -> str:
     strategy = normalize_line_break_strategy(strategy)
     if strategy == LINE_BREAK_BALANCED:
@@ -467,6 +697,7 @@ def vertical_layout_plan(
         x = -col_idx * col_advance
         for row_idx, ch in enumerate(col):
             cls = vertical_punctuation_class(ch)
+            adjust = vertical_punctuation_adjustment(ch, fs)
             glyphs.append({
                 "char": ch,
                 "column": col_idx,
@@ -476,8 +707,18 @@ def vertical_layout_plan(
                 "punctuation_class": cls,
                 "center": cls in {"center", "punct"},
                 "rotate": cls == "rotate",
-                "hang": cls == "center" and ch in {"、", "。", "，", "．"},
+                "hang": bool(adjust.get("hang")) or (cls == "center" and ch in {"、", "。", "，", "．"}),
+                "offset": {"dx": adjust.get("dx", 0.0), "dy": adjust.get("dy", 0.0)},
+                "rotate_degrees": adjust.get("rotate_degrees", 0.0),
+                "scale": adjust.get("scale", 1.0),
+                "tate_chu_yoko": False,
             })
+    tcy_groups = vertical_tate_chu_yoko_groups(text)
+    for group in tcy_groups:
+        group_text = group.get("text", "")
+        for glyph in glyphs:
+            if glyph.get("char") in group_text:
+                glyph["tate_chu_yoko"] = True
     return {
         "columns": cols,
         "glyphs": glyphs,
@@ -486,6 +727,8 @@ def vertical_layout_plan(
         "column_advance": col_advance,
         "glyph_advance": glyph_advance,
         "strategy": normalize_line_break_strategy(strategy),
+        "tate_chu_yoko_groups": tcy_groups,
+        "bracket_pairs": vertical_bracket_pair_hints(text),
     }
 
 
@@ -566,20 +809,7 @@ def estimate_text_bounds(
         elif contains_cjk(text):
             lines = kinsoku_wrap(text, max_chars, line_break_strategy)
         else:
-            raw = text.splitlines() or [text]
-            lines = []
-            for para in raw:
-                words = para.split()
-                cur = ""
-                for word in words or [para]:
-                    cand = word if not cur else cur + " " + word
-                    if cur and len(cand) > max_chars:
-                        lines.append(cur)
-                        cur = word
-                    else:
-                        cur = cand
-                if cur:
-                    lines.append(cur)
+            lines = wrap_latin_text(text, max_chars, split_long_words=True)
         measured_w = max((len(ln) for ln in lines), default=0) * avg
         measured_h = max(1, len(lines)) * leading
         line_count = len(lines)
@@ -604,6 +834,8 @@ def fit_font_size_to_box(
     padding: float = 0.0,
     stroke_width: float = 0.0,
     line_break_strategy: str = LINE_BREAK_AUTO,
+    shadow_radius: float = 0.0,
+    shadow_offset: Sequence[float] | None = None,
 ) -> Tuple[float, str, TextRenderDiagnostics]:
     fit_mode = normalize_fit_mode(fit_mode)
     line_break_strategy = normalize_line_break_strategy(line_break_strategy)
@@ -620,7 +852,7 @@ def fit_font_size_to_box(
     current = max(lo, min(hi, float(font_size or lo)))
 
     def over(size: float) -> Tuple[bool, Tuple[float, float, int, int]]:
-        b = estimate_text_bounds(text_out, size, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, line_break_strategy=line_break_strategy)
+        b = estimate_text_bounds(text_out, size, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
         return b[0] > box_w or b[1] > box_h, b
 
     if fit_mode == FIT_MODE_PRESERVE:
@@ -631,7 +863,11 @@ def fit_font_size_to_box(
         if bounds[1] > box_h:
             axes.append("y")
         actions = ["shrink_to_fit"] if axes else []
-        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions)
+        inner, margin = safe_inner_bounds((box_w, box_h), current, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
+        quality = lettering_quality_score(is_over, [], 7.0, margin, (box_w, box_h))
+        scale_hint = max(bounds[0] / max(1.0, box_w), bounds[1] / max(1.0, box_h), 1.0)
+        rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
+        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3))
         return current, text_out, diag
 
     target_largest = fit_mode in (FIT_MODE_EXPAND, FIT_MODE_BALANCE)
@@ -647,7 +883,7 @@ def fit_font_size_to_box(
             low = mid
     if fit_mode == FIT_MODE_SHRINK:
         best = min(current, best)
-    bounds = estimate_text_bounds(text_out, best, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, line_break_strategy=line_break_strategy)
+    bounds = estimate_text_bounds(text_out, best, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
     overflow = bounds[0] > box_w or bounds[1] > box_h
     axes = []
     if bounds[0] > box_w:
@@ -661,7 +897,13 @@ def fit_font_size_to_box(
         actions.append("balance_lines")
     if resolved == WRITING_MODE_VERTICAL_RL:
         actions.append("check_vertical_punctuation")
-    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions)
+    inner, margin = safe_inner_bounds((box_w, box_h), best, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
+    quality = lettering_quality_score(overflow, [], 7.0, margin, (box_w, box_h))
+    scale_hint = max(bounds[0] / max(1.0, box_w), bounds[1] / max(1.0, box_h), 1.0)
+    rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
+    if overflow and "resize_to_fit_content" not in actions:
+        actions.append("resize_to_fit_content")
+    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3))
     return best, text_out, diag
 
 

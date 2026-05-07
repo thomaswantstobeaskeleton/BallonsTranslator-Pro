@@ -60,3 +60,14 @@ def test_apply_project_rendering_fixes_honors_selected_rows_and_actions():
     )
     assert applied["applied_count"] == 1
     assert blk.fontformat.writing_mode == "vertical_rl"
+
+
+def test_rendering_qa_reports_quality_and_unsafe_effect_bounds():
+    fmt = FontFormat()
+    fmt.stroke_width = 0.5
+    fmt.shadow_radius = 0.2
+    fmt.text_padding = 10
+    blk = Block("Hello", [0, 0, 60, 35], fmt)
+    diag = analyze_text_block(blk, "p.png", 0, config_obj=Cfg())
+    assert "quality_score" in diag
+    assert "unsafe_effect_bounds" in diag["warnings"]

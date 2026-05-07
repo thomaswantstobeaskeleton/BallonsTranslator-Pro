@@ -73,6 +73,9 @@ class FontFormat(Config):
     writing_mode: str = "auto"
     # Fit behavior used by layout/review: shrink | expand | preserve | balance.
     fit_mode: str = "shrink"
+    # Optional per-style font-size clamps for fitted text. 0 = use project/global engine defaults.
+    fit_font_size_min: float = 0.0
+    fit_font_size_max: float = 0.0
     font_weight: int = None
     line_spacing: float = 1.2
     letter_spacing: float = 1.15

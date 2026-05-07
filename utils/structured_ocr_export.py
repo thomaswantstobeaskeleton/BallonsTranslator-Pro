@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
+from .text_rendering import sort_blocks_for_reading_order
+
 
 def _as_list(value):
     if value is None:
@@ -24,10 +26,13 @@ def _font_dict(block) -> dict:
         "bold": bool(getattr(fmt, "bold", False)),
         "italic": bool(getattr(fmt, "italic", False)),
         "stroke_width": float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        "writing_mode": getattr(fmt, "writing_mode", "auto"),
+        "fit_mode": getattr(fmt, "fit_mode", "shrink"),
+        "line_break_strategy": getattr(fmt, "line_break_strategy", "auto"),
     }
 
 
-def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None) -> dict:
+def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None, reading_order: str = "auto") -> dict:
     """Build a stable JSON-serializable OCR/layout export for LLM and QA tools.
 
     The schema intentionally mirrors project state instead of re-running OCR:
@@ -38,7 +43,9 @@ def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None) 
     out_pages = []
     image_info = getattr(project, "_image_info", {}) or {}
     for page_index, page_name in enumerate(page_names):
-        blocks = list((getattr(project, "pages", {}) or {}).get(page_name, []) or [])
+        original_blocks = list((getattr(project, "pages", {}) or {}).get(page_name, []) or [])
+        blocks, resolved_reading_order = sort_blocks_for_reading_order(original_blocks, reading_order)
+        original_index = {id(block): i for i, block in enumerate(original_blocks)}
         info = image_info.get(page_name, {}) if isinstance(image_info, dict) else {}
         out_blocks = []
         for block_index, block in enumerate(blocks):
@@ -46,6 +53,8 @@ def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None) 
             out_blocks.append(
                 {
                     "index": block_index,
+                    "source_index": original_index.get(id(block), block_index),
+                    "reading_order": resolved_reading_order,
                     "xyxy": _as_list(getattr(block, "xyxy", None)),
                     "lines": _as_list(getattr(block, "lines", None)),
                     "angle": float(getattr(block, "angle", 0.0) or 0.0),
@@ -68,6 +77,7 @@ def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None) 
                 "ignored": bool(info.get("ignored", False)),
                 "finish_code": int(info.get("finish_code", 0) or 0),
                 "completion_state": completion,
+                "reading_order": resolved_reading_order,
                 "blocks": out_blocks,
             }
         )

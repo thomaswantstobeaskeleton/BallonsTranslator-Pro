@@ -573,6 +573,7 @@ class ProgramConfig(Config):
     render_default_writing_mode: str = "auto"
     render_default_fit_mode: str = "shrink"
     render_default_line_break_strategy: str = "auto"
+    render_default_reading_order: str = "auto"
     render_overflow_warnings: bool = True
     render_diagnostics_overlay: bool = False
     render_default_font_family: str = ""
@@ -704,7 +705,7 @@ CONFIG_KEY_ORDER = (
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
-    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",

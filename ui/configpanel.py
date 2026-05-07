@@ -115,10 +115,14 @@ class ConfigSubBlock(Widget):
         self.name = name
         if name is not None:
             textlabel = ConfigTextLabel(name, _config_font_size(CONFIG_FONTSIZE_CONTENT), QFont.Weight.Normal)
+            textlabel.setWordWrap(True)
             self.name_label = textlabel
             layout.addWidget(textlabel)
         if discription is not None:
-            layout.addWidget(ConfigTextLabel(discription, _config_font_size(CONFIG_FONTSIZE_CONTENT)-2))
+            desc_label = ConfigTextLabel(discription, _config_font_size(CONFIG_FONTSIZE_CONTENT)-2)
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("color: gray;")
+            layout.addWidget(desc_label)
         if insert_stretch:
             layout.insertStretch(-1)
         if isinstance(widget, QWidget):
@@ -126,6 +130,12 @@ class ConfigSubBlock(Widget):
         else:
             layout.addLayout(widget)
         self.widget = widget
+        tooltip_parts = [part for part in (name, discription) if part]
+        if tooltip_parts:
+            tooltip = "\n".join(tooltip_parts)
+            self.setToolTip(tooltip)
+            if isinstance(widget, QWidget):
+                widget.setToolTip(widget.toolTip() or tooltip)
         self.setContentsMargins(*content_margins)
 
     def setIdx(self, idx0: int, idx1: int) -> None:
@@ -140,6 +150,9 @@ class ConfigSubBlock(Widget):
 def combobox_with_label(sel: List[str], name: str, discription: str = None, vertical_layout: bool = False, target_block: QWidget = None, fix_size: bool = True, parent: QWidget = None, insert_stretch: bool = False) -> Tuple[ConfigComboBox, QWidget]:
     combox = ConfigComboBox(fix_size=fix_size, scrollWidget=parent)
     combox.addItems(sel)
+    if fix_size:
+        combox.setMinimumWidth(min(max(CONFIG_COMBOBOX_MIDEAN, 220), CONFIG_COMBOBOX_LONG))
+    combox.currentTextChanged.connect(lambda text, c=combox: c.setToolTip(text))
     if target_block is None:
         sublock = ConfigSubBlock(combox, name, discription, vertical_layout=vertical_layout, insert_stretch=insert_stretch)
         sublock.layout().setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -832,14 +845,15 @@ class ConfigPanel(Widget):
         )
         self.vertical_cjk_punctuation_hang_checker.stateChanged.connect(self.on_vertical_cjk_punctuation_hang_changed)
 
-        generalConfigPanel.addTextLabel(self.tr('Rendering / Text Formatting'))
+        generalConfigPanel.addTextLabel(self.tr('Project text rendering defaults'))
+        generalConfigPanel.addSectionDescription(self.tr('These are defaults for new styles/batch rendering. The right-side text panel controls the current style or selected textbox override.'))
         self.render_default_font_edit = QLineEdit(self)
         self.render_default_font_edit.setPlaceholderText(self.tr('Empty = use project/default font'))
         self.render_default_font_edit.textChanged.connect(self.on_render_default_font_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.render_default_font_edit,
-            self.tr('Rendering font'),
-            discription=self.tr('Default translated-text font family used by new manga presets and batch rendering helpers.')
+            self.tr('Default rendering font'),
+            discription=self.tr('Project/global default translated-text font family used by new manga presets and batch rendering helpers. Current textbox font is changed in the right text panel.')
         ))
         self.render_default_writing_mode_combo = QComboBox(self)
         for label, value in [(self.tr('Auto'), 'auto'), (self.tr('Horizontal LTR'), 'horizontal_ltr'), (self.tr('Vertical RL'), 'vertical_rl'), (self.tr('RTL'), 'rtl')]:
@@ -848,7 +862,7 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.render_default_writing_mode_combo,
             self.tr('Default writing mode'),
-            discription=self.tr('Auto uses script plus text-box geometry; per-textbox settings can override it.')
+            discription=self.tr('Default for new styles. Auto uses script plus text-box geometry; current textbox/style overrides are in the right text panel.')
         ))
         self.render_default_fit_mode_combo = QComboBox(self)
         for label, value in [(self.tr('Shrink to fit'), 'shrink'), (self.tr('Expand to fill'), 'expand'), (self.tr('Preserve size'), 'preserve'), (self.tr('Balance lines'), 'balance')]:
@@ -857,7 +871,7 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.render_default_fit_mode_combo,
             self.tr('Default fit mode'),
-            discription=self.tr('Controls whether auto-layout shrinks, expands, preserves, or balances text in boxes.')
+            discription=self.tr('Default for new styles. Controls whether auto-layout shrinks, expands, preserves, or balances text in boxes; current selection overrides live in the right panel.')
         ))
         self.render_default_line_break_combo = QComboBox(self)
         for label, value in [(self.tr('Auto'), 'auto'), (self.tr('Strict CJK kinsoku'), 'cjk_strict'), (self.tr('Balanced lettering'), 'balanced'), (self.tr('Loose SFX'), 'loose')]:
@@ -866,7 +880,16 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.render_default_line_break_combo,
             self.tr('Default line-break strategy'),
-            discription=self.tr('Controls CJK punctuation guards, dangling final lines, and loose SFX wrapping for new text styles.')
+            discription=self.tr('Default for new styles. Controls CJK punctuation guards, dangling final lines, and loose SFX wrapping; current selection overrides live in the right panel.')
+        ))
+        self.render_default_reading_order_combo = QComboBox(self)
+        for label, value in [(self.tr('Auto'), 'auto'), (self.tr('Manga RTL columns'), 'rtl'), (self.tr('LTR rows'), 'ltr'), (self.tr('Top-to-bottom/webtoon'), 'ttb')]:
+            self.render_default_reading_order_combo.addItem(label, value)
+        self.render_default_reading_order_combo.currentIndexChanged.connect(self.on_render_default_reading_order_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_reading_order_combo,
+            self.tr('Default textbox reading order'),
+            discription=self.tr('Used by structured OCR export, automation APIs, and review handoffs so agents read manga pages in the intended order.')
         ))
         self.render_default_stroke_width_spin = QDoubleSpinBox(self)
         self.render_default_stroke_width_spin.setRange(0.0, 1.0)
@@ -911,9 +934,6 @@ class ConfigPanel(Widget):
         self.render_fallback_emoji_edit = QLineEdit(self)
         self.render_fallback_emoji_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_emoji', text))
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_emoji_edit, self.tr('Emoji/symbol fallback fonts'), discription=self.tr('Comma-separated emoji/symbol fallback font families.')))
-        google_stub = QLabel(self.tr('Google/Web fonts: planned; use local installed fonts or the existing font installer for now.'))
-        generalConfigPanel.addSublock(ConfigSubBlock(google_stub, self.tr('Web font support'), discription=self.tr('Future stub only: no network font UI is exposed until download/cache handling is complete.')))
-
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
         self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
@@ -1119,6 +1139,9 @@ class ConfigPanel(Widget):
         global_fntfmt_layout.addWidget(sublock, 10, 0)
 
         global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 11, 0)
+
+        generalConfigPanel.addTextLabel(self.tr('Advanced auto-layout engine'))
+        generalConfigPanel.addSectionDescription(self.tr('Engine-level layout tuning. These affect automatic layout calculations globally; per-style overrides such as writing mode, fit mode, line breaks, spacing, stroke, and fallback fonts are in the right text panel.'))
 
         self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'),
                 discription=self.tr('When on: scale font size to fit the speech bubble and wrap lines to the balloon shape. When off: use global font size and still wrap to the balloon (text may overflow if too long). Works with "Text in box" = Auto fit to box.'))
@@ -1832,6 +1855,8 @@ class ConfigPanel(Widget):
         pcfg.render_default_fit_mode = str(self.render_default_fit_mode_combo.currentData() or 'shrink')
     def on_render_default_line_break_changed(self):
         pcfg.render_default_line_break_strategy = str(self.render_default_line_break_combo.currentData() or 'auto')
+    def on_render_default_reading_order_changed(self):
+        pcfg.render_default_reading_order = str(self.render_default_reading_order_combo.currentData() or 'auto')
     def on_render_default_stroke_width_changed(self):
         pcfg.render_default_stroke_width = float(self.render_default_stroke_width_spin.value())
     def on_render_default_shadow_radius_changed(self):
@@ -2060,6 +2085,9 @@ class ConfigPanel(Widget):
             self.render_default_fit_mode_combo.setCurrentIndex(max(0, idx))
             idx = self.render_default_line_break_combo.findData(getattr(pcfg, 'render_default_line_break_strategy', 'auto'))
             self.render_default_line_break_combo.setCurrentIndex(max(0, idx))
+            if hasattr(self, 'render_default_reading_order_combo'):
+                idx = self.render_default_reading_order_combo.findData(getattr(pcfg, 'render_default_reading_order', 'auto'))
+                self.render_default_reading_order_combo.setCurrentIndex(max(0, idx))
             self.render_default_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_stroke_width', 0.08)))
             self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))

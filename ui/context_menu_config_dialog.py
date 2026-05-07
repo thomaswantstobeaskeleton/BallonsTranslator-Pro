@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QMenu,
     QPlainTextEdit,
+    QLineEdit,
 )
 
 from utils.config import pcfg, save_config, CONTEXT_MENU_DEFAULT, parse_context_run_macros
@@ -160,6 +161,14 @@ class ContextMenuConfigDialog(QDialog):
         pinned_layout.addWidget(clear_pinned_btn)
         layout.addWidget(pinned_group)
 
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel(self.tr("Filter actions:")))
+        self._filter_edit = QLineEdit(self)
+        self._filter_edit.setPlaceholderText(self.tr("Search menu actions, categories, or action IDs..."))
+        self._filter_edit.textChanged.connect(self._apply_filter)
+        filter_row.addWidget(self._filter_edit, 1)
+        layout.addLayout(filter_row)
+
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel(self.tr("Quick profiles:")))
         btn_edit = QPushButton(self.tr("Editing-focused"))
@@ -183,21 +192,26 @@ class ContextMenuConfigDialog(QDialog):
         content_layout = QVBoxLayout(content)
         content_layout.setSpacing(12)
 
+        self._filter_rows = []
         for cat_title, items in CONTEXT_MENU_ITEMS:
             group = QGroupBox(self.tr(cat_title))
             group_layout = QVBoxLayout(group)
             for key, label in items:
-                row = QHBoxLayout()
+                row_widget = QWidget(group)
+                row = QHBoxLayout(row_widget)
+                row.setContentsMargins(0, 0, 0, 0)
                 cb = QCheckBox(self.tr(label))
+                cb.setToolTip(self.tr(f"Canvas context menu action: {label} ({key})"))
                 cb.setChecked(pcfg.context_menu.get(key, True))
                 self._checkboxes[key] = cb
-                row.addWidget(cb)
+                row.addWidget(cb, 1)
                 pin_btn = QPushButton(self.tr("Pin to top"))
-                pin_btn.setMaximumWidth(90)
+                pin_btn.setToolTip(self.tr("Show this action at the top of the canvas context menu."))
+                pin_btn.setMinimumWidth(96)
                 pin_btn.clicked.connect(lambda checked=False, k=key: self._pin_key(k))
                 row.addWidget(pin_btn)
-                row.addStretch(1)
-                group_layout.addLayout(row)
+                group_layout.addWidget(row_widget)
+                self._filter_rows.append((group, row_widget, cat_title, key, label))
             content_layout.addWidget(group)
 
         content_layout.addStretch(1)
@@ -232,6 +246,17 @@ class ContextMenuConfigDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._refresh_pinned_list()
+
+    def _apply_filter(self, text: str = None):
+        needle = (text if text is not None else self._filter_edit.text()).strip().lower()
+        visible_by_group = {}
+        for group, row_widget, cat_title, key, label in getattr(self, '_filter_rows', []):
+            haystack = f"{cat_title} {key} {label}".lower()
+            visible = not needle or needle in haystack
+            row_widget.setVisible(visible)
+            visible_by_group[group] = visible_by_group.get(group, False) or visible
+        for group, visible in visible_by_group.items():
+            group.setVisible(visible)
 
     def _apply_profile(self, profile: str):
         editing_keys = {

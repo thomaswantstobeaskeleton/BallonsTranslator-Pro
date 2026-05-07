@@ -152,6 +152,24 @@ def ffmt_change_fit_mode(param_name: str, values: str, act_ffmt: FontFormat, is_
         if hasattr(blkitem, "blk") and blkitem.blk is not None:
             blkitem.blk.fontformat.fit_mode = mode
 
+
+@font_formating(push_undostack=True)
+def ffmt_change_fit_font_size_min(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        v = max(0.0, float(value or 0.0))
+        blkitem.fontformat.fit_font_size_min = v
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.fit_font_size_min = v
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_fit_font_size_max(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        v = max(0.0, float(value or 0.0))
+        blkitem.fontformat.fit_font_size_max = v
+        if hasattr(blkitem, "blk") and blkitem.blk is not None:
+            blkitem.blk.fontformat.fit_font_size_max = v
+
 @font_formating(push_undostack=True)
 def ffmt_change_text_padding(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
     for blkitem, value in zip(blkitems, values):
