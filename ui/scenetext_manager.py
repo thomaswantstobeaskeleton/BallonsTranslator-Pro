@@ -40,6 +40,7 @@ from utils.text_rendering import (
     resolve_writing_mode,
 )
 from utils.line_breaking import split_long_token_with_hyphenation
+from utils.textbox_masking import centered_resize_xyxy, mask_aware_textbox_diagnostics
 from utils.layout_review_agent import (
     BlockSnapshot,
     ExternalReviewProvider,
@@ -632,6 +633,8 @@ class SceneTextManager(QObject):
             self.canvas.set_writing_mode_signal.connect(self.onSetWritingMode)
         if hasattr(self.canvas, "recenter_text_in_box_signal"):
             self.canvas.recenter_text_in_box_signal.connect(self.onRecenterTextInBox)
+        if hasattr(self.canvas, "fit_to_mask_safe_box_signal"):
+            self.canvas.fit_to_mask_safe_box_signal.connect(self.onFitToMaskSafeBox)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
         self.canvas.incanvas_selection_changed.connect(self.on_incanvas_selection_changed)
@@ -1328,6 +1331,14 @@ class SceneTextManager(QObject):
             fit_dict = fit_diag.to_dict()
         except Exception:
             fit_dict = {}
+        mask_diag = mask_aware_textbox_diagnostics(
+            box_size,
+            (float(fit_dict.get('measured_bounds', est or (0.0, 0.0))[0]) if fit_dict.get('measured_bounds') else (est or (0.0, 0.0))[0],
+             float(fit_dict.get('measured_bounds', est or (0.0, 0.0))[1]) if fit_dict.get('measured_bounds') else (est or (0.0, 0.0))[1]),
+            getattr(getattr(blk, 'blk', None), 'text_mask', None),
+            effect_margin=float(fit_dict.get('effect_margin', 0.0) or 0.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+        )
         style = {
             'font_family': getattr(ff, 'font_family', ''),
             'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
@@ -1343,6 +1354,7 @@ class SceneTextManager(QObject):
             'ink_clip_risk': fit_dict.get('ink_clip_risk', False),
             'preset_suggestion': fit_dict.get('preset_suggestion', ''),
             'safe_inner_bounds': fit_dict.get('safe_inner_bounds', []),
+            'mask_diagnostics': mask_diag,
         }
         return BlockSnapshot(
             block_index=blk.idx,
@@ -1359,6 +1371,33 @@ class SceneTextManager(QObject):
             font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
             quality_score=float(fit_dict.get('quality_score', 1.0) or 1.0),
         )
+
+    def onFitToMaskSafeBox(self):
+        """Grow selected text boxes when text eraser masks leave too little visible lettering area."""
+        selected = self.canvas.selected_text_items()
+        if not selected:
+            return
+        actions = []
+        for blkitem in selected:
+            try:
+                snap = self._layout_review_snapshot_for_item(blkitem)
+                mask_diag = (snap.text_style or {}).get('mask_diagnostics') or {}
+                if not mask_diag.get('mask_overflow'):
+                    continue
+                rec = mask_diag.get('recommended_box_size') or []
+                if len(rec) < 2:
+                    continue
+                actions.append(ReviewAction(
+                    action='resize_to_mask_safe_box',
+                    block_index=blkitem.idx,
+                    args={'width': float(rec[0]), 'height': float(rec[1])},
+                    reason='Fit selected textbox to mask-visible safe area.',
+                ))
+            except Exception as e:
+                LOGGER.debug('fit-to-mask-safe-box skipped block idx=%s: %s', getattr(blkitem, 'idx', -1), e)
+        if actions:
+            self._apply_layout_review_actions(actions, selected)
+            self.canvas.setProjSaveState(False)
 
     def review_and_fix_selected_textboxes(
         self,
@@ -1637,7 +1676,7 @@ class SceneTextManager(QObject):
                 scale = float(action.args.get("scale", 1.0) or 1.0)
                 if scale <= 0 or abs(scale - 1.0) < 1e-6:
                     continue
-            elif action.action == "resize_to_recommended_box":
+            elif action.action in ("resize_to_recommended_box", "resize_to_mask_safe_box"):
                 width = float(action.args.get("width", 0.0) or 0.0)
                 height = float(action.args.get("height", 0.0) or 0.0)
                 if width <= 0 or height <= 0:
@@ -1671,7 +1710,7 @@ class SceneTextManager(QObject):
                 self.onAutoFitFontToBox()
             if grouped["resize_to_fit_content"]:
                 self.onResizeToFitContent()
-            for action in grouped["resize_to_recommended_box"]:
+            for action in grouped["resize_to_recommended_box"] + grouped["resize_to_mask_safe_box"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
                     continue
@@ -1680,10 +1719,9 @@ class SceneTextManager(QObject):
                 new_h = max(1.0, float(action.args.get("height", rect.height()) or rect.height()))
                 if new_w <= rect.width() * 1.01 and new_h <= rect.height() * 1.01:
                     continue
-                cx = rect.x() + rect.width() / 2.0
-                cy = rect.y() + rect.height() / 2.0
                 blkitem.oldRect = rect
-                blkitem.setRect([cx - new_w / 2.0, cy - new_h / 2.0, new_w, new_h], repaint=True)
+                x1, y1, x2, y2 = centered_resize_xyxy([rect.x(), rect.y(), rect.x() + rect.width(), rect.y() + rect.height()], [new_w, new_h])
+                blkitem.setRect([x1, y1, x2 - x1, y2 - y1], repaint=True)
                 self.canvas.push_undo_command(ReshapeItemCommand(blkitem))
             if grouped["center_in_bubble"] or grouped["recenter"]:
                 self.onCenterInBubble()

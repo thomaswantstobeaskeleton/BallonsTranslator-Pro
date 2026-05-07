@@ -43,6 +43,12 @@ KOREAN_RE = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
 RTL_RE = re.compile(r"[\u0590-\u05ff\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
 OPENING_PUNCT = set("([{（［｛〈《「『【〔〖〝‘“")
 CLOSING_PUNCT = set(")]},.!?:;、。，．！？：；⁈⁉‼⁇…）］｝〉》」』】〕〗〟’”")
+# Basic kinsoku shori sets for manga lettering.  These extend generic
+# punctuation bans with Japanese small kana, iteration/prolongation marks,
+# and dash-like marks that should not be stranded at the start/end of a
+# balanced line.
+KINSOKU_PROHIBITED_LINE_START = CLOSING_PUNCT | set("ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヶヵゝゞ々ーｰ゛゜ヽヾ・゠〰〜～")
+KINSOKU_PROHIBITED_LINE_END = OPENING_PUNCT | set("〔〖〘〚〝‘“")
 VERTICAL_PUNCT_MAP = {
     "?!": "⁈",
     "!?": "⁉",
@@ -666,12 +672,12 @@ def kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_AUTO) -> 
             continue
         candidate = cur + tok
         if cur and len(candidate) > max_chars:
-            if strategy != LINE_BREAK_LOOSE and tok in CLOSING_PUNCT:
+            if strategy != LINE_BREAK_LOOSE and tok in KINSOKU_PROHIBITED_LINE_START:
                 cur += tok
                 lines.append(cur)
                 cur = ""
                 continue
-            if strategy != LINE_BREAK_LOOSE and cur[-1:] in OPENING_PUNCT:
+            if strategy != LINE_BREAK_LOOSE and cur[-1:] in KINSOKU_PROHIBITED_LINE_END:
                 cur += tok
                 continue
             lines.append(cur)
@@ -682,10 +688,10 @@ def kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_AUTO) -> 
         lines.append(cur)
 
     for i in range(1, len(lines)):
-        while strategy != LINE_BREAK_LOOSE and lines[i] and lines[i][0] in CLOSING_PUNCT and len(lines[i - 1]) < max_chars + 2:
+        while strategy != LINE_BREAK_LOOSE and lines[i] and lines[i][0] in KINSOKU_PROHIBITED_LINE_START and len(lines[i - 1]) < max_chars + 2:
             lines[i - 1] += lines[i][0]
             lines[i] = lines[i][1:]
-        if strategy != LINE_BREAK_LOOSE and lines[i - 1].endswith(tuple(OPENING_PUNCT)) and lines[i]:
+        if strategy != LINE_BREAK_LOOSE and lines[i - 1].endswith(tuple(KINSOKU_PROHIBITED_LINE_END)) and lines[i]:
             lines[i - 1] += lines[i][0]
             lines[i] = lines[i][1:]
     lines = [ln for ln in lines if ln]
@@ -711,10 +717,10 @@ def line_break_opportunities(text: str, strategy: str = LINE_BREAK_AUTO) -> List
         next_ch = text[idx]
         allowed = True
         reason = "default"
-        if strategy != LINE_BREAK_LOOSE and next_ch in CLOSING_PUNCT:
+        if strategy != LINE_BREAK_LOOSE and next_ch in KINSOKU_PROHIBITED_LINE_START:
             allowed = False
             reason = "kinsoku_no_line_start_closing_punctuation"
-        elif strategy != LINE_BREAK_LOOSE and prev_ch in OPENING_PUNCT:
+        elif strategy != LINE_BREAK_LOOSE and prev_ch in KINSOKU_PROHIBITED_LINE_END:
             allowed = False
             reason = "kinsoku_no_line_end_opening_punctuation"
         elif _is_cjk_char(prev_ch) or _is_cjk_char(next_ch):
@@ -786,9 +792,9 @@ def optimal_kinsoku_wrap(text: str, max_chars: int, strategy: str = LINE_BREAK_B
         if len(line) > max_chars + 2:
             return False
         if strategy != LINE_BREAK_LOOSE:
-            if line[0] in CLOSING_PUNCT:
+            if line[0] in KINSOKU_PROHIBITED_LINE_START:
                 return False
-            if line[-1] in OPENING_PUNCT:
+            if line[-1] in KINSOKU_PROHIBITED_LINE_END:
                 return False
         return True
 
@@ -923,12 +929,14 @@ def vertical_layout_plan(
     glyph_advance = fs * max(0.1, float(letter_spacing or 1.0))
     cols = vertical_columns(text, max_chars_per_column, strategy)
     glyphs: List[Dict[str, object]] = []
+    logical_index = 0
     for col_idx, col in enumerate(cols):
         x = -col_idx * col_advance
         for row_idx, ch in enumerate(col):
             cls = vertical_punctuation_class(ch)
             adjust = vertical_punctuation_adjustment(ch, fs)
             glyphs.append({
+                "index": logical_index,
                 "char": ch,
                 "column": col_idx,
                 "row": row_idx,
@@ -942,13 +950,17 @@ def vertical_layout_plan(
                 "rotate_degrees": adjust.get("rotate_degrees", 0.0),
                 "scale": adjust.get("scale", 1.0),
                 "tate_chu_yoko": False,
+                "tate_chu_yoko_group": -1,
             })
+            logical_index += 1
     tcy_groups = vertical_tate_chu_yoko_groups(text)
-    for group in tcy_groups:
-        group_text = group.get("text", "")
+    for group_idx, group in enumerate(tcy_groups):
+        start = int(group.get("start", -1))
+        end = int(group.get("end", -1))
         for glyph in glyphs:
-            if glyph.get("char") in group_text:
+            if start <= int(glyph.get("index", -1)) < end:
                 glyph["tate_chu_yoko"] = True
+                glyph["tate_chu_yoko_group"] = group_idx
     return {
         "columns": cols,
         "glyphs": glyphs,

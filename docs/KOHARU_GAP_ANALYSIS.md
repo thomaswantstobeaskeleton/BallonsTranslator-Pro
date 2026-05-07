@@ -1,6 +1,6 @@
 # Koharu Gap Analysis and Implementation Audit
 
-_Last audited: 2026-05-07 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (652 all-state issues/PRs scanned, including #660 through #1)._
+_Last audited: 2026-05-07 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (249 non-PR all-state issues refreshed via REST API, with prior PR references retained)._
 
 ## Audit scope
 
@@ -16,6 +16,24 @@ The repository already had substantial Koharu-inspired foundations before this p
 | Effect-aware fit diagnostics | Fit-to-box now accounts for shadow radius/offset as well as stroke/padding, and diagnostics include recommended box size plus a scale hint for resize/review actions. | #630 centering/fitting inconsistencies, #637 mask/collision-aware sizing groundwork, #640 fixed font options | `utils/text_rendering.py`, `utils/rendering_qa.py`, `tests/test_text_rendering.py` |
 | QA/API export metadata | Rendering QA now exposes recommended box size/scale hints, while structured OCR exports include writing mode, fit mode, line-break strategy, source order, and resolved reading order for headless agents. | #649/#648 project-wide text fixes, #660 reading order, #612 API workflow | `utils/rendering_qa.py`, `utils/structured_ocr_export.py`, `ui/mainwindow.py` |
 | Archive export workflow | Batch export dialog now supports manga-reader CBZ archives in addition to ZIP, with clearer archive wording and backend status messages. | #626 streaming ZIP export, #610 bulk comic/archive workflow, #591 export/interoperability requests | `ui/export_dialog.py`, `ui/mainwindow.py` |
+
+## Latest implementation pass (2026-05-07 continued: mask-aware overflow and textbox safety)
+
+| Area | Implemented | Koharu issue inspiration | Files |
+| --- | --- | --- | --- |
+| Mask-aware textbox fit diagnostics | Added reusable text-mask diagnostics that convert text eraser masks into visible textbox bounds, report hidden/edge-erased mask ratios, detect overflow against the mask-visible area, and recommend centered box growth for clipped lettering. | #646 eraser/mask pain points, #636 textbox placement, #637/#630 overflow and collision-safe sizing, #594 advanced formatting | `utils/textbox_masking.py`, `utils/rendering_qa.py`, `tests/test_textbox_masking.py`, `tests/test_rendering_qa.py` |
+| Layout review mask fixes | Layout review snapshots now include mask diagnostics; the heuristic planner emits `mask_visible_area_overflow` / `text_mask_erases_edge` issues with `resize_to_mask_safe_box` and padding actions, and scene application can execute those fixes with undoable centered box resizing. | #649 global font-size/style cleanup, #648 whole-project alignment/style changes, #636 text boxes snapping/placement, #646 eraser tool workflow | `utils/layout_review_agent.py`, `ui/scenetext_manager.py`, `tests/test_rendering_qa.py` |
+| User-visible mask-safe textbox action | Added a canvas context-menu command **Format → Fit box to visible mask area** plus context-menu customization entry, giving editors a direct one-click repair for text boxes whose text eraser/mask clips stroke, shadow, or overflow-safe lettering. | #646 eraser tool problems, #636 text box movement/placement, #601 editing workflow | `ui/canvas.py`, `ui/scenetext_manager.py`, `utils/config.py`, `ui/context_menu_config_dialog.py` |
+| Rendering QA / automation metadata | Rendering QA rows and local API `list_rendering_issues` now expose mask diagnostics and mask-visible area ratios so headless agents can prioritize boxes where masks, padding, effects, and overflow interact badly. | #612 automation/API workflow, #649 project-wide text cleanup, #594 renderer diagnostics | `utils/rendering_qa.py`, `ui/mainwindow.py` |
+
+## Latest implementation pass (2026-05-07 continued: workflow presets and vertical lettering hints)
+
+| Area | Implemented | Koharu issue inspiration | Files |
+| --- | --- | --- | --- |
+| Vertical CJK lettering quality | Extended kinsoku wrapping with Japanese small-kana/prolongation/iteration mark line-start bans; corrected vertical tate-chu-yoko grouping to use logical glyph indices; structured OCR/headless exports now include resolved writing mode, vertical columns, tate-chu-yoko groups, bracket pairs, spacing/padding/fallback/preset metadata for renderer-aware agents. | #594 advanced text formatting, #597 text direction toggle, #602 vertical/RTL export fidelity groundwork | `utils/text_rendering.py`, `utils/structured_ocr_export.py`, `tests/test_text_rendering.py`, `tests/test_structured_ocr_export.py` |
+| Workflow preset UX | Added a reusable workflow-preset backend and Pipeline Insights controls for **Apply** and **Apply + Run** presets, including a no-AI Lettering QA pass for rendering review/export-only work. Existing title-bar run presets now share the same backend and persist stage settings. | #592 workflow presets, #612 granular workflow control, #649/#648 project-wide style/QA cleanup | `utils/workflow_presets.py`, `ui/pipeline_insights_widget.py`, `ui/mainwindow.py`, `tests/test_workflow_presets.py` |
+| Automation/API workflow | Added local API `pipeline_presets` list/apply/run actions returning current stage vectors, enabling headless clients to switch staged manga workflows without UI clicks. | #612 automation/API, #592 workflow presets | `ui/mainwindow.py`, `utils/workflow_presets.py` |
+| Renderer diagnostics robustness | Fixed the renderer diagnostics overlay label to reference the active font format correctly while displaying mode/line-break/bounds/missing-glyph info. | #594/#649 diagnostics and text QA | `ui/textitem.py` |
 
 ## Latest implementation pass (2026-05-07 continued: reusable presets and font workflow)
 
@@ -73,8 +91,8 @@ The repository already had substantial Koharu-inspired foundations before this p
 | PSD/export | **Partially implemented and improved** | Layered PSD handoff manifests/Photoshop JSX, editable text metadata, export manifests, current-page render API, ZIP/CBZ batch archive workflow, API archive export, optional clean/mask helper image export, and persistent open-output-folder workflow. | Native PSD text layer writer and streaming archive writer remain deferred. |
 | Settings/config | **Implemented and improved** | Dedicated rendering defaults include font, writing mode, fit mode, line break, reading order, effects, overflow warnings, diagnostics overlay, script fallback chains, recent/favorite fonts, and user-saved manga lettering presets. | Per-project profile import/export and model/provider wizard remain future work. |
 | Keyboard/tool UX | **Partially implemented** | Existing shortcut conflict tests and text-field guard behavior remain in place; no shortcut ambiguity changes were introduced in this pass. | Broader one-owner QAction/QShortcut cleanup is deferred to a focused shortcut pass. |
-| Automation/API/headless | **Implemented and improved** | Existing local API supports project open/run/edit/export/review/render/QA/fixes; `list_pages` exposes page states and ordered textboxes, `recent_projects` exposes reopenable project metadata for agents/onboarding flows, and archive/ZIP/CBZ export is now callable headlessly. | Event streaming/progress subscription and MCP server parity are deferred. |
-| Workflow enhancements from issues | **Improved this pass** | Reading-order-aware exports/API reduce manual agent cleanup; ZIP/CBZ archive export reduces comic delivery steps; the side text editor now has configurable comfort padding; `recent_projects` helps agents/onboarding flows reopen projects safely. | Bulk parent/child CBZ project processing and provider/model setup wizard are next candidates. |
+| Automation/API/headless | **Implemented and improved** | Existing local API supports project open/run/edit/export/review/render/QA/fixes; `list_pages` exposes page states and ordered textboxes, `recent_projects` exposes reopenable project metadata for agents/onboarding flows, archive/ZIP/CBZ export is callable headlessly, and `pipeline_presets` now lists/applies/runs staged workflows. | Event streaming/progress subscription and MCP server parity are deferred. |
+| Workflow enhancements from issues | **Improved this pass** | Reading-order-aware exports/API reduce manual agent cleanup; ZIP/CBZ archive export reduces comic delivery steps; the side text editor has configurable comfort padding; `recent_projects` helps agents reopen projects safely; Pipeline Insights workflow presets reduce staged pipeline setup to one click. | User-defined workflow preset editor, bulk parent/child CBZ processing, and provider/model setup wizard are next candidates. |
 
 ## Issue-inspired items implemented in this pass
 
@@ -90,6 +108,9 @@ The repository already had substantial Koharu-inspired foundations before this p
 - **#594/#595 typography workflow**: visual-advance fit diagnostics, letter-spacing review fixes, persistent favorite/recent lettering fonts, and custom saved presets improve final lettering and reduce font-selection clicks.
 - **#593/#612 preset workflow**: custom manga presets are saved from the text panel, reused in batch style override/layout review, and exposed to automation clients for headless style consistency.
 - **#626/#610/#591 export workflow**: API archive export and open-output-folder settings make rendered/CBZ/ZIP handoff faster and more discoverable.
+- **#594/#597 vertical lettering**: kinsoku wrapping now handles small-kana/prolongation/iteration line-start bans, tate-chu-yoko groups are index-precise, and structured OCR exports carry vertical render hints for headless agents.
+- **#592/#612 workflow presets**: Pipeline Insights and the local API can apply/run staged workflow presets, including a no-AI Lettering QA preset for faster review/export passes.
+- **#646/#636/#637/#630 mask-aware overflow**: text eraser masks now feed rendering QA and layout review, and editors get a visible **Fit box to visible mask area** action for overflow/clipping around masked text boxes.
 
 ## Deferred with reasons
 
