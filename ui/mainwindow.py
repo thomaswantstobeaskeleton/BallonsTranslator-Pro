@@ -869,6 +869,7 @@ class MainWindow(mainwindow_cls):
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
             'apply_rendering_preset': self._api_apply_rendering_preset,
+            'rendering_presets': self._api_rendering_presets,
             'fix_rendering_issues': self._api_fix_rendering_issues,
             'export_rendering_qa': self._api_export_rendering_qa,
             'apply_project_rendering_fixes': self._api_apply_project_rendering_fixes,
@@ -959,6 +960,24 @@ class MainWindow(mainwindow_cls):
             result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)))
             self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
             return {'ok': True, **(result or {})}
+        if kind in {'archive', 'zip', 'cbz'}:
+            import tempfile, zipfile
+            archive_format = 'cbz' if kind == 'cbz' or str((body or {}).get('archive_format', '')).lower() == 'cbz' else 'zip'
+            archive_path = str((body or {}).get('archive_path', '') or '').strip()
+            out_dir = str((body or {}).get('out_dir', '') or '').strip()
+            if not out_dir:
+                out_dir = tempfile.mkdtemp(prefix='bt_export_')
+            result = self._do_batch_export(out_dir, ext=str((body or {}).get('ext', '') or '').strip().lower() or None, also_pdf=bool((body or {}).get('also_pdf', False)), show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)))
+            if not archive_path:
+                archive_path = osp.join(self.imgtrans_proj.directory, 'exports', ('exported.cbz' if archive_format == 'cbz' else 'exported.zip'))
+            os.makedirs(osp.dirname(archive_path), exist_ok=True)
+            with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, _dirs, files in os.walk(out_dir):
+                    for fn in sorted(files):
+                        fp = osp.join(root, fn)
+                        zf.write(fp, osp.relpath(fp, out_dir))
+            self.pipelineInsightsPanel.add_event('API', self.tr('Archive export via API: {0}').format(archive_path))
+            return {'ok': True, 'archive_path': archive_path, 'archive_format': archive_format, **(result or {})}
         if kind in {'current_page', 'render_current_page'}:
             return self._api_render_current_page_ui(body)
         if kind in {'structured_ocr', 'ocr_json'}:
@@ -1173,6 +1192,7 @@ class MainWindow(mainwindow_cls):
             indices=indices,
             only_auto_sized=bool((body or {}).get('only_auto_sized', False)),
             dry_run=bool((body or {}).get('dry_run', False)),
+            config_obj=pcfg,
         )
         if result.get('changed') and not result.get('dry_run'):
             if self.imgtrans_proj.current_img in (result.get('touched_pages') or []):
@@ -1186,18 +1206,75 @@ class MainWindow(mainwindow_cls):
     def _api_apply_rendering_preset(self, body: dict):
         return self._api_call_ui(self._api_apply_rendering_preset_ui, body)
 
+    def _api_rendering_presets(self, body: dict):
+        return self._api_call_ui(self._api_rendering_presets_ui, body)
+
+    def _api_rendering_presets_ui(self, body: dict):
+        from utils.text_rendering import manga_presets, preset_from_font_format, preset_id_from_label, sanitize_manga_preset
+        from utils.rendering_preset_io import delete_custom_preset, import_preset_pack, preset_font_diagnostics, write_preset_pack
+        action = str((body or {}).get('action', 'list') or 'list').strip().lower()
+        if action == 'list':
+            presets = manga_presets(pcfg)
+            diagnostics = preset_font_diagnostics(presets, getattr(shared, 'FONT_FAMILIES', None) or [])
+            return {'ok': True, 'presets': presets, 'count': len(presets), 'font_diagnostics': diagnostics}
+        if action == 'save_current':
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+                raise ValueError('open a project and select a page first')
+            idx = int((body or {}).get('index', 0) or 0)
+            blks = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
+            if idx < 0 or idx >= len(blks):
+                raise ValueError('invalid index')
+            name = str((body or {}).get('name', '') or '').strip() or f'Preset {idx + 1}'
+            custom = dict(getattr(pcfg, 'render_custom_manga_presets', {}) or {})
+            preset_id = preset_id_from_label(name, list(custom.keys()))
+            custom[preset_id] = preset_from_font_format(blks[idx].fontformat, label=name)
+            pcfg.render_custom_manga_presets = custom
+            save_config()
+            return {'ok': True, 'preset_id': preset_id, 'preset': custom[preset_id], 'count': len(custom)}
+        if action == 'save':
+            name = str((body or {}).get('name', '') or '').strip() or 'Custom preset'
+            preset_data = dict((body or {}).get('preset', {}) or {})
+            custom = dict(getattr(pcfg, 'render_custom_manga_presets', {}) or {})
+            preset_id = str((body or {}).get('preset_id', '') or '').strip() or preset_id_from_label(name, list(custom.keys()))
+            if not preset_id.startswith('custom:'):
+                preset_id = 'custom:' + preset_id
+            custom[preset_id] = sanitize_manga_preset(preset_data, label=name)
+            pcfg.render_custom_manga_presets = custom
+            save_config()
+            return {'ok': True, 'preset_id': preset_id, 'preset': custom[preset_id], 'count': len(custom)}
+        if action == 'export':
+            path = str((body or {}).get('path', '') or '').strip()
+            if not path:
+                raise ValueError('path is required')
+            pack = write_preset_pack(pcfg, path, include_builtins=bool((body or {}).get('include_builtins', False)))
+            diagnostics = preset_font_diagnostics(pack.get('presets', {}), getattr(shared, 'FONT_FAMILIES', None) or [])
+            return {'ok': True, 'path': pack.get('path', path), 'count': len(pack.get('presets', {}) or {}), 'font_diagnostics': diagnostics}
+        if action == 'import':
+            path = str((body or {}).get('path', '') or '').strip()
+            if not path:
+                raise ValueError('path is required')
+            result = import_preset_pack(pcfg, path, overwrite=bool((body or {}).get('overwrite', False)))
+            save_config()
+            return {'ok': True, **result}
+        if action == 'delete':
+            result = delete_custom_preset(pcfg, str((body or {}).get('preset_id', '') or ''))
+            save_config()
+            return {'ok': True, **result}
+        raise ValueError(f'unknown rendering_presets action: {action}')
+
     def _api_apply_rendering_preset_ui(self, body: dict):
-        from utils.text_rendering import MANGA_PRESETS
+        from utils.text_rendering import manga_presets
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
             raise ValueError('open a project and select a page first')
         preset_id = str((body or {}).get('preset', '') or '').strip()
-        if preset_id not in MANGA_PRESETS:
+        presets = manga_presets(pcfg)
+        if preset_id not in presets:
             raise ValueError(f'unknown preset: {preset_id}')
         indices = (body or {}).get('indices')
         page = self.imgtrans_proj.current_img
         blks = self.imgtrans_proj.pages.get(page, [])
         target = list(range(len(blks))) if indices is None else [int(i) for i in indices]
-        preset = MANGA_PRESETS[preset_id]
+        preset = presets[preset_id]
         applied = 0
         for idx in target:
             if idx < 0 or idx >= len(blks):
@@ -1351,7 +1428,7 @@ class MainWindow(mainwindow_cls):
 
     def on_open_batch_style_override(self):
         """Apply Koharu-inspired fixed font/alignment options across a page/project."""
-        from utils.text_rendering import MANGA_PRESETS
+        from utils.text_rendering import manga_presets
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             self.pipelineInsightsPanel.add_warning('BATCH_STYLE', self.tr('Open a project before applying a batch text style override.'))
             return
@@ -1409,8 +1486,11 @@ class MainWindow(mainwindow_cls):
 
         preset = QComboBox(dlg)
         preset.addItem(self.tr('Keep'), '')
-        for preset_id, preset_def in MANGA_PRESETS.items():
-            preset.addItem(self.tr(preset_def.get('label', preset_id)), preset_id)
+        for preset_id, preset_def in manga_presets(pcfg).items():
+            label = str(preset_def.get('label', preset_id) or preset_id)
+            if preset_id.startswith('custom:'):
+                label = self.tr('Custom: ') + label
+            preset.addItem(self.tr(label), preset_id)
 
         fallback_chain = QLineEdit(dlg)
         fallback_chain.setPlaceholderText(self.tr('Leave blank to keep current per-style fallback chain'))
@@ -1501,7 +1581,7 @@ class MainWindow(mainwindow_cls):
         if auto_fit.isChecked() and 'font_size' not in updates:
             updates['auto_fit_font_size'] = True
         from utils.text_style_batch import apply_text_style_batch
-        result = apply_text_style_batch(self.imgtrans_proj, updates, pages=page_names, only_auto_sized=only_auto.isChecked())
+        result = apply_text_style_batch(self.imgtrans_proj, updates, pages=page_names, only_auto_sized=only_auto.isChecked(), config_obj=pcfg)
         changed = int(result.get('changed', 0))
         if self.imgtrans_proj.current_img in page_names:
             self.st_manager.updateSceneTextitems()
@@ -3883,6 +3963,7 @@ class MainWindow(mainwindow_cls):
                     self.imgtrans_proj.clean_mask_and_inpainted_cache()
                     msg += '\n' + self.tr('Cache cleaned.')
                 QMessageBox.information(self, self.tr('Export'), msg)
+                self._open_export_folder_if_requested(zip_path)
         finally:
             if temp_export_dir and osp.isdir(temp_export_dir):
                 try:
@@ -3890,6 +3971,22 @@ class MainWindow(mainwindow_cls):
                     shutil.rmtree(temp_export_dir, ignore_errors=True)
                 except Exception:
                     pass
+
+    def _open_export_folder_if_requested(self, path: str):
+        if not getattr(pcfg, 'export_open_folder_after_batch', False):
+            return
+        try:
+            target = path if osp.isdir(path) else osp.dirname(path)
+            if not target:
+                return
+            if sys.platform.startswith('win'):
+                os.startfile(target)  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', target])
+            else:
+                subprocess.Popen(['xdg-open', target])
+        except Exception as e:
+            LOGGER.warning('Could not open export folder %s: %s', path, e)
 
     def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False):
         try:
@@ -3975,6 +4072,7 @@ class MainWindow(mainwindow_cls):
                 msg += '\n' + self.tr('Cache cleaned.')
             if show_message:
                 QMessageBox.information(self, self.tr('Export'), msg)
+                self._open_export_folder_if_requested(out_dir)
             return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'helper_paths': helper_paths, 'manifest': manifest, 'marked_exported': marked_exported}
         except Exception as e:
             LOGGER.exception(e)

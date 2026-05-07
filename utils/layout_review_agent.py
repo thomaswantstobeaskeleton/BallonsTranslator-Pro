@@ -15,6 +15,7 @@ ActionType = Literal[
     "switch_writing_mode",
     "recenter",
     "increase_padding",
+    "tighten_letter_spacing",
     "balance_lines",
     "apply_manga_preset",
     "set_line_break_strategy",
@@ -185,6 +186,17 @@ class LayoutReviewPlanner:
                     reason="Compatibility action: reduce font size to fit current box before resizing.",
                 )
             )
+            letter_spacing = float((blk.text_style or {}).get("letter_spacing", 1.0) or 1.0)
+            if overflow_x and letter_spacing > 0.92:
+                from .text_rendering import recommended_tight_letter_spacing
+                actions.append(
+                    ReviewAction(
+                        action="tighten_letter_spacing",
+                        block_index=blk.block_index,
+                        args={"letter_spacing": recommended_tight_letter_spacing(letter_spacing, max(est_w / max(1.0, bw), 1.0))},
+                        reason="Tighten tracking slightly before shrinking/resizing wide manga lettering.",
+                    )
+                )
             if (blk.text_style or {}).get("fit_mode") == "balance" or (blk.text_style or {}).get("line_break_strategy") != "balanced":
                 actions.append(
                     ReviewAction(
@@ -480,6 +492,7 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
+        "tighten_letter_spacing": [],
         "balance_lines": [],
         "apply_manga_preset": [],
         "set_line_break_strategy": [],
@@ -509,6 +522,7 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
+        "tighten_letter_spacing": [],
         "balance_lines": [],
         "apply_manga_preset": [],
         "set_line_break_strategy": [],

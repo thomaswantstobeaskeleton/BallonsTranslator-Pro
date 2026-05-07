@@ -215,3 +215,63 @@ def test_fit_diagnostics_expose_clip_risk_and_preset_suggestion():
     d = diag.to_dict()
     assert d["ink_clip_risk"] is True
     assert d["preset_suggestion"] in {"sfx_bold", "caption_box", "default_manga_bubble"}
+
+
+def test_glyph_advance_units_treats_cjk_punctuation_as_compact():
+    from utils.text_rendering import glyph_advance_units, estimate_text_bounds
+    assert glyph_advance_units("漢字。", "horizontal_ltr") < glyph_advance_units("漢字漢", "horizontal_ltr")
+    plain = estimate_text_bounds("漢字漢", 20, "horizontal_ltr", 200, 80)
+    punct = estimate_text_bounds("漢字。", 20, "horizontal_ltr", 200, 80)
+    assert punct[0] < plain[0]
+
+
+def test_recommended_tight_letter_spacing_is_conservative():
+    from utils.text_rendering import recommended_tight_letter_spacing
+    assert recommended_tight_letter_spacing(1.0, 1.08) < 1.0
+    assert recommended_tight_letter_spacing(1.0, 1.30) >= 0.88
+
+
+def test_custom_manga_preset_sanitization_and_merge():
+    from types import SimpleNamespace
+    from utils.text_rendering import manga_presets, preset_from_font_format, preset_id_from_label, sanitize_manga_preset
+    from utils.fontformat import FontFormat
+
+    pid = preset_id_from_label("My SFX!!", ["custom:my_sfx"])
+    assert pid == "custom:my_sfx_2"
+    preset = sanitize_manga_preset({"label": "Boom", "font_size": "48", "writing_mode": "vertical-rl", "alignment": 9, "frgb": [300, -5, 20]})
+    assert preset["font_size"] == 48.0
+    assert preset["writing_mode"] == "vertical_rl"
+    assert preset["alignment"] == 2
+    assert preset["frgb"] == [255, 0, 20]
+    fmt = FontFormat(font_size=31, stroke_width=0.12, writing_mode="rtl", letter_spacing=0.95)
+    saved = preset_from_font_format(fmt, "RTL caption")
+    cfg = SimpleNamespace(render_custom_manga_presets={"custom:rtl_caption": saved})
+    presets = manga_presets(cfg)
+    assert "default_manga_bubble" in presets
+    assert presets["custom:rtl_caption"]["writing_mode"] == "rtl"
+    assert presets["custom:rtl_caption"]["stroke_width"] == 0.12
+
+
+def test_rendering_preset_pack_roundtrip_and_font_diagnostics(tmp_path):
+    from types import SimpleNamespace
+    from utils.rendering_preset_io import import_preset_pack, preset_font_diagnostics, write_preset_pack
+
+    cfg = SimpleNamespace(render_custom_manga_presets={
+        "custom:boom": {"label": "Boom", "font_family": "Missing Manga", "font_size": 42, "writing_mode": "auto"}
+    })
+    path = tmp_path / "pack.json"
+    pack = write_preset_pack(cfg, str(path))
+    assert pack["format"].startswith("ballonstranslator")
+    assert path.exists()
+    diag = preset_font_diagnostics(pack["presets"], ["Arial"])
+    assert diag["checked"] is True
+    assert diag["missing"]["custom:boom"] == "Missing Manga"
+
+    target = SimpleNamespace(render_custom_manga_presets={})
+    result = import_preset_pack(target, str(path))
+    assert result["imported_count"] == 1
+    assert target.render_custom_manga_presets["custom:boom"]["font_size"] == 42.0
+
+    result2 = import_preset_pack(target, str(path), overwrite=False)
+    assert result2["imported_count"] == 1
+    assert any(pid.startswith("custom:boom_") for pid in target.render_custom_manga_presets)

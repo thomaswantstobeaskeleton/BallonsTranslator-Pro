@@ -1746,6 +1746,15 @@ class SceneTextManager(QObject):
                 blkitem.fontformat.line_break_strategy = strategy
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.line_break_strategy = strategy
+            for action in grouped["tighten_letter_spacing"]:
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                spacing = max(0.80, min(float(getattr(blkitem.fontformat, 'letter_spacing', 1.0) or 1.0), float(action.args.get("letter_spacing", 0.94) or 0.94)))
+                blkitem.fontformat.letter_spacing = spacing
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.letter_spacing = spacing
+                blkitem.set_fontformat(blkitem.fontformat)
             for action in grouped["balance_lines"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -1763,8 +1772,9 @@ class SceneTextManager(QObject):
                 if blkitem is None:
                     continue
                 preset_id = str(action.args.get("preset", "default_manga_bubble") or "default_manga_bubble")
-                from utils.text_rendering import MANGA_PRESETS
-                preset = MANGA_PRESETS.get(preset_id)
+                from utils.text_rendering import manga_presets
+                from utils.config import pcfg
+                preset = manga_presets(pcfg).get(preset_id)
                 if not preset:
                     continue
                 for key, value in preset.items():
