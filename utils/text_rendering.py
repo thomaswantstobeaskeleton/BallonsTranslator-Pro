@@ -141,6 +141,8 @@ class TextRenderDiagnostics:
     quality_score: float = 1.0
     recommended_box_size: Tuple[float, float] = (0.0, 0.0)
     box_scale_hint: float = 1.0
+    ink_clip_risk: bool = False
+    preset_suggestion: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -162,6 +164,8 @@ class TextRenderDiagnostics:
             "quality_score": self.quality_score,
             "recommended_box_size": list(self.recommended_box_size),
             "box_scale_hint": self.box_scale_hint,
+            "ink_clip_risk": bool(self.ink_clip_risk),
+            "preset_suggestion": self.preset_suggestion,
         }
 
 
@@ -273,6 +277,63 @@ def resolve_writing_mode(mode: Optional[str], text: str, box_size: Optional[Tupl
     if contains_cjk(text) and h > max(w * 1.15, 1.0):
         return WRITING_MODE_VERTICAL_RL
     return WRITING_MODE_HORIZONTAL_LTR
+
+
+def locale_aware_upper(text: str, locale: str = "") -> str:
+    """Uppercase text without damaging scripts that have no useful uppercase form.
+
+    Koharu issue #572/#567 focused on universal uppercase behavior. Python's
+    `str.upper()` is acceptable for Latin/Greek/Cyrillic, but applying it to
+    manga text containing Japanese/Chinese/Korean, Arabic, Hebrew, or emoji can
+    change punctuation expectations without improving lettering. This helper
+    uppercases only contiguous cased-script runs and keeps other scripts as-is.
+    Turkish/Azeri dotted-i is handled explicitly when requested.
+    """
+    text = text or ""
+    loc = (locale or "").lower()
+    turkic = loc.startswith(("tr", "az"))
+    out: List[str] = []
+    for ch in text:
+        if not ch:
+            continue
+        cat = unicodedata.category(ch)
+        name = unicodedata.name(ch, "")
+        if turkic and ch == "i":
+            out.append("İ")
+        elif turkic and ch == "ı":
+            out.append("I")
+        elif cat.startswith("L") and not (_is_cjk_char(ch) or KOREAN_RE.match(ch) or RTL_RE.match(ch)) and any(script in name for script in ("LATIN", "GREEK", "CYRILLIC")):
+            out.append(ch.upper())
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def suggest_manga_preset(text: str, box_size: Tuple[float, float] = (0.0, 0.0), writing_mode: str = WRITING_MODE_AUTO) -> str:
+    """Suggest a lettering preset from script, geometry, and SFX-like content."""
+    text = text or ""
+    w, h = box_size or (0.0, 0.0)
+    resolved = resolve_writing_mode(writing_mode, text, box_size)
+    stripped = re.sub(r"\s+", "", text)
+    emph = sum(1 for ch in stripped if ch in "!！?？⁈⁉‼⁇~～ー—―")
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        return "vertical_cjk_bubble"
+    if len(stripped) <= 8 and (emph >= 2 or stripped.isupper()):
+        return "sfx_bold"
+    if w > 0 and h > 0 and w > h * 2.5:
+        return "caption_box"
+    if len(stripped) <= 12 and max(w, h) < 140:
+        return "small_aside"
+    return "default_manga_bubble"
+
+
+def ink_clip_risk(box_size: Tuple[float, float], measured_bounds: Tuple[float, float], effect_margin: float, threshold_px: float = 1.0) -> bool:
+    """True when stroke/shadow/padding likely clips at the text box edge."""
+    bw, bh = box_size or (0.0, 0.0)
+    mw, mh = measured_bounds or (0.0, 0.0)
+    spare_x = float(bw or 0.0) - float(mw or 0.0)
+    spare_y = float(bh or 0.0) - float(mh or 0.0)
+    return effect_margin > 0 and (spare_x < max(threshold_px, effect_margin * 0.3) or spare_y < max(threshold_px, effect_margin * 0.3))
 
 
 def normalize_vertical_punctuation(text: str) -> str:
@@ -680,6 +741,8 @@ def vertical_layout_plan(
     line_spacing: float = 1.1,
     letter_spacing: float = 1.0,
     strategy: str = LINE_BREAK_CJK_STRICT,
+    rotate_latin: bool = True,
+    punctuation_hang: bool = True,
 ) -> Dict[str, object]:
     """Build a renderer-independent vertical-RL glyph placement plan.
 
@@ -706,8 +769,8 @@ def vertical_layout_plan(
                 "y": row_idx * glyph_advance,
                 "punctuation_class": cls,
                 "center": cls in {"center", "punct"},
-                "rotate": cls == "rotate",
-                "hang": bool(adjust.get("hang")) or (cls == "center" and ch in {"、", "。", "，", "．"}),
+                "rotate": (cls == "rotate") or (rotate_latin and ch.isascii() and ch.isalpha()),
+                "hang": bool(punctuation_hang) and (bool(adjust.get("hang")) or (cls == "center" and ch in {"、", "。", "，", "．"})),
                 "offset": {"dx": adjust.get("dx", 0.0), "dy": adjust.get("dy", 0.0)},
                 "rotate_degrees": adjust.get("rotate_degrees", 0.0),
                 "scale": adjust.get("scale", 1.0),
@@ -729,6 +792,8 @@ def vertical_layout_plan(
         "strategy": normalize_line_break_strategy(strategy),
         "tate_chu_yoko_groups": tcy_groups,
         "bracket_pairs": vertical_bracket_pair_hints(text),
+        "rotate_latin": bool(rotate_latin),
+        "punctuation_hang": bool(punctuation_hang),
     }
 
 
@@ -867,7 +932,11 @@ def fit_font_size_to_box(
         quality = lettering_quality_score(is_over, [], 7.0, margin, (box_w, box_h))
         scale_hint = max(bounds[0] / max(1.0, box_w), bounds[1] / max(1.0, box_h), 1.0)
         rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
-        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3))
+        clip = ink_clip_risk((box_w, box_h), (bounds[0], bounds[1]), margin)
+        if clip and "increase_padding" not in actions:
+            actions.append("increase_padding")
+        preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
+        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
         return current, text_out, diag
 
     target_largest = fit_mode in (FIT_MODE_EXPAND, FIT_MODE_BALANCE)
@@ -903,7 +972,11 @@ def fit_font_size_to_box(
     rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
     if overflow and "resize_to_fit_content" not in actions:
         actions.append("resize_to_fit_content")
-    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3))
+    clip = ink_clip_risk((box_w, box_h), (bounds[0], bounds[1]), margin)
+    if clip and "increase_padding" not in actions:
+        actions.append("increase_padding")
+    preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
+    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
     return best, text_out, diag
 
 

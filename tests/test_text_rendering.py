@@ -185,3 +185,33 @@ def test_split_long_word_respects_soft_hyphen_boundaries():
     parts = split_long_word("extra­ordinary", 7)
     assert len(parts) >= 2
     assert all("­" not in p for p in parts)
+
+
+def test_locale_aware_upper_keeps_cjk_and_handles_turkish_i():
+    from utils.text_rendering import locale_aware_upper
+    assert locale_aware_upper("hello 魔法 i", "en") == "HELLO 魔法 I"
+    assert locale_aware_upper("istanbul ı", "tr") == "İSTANBUL I"
+
+
+def test_suggest_manga_preset_and_ink_clip_risk():
+    from utils.text_rendering import suggest_manga_preset, ink_clip_risk
+    assert suggest_manga_preset("ドン!!", (80, 180), "auto") == "vertical_cjk_bubble"
+    assert suggest_manga_preset("BOOM!!", (90, 70), "horizontal_ltr") == "sfx_bold"
+    assert ink_clip_risk((100, 40), (99, 39), 4) is True
+
+
+def test_vertical_layout_plan_respects_rotate_and_hang_toggles():
+    plan = vertical_layout_plan("A、", 4, font_size=18, rotate_latin=False, punctuation_hang=False)
+    latin = next(g for g in plan["glyphs"] if g["char"] == "A")
+    comma = next(g for g in plan["glyphs"] if g["char"] == "、")
+    assert latin["rotate"] is False
+    assert comma["hang"] is False
+    assert plan["rotate_latin"] is False
+    assert plan["punctuation_hang"] is False
+
+
+def test_fit_diagnostics_expose_clip_risk_and_preset_suggestion():
+    _size, _text, diag = fit_font_size_to_box("BOOM!!", 36, (80, 30), FIT_MODE_PRESERVE, stroke_width=0.2, padding=0)
+    d = diag.to_dict()
+    assert d["ink_clip_risk"] is True
+    assert d["preset_suggestion"] in {"sfx_bold", "caption_box", "default_manga_bubble"}

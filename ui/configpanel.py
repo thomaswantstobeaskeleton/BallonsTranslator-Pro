@@ -919,6 +919,15 @@ class ConfigPanel(Widget):
             discription=self.tr('Draw text box, measured bounds, writing mode, and missing-glyph warnings on the canvas.')
         )
         self.render_diagnostics_overlay_checker.stateChanged.connect(self.on_render_diagnostics_overlay_changed)
+        self.text_editor_top_padding_spin = QSpinBox(self)
+        self.text_editor_top_padding_spin.setRange(0, 80)
+        self.text_editor_top_padding_spin.setSingleStep(2)
+        self.text_editor_top_padding_spin.valueChanged.connect(self.on_text_editor_top_padding_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.text_editor_top_padding_spin,
+            self.tr('Text editor top padding'),
+            discription=self.tr('Adds breathing room above the left text editor list so the first textbox is not pressed against the window edge.')
+        ))
         self.render_fallback_latin_edit = QLineEdit(self)
         self.render_fallback_latin_edit.textChanged.connect(lambda text: self.on_render_fallback_changed('render_fallback_fonts_latin', text))
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_fallback_latin_edit, self.tr('Latin fallback fonts'), discription=self.tr('Comma-separated fallback font families.')))
@@ -1869,6 +1878,16 @@ class ConfigPanel(Widget):
         pcfg.render_diagnostics_overlay = self.render_diagnostics_overlay_checker.isChecked()
     def on_render_fallback_changed(self, attr: str, text: str):
         setattr(pcfg, attr, text or '')
+    def on_text_editor_top_padding_changed(self):
+        pcfg.text_editor_top_padding = int(self.text_editor_top_padding_spin.value())
+        try:
+            parent = self.parent()
+            while parent is not None and not hasattr(parent, 'textPanel'):
+                parent = parent.parent()
+            if parent is not None and hasattr(parent.textPanel, 'textEditList'):
+                parent.textPanel.textEditList.refreshComfortPadding()
+        except Exception:
+            pass
 
     def on_fontcolor_flag_changed(self):
         pcfg.let_fntcolor_flag = self.let_fntcolor_combox.currentIndex()
@@ -2093,6 +2112,8 @@ class ConfigPanel(Widget):
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
             self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
             self.render_diagnostics_overlay_checker.setChecked(bool(getattr(pcfg, 'render_diagnostics_overlay', False)))
+            if hasattr(self, 'text_editor_top_padding_spin'):
+                self.text_editor_top_padding_spin.setValue(int(getattr(pcfg, 'text_editor_top_padding', 14) or 0))
             self.render_fallback_latin_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_latin', '') or ''))
             self.render_fallback_cjk_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_cjk', '') or ''))
             self.render_fallback_korean_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_korean', '') or ''))

@@ -131,9 +131,16 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     recommended_box = list(getattr(fit_diag, "recommended_box_size", (box_w, box_h)))
     if overflow and (recommended_box[0] > box_w * 1.02 or recommended_box[1] > box_h * 1.02):
         suggestions.append({"action": "resize_to_recommended_box", "recommended_box_size": recommended_box, "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0), "reason": "Effect-aware fit diagnostics recommend a larger text box."})
+    if getattr(fit_diag, "ink_clip_risk", False):
+        warnings.append("ink_clip_risk")
+        suggestions.append({"action": "increase_padding", "padding": max(2.0, float(getattr(fmt, "text_padding", 0.0) or 0.0) + 1.0), "reason": "Estimated ink bounds leave too little room for stroke/shadow at the edge."})
     if (inner_bounds[0] < box_w * 0.62 or inner_bounds[1] < box_h * 0.62) and effect_margin > 0:
         warnings.append("unsafe_effect_bounds")
         suggestions.append({"action": "increase_box_or_reduce_effect", "effect_margin": effect_margin, "safe_inner_bounds": list(inner_bounds), "recommended_box_size": recommended_box, "reason": "Stroke/shadow/padding leave little safe text area inside this box."})
+    preset_suggestion = getattr(fit_diag, "preset_suggestion", "") or ""
+    if preset_suggestion and preset_suggestion != getattr(fmt, "preset", ""):
+        if preset_suggestion in {"vertical_cjk_bubble", "sfx_bold", "caption_box"}:
+            suggestions.append({"action": "apply_manga_preset", "preset": preset_suggestion, "reason": "Script/geometry heuristics suggest this manga lettering preset."})
 
     quality_score = lettering_quality_score(overflow, missing, float(effect_suggestion.get("contrast_ratio", 7.0) or 7.0), effect_margin, (box_w, box_h))
 
@@ -141,7 +148,16 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     break_ops = []
     if mode == "vertical_rl":
         max_chars = max(1, int(max(1.0, box_h) / max(1.0, float(getattr(fmt, "font_size", 24.0) or 24.0))))
-        vertical_plan = vertical_layout_plan(text, max_chars, getattr(fmt, "font_size", 24.0), getattr(fmt, "line_spacing", 1.15), getattr(fmt, "letter_spacing", 1.0), getattr(fmt, "line_break_strategy", "auto"))
+        vertical_plan = vertical_layout_plan(
+            text,
+            max_chars,
+            getattr(fmt, "font_size", 24.0),
+            getattr(fmt, "line_spacing", 1.15),
+            getattr(fmt, "letter_spacing", 1.0),
+            getattr(fmt, "line_break_strategy", "auto"),
+            rotate_latin=bool(getattr(config_obj, "vertical_cjk_rotate_latin", True)),
+            punctuation_hang=bool(getattr(config_obj, "vertical_cjk_punctuation_hang", True)),
+        )
     else:
         break_ops = line_break_opportunities(text, getattr(fmt, "line_break_strategy", "auto"))[:24]
 
@@ -172,6 +188,8 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "suggested_font_size": fitted_size,
         "recommended_box_size": recommended_box,
         "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
+        "ink_clip_risk": bool(getattr(fit_diag, "ink_clip_risk", False)),
+        "preset_suggestion": preset_suggestion,
         "suggested_text": fitted_text if fitted_text != text else "",
         "contrast_effect": effect_suggestion,
         "vertical_layout_plan": vertical_plan,
@@ -342,7 +360,7 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
             if "rtl_left_alignment" in diag["warnings"] and wants("set_alignment"):
                 fmt.alignment = 2
                 changed.append("alignment")
-            if "low_padding_with_stroke" in diag["warnings"] and wants("increase_padding"):
+            if ("low_padding_with_stroke" in diag["warnings"] or "ink_clip_risk" in diag["warnings"]) and wants("increase_padding"):
                 fmt.text_padding = max(float(getattr(fmt, "text_padding", 0.0) or 0.0), 2.0)
                 changed.append("text_padding")
             if "horizontal_cjk_in_tall_box" in diag["warnings"] and wants("switch_writing_mode"):

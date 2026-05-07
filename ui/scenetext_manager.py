@@ -1299,6 +1299,67 @@ class SceneTextManager(QObject):
             self._scale_font_to_fit_box(blkitem)
         self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
 
+    def _layout_review_snapshot_for_item(self, blk: TextBlkItem) -> BlockSnapshot:
+        """Build a renderer-aware snapshot for the layout review agent."""
+        abr = blk.absBoundingRect(qrect=True)
+        doc = blk.document()
+        est = None
+        if doc is not None:
+            ds = doc.size()
+            est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
+        text = blk.toPlainText()
+        ff = blk.fontformat
+        box_size = (max(1.0, float(abr.width())), max(1.0, float(abr.height())))
+        try:
+            _fit_size, _fit_text, fit_diag = fit_font_size_to_box(
+                text,
+                max(1.0, float(getattr(ff, 'font_size', blk.font().pointSizeF() or blk.font().pointSize() or 1.0) or 1.0)),
+                box_size,
+                getattr(ff, 'fit_mode', 'shrink'),
+                getattr(ff, 'writing_mode', 'auto'),
+                padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+                stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+                line_spacing=float(getattr(ff, 'line_spacing', 1.2) or 1.2),
+                letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+                line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
+                shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+                shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            )
+            fit_dict = fit_diag.to_dict()
+        except Exception:
+            fit_dict = {}
+        style = {
+            'font_family': getattr(ff, 'font_family', ''),
+            'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
+            'fit_mode': getattr(ff, 'fit_mode', 'shrink'),
+            'stroke_width': getattr(ff, 'stroke_width', 0.0),
+            'text_padding': getattr(ff, 'text_padding', 0.0),
+            'line_spacing': getattr(ff, 'line_spacing', 1.2),
+            'letter_spacing': getattr(ff, 'letter_spacing', 1.0),
+            'line_break_strategy': getattr(ff, 'line_break_strategy', 'auto'),
+            'alignment': getattr(ff, 'alignment', 0),
+            'recommended_box_size': fit_dict.get('recommended_box_size', []),
+            'box_scale_hint': fit_dict.get('box_scale_hint', 1.0),
+            'ink_clip_risk': fit_dict.get('ink_clip_risk', False),
+            'preset_suggestion': fit_dict.get('preset_suggestion', ''),
+            'safe_inner_bounds': fit_dict.get('safe_inner_bounds', []),
+        }
+        return BlockSnapshot(
+            block_index=blk.idx,
+            xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
+            text=text,
+            font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
+            est_text_size=est,
+            bubble_center=self._estimate_block_bubble_center(blk),
+            writing_mode=getattr(ff, 'writing_mode', 'auto'),
+            resolved_writing_mode=resolve_writing_mode(getattr(ff, 'writing_mode', 'auto'), text, box_size),
+            overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
+            measured_bounds=est,
+            text_style=style,
+            font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
+            quality_score=float(fit_dict.get('quality_score', 1.0) or 1.0),
+        )
+
     def review_and_fix_selected_textboxes(
         self,
         max_iters: int = 2,
@@ -1317,39 +1378,7 @@ class SceneTextManager(QObject):
         for i in range(max(1, int(max_iters))):
             snapshots: List[BlockSnapshot] = []
             for blk in selected:
-                abr = blk.absBoundingRect(qrect=True)
-                doc = blk.document()
-                est = None
-                if doc is not None:
-                    ds = doc.size()
-                    est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
-                bubble_center = self._estimate_block_bubble_center(blk)
-                snapshots.append(
-                    BlockSnapshot(
-                        block_index=blk.idx,
-                        xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
-                        text=blk.toPlainText(),
-                        font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
-                        est_text_size=est,
-                        bubble_center=bubble_center,
-                        writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
-                        resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
-                        overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
-                        measured_bounds=est,
-                        text_style={
-                            'font_family': getattr(blk.fontformat, 'font_family', ''),
-                            'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                            'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
-                            'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
-                            'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
-                            'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
-                            'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
-                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
-                        'alignment': getattr(blk.fontformat, 'alignment', 0),
-                        },
-                        font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                    )
-                )
+                snapshots.append(self._layout_review_snapshot_for_item(blk))
             result = planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
             pending_actions = [a for block_result in result.blocks for a in block_result.actions]
             if not pending_actions:
@@ -1370,38 +1399,7 @@ class SceneTextManager(QObject):
         planner = LayoutReviewPlanner()
         snapshots: List[BlockSnapshot] = []
         for blk in selected:
-            abr = blk.absBoundingRect(qrect=True)
-            doc = blk.document()
-            est = None
-            if doc is not None:
-                ds = doc.size()
-                est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
-            snapshots.append(
-                BlockSnapshot(
-                    block_index=blk.idx,
-                    xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
-                    text=blk.toPlainText(),
-                    font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
-                    est_text_size=est,
-                    bubble_center=self._estimate_block_bubble_center(blk),
-                    writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
-                    resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
-                    overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
-                    measured_bounds=est,
-                    text_style={
-                        'font_family': getattr(blk.fontformat, 'font_family', ''),
-                        'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                        'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
-                        'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
-                        'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
-                        'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
-                        'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
-                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
-                        'alignment': getattr(blk.fontformat, 'alignment', 0),
-                    },
-                    font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                )
-            )
+            snapshots.append(self._layout_review_snapshot_for_item(blk))
         return planner.review_page(getattr(self.imgtrans_proj, "current_img", ""), snapshots)
 
     def review_selected_textboxes_with_provider(
@@ -1417,38 +1415,7 @@ class SceneTextManager(QObject):
         selected = self._get_review_target_blocks(target_block_indices)
         snapshots: List[BlockSnapshot] = []
         for blk in selected:
-            abr = blk.absBoundingRect(qrect=True)
-            doc = blk.document()
-            est = None
-            if doc is not None:
-                ds = doc.size()
-                est = (max(0.0, float(ds.width())), max(0.0, float(ds.height())))
-            snapshots.append(
-                BlockSnapshot(
-                    block_index=blk.idx,
-                    xyxy=(abr.x(), abr.y(), abr.x() + abr.width(), abr.y() + abr.height()),
-                    text=blk.toPlainText(),
-                    font_size=max(1.0, float(blk.font().pointSizeF() or blk.font().pointSize() or 1.0)),
-                    est_text_size=est,
-                    bubble_center=self._estimate_block_bubble_center(blk),
-                    writing_mode=getattr(blk.fontformat, 'writing_mode', 'auto'),
-                    resolved_writing_mode=resolve_writing_mode(getattr(blk.fontformat, 'writing_mode', 'auto'), blk.toPlainText(), (abr.width(), abr.height())),
-                    overflow_status=bool(est and (est[0] > abr.width() * 0.98 or est[1] > abr.height() * 0.98)),
-                    measured_bounds=est,
-                    text_style={
-                        'font_family': getattr(blk.fontformat, 'font_family', ''),
-                        'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                        'fit_mode': getattr(blk.fontformat, 'fit_mode', 'shrink'),
-                        'stroke_width': getattr(blk.fontformat, 'stroke_width', 0.0),
-                        'text_padding': getattr(blk.fontformat, 'text_padding', 0.0),
-                        'line_spacing': getattr(blk.fontformat, 'line_spacing', 1.2),
-                        'letter_spacing': getattr(blk.fontformat, 'letter_spacing', 1.0),
-                        'line_break_strategy': getattr(blk.fontformat, 'line_break_strategy', 'auto'),
-                        'alignment': getattr(blk.fontformat, 'alignment', 0),
-                    },
-                    font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(blk.fontformat, 'font_family', ''), blk.toPlainText(), pcfg, getattr(blk.fontformat, 'fallback_font_chain', ''))),
-                )
-            )
+            snapshots.append(self._layout_review_snapshot_for_item(blk))
         provider_impl = provider or self._resolve_review_provider(cfg)
         return provider_impl.review(getattr(self.imgtrans_proj, "current_img", ""), snapshots, cfg)
 

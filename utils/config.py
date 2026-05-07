@@ -586,6 +586,7 @@ class ProgramConfig(Config):
     render_fallback_fonts_korean: str = "Noto Sans CJK KR, Malgun Gothic"
     render_fallback_fonts_rtl: str = "Noto Naskh Arabic, Arial, Segoe UI"
     render_fallback_fonts_emoji: str = "Noto Color Emoji, Segoe UI Emoji, Apple Color Emoji"
+    text_editor_top_padding: int = 14
     # Smooth scroll: animate scroll position on wheel (ms). 0 = off. 80–200 = subtle enhanced feel.
     smooth_scroll_duration_ms: int = 0
     # When True, briefly apply motion blur to scroll area viewport during scroll (can be costly).
@@ -705,7 +706,7 @@ CONFIG_KEY_ORDER = (
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
-    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "text_editor_top_padding",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",

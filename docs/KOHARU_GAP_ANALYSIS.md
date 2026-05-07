@@ -1,6 +1,6 @@
 # Koharu Gap Analysis and Implementation Audit
 
-_Last audited: 2026-05-07 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (651 all-state issues/PRs scanned, including #660 through #1)._
+_Last audited: 2026-05-07 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (652 all-state issues/PRs scanned, including #660 through #1)._
 
 ## Audit scope
 
@@ -16,6 +16,17 @@ The repository already had substantial Koharu-inspired foundations before this p
 | Effect-aware fit diagnostics | Fit-to-box now accounts for shadow radius/offset as well as stroke/padding, and diagnostics include recommended box size plus a scale hint for resize/review actions. | #630 centering/fitting inconsistencies, #637 mask/collision-aware sizing groundwork, #640 fixed font options | `utils/text_rendering.py`, `utils/rendering_qa.py`, `tests/test_text_rendering.py` |
 | QA/API export metadata | Rendering QA now exposes recommended box size/scale hints, while structured OCR exports include writing mode, fit mode, line-break strategy, source order, and resolved reading order for headless agents. | #649/#648 project-wide text fixes, #660 reading order, #612 API workflow | `utils/rendering_qa.py`, `utils/structured_ocr_export.py`, `ui/mainwindow.py` |
 | Archive export workflow | Batch export dialog now supports manga-reader CBZ archives in addition to ZIP, with clearer archive wording and backend status messages. | #626 streaming ZIP export, #610 bulk comic/archive workflow, #591 export/interoperability requests | `ui/export_dialog.py`, `ui/mainwindow.py` |
+
+## Latest implementation pass (2026-05-07 continued again)
+
+| Area | Implemented | Koharu issue inspiration | Files |
+| --- | --- | --- | --- |
+| Text editor comfort / onboarding polish | Added persistent side text-editor viewport top padding with a live Config control, fixing the first/selected visible textbox feeling pressed into the top edge while preserving compact list density even after scrolling. | #519 workflow/editor polish, #612 fewer-friction setup/API workflow | `ui/textedit_area.py`, `ui/configpanel.py`, `utils/config.py` |
+| Script-aware uppercase lettering | Replaced raw `.upper()` usage in translation post-processing and selected-block uppercase actions with dependency-free locale/script-aware casing that preserves CJK/RTL text and handles Turkish/Azeri dotted-i. | #572/#567 universal locale-aware uppercase conversion | `utils/text_rendering.py`, `ui/mainwindow.py`, `tests/test_text_rendering.py` |
+| Ink-safe typography diagnostics | Renderer fit diagnostics now report `ink_clip_risk` plus `preset_suggestion`; Typography QA and layout review can propose/apply padding and preset actions when strokes/shadows may clip or geometry suggests SFX/caption/vertical presets. | #594 advanced formatting, #630 centering/fitting, #649/#648 project-wide style repair | `utils/text_rendering.py`, `utils/rendering_qa.py`, `utils/layout_review_agent.py`, `ui/scenetext_manager.py`, `tests/test_text_rendering.py` |
+| Configurable vertical punctuation behavior | Vertical layout plans now carry and honor runtime `rotate_latin` and `punctuation_hang` toggles, and QA forwards Config settings into the plan metadata for API/export parity. | #624 advanced typesetting/kinsoku, #602/#583 RTL/CJK layout fidelity | `utils/text_rendering.py`, `utils/rendering_qa.py`, `tests/test_text_rendering.py` |
+| Automation onboarding workflow | Added `POST /recent_projects` with path/existence/project-json metadata so local tools and first-run helpers can list reopenable projects before running pipeline actions. | #612 granular workflow/API, #610 project workflow, #519 fewer manual processing steps | `ui/mainwindow.py` |
+
 
 ## Follow-up implementation pass (2026-05-07 continued)
 
@@ -38,13 +49,13 @@ The repository already had substantial Koharu-inspired foundations before this p
 
 | Workstream | Status | Implemented | Partial / deferred |
 | --- | --- | --- | --- |
-| Advanced manga text rendering / formatting | **Partially implemented and advanced this pass** | Writing modes, vertical CJK plans, kinsoku/balanced wrapping, tate-chu-yoko hints, vertical punctuation offset/rotation/bracket hints, fallback chains, manga presets, fit clamps, effect-aware safe bounds, shadow-aware fit diagnostics, recommended resize hints, and live QA. | Full HarfBuzz/ICU shaping, OpenType vertical alternates, and true ink-bound measurement remain deferred pending optional dependency/runtime design. |
+| Advanced manga text rendering / formatting | **Partially implemented and advanced this pass** | Writing modes, vertical CJK plans, kinsoku/balanced wrapping, tate-chu-yoko hints, configurable latin-rotation/punctuation-hang metadata, vertical punctuation offset/rotation/bracket hints, fallback chains, manga presets, script-aware uppercase conversion, fit clamps, ink-clip risk diagnostics, effect-aware safe bounds, shadow-aware fit diagnostics, recommended resize hints, and live QA. | Full HarfBuzz/ICU shaping, OpenType vertical alternates, and true ink-bound measurement remain deferred pending optional dependency/runtime design. |
 | Layout review agent | **Implemented/verified and advanced** | Selected/page review, heuristic fallback, settings, action application, recommended-box resize, vertical punctuation normalization, RTL alignment, contrast stroke, and richer QA metadata are present. | Visual before/after previews and true mask-aware squeezing still need rendered snapshots/mask geometry. |
 | PSD/export | **Partially implemented and improved** | Layered PSD handoff manifests/Photoshop JSX, editable text metadata, export manifests, current-page render API, ZIP/CBZ batch archive workflow, and optional clean/mask helper image export. | Native PSD text layer writer and streaming archive writer remain deferred. |
 | Settings/config | **Implemented and improved** | Dedicated rendering defaults include font, writing mode, fit mode, line break, reading order, effects, overflow warnings, diagnostics overlay, and script fallback chains. | Per-project profile presets and model/provider wizard remain future work. |
 | Keyboard/tool UX | **Partially implemented** | Existing shortcut conflict tests and text-field guard behavior remain in place; no shortcut ambiguity changes were introduced in this pass. | Broader one-owner QAction/QShortcut cleanup is deferred to a focused shortcut pass. |
-| Automation/API/headless | **Implemented and improved** | Existing local API supports project open/run/edit/export/review/render/QA/fixes; new `list_pages` route exposes page states and ordered textboxes for agents. | Event streaming/progress subscription and MCP server parity are deferred. |
-| Workflow enhancements from issues | **Improved this pass** | Reading-order-aware exports/API reduce manual agent cleanup; ZIP/CBZ archive export reduces comic delivery steps. | Bulk parent/child CBZ project processing and provider/model setup wizard are next candidates. |
+| Automation/API/headless | **Implemented and improved** | Existing local API supports project open/run/edit/export/review/render/QA/fixes; `list_pages` exposes page states and ordered textboxes, and `recent_projects` exposes reopenable project metadata for agents/onboarding flows. | Event streaming/progress subscription and MCP server parity are deferred. |
+| Workflow enhancements from issues | **Improved this pass** | Reading-order-aware exports/API reduce manual agent cleanup; ZIP/CBZ archive export reduces comic delivery steps; the side text editor now has configurable comfort padding; `recent_projects` helps agents/onboarding flows reopen projects safely. | Bulk parent/child CBZ project processing and provider/model setup wizard are next candidates. |
 
 ## Issue-inspired items implemented in this pass
 
@@ -54,7 +65,9 @@ The repository already had substantial Koharu-inspired foundations before this p
 - **#649 / #648 project-wide style cleanup**: extended batch style override and automation so users can adjust font/style/fitting fields across current page or project while optionally limiting changes to auto-sized boxes.
 - **#587 / #558 helper export handoff**: batch export can now include clean/inpainted pages and masks beside rendered pages for downstream PSD/GIMP review.
 - **#591 SVG/XCF interop request**: added an SVG text handoff path with editable translated text, vertical/RTL attributes, and companion diagnostics manifest.
-- **#637/#630/#624 review fixes**: layout review can now turn fit diagnostics into targeted resize actions and apply vertical punctuation, RTL alignment, and contrast-stroke fixes.
+- **#637/#630/#624 review fixes**: layout review can now turn fit diagnostics into targeted resize actions and apply vertical punctuation, RTL alignment, contrast-stroke, ink-safe padding, and preset-suggestion fixes.
+- **#572/#567 locale uppercase**: uppercase post-processing and context actions are now script-aware instead of applying raw uppercase to every character.
+- **#612/#519 workflow polish**: automation can list recent projects and the side text editor has configurable breathing room for faster editing.
 
 ## Deferred with reasons
 

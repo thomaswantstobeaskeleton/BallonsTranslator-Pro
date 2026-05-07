@@ -539,6 +539,18 @@ class TextEditListScrollArea(QScrollArea):
 
         self.setSizePolicy(self.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Expanding)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.refreshComfortPadding()
+
+    def _comfort_top_padding(self) -> int:
+        return max(0, int(getattr(pcfg, 'text_editor_top_padding', 14) or 0))
+
+    def refreshComfortPadding(self):
+        # Reserve breathing room inside the scroll area viewport, not just at
+        # content position 0. This keeps the first visible text pair from
+        # touching the format panel even when the text list is scrolled.
+        top_pad = self._comfort_top_padding()
+        self.setViewportMargins(0, top_pad, 0, 0)
+        self.vlayout.setContentsMargins(0, 0, 3, 0)
 
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.RightButton:
