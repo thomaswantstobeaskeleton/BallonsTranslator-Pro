@@ -1,6 +1,17 @@
 # Koharu Issue Backlog for BallonsTranslator-Pro
 
-_Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issues/PRs, 651 all-state items scanned. This backlog is maintained as an implementation source, not a one-time audit._
+_Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issues/PRs, 652 all-state items scanned. This backlog is maintained as an implementation source, not a one-time audit._
+
+## Newly implemented / advanced in this pass (continued 2026-05-07)
+
+| Issue | Title | Category | Relevant labels | Maps to BT-Pro? | Implemented here? | Priority | Implementation notes | Deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [#572](https://github.com/mayocream/koharu/pull/572) / [#567](https://github.com/mayocream/koharu/pull/567) | Universal locale-aware uppercase conversion | Text rendering / typography / fonts | area: renderer | yes | **yes for dependency-free script-aware path** | P0 | Added `locale_aware_upper()` and wired translation post-processing plus selected-text uppercase actions through it so Latin/Greek/Cyrillic text uppercases without damaging CJK/RTL runs; Turkish/Azeri dotted-i is handled explicitly. | Full ICU locale casing remains deferred until optional dependency policy is settled. |
+| [#594](https://github.com/mayocream/koharu/issues/594) | Advanced text formatting (gradients, line spacing, kerning) | Text rendering / typography / fonts; Text fitting / layout / overflow | renderer, feature request, font | yes | **advanced** | P0 | Fit diagnostics now expose `ink_clip_risk` and `preset_suggestion`; QA/layout review convert those into padding and manga-preset actions for safer outlined/shadowed lettering. | Native kerning/gradient text paint remains a renderer pass. |
+| [#624](https://github.com/mayocream/koharu/pull/624) | Advanced Typesetting / Kinsoku Shori | Vertical CJK / RTL / punctuation | dependencies, area: renderer | yes | **advanced** | P0 | Vertical layout plans now honor configurable latin rotation and punctuation-hanging toggles, and QA forwards the runtime settings into diagnostics/API output. | OpenType vertical alternates and HarfBuzz shaping remain deferred. |
+| [#612](https://github.com/mayocream/koharu/pull/612) | Granular pipeline control and batch process dialog | Automation/API/headless/MCP; UI/UX/editor workflow | area: ui | yes | **advanced** | P1 | Added `POST /recent_projects` so headless/onboarding clients can list valid recent projects with existence metadata before opening/running. | Event streaming and full MCP parity remain deferred. |
+| [#519](https://github.com/mayocream/koharu/issues/519) | Shortcuts for processing | Settings/config/keybinds; UI/UX/editor workflow | ui, feature request, workflow | yes | partial → **workflow polish advanced** | P1 | Fixed the side text editor comfort issue with persistent viewport top padding and a live settings control, improving editing ergonomics without adding shortcut ambiguity. | Broader shortcut ownership cleanup remains a focused future pass. |
+
 
 ## Implemented / advanced in this pass
 
@@ -76,11 +87,12 @@ _Last refreshed: 2026-05-07 via GitHub REST API against `mayocream/koharu` issue
 
 ## Next batch candidates
 
-1. Mask-aware collision detection/squeezing using bubble masks and text bounds (#637).
-2. Before/after thumbnails for checked-row Typography QA fixes (#649/#648/#630).
-3. Native editable PSD text writer or stronger Photoshop/GIMP handoff validation (#587/#558/#602).
-4. Canvas-side text block drag-to-reorder with undo/read-order preview (#601/#660).
-5. HarfBuzz/ICU shaping experiment for Arabic joining and vertical OpenType alternates (#602/#583/#213/#624).
-6. Streaming ZIP/CBZ export with progress/cancel and parent/child batch processing (#626/#610).
-7. Provider/model setup wizard with OCR model recommendation and failure retry diagnostics (#625/#652).
-8. Runtime GPU memory profiles and safer device fallback guidance (#638/#600).
+1. True ink-bound glyph measurement / OpenType shaping for clipping-free advanced formatting (#594/#572/#624).
+2. Mask-aware collision detection/squeezing using bubble masks and text bounds (#637).
+3. Before/after thumbnails for checked-row Typography QA fixes (#649/#648/#630).
+4. Native editable PSD text writer or stronger Photoshop/GIMP handoff validation (#587/#558/#602).
+5. Canvas-side text block drag-to-reorder with undo/read-order preview (#601/#660).
+6. HarfBuzz/ICU shaping experiment for Arabic joining and vertical OpenType alternates (#602/#583/#213/#624).
+7. Streaming ZIP/CBZ export with progress/cancel and parent/child batch processing (#626/#610).
+8. Provider/model setup wizard with OCR model recommendation and failure retry diagnostics (#625/#652).
+9. Runtime GPU memory profiles and safer device fallback guidance (#638/#600).

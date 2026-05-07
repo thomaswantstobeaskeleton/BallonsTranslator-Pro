@@ -74,6 +74,7 @@ from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
+from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
@@ -863,6 +864,7 @@ class MainWindow(mainwindow_cls):
             'layout_review': self._api_layout_review,
             'page_state': self._api_page_state,
             'list_pages': self._api_list_pages,
+            'recent_projects': self._api_recent_projects,
             'export_structured_ocr': self._api_export_structured_ocr,
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
@@ -888,6 +890,23 @@ class MainWindow(mainwindow_cls):
             raise ValueError('path is required')
         self.OpenProj(path)
         return {'opened': path}
+
+    def _api_recent_projects(self, body: dict):
+        return self._api_call_ui(self._api_recent_projects_ui, body)
+
+    def _api_recent_projects_ui(self, body: dict):
+        import os.path as _osp
+        max_items = int((body or {}).get('limit', getattr(pcfg, 'recent_proj_list_max', 14)) or 14)
+        entries = []
+        for path in list(getattr(self.leftBar, 'recent_proj_list', []) or [])[:max(0, max_items)]:
+            path = str(path or '')
+            entries.append({
+                'path': path,
+                'exists': bool(_osp.exists(path)),
+                'is_project_json': path.lower().endswith('.json'),
+                'name': _osp.basename(path.rstrip(_osp.sep)) or path,
+            })
+        return {'recent_projects': entries, 'count': len(entries)}
 
     def _api_run_pipeline(self, body: dict):
         return self._api_call_ui(self._api_run_pipeline_ui, body)
@@ -4545,7 +4564,7 @@ class MainWindow(mainwindow_cls):
         for blk in blk_list:
             blk.translation = self.mtSubWidget.sub_text(blk.translation)
             if pcfg.let_uppercase_flag:
-                blk.translation = blk.translation.upper()
+                blk.translation = locale_aware_upper(blk.translation, getattr(pcfg.module, 'translate_target', ''))
 
     def on_pagtrans_finished(self, page_index: int):
         blk_list = self.imgtrans_proj.get_blklist_byidx(page_index)
@@ -5604,10 +5623,10 @@ class MainWindow(mainwindow_cls):
         for blkitem in blks:
             blk = blkitem.blk
             pw = self.st_manager.pairwidget_list[blkitem.idx]
-            src = pw.e_source.toPlainText().upper()
-            trans = pw.e_trans.toPlainText().upper()
+            src = locale_aware_upper(pw.e_source.toPlainText(), getattr(pcfg.module, 'translate_source', ''))
+            trans = locale_aware_upper(pw.e_trans.toPlainText(), getattr(pcfg.module, 'translate_target', ''))
             if getattr(blk, "text", None) and isinstance(blk.text, list):
-                blk.text = [line.upper() for line in blk.text]
+                blk.text = [locale_aware_upper(line, getattr(pcfg.module, 'translate_source', '')) for line in blk.text]
             blk.translation = trans
             pw.e_source.setPlainText(src)
             pw.e_trans.setPlainText(trans)

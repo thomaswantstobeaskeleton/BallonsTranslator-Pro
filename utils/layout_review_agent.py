@@ -331,6 +331,46 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.10
 
+        if bool((blk.text_style or {}).get("ink_clip_risk", False)):
+            issues.append(
+                ReviewIssue(
+                    code="ink_clip_risk",
+                    severity="warning",
+                    message="Estimated ink bounds may clip stroke, glow, or shadow at the text box edge.",
+                    score_penalty=0.06,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": max(2.0, float((blk.text_style or {}).get("text_padding", 0.0) or 0.0) + 1.0)},
+                    reason="Increase inset before final render so manga effects have safe ink margin.",
+                )
+            )
+            score_before -= 0.06
+
+        suggested_preset = str((blk.text_style or {}).get("preset_suggestion", "") or "")
+        if suggested_preset and suggested_preset != str((blk.text_style or {}).get("preset", "") or ""):
+            if suggested_preset in {"vertical_cjk_bubble", "sfx_bold", "caption_box"}:
+                issues.append(
+                    ReviewIssue(
+                        code="preset_suggestion",
+                        severity="info",
+                        message=f"Renderer diagnostics suggest the {suggested_preset} manga lettering preset.",
+                        score_penalty=0.03,
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="apply_manga_preset",
+                        block_index=blk.block_index,
+                        args={"preset": suggested_preset},
+                        reason="Apply the preset suggested by script, geometry, and lettering diagnostics.",
+                    )
+                )
+                score_before -= 0.03
+
         if float(getattr(blk, "quality_score", 1.0) or 1.0) < 0.7:
             issues.append(
                 ReviewIssue(

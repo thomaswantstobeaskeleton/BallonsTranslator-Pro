@@ -138,3 +138,12 @@ For vector-editor interoperability, **Tools → Export → Export SVG text hando
 ## Layout review resize and punctuation actions
 
 The layout review agent now consumes effect-aware `recommended_box_size` diagnostics. When text cannot fit safely after stroke/shadow/padding are considered, review can propose a targeted **resize to recommended box** action instead of only running generic auto-fit. It also proposes vertical punctuation normalization, RTL right-alignment, low-contrast outline application, and low-quality-score flags so the same conservative fixes are available from UI review, project QA, and automation.
+
+
+## Latest text-formatting and workflow additions
+
+- **Script-aware uppercase:** automatic uppercase post-processing and the selected-block **To uppercase** action now use `locale_aware_upper()`. Latin/Greek/Cyrillic runs are uppercased, CJK/RTL/emoji runs are preserved, and Turkish/Azeri dotted-i casing is handled without requiring ICU.
+- **Ink-safe diagnostics:** fit diagnostics include `ink_clip_risk` when stroke, glow, shadow, or padding leaves too little safe edge margin. Typography QA and layout review can turn that into an **increase padding** action. Diagnostics also include a `preset_suggestion` so SFX, caption, and vertical CJK boxes can be surfaced as one-click preset fixes.
+- **Configurable vertical plans:** `vertical_layout_plan()` now records whether latin glyph rotation and punctuation hanging were enabled, and Typography QA uses the live Config values. This makes UI, API, SVG/PSD handoff, and tests agree on vertical punctuation intent.
+- **Editor comfort setting:** Config → General → Rendering / Text Formatting includes **Text editor top padding**. It updates the side text editor list immediately, fixing the cramped first-visible-row feel even after scrolling while keeping dense manga editing workflows fast.
+- **Automation workflow helper:** local automation clients can call `POST /recent_projects` to retrieve recent project paths, existence checks, and JSON/folder type before opening or running a project.
