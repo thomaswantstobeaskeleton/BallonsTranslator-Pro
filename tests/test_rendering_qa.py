@@ -71,3 +71,44 @@ def test_rendering_qa_reports_quality_and_unsafe_effect_bounds():
     diag = analyze_text_block(blk, "p.png", 0, config_obj=Cfg())
     assert "quality_score" in diag
     assert "unsafe_effect_bounds" in diag["warnings"]
+
+
+def test_rendering_qa_reports_mask_visible_area_overflow_and_fix_grows_box():
+    import numpy as np
+    fmt = FontFormat()
+    fmt.font_size = 28
+    blk = Block("A long masked line", [0, 0, 180, 80], fmt)
+    blk.text_mask = np.zeros((10, 20), dtype=np.uint8)
+    blk.text_mask[2:8, 5:15] = 255
+    diag = analyze_text_block(blk, "p.png", 0, config_obj=Cfg())
+    assert "mask_visible_area_overflow" in diag["warnings"]
+    assert any(s["action"] == "resize_to_mask_safe_box" for s in diag["suggestions"])
+    before_w = blk.xyxy[2] - blk.xyxy[0]
+    result = apply_project_rendering_fixes(
+        Project([blk]),
+        config_obj=Cfg(),
+        selected_fixes=[{"page": "p.png", "index": 0, "actions": ["resize_to_mask_safe_box"]}],
+    )
+    assert result["applied_count"] == 1
+    assert blk.xyxy[2] - blk.xyxy[0] >= before_w
+
+
+def test_layout_review_planner_proposes_mask_safe_box_action():
+    from utils.layout_review_agent import BlockSnapshot, LayoutReviewPlanner
+    planner = LayoutReviewPlanner()
+    result = planner.review_page(
+        "p.png",
+        [BlockSnapshot(
+            block_index=2,
+            xyxy=(0, 0, 180, 80),
+            text="masked",
+            font_size=24,
+            est_text_size=(100, 40),
+            text_style={"mask_diagnostics": {"mask_overflow": True, "recommended_box_size": [220, 90], "mask": {"edge_hidden": True}, "text_padding": 0}},
+        )],
+    )
+    actions = [a.action for a in result.blocks[0].actions]
+    issues = [i.code for i in result.blocks[0].issues]
+    assert "resize_to_mask_safe_box" in actions
+    assert "mask_visible_area_overflow" in issues
+    assert "text_mask_erases_edge" in issues

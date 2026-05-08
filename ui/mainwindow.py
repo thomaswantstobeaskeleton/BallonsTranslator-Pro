@@ -77,6 +77,7 @@ from utils.svg_text_export import build_svg_text_handoff
 from utils.lettering_proof_export import build_lettering_proof_pack
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
+from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
 from modules.text_normalization import normalize_text
@@ -562,6 +563,9 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
         self.pipelineInsightsPanel.open_batch_style_requested.connect(self.on_open_batch_style_override)
         self.pipelineInsightsPanel.open_typography_qa_requested.connect(self.on_open_typography_qa_report)
+        if hasattr(self.pipelineInsightsPanel, 'apply_workflow_preset_requested'):
+            self.pipelineInsightsPanel.apply_workflow_preset_requested.connect(self.on_apply_workflow_preset_requested)
+            self.pipelineInsightsPanel.run_workflow_preset_requested.connect(lambda preset_id: self.on_apply_workflow_preset_requested(preset_id, run_after=True))
         self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
         self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
         self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
@@ -868,6 +872,7 @@ class MainWindow(mainwindow_cls):
             'list_pages': self._api_list_pages,
             'recent_projects': self._api_recent_projects,
             'project_status': self._api_project_status,
+            'pipeline_presets': self._api_pipeline_presets,
             'export_structured_ocr': self._api_export_structured_ocr,
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
@@ -887,6 +892,25 @@ class MainWindow(mainwindow_cls):
             self.pipelineInsightsPanel.add_event('API', self.tr('Local automation API started'))
         except Exception as e:
             self.pipelineInsightsPanel.add_warning('API', self.tr(f'Failed to start automation API: {e}'))
+
+
+    def _api_pipeline_presets(self, body: dict):
+        return self._api_call_ui(self._api_pipeline_presets_ui, body)
+
+    def _api_pipeline_presets_ui(self, body: dict):
+        action = str((body or {}).get('action', 'list') or 'list').strip().lower()
+        if action == 'list':
+            return {'ok': True, 'presets': list_workflow_presets(), 'current': workflow_stage_vector(pcfg.module)}
+        if action in {'apply', 'run'}:
+            preset_id = str((body or {}).get('preset', '') or '').strip()
+            result = apply_workflow_preset(pcfg.module, preset_id)
+            self._sync_stage_actions_from_config()
+            save_config()
+            if action == 'run':
+                self.on_run_imgtrans()
+            self.pipelineInsightsPanel.add_event('API', self.tr('Pipeline preset {0}: {1}').format(action, result.get('label', preset_id)))
+            return {'ok': True, 'applied': result, 'current': workflow_stage_vector(pcfg.module), 'started': action == 'run'}
+        raise ValueError(f'unknown pipeline_presets action: {action}')
 
     def _api_open_project(self, body: dict):
         return self._api_call_ui(self._api_open_project_ui, body)
@@ -3931,41 +3955,36 @@ class MainWindow(mainwindow_cls):
         if mins > 0:
             self._idle_unload_timer.start(mins * 60 * 1000)
 
+    def _sync_stage_actions_from_config(self):
+        for idx, sa in enumerate(getattr(self.titleBar, 'stageActions', []) or []):
+            sa.setChecked(pcfg.module.stage_enabled(idx))
+        if hasattr(self, '_update_run_button_tooltip'):
+            self._update_run_button_tooltip()
+
+    def on_apply_workflow_preset_requested(self, preset_id: str, run_after: bool = False):
+        try:
+            result = apply_workflow_preset(pcfg.module, preset_id)
+            self._sync_stage_actions_from_config()
+            save_config()
+            label = str(result.get('label') or result.get('preset_id'))
+            self.pipelineInsightsPanel.add_event('PRESET', self.tr('Workflow preset applied: {0}').format(label))
+            if run_after:
+                self.on_run_imgtrans()
+        except Exception as e:
+            self.pipelineInsightsPanel.add_warning('PRESET', self.tr('Failed to apply workflow preset: {0}').format(e))
+            create_error_dialog(e, self.tr('Workflow preset failed'))
+
     def on_run_preset_full(self):
-        pcfg.module.enable_detect = True
-        pcfg.module.enable_ocr = True
-        pcfg.module.enable_translate = True
-        pcfg.module.enable_inpaint = True
-        for idx, sa in enumerate(self.titleBar.stageActions):
-            sa.setChecked(True)
-        pcfg.module.run_preset_name = 'Full'
+        self.on_apply_workflow_preset_requested('full')
 
     def on_run_preset_detect_ocr(self):
-        pcfg.module.enable_detect = True
-        pcfg.module.enable_ocr = True
-        pcfg.module.enable_translate = False
-        pcfg.module.enable_inpaint = False
-        for idx, sa in enumerate(self.titleBar.stageActions):
-            sa.setChecked(pcfg.module.stage_enabled(idx))
-        pcfg.module.run_preset_name = 'Detect+OCR'
+        self.on_apply_workflow_preset_requested('detect_ocr')
 
     def on_run_preset_translate(self):
-        pcfg.module.enable_detect = False
-        pcfg.module.enable_ocr = False
-        pcfg.module.enable_translate = True
-        pcfg.module.enable_inpaint = False
-        for idx, sa in enumerate(self.titleBar.stageActions):
-            sa.setChecked(pcfg.module.stage_enabled(idx))
-        pcfg.module.run_preset_name = 'Translate'
+        self.on_apply_workflow_preset_requested('translate')
 
     def on_run_preset_inpaint(self):
-        pcfg.module.enable_detect = False
-        pcfg.module.enable_ocr = False
-        pcfg.module.enable_translate = False
-        pcfg.module.enable_inpaint = True
-        for idx, sa in enumerate(self.titleBar.stageActions):
-            sa.setChecked(pcfg.module.stage_enabled(idx))
-        pcfg.module.run_preset_name = 'Inpaint'
+        self.on_apply_workflow_preset_requested('inpaint')
 
     def on_video_translator(self):
         """Open the Video translator dialog (Pipeline → Video translator...)."""

@@ -4,6 +4,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set
 
 from .fontformat import FontFormat
 from .text_masking import masked_text_warnings, mask_effective_box
+from .textbox_masking import centered_resize_xyxy, mask_aware_textbox_diagnostics
 from .text_rendering import (
     FIT_MODE_BALANCE,
     FIT_MODE_EXPAND,
@@ -136,8 +137,16 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if float(getattr(fmt, "stroke_width", 0.0) or 0.0) > 0 and float(getattr(fmt, "text_padding", 0.0) or 0.0) < 1.0:
         warnings.append("low_padding_with_stroke")
         suggestions.append({"action": "increase_padding", "padding": 2.0, "reason": "Outlined text can clip without inset padding."})
-    mask_diag = masked_text_warnings(getattr(blk, "text_mask", None), float(getattr(fmt, "text_padding", 0.0) or 0.0))
-    effective_box = mask_effective_box(getattr(blk, "text_mask", None), (box_w, box_h), float(getattr(fmt, "text_padding", 0.0) or 0.0))
+    text_mask = getattr(blk, "text_mask", None)
+    mask_diag = masked_text_warnings(text_mask, float(getattr(fmt, "text_padding", 0.0) or 0.0))
+    textbox_mask_diag = mask_aware_textbox_diagnostics(
+        (box_w, box_h),
+        (measured[0], measured[1]),
+        text_mask=text_mask,
+        effect_margin=effect_margin,
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+    )
+    effective_box = mask_effective_box(text_mask, (box_w, box_h), float(getattr(fmt, "text_padding", 0.0) or 0.0))
     mask_overflow = bool(effective_box.get("uses_mask")) and (measured[0] > float(effective_box.get("width", box_w)) or measured[1] > float(effective_box.get("height", box_h)))
     if mask_diag.get("fully_masked") or mask_diag.get("narrow_safe_area"):
         warnings.append("mask_safe_area")
@@ -154,6 +163,14 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
             "action": "shrink_to_mask_safe_area",
             "effective_box": [round(float(effective_box.get("width", box_w)), 2), round(float(effective_box.get("height", box_h)), 2)],
             "reason": "Measured lettering exceeds the visible mask-safe area even if it fits the full text box.",
+        })
+    if textbox_mask_diag.get("mask_overflow"):
+        warnings.append("mask_visible_area_overflow")
+        suggestions.append({
+            "action": "resize_to_mask_safe_box",
+            "recommended_box_size": textbox_mask_diag.get("recommended_box_size", [box_w, box_h]),
+            "mask_visible_rect": (textbox_mask_diag.get("mask", {}) or {}).get("visible_rect", []),
+            "reason": "Resize the textbox so measured lettering fits inside the visible text-mask area with effect margins.",
         })
     if effect_suggestion.get("needs_effect") and float(getattr(fmt, "stroke_width", 0.0) or 0.0) <= 0:
         warnings.append("low_contrast_no_effect")
@@ -275,6 +292,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
         "ink_clip_risk": bool(getattr(fit_diag, "ink_clip_risk", False)),
         "mask_diagnostics": mask_diag,
+        "textbox_mask_diagnostics": textbox_mask_diag,
         "mask_effective_box": effective_box,
         "preset_suggestion": preset_suggestion,
         "suggested_text": fitted_text if fitted_text != text else "",
@@ -477,6 +495,16 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
                 if chain:
                     fmt.fallback_font_chain = chain
                     changed.append("fallback_font_chain")
+            if "mask_visible_area_overflow" in diag["warnings"] and wants("resize_to_mask_safe_box"):
+                rec = (diag.get("textbox_mask_diagnostics", {}) or {}).get("recommended_box_size", []) or []
+                if len(rec) >= 2:
+                    try:
+                        rec_w, rec_h = float(rec[0]), float(rec[1])
+                    except Exception:
+                        rec_w = rec_h = 0.0
+                    if rec_w > box_w * 1.02 or rec_h > box_h * 1.02:
+                        blk.xyxy = centered_resize_xyxy(getattr(blk, "xyxy", [0, 0, box_w, box_h]), (rec_w, rec_h))
+                        changed.append("mask_safe_textbox_size")
             if "overflow" in diag["warnings"] and wants("resize_to_recommended_box"):
                 rec = diag.get("recommended_box_size", []) or []
                 if len(rec) >= 2:

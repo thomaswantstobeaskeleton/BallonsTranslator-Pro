@@ -7,6 +7,7 @@ ActionType = Literal[
     "move",
     "resize",
     "resize_to_recommended_box",
+    "resize_to_mask_safe_box",
     "set_font_size",
     "auto_fit",
     "center_in_bubble",
@@ -302,6 +303,52 @@ class LayoutReviewPlanner:
                 )
                 score_before -= 0.12
 
+        textbox_mask_diag = (blk.text_style or {}).get("mask_diagnostics", {}) or {}
+        if bool(textbox_mask_diag.get("mask_overflow")):
+            issues.append(
+                ReviewIssue(
+                    code="mask_visible_area_overflow",
+                    severity="warning",
+                    message="Measured text exceeds the visible text-mask area.",
+                    score_penalty=0.12,
+                )
+            )
+            mask_info = textbox_mask_diag.get("mask", {}) or {}
+            if bool(mask_info.get("edge_hidden")):
+                issues.append(
+                    ReviewIssue(
+                        code="text_mask_erases_edge",
+                        severity="warning",
+                        message="Text mask erases an edge that can clip stroke or shadow.",
+                        score_penalty=0.06,
+                    )
+                )
+            recommended = textbox_mask_diag.get("recommended_box_size") or ()
+            try:
+                rec_w = float(recommended[0])
+                rec_h = float(recommended[1])
+            except Exception:
+                rec_w = rec_h = 0.0
+            if rec_w > bw * 1.02 or rec_h > bh * 1.02:
+                actions.append(
+                    ReviewAction(
+                        action="resize_to_mask_safe_box",
+                        block_index=blk.block_index,
+                        args={"width": max(bw, rec_w), "height": max(bh, rec_h)},
+                        reason="Expand the box enough for lettering to fit the visible text-mask area.",
+                    )
+                )
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": float(textbox_mask_diag.get("text_padding", 2.0) or 2.0)},
+                    reason="Keep lettering away from text-mask edges before final render/export.",
+                )
+            )
+            score_before -= 0.12
+
+
         if blk.bubble_center is not None:
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
             bcx, bcy = blk.bubble_center
@@ -572,6 +619,7 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "move": [],
         "resize": [],
         "resize_to_recommended_box": [],
+        "resize_to_mask_safe_box": [],
         "set_font_size": [],
         "auto_fit": [],
         "center_in_bubble": [],
@@ -604,6 +652,7 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "move": [],
         "resize": [],
         "resize_to_recommended_box": [],
+        "resize_to_mask_safe_box": [],
         "set_font_size": [],
         "auto_fit": [],
         "center_in_bubble": [],

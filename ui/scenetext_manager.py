@@ -1905,7 +1905,7 @@ class SceneTextManager(QObject):
                 scale = float(action.args.get("scale", 1.0) or 1.0)
                 if scale <= 0 or abs(scale - 1.0) < 1e-6:
                     continue
-            elif action.action == "resize_to_recommended_box":
+            elif action.action in {"resize_to_recommended_box", "resize_to_mask_safe_box"}:
                 width = float(action.args.get("width", 0.0) or 0.0)
                 height = float(action.args.get("height", 0.0) or 0.0)
                 if width <= 0 or height <= 0:
@@ -1939,7 +1939,7 @@ class SceneTextManager(QObject):
                 self.onAutoFitFontToBox()
             if grouped["resize_to_fit_content"]:
                 self.onResizeToFitContent()
-            for action in grouped["resize_to_recommended_box"]:
+            for action in grouped["resize_to_recommended_box"] + grouped.get("resize_to_mask_safe_box", []):
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
                     continue

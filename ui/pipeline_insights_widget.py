@@ -1,5 +1,5 @@
 from qtpy.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QListWidget, QListWidgetItem, QFrame, QProgressBar, QGraphicsOpacityEffect, QGridLayout
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QListWidget, QListWidgetItem, QFrame, QProgressBar, QGraphicsOpacityEffect, QGridLayout, QComboBox
 
 
 class PipelineInsightsWidget(QWidget):
@@ -12,6 +12,8 @@ class PipelineInsightsWidget(QWidget):
     run_layout_review_requested = Signal()
     open_batch_style_requested = Signal()
     open_typography_qa_requested = Signal()
+    apply_workflow_preset_requested = Signal(str)
+    run_workflow_preset_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -40,6 +42,33 @@ class PipelineInsightsWidget(QWidget):
         self.job_label.setObjectName('PipelineJobLabel')
         progress_lay.addWidget(self.job_label)
         lay.addWidget(progress_card)
+
+        preset_card = QFrame(self)
+        preset_card.setObjectName('PipelineCard')
+        preset_lay = QVBoxLayout(preset_card)
+        preset_lay.setContentsMargins(10, 10, 10, 10)
+        preset_lay.addWidget(QLabel(self.tr('Workflow preset')))
+        preset_row = QHBoxLayout()
+        self.workflow_preset_combo = QComboBox(self)
+        self.workflow_preset_combo.setToolTip(self.tr('Apply a staged manga workflow preset without opening the Pipeline menu.'))
+        try:
+            from utils.workflow_presets import list_workflow_presets
+            for preset_id, preset in list_workflow_presets().items():
+                self.workflow_preset_combo.addItem(self.tr(str(preset.get('label', preset_id))), preset_id)
+        except Exception:
+            for preset_id in ('full', 'detect_ocr', 'translate', 'inpaint', 'lettering_review'):
+                self.workflow_preset_combo.addItem(preset_id, preset_id)
+        preset_row.addWidget(self.workflow_preset_combo, 1)
+        self.apply_workflow_preset_btn = QPushButton(self.tr('Apply'), self)
+        self.apply_workflow_preset_btn.setToolTip(self.tr('Set pipeline stage toggles to this preset.'))
+        self.apply_workflow_preset_btn.clicked.connect(self._emit_apply_workflow_preset)
+        preset_row.addWidget(self.apply_workflow_preset_btn)
+        self.run_workflow_preset_btn = QPushButton(self.tr('Apply + Run'), self)
+        self.run_workflow_preset_btn.setToolTip(self.tr('Apply the preset and immediately run the pipeline.'))
+        self.run_workflow_preset_btn.clicked.connect(self._emit_run_workflow_preset)
+        preset_row.addWidget(self.run_workflow_preset_btn)
+        preset_lay.addLayout(preset_row)
+        lay.addWidget(preset_card)
 
         btn_row = QHBoxLayout()
         for stage in ('detect', 'ocr', 'translate', 'inpaint', 'render'):
@@ -122,6 +151,15 @@ class PipelineInsightsWidget(QWidget):
         self._progress_pulse.setDuration(180)
         self._progress_pulse.setStartValue(0.75)
         self._progress_pulse.setEndValue(1.0)
+
+    def _current_workflow_preset_id(self) -> str:
+        return str(self.workflow_preset_combo.currentData() or self.workflow_preset_combo.currentText() or '')
+
+    def _emit_apply_workflow_preset(self):
+        self.apply_workflow_preset_requested.emit(self._current_workflow_preset_id())
+
+    def _emit_run_workflow_preset(self):
+        self.run_workflow_preset_requested.emit(self._current_workflow_preset_id())
 
     def set_pipeline_progress(self, value: int):
         self.stage_progress.setValue(max(0, min(100, int(value))))
