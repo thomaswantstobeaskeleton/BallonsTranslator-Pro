@@ -250,10 +250,11 @@ def color_difference(rgb1: List, rgb2: List) -> float:
     diff = np.linalg.norm(diff, axis=2) 
     return diff.item()
 
-def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False, enlarge_ratio=2.0, cal_region_rect=False, margin_px: int = 0) -> Tuple[np.ndarray, int, List]:
+def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False, enlarge_ratio=2.0, cal_region_rect=False, margin_px: int = 0, seed_point_abs: Tuple[float, float] = None) -> Tuple[np.ndarray, int, List]:
     """
     Extract bubble mask from a crop around ballon_rect.
     margin_px: extra pixels added on each side to the crop (for shape classification so the full bubble is visible). 0 = no extra margin.
+    seed_point_abs: optional image-space point that should be inside the target bubble. When omitted, use the crop center.
     """
     WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
@@ -296,7 +297,12 @@ def extract_ballon_region(img: np.ndarray, ballon_rect: List, show_process=False
     min_retval = np.inf
     mask = np.zeros((h, w), np.uint8)
     difres = 10
-    seedpnt = (int(w/2), int(h/2))
+    if seed_point_abs is not None:
+        sx = int(round((float(seed_point_abs[0]) - x1) * scaleR))
+        sy = int(round((float(seed_point_abs[1]) - y1) * scaleR))
+        seedpnt = (max(0, min(w - 1, sx)), max(0, min(h - 1, sy)))
+    else:
+        seedpnt = (int(w/2), int(h/2))
     for ii in range(len(cons)):
         rect = cv2.boundingRect(cons[ii])
         if rect[2]*rect[3] < img_area*0.4:
