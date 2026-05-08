@@ -93,6 +93,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_auto_fit_binary", "Auto fit font size (binary search)"),
         ("format_balloon_shape", "Balloon shape (submenu)"),
         ("format_resize_to_fit_content", "Resize to fit content"),
+        ("format_fit_to_mask_safe_box", "Fit box to visible mask area"),
         ("format_center_in_bubble", "Center in bubble"),
         ("format_writing_mode", "Writing mode (submenu)"),
         ("format_recenter_text_in_box", "Recenter text in box"),
@@ -267,7 +268,24 @@ class ContextMenuConfigDialog(QDialog):
             'text_trim','text_upper','text_lower','format_apply','format_layout','format_fit_to_bubble','create_textbox'
         }
         pipeline_keys = {'run_detect_region','run_detect_page','run_translate','run_ocr','run_ocr_translate','run_ocr_translate_inpaint','run_inpaint'}
-        layout_keys = {'format_apply','format_layout','format_fit_to_bubble','format_auto_fit','format_smart_auto_fit','format_polish_typography','format_auto_fit_binary','format_balloon_shape','format_resize_to_fit_content','format_center_in_bubble','format_writing_mode','format_recenter_text_in_box','format_angle','format_squeeze','review_export_lettering_proof'}
+        layout_keys = {
+            'format_apply',
+            'format_layout',
+            'format_fit_to_bubble',
+            'format_auto_fit',
+            'format_smart_auto_fit',
+            'format_polish_typography',
+            'format_auto_fit_binary',
+            'format_balloon_shape',
+            'format_resize_to_fit_content',
+            'format_fit_to_mask_safe_box',
+            'format_center_in_bubble',
+            'format_writing_mode',
+            'format_recenter_text_in_box',
+            'format_angle',
+            'format_squeeze',
+            'review_export_lettering_proof',
+        }
         chosen = editing_keys if profile == 'editing' else pipeline_keys if profile == 'pipeline' else layout_keys
         for key, cb in self._checkboxes.items():
             cb.setChecked(key in chosen)

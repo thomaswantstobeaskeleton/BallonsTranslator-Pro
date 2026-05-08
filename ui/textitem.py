@@ -799,7 +799,14 @@ class TextBlkItem(QGraphicsTextItem):
         if mask_diag.get('narrow_safe_area') or mask_diag.get('fully_masked'):
             sr = mask_diag.get('safe_rect') or [0, 0, 0, 0]
             painter.setPen(QPen(QColor(180, 80, 255, 190), 1 / max(0.01, self.get_scale()), Qt.PenStyle.DotLine))
-            painter.drawRect(QRectF(float(sr[0]), float(sr[1]), max(0.0, float(sr[2]) - float(sr[0])), max(0.0, float(sr[3]) - float(sr[1]))))
+            painter.drawRect(QRectF(
+                float(sr[0]),
+                float(sr[1]),
+                max(0.0, float(sr[2]) - float(sr[0])),
+                max(0.0, float(sr[3]) - float(sr[1])),
+            ))
+
+        ff = getattr(self, 'fontformat', None)
         label = f"{diag['mode']} {getattr(ff, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
         if diag['missing']:
             label += f" missing: {diag['missing']}"

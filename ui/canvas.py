@@ -217,6 +217,7 @@ class Canvas(QGraphicsScene):
     set_writing_mode_signal = Signal(str)
     recenter_text_in_box_signal = Signal()
     apply_mask_safe_padding_signal = Signal()
+    fit_to_mask_safe_box_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
 
@@ -1300,8 +1301,7 @@ class Canvas(QGraphicsScene):
             # --- Format ---
             format_act = layout_act = fit_to_bubble_act = auto_fit_act = smart_auto_fit_act = polish_typography_act = auto_fit_binary_act = angle_act = squeeze_act = None
             writing_auto_act = writing_ltr_act = writing_vertical_act = writing_rtl_act = recenter_text_in_box_act = None
-            mask_safe_padding_act = None
-            resize_to_fit_content_act = center_in_bubble_act = None
+            mask_safe_padding_act = resize_to_fit_content_act = center_in_bubble_act = fit_to_mask_safe_box_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
@@ -1362,6 +1362,12 @@ class Canvas(QGraphicsScene):
                 if resize_to_fit_content_act is not None:
                     resize_to_fit_content_act.setToolTip(self.tr("Resize the text box so all text is visible (e.g. when the box is too small and clips content)."))
                 actions_map['format_resize_to_fit_content'] = resize_to_fit_content_act
+            if context_menu_visible('format_fit_to_mask_safe_box') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                fit_to_mask_safe_box_act = format_menu.addAction(self.tr("Fit box to visible mask area"))
+                if fit_to_mask_safe_box_act is not None:
+                    fit_to_mask_safe_box_act.setToolTip(self.tr("Grow selected text boxes if the text eraser/mask leaves too little visible area for stroke, shadow, or overflow-safe lettering."))
+                actions_map['format_fit_to_mask_safe_box'] = fit_to_mask_safe_box_act
             if context_menu_visible('format_center_in_bubble') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 center_in_bubble_act = format_menu.addAction(self.tr("Center in bubble"))
@@ -1704,6 +1710,8 @@ class Canvas(QGraphicsScene):
                 self.set_balloon_shape_signal.emit("auto")
             elif rst == resize_to_fit_content_act:
                 self.resize_to_fit_content_signal.emit()
+            elif rst == fit_to_mask_safe_box_act:
+                self.fit_to_mask_safe_box_signal.emit()
             elif rst == center_in_bubble_act:
                 self.center_in_bubble_signal.emit()
             elif rst == writing_auto_act:
