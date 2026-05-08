@@ -459,15 +459,32 @@ class ConfigPanel(Widget):
         self.load_model_checker.stateChanged.connect(self.on_load_model_changed)
         dlConfigPanel.vlayout.addWidget(msublock)
         self.default_device_combobox = QComboBox()
+        device_diag_text = ''
         try:
-            from modules.base import AVAILABLE_DEVICES
+            from modules.base import get_available_devices, get_device_diagnostics_text
             self.default_device_combobox.addItem(self.tr('Default (use module default)'))
-            self.default_device_combobox.addItems(AVAILABLE_DEVICES)
-        except Exception:
-            self.default_device_combobox.addItems([self.tr('Default (use module default)'), 'cpu', 'cuda'])
+            self.default_device_combobox.addItems(get_available_devices())
+            device_diag_text = get_device_diagnostics_text()
+        except Exception as e:
+            self.default_device_combobox.addItems([self.tr('Default (use module default)'), 'cpu'])
+            device_diag_text = self.tr('Device diagnostics unavailable: {0}').format(e)
         self.default_device_combobox.currentIndexChanged.connect(self.on_default_device_index_changed)
-        sublock = ConfigSubBlock(self.default_device_combobox, self.tr('Default device'), discription=self.tr('Preferred device for DL modules when set to Default.'))
+        device_description = self.tr('Preferred device for DL modules when set to Default.')
+        if device_diag_text:
+            device_description = device_description + '\n' + device_diag_text
+            self.default_device_combobox.setToolTip(device_diag_text)
+        sublock = ConfigSubBlock(self.default_device_combobox, self.tr('Default device'), discription=device_description)
         dlConfigPanel.vlayout.addWidget(sublock)
+        self.device_diagnostics_label = QLabel(device_diag_text)
+        self.device_diagnostics_label.setWordWrap(True)
+        self.device_diagnostics_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.device_diagnostics_label.setStyleSheet("color: gray;")
+        self.device_diagnostics_label.setToolTip(device_diag_text)
+        dlConfigPanel.vlayout.addWidget(ConfigSubBlock(
+            self.device_diagnostics_label,
+            self.tr('Runtime device diagnostics'),
+            discription=self.tr('Shows why CUDA/GPU backends are or are not available to PyTorch.')
+        ))
         self.empty_runcache_checker, msublock = checkbox_with_label(self.tr('Empty cache after RUN'), discription=self.tr('Empty cache after RUN to save memory.'))
         dlConfigPanel.vlayout.addWidget(msublock)
         self.empty_runcache_checker.stateChanged.connect(self.on_runcache_changed)

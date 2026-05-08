@@ -3504,6 +3504,14 @@ class MainWindow(mainwindow_cls):
         except Exception as e:
             lines.append(self.tr("GPU stats unavailable: {0}").format(str(e)))
 
+        try:
+            from modules.base import get_device_diagnostics_text
+            lines.append("")
+            lines.append(self.tr("Runtime device diagnostics:"))
+            lines.append(get_device_diagnostics_text())
+        except Exception as e:
+            lines.append(self.tr("Runtime device diagnostics unavailable: {0}").format(str(e)))
+
         lines.append(self.tr("Quantization note: model quantization is module-dependent; some HF/LLM modules provide low-VRAM/4-bit/8-bit style options, but not every detector/OCR/inpainter supports quantized loading."))
         return "\n".join(lines)
 
