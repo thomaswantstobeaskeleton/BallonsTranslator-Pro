@@ -300,55 +300,206 @@ class BaseModule:
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import torch
 
-DEFAULT_DEVICE = 'cpu'
-AVAILABLE_DEVICES = ['cpu']
 
-# Build a single source of truth for runtime device options shown in module/device selectors.
-def _append_unique_device(device_name: str):
-    if device_name and device_name not in AVAILABLE_DEVICES:
-        AVAILABLE_DEVICES.append(device_name)
+def _safe_torch_version_attr(attr: str):
+    try:
+        return getattr(torch.version, attr, None)
+    except Exception as e:
+        return f'unavailable: {e}'
 
-# CUDA / ROCm (both typically exposed through torch.cuda).
+
+def _detect_runtime_devices() -> dict:
+    """Collect torch/backend device diagnostics without advertising unusable devices."""
+    diagnostics = {
+        'torch': getattr(torch, '__version__', None),
+        'torch_cuda': _safe_torch_version_attr('cuda'),
+        'torch_xpu': _safe_torch_version_attr('xpu'),
+        'cuda_available': False,
+        'cuda_count': 0,
+        'cuda_devices': [],
+        'cuda_exception': None,
+        'directml_available': False,
+        'directml_count': 0,
+        'directml_default_device': None,
+        'directml_exception': None,
+        'mps_available': False,
+        'mps_built': None,
+        'mps_exception': None,
+        'xpu_available': False,
+        'xpu_count': 0,
+        'xpu_devices': [],
+        'xpu_exception': None,
+        'available_devices': ['cpu'],
+        'default_device': 'cpu',
+    }
+
+    def append_device(device_name: str):
+        if device_name and device_name not in diagnostics['available_devices']:
+            diagnostics['available_devices'].append(device_name)
+
+    try:
+        if hasattr(torch, 'cuda'):
+            diagnostics['cuda_available'] = bool(torch.cuda.is_available())
+            diagnostics['cuda_count'] = int(torch.cuda.device_count())
+            if diagnostics['cuda_available']:
+                diagnostics['default_device'] = 'cuda'
+                append_device('cuda')
+                for idx in range(diagnostics['cuda_count']):
+                    try:
+                        diagnostics['cuda_devices'].append(torch.cuda.get_device_name(idx))
+                    except Exception as name_exc:
+                        diagnostics['cuda_devices'].append(f'cuda:{idx} name unavailable: {name_exc}')
+                    append_device(f'cuda:{idx}')
+            elif diagnostics['cuda_count'] > 0:
+                for idx in range(diagnostics['cuda_count']):
+                    try:
+                        diagnostics['cuda_devices'].append(torch.cuda.get_device_name(idx))
+                    except Exception as name_exc:
+                        diagnostics['cuda_devices'].append(f'cuda:{idx} name unavailable: {name_exc}')
+    except Exception as e:
+        diagnostics['cuda_exception'] = str(e)
+
+    try:
+        if hasattr(torch, 'xpu'):
+            diagnostics['xpu_available'] = bool(torch.xpu.is_available())
+            if diagnostics['xpu_available']:
+                diagnostics['xpu_count'] = int(torch.xpu.device_count()) if hasattr(torch.xpu, 'device_count') else 1
+                diagnostics['default_device'] = 'xpu'
+                append_device('xpu')
+                for idx in range(diagnostics['xpu_count']):
+                    try:
+                        get_name = getattr(torch.xpu, 'get_device_name', None)
+                        diagnostics['xpu_devices'].append(get_name(idx) if get_name else f'xpu:{idx}')
+                    except Exception as name_exc:
+                        diagnostics['xpu_devices'].append(f'xpu:{idx} name unavailable: {name_exc}')
+    except Exception as e:
+        diagnostics['xpu_exception'] = str(e)
+
+    try:
+        mps_backend = getattr(getattr(torch, 'backends', None), 'mps', None)
+        if mps_backend is not None:
+            is_built = getattr(mps_backend, 'is_built', None)
+            diagnostics['mps_built'] = bool(is_built()) if callable(is_built) else None
+            diagnostics['mps_available'] = bool(mps_backend.is_available())
+            if diagnostics['mps_available']:
+                diagnostics['default_device'] = 'mps'
+                append_device('mps')
+    except Exception as e:
+        diagnostics['mps_exception'] = str(e)
+
+    try:
+        import torch_directml
+        diagnostics['directml_count'] = int(torch_directml.device_count())
+        diagnostics['directml_available'] = diagnostics['directml_count'] > 0
+        if diagnostics['directml_available'] and hasattr(torch, 'privateuseone'):
+            torch.dml = torch_directml
+            diagnostics['directml_default_device'] = str(torch.dml.default_device())
+            diagnostics['default_device'] = f'privateuseone:{torch.dml.default_device()}'
+            for d in range(diagnostics['directml_count']):
+                append_device(f'privateuseone:{d}')
+    except Exception as e:
+        diagnostics['directml_exception'] = str(e)
+
+    return diagnostics
+
+
+_DEVICE_DIAGNOSTICS = _detect_runtime_devices()
+DEFAULT_DEVICE = _DEVICE_DIAGNOSTICS['default_device']
+AVAILABLE_DEVICES = list(_DEVICE_DIAGNOSTICS['available_devices'])
+
+
+def get_device_diagnostics() -> dict:
+    """Return a copy of runtime backend diagnostics gathered at import time."""
+    return deepcopy(_DEVICE_DIAGNOSTICS)
+
+
+def get_available_devices() -> List[str]:
+    """Return devices that passed runtime initialization checks."""
+    return list(AVAILABLE_DEVICES)
+
+
+def _cuda_unavailable_reason(diagnostics: dict) -> str:
+    if diagnostics.get('cuda_exception'):
+        return f"CUDA detection raised an exception: {diagnostics['cuda_exception']}"
+    if diagnostics.get('torch_cuda') is None:
+        return (
+            'PyTorch appears to be CPU-only (torch.version.cuda is None). '
+            'Install a CUDA-enabled PyTorch wheel for your NVIDIA driver. '
+            'Suggested pip command: python -m pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 '
+            '(or choose the CUDA version matching your system at https://pytorch.org/get-started/locally/).'
+        )
+    if not diagnostics.get('cuda_available'):
+        return (
+            f"PyTorch was built with CUDA {diagnostics.get('torch_cuda')}, but CUDA is not usable by PyTorch. "
+            'Check the NVIDIA driver, CUDA runtime visibility, and that no environment variable is hiding the GPU.'
+        )
+    return ''
+
+
+def get_device_diagnostics_text() -> str:
+    """Human-readable diagnostics for logs, tooltips, and settings UI."""
+    d = _DEVICE_DIAGNOSTICS
+    devices = ', '.join(d.get('available_devices', [])) or 'none'
+    cuda_names = ', '.join(d.get('cuda_devices', [])) or 'none'
+    xpu_names = ', '.join(d.get('xpu_devices', [])) or 'none'
+    backend = DEFAULT_DEVICE.split(':', 1)[0] if DEFAULT_DEVICE != 'cpu' else 'cpu'
+    lines = [
+        f"Detected backend: {backend}",
+        f"Available device selectors: {devices}",
+        f"PyTorch: {d.get('torch')}",
+        f"PyTorch CUDA build: {d.get('torch_cuda')}",
+        f"CUDA available/count: {d.get('cuda_available')} / {d.get('cuda_count')}",
+        f"CUDA GPU names: {cuda_names}",
+        f"DirectML available/count: {d.get('directml_available')} / {d.get('directml_count')}",
+        f"MPS available/built: {d.get('mps_available')} / {d.get('mps_built')}",
+        f"XPU available/count: {d.get('xpu_available')} / {d.get('xpu_count')}",
+        f"XPU device names: {xpu_names}",
+    ]
+    if d.get('cuda_exception'):
+        lines.append(f"CUDA exception: {d['cuda_exception']}")
+    if d.get('directml_exception'):
+        lines.append(f"DirectML probe: {d['directml_exception']}")
+    if d.get('mps_exception'):
+        lines.append(f"MPS probe: {d['mps_exception']}")
+    if d.get('xpu_exception'):
+        lines.append(f"XPU probe: {d['xpu_exception']}")
+    reason = _cuda_unavailable_reason(d)
+    if DEFAULT_DEVICE == 'cpu' and reason:
+        lines.append(f"CUDA unavailable: {reason}")
+    return '\n'.join(lines)
+
+
+def _get_device_selector_description(options: List[str]) -> str:
+    d = _DEVICE_DIAGNOSTICS
+    lines = [
+        f"Detected backend: {DEFAULT_DEVICE.split(':', 1)[0] if DEFAULT_DEVICE != 'cpu' else 'cpu'}",
+        f"Available devices: {', '.join(options) if options else 'cpu'}",
+        f"PyTorch CUDA build: {d.get('torch_cuda')}",
+    ]
+    if d.get('cuda_devices'):
+        lines.append(f"CUDA GPU names: {', '.join(d['cuda_devices'])}")
+    reason = _cuda_unavailable_reason(d)
+    if 'cuda' not in options and reason:
+        lines.append(reason)
+    return '\n'.join(lines)
+
+
+LOGGER.info(
+    'Runtime device diagnostics: torch=%s, torch_cuda=%s, cuda_available=%s, cuda_count=%s, devices=%s, cuda_exception=%s',
+    _DEVICE_DIAGNOSTICS.get('torch'),
+    _DEVICE_DIAGNOSTICS.get('torch_cuda'),
+    _DEVICE_DIAGNOSTICS.get('cuda_available'),
+    _DEVICE_DIAGNOSTICS.get('cuda_count'),
+    _DEVICE_DIAGNOSTICS.get('available_devices'),
+    _DEVICE_DIAGNOSTICS.get('cuda_exception'),
+)
+if DEFAULT_DEVICE == 'cpu':
+    LOGGER.warning('Runtime device diagnostics: %s', _cuda_unavailable_reason(_DEVICE_DIAGNOSTICS))
+
 try:
-    if hasattr(torch, 'cuda'):
-        cuda_count = int(torch.cuda.device_count())
-        if torch.cuda.is_available() or cuda_count > 0:
-            DEFAULT_DEVICE = 'cuda'
-            _append_unique_device('cuda')
-            for idx in range(cuda_count):
-                _append_unique_device(f'cuda:{idx}')
+    BF16_SUPPORTED = DEFAULT_DEVICE == 'cuda' and torch.cuda.is_bf16_supported() or DEFAULT_DEVICE == 'xpu' and torch.xpu.is_bf16_supported()
 except Exception:
-    pass
-
-# Intel XPU
-try:
-    if hasattr(torch, 'xpu') and torch.xpu.is_available():
-        DEFAULT_DEVICE = 'xpu'
-        _append_unique_device('xpu')
-except Exception:
-    pass
-
-# Apple Silicon MPS
-try:
-    if hasattr(torch, 'backends') and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        DEFAULT_DEVICE = 'mps'
-        _append_unique_device('mps')
-except Exception:
-    pass
-
-# DirectML (privateuseone)
-try:
-    import torch_directml
-    if hasattr(torch, 'privateuseone') and torch_directml.device_count() > 0:
-        torch.dml = torch_directml
-        DEFAULT_DEVICE = f'privateuseone:{torch.dml.default_device()}'
-        for d in range(torch.dml.device_count()):
-            _append_unique_device(f'privateuseone:{d}')
-except Exception:
-    # directml is not supported
-    pass
-
-BF16_SUPPORTED = DEFAULT_DEVICE == 'cuda' and torch.cuda.is_bf16_supported() or DEFAULT_DEVICE == 'xpu' and torch.xpu.is_bf16_supported()
+    BF16_SUPPORTED = False
 
 def is_nvidia():
     if DEFAULT_DEVICE == 'cuda':
@@ -374,13 +525,20 @@ def soft_empty_cache():
         torch.mps.empty_cache()
 
 
-def DEVICE_SELECTOR(not_supported:list[str]=[]): return deepcopy(
-    {
-        'type': 'selector',
-        'options': [opt for opt in AVAILABLE_DEVICES if all(device not in opt for device in not_supported)],
-        'value': DEFAULT_DEVICE if not any(DEFAULT_DEVICE in device for device in not_supported) else 'cpu'
-    }
-)
+def DEVICE_SELECTOR(not_supported: list[str] = None):
+    not_supported = not_supported or []
+    options = [opt for opt in AVAILABLE_DEVICES if all(device not in opt for device in not_supported)]
+    value = DEFAULT_DEVICE if not any(DEFAULT_DEVICE in device for device in not_supported) else 'cpu'
+    if value not in options:
+        value = 'cpu'
+    return deepcopy(
+        {
+            'type': 'selector',
+            'options': options,
+            'value': value,
+            'description': _get_device_selector_description(options),
+        }
+    )
 
 TORCH_DTYPE_MAP = {
     'fp32': torch.float32,
