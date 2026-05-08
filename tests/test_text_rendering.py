@@ -215,3 +215,186 @@ def test_fit_diagnostics_expose_clip_risk_and_preset_suggestion():
     d = diag.to_dict()
     assert d["ink_clip_risk"] is True
     assert d["preset_suggestion"] in {"sfx_bold", "caption_box", "default_manga_bubble"}
+
+
+def test_glyph_advance_units_treats_cjk_punctuation_as_compact():
+    from utils.text_rendering import glyph_advance_units, estimate_text_bounds
+    assert glyph_advance_units("漢字。", "horizontal_ltr") < glyph_advance_units("漢字漢", "horizontal_ltr")
+    plain = estimate_text_bounds("漢字漢", 20, "horizontal_ltr", 200, 80)
+    punct = estimate_text_bounds("漢字。", 20, "horizontal_ltr", 200, 80)
+    assert punct[0] < plain[0]
+
+
+def test_recommended_tight_letter_spacing_is_conservative():
+    from utils.text_rendering import recommended_tight_letter_spacing
+    assert recommended_tight_letter_spacing(1.0, 1.08) < 1.0
+    assert recommended_tight_letter_spacing(1.0, 1.30) >= 0.88
+
+
+def test_custom_manga_preset_sanitization_and_merge():
+    from types import SimpleNamespace
+    from utils.text_rendering import manga_presets, preset_from_font_format, preset_id_from_label, sanitize_manga_preset
+    from utils.fontformat import FontFormat
+
+    pid = preset_id_from_label("My SFX!!", ["custom:my_sfx"])
+    assert pid == "custom:my_sfx_2"
+    preset = sanitize_manga_preset({"label": "Boom", "font_size": "48", "writing_mode": "vertical-rl", "alignment": 9, "frgb": [300, -5, 20]})
+    assert preset["font_size"] == 48.0
+    assert preset["writing_mode"] == "vertical_rl"
+    assert preset["alignment"] == 2
+    assert preset["frgb"] == [255, 0, 20]
+    fmt = FontFormat(font_size=31, stroke_width=0.12, writing_mode="rtl", letter_spacing=0.95)
+    saved = preset_from_font_format(fmt, "RTL caption")
+    cfg = SimpleNamespace(render_custom_manga_presets={"custom:rtl_caption": saved})
+    presets = manga_presets(cfg)
+    assert "default_manga_bubble" in presets
+    assert presets["custom:rtl_caption"]["writing_mode"] == "rtl"
+    assert presets["custom:rtl_caption"]["stroke_width"] == 0.12
+
+
+def test_rendering_preset_pack_roundtrip_and_font_diagnostics(tmp_path):
+    from types import SimpleNamespace
+    from utils.rendering_preset_io import import_preset_pack, preset_font_diagnostics, write_preset_pack
+
+    cfg = SimpleNamespace(render_custom_manga_presets={
+        "custom:boom": {"label": "Boom", "font_family": "Missing Manga", "font_size": 42, "writing_mode": "auto"}
+    })
+    path = tmp_path / "pack.json"
+    pack = write_preset_pack(cfg, str(path))
+    assert pack["format"].startswith("ballonstranslator")
+    assert path.exists()
+    diag = preset_font_diagnostics(pack["presets"], ["Arial"])
+    assert diag["checked"] is True
+    assert diag["missing"]["custom:boom"] == "Missing Manga"
+
+    target = SimpleNamespace(render_custom_manga_presets={})
+    result = import_preset_pack(target, str(path))
+    assert result["imported_count"] == 1
+    assert target.render_custom_manga_presets["custom:boom"]["font_size"] == 42.0
+
+    result2 = import_preset_pack(target, str(path), overwrite=False)
+    assert result2["imported_count"] == 1
+    assert any(pid.startswith("custom:boom_") for pid in target.render_custom_manga_presets)
+
+
+def test_text_mask_safe_rect_detects_narrow_visible_area():
+    import numpy as np
+    from utils.text_masking import mask_safe_rect, recommended_padding_for_mask, masked_text_warnings
+
+    mask = np.zeros((20, 30), dtype=np.uint8)
+    mask[4:16, 8:22] = 255
+    diag = mask_safe_rect(mask)
+    assert diag.narrow_safe_area is True
+    assert diag.safe_rect == (8, 4, 22, 16)
+    assert diag.safe_insets == (8, 4, 8, 4)
+    assert recommended_padding_for_mask(mask, current_padding=1) >= 9
+    payload = masked_text_warnings(mask, 1)
+    assert payload["warning"]
+    assert payload["recommended_padding"] >= 9
+
+
+def test_rendering_qa_reports_text_mask_safe_area_warning():
+    import numpy as np
+    from types import SimpleNamespace
+    from utils.fontformat import FontFormat
+    from utils.rendering_qa import analyze_text_block
+
+    mask = np.zeros((24, 40), dtype=np.uint8)
+    mask[5:18, 10:28] = 255
+    blk = SimpleNamespace(
+        xyxy=[0, 0, 40, 24],
+        translation="Hello mask",
+        rich_text="",
+        text=[],
+        text_mask=mask,
+        fontformat=FontFormat(font_size=12, text_padding=1),
+    )
+    cfg = SimpleNamespace(
+        render_fallback_fonts_latin="",
+        render_fallback_fonts_cjk="",
+        render_fallback_fonts_korean="",
+        render_fallback_fonts_rtl="",
+        render_fallback_fonts_emoji="",
+        module=SimpleNamespace(layout_font_size_min=6.0, layout_font_size_max=96.0),
+    )
+    diag = analyze_text_block(blk, "page.png", 0, cfg)
+    assert "mask_safe_area" in diag["warnings"]
+    assert diag["mask_diagnostics"]["narrow_safe_area"] is True
+    assert any(s["action"] == "increase_padding" for s in diag["suggestions"])
+
+
+def test_mask_effective_box_shrinks_fitting_area_for_narrow_mask():
+    import numpy as np
+    from utils.text_masking import mask_effective_box
+
+    mask = np.zeros((40, 80), dtype=np.uint8)
+    mask[8:32, 20:60] = 255
+    effective = mask_effective_box(mask, (80, 40), current_padding=1)
+    assert effective["uses_mask"] is True
+    assert effective["width"] < 80
+    assert effective["height"] < 40
+    assert effective["recommended_padding"] >= 21
+
+
+def test_rendering_qa_reports_mask_safe_overflow_against_effective_box():
+    import numpy as np
+    from types import SimpleNamespace
+    from utils.fontformat import FontFormat
+    from utils.rendering_qa import analyze_text_block
+
+    mask = np.zeros((50, 120), dtype=np.uint8)
+    mask[10:40, 30:90] = 255
+    blk = SimpleNamespace(
+        xyxy=[0, 0, 120, 50],
+        translation="A long masked caption",
+        rich_text="",
+        text=[],
+        text_mask=mask,
+        fontformat=FontFormat(font_size=18, text_padding=1, fit_mode="preserve"),
+    )
+    cfg = SimpleNamespace(
+        render_fallback_fonts_latin="",
+        render_fallback_fonts_cjk="",
+        render_fallback_fonts_korean="",
+        render_fallback_fonts_rtl="",
+        render_fallback_fonts_emoji="",
+        module=SimpleNamespace(layout_font_size_min=6.0, layout_font_size_max=96.0),
+    )
+    diag = analyze_text_block(blk, "page.png", 0, cfg)
+    assert "mask_safe_overflow" in diag["warnings"]
+    assert diag["mask_effective_box"]["uses_mask"] is True
+    assert any(s["action"] == "shrink_to_mask_safe_area" for s in diag["suggestions"])
+
+
+def test_plan_typography_cleanup_vertical_cjk_normalizes_and_sets_strict_breaks():
+    from utils.text_rendering import plan_typography_cleanup
+    result = plan_typography_cleanup("こんにちは?!", 22, (42, 160), "auto", "shrink", "auto", text_padding=0)
+    assert result.resolved_writing_mode == "vertical_rl"
+    assert "⁈" in result.text
+    assert result.line_break_strategy == "cjk_strict"
+    assert "switch_writing_mode" in result.actions
+    assert "increase_padding" in result.actions
+
+
+def test_plan_typography_cleanup_balances_latin_lines():
+    from utils.text_rendering import plan_typography_cleanup
+    result = plan_typography_cleanup("This translation needs nicer manga line breaks", 18, (120, 80), "horizontal_ltr", "shrink", "auto")
+    assert result.line_break_strategy == "balanced"
+    assert "\n" in result.text
+    assert "balance_lines" in result.actions
+
+
+def test_vertical_layout_cells_flow_top_to_bottom_right_to_left():
+    from utils.text_rendering import vertical_layout_cells
+    cells = vertical_layout_cells("天地人?!", 20, (80, 64), padding=2)
+    assert cells[0]["column"] == 0 and cells[0]["row"] == 0
+    assert cells[0]["x"] > cells[-1]["x"]
+    assert any(c["char"] == "⁈" for c in cells)
+
+
+def test_lettering_proof_metrics_reports_overflow_and_vertical_cells():
+    from utils.text_rendering import lettering_proof_metrics
+    metrics = lettering_proof_metrics("天地人?!", 22, (36, 42), "vertical_rl", padding=1)
+    assert metrics["resolved_writing_mode"] == "vertical_rl"
+    assert metrics["vertical_cells"]
+    assert "check_vertical_punctuation" in metrics["recommended_actions"]

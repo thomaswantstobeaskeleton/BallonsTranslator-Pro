@@ -12,9 +12,12 @@ ActionType = Literal[
     "center_in_bubble",
     "resize_to_fit_content",
     "shrink_to_fit",
+    "smart_fit",
+    "polish_typography",
     "switch_writing_mode",
     "recenter",
     "increase_padding",
+    "tighten_letter_spacing",
     "balance_lines",
     "apply_manga_preset",
     "set_line_break_strategy",
@@ -66,6 +69,9 @@ class BlockSnapshot:
     text_style: Dict[str, Any] = field(default_factory=dict)
     font_fallback_warning: str = ""
     quality_score: float = 1.0
+    mask_coverage: float = 1.0
+    mask_safe_insets: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    mask_warning: str = ""
 
 
 @dataclass
@@ -173,6 +179,22 @@ class LayoutReviewPlanner:
                 )
             actions.append(
                 ReviewAction(
+                    action="polish_typography",
+                    block_index=blk.block_index,
+                    args={"typography_cleanup": (blk.text_style or {}).get("typography_cleanup", {})},
+                    reason="Normalize script-aware typography before destructive resize.",
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="smart_fit",
+                    block_index=blk.block_index,
+                    args={"smart_fit": (blk.text_style or {}).get("smart_fit", {})},
+                    reason="Apply balanced wrapping/tracking/leading before destructive resize.",
+                )
+            )
+            actions.append(
+                ReviewAction(
                     action="shrink_to_fit",
                     block_index=blk.block_index,
                     reason="Reduce font size using the selected fit policy before resizing.",
@@ -185,6 +207,17 @@ class LayoutReviewPlanner:
                     reason="Compatibility action: reduce font size to fit current box before resizing.",
                 )
             )
+            letter_spacing = float((blk.text_style or {}).get("letter_spacing", 1.0) or 1.0)
+            if overflow_x and letter_spacing > 0.92:
+                from .text_rendering import recommended_tight_letter_spacing
+                actions.append(
+                    ReviewAction(
+                        action="tighten_letter_spacing",
+                        block_index=blk.block_index,
+                        args={"letter_spacing": recommended_tight_letter_spacing(letter_spacing, max(est_w / max(1.0, bw), 1.0))},
+                        reason="Tighten tracking slightly before shrinking/resizing wide manga lettering.",
+                    )
+                )
             if (blk.text_style or {}).get("fit_mode") == "balance" or (blk.text_style or {}).get("line_break_strategy") != "balanced":
                 actions.append(
                     ReviewAction(
@@ -201,6 +234,73 @@ class LayoutReviewPlanner:
                 )
             )
             score_before -= 0.25
+
+        if blk.mask_warning or float(getattr(blk, "mask_coverage", 1.0) or 1.0) < 0.72:
+            issues.append(
+                ReviewIssue(
+                    code="mask_safe_area",
+                    severity="warning",
+                    message=blk.mask_warning or "Text mask leaves limited visible area for lettering.",
+                    score_penalty=0.10,
+                )
+            )
+            style_padding = float((blk.text_style or {}).get("text_padding", 0.0) or 0.0)
+            insets = getattr(blk, "mask_safe_insets", (0, 0, 0, 0)) or (0, 0, 0, 0)
+            try:
+                recommended_padding = max(style_padding + 1.0, 2.0, min(24.0, max(float(v) for v in insets) + 1.0))
+            except Exception:
+                recommended_padding = max(style_padding + 1.0, 2.0)
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": recommended_padding},
+                    reason="Move rendered ink away from mask edges/holes before final compositing.",
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="recenter",
+                    block_index=blk.block_index,
+                    reason="Recenter text inside the current box after accounting for the mask-safe area.",
+                )
+            )
+            score_before -= 0.10
+
+
+        effective_box = (blk.text_style or {}).get("mask_effective_box", {}) or {}
+        if bool(effective_box.get("uses_mask")):
+            try:
+                eff_w = float(effective_box.get("width", bw))
+                eff_h = float(effective_box.get("height", bh))
+            except Exception:
+                eff_w, eff_h = bw, bh
+            if est_w > eff_w or est_h > eff_h:
+                issues.append(
+                    ReviewIssue(
+                        code="mask_safe_overflow",
+                        severity="warning",
+                        message="Text fits the full box but exceeds the visible mask-safe area.",
+                        score_penalty=0.12,
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="smart_fit",
+                        block_index=blk.block_index,
+                        args={"smart_fit": (blk.text_style or {}).get("smart_fit", {})},
+                        reason="Apply smart fit against the visible mask-safe area before export.",
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="increase_padding",
+                        block_index=blk.block_index,
+                        args={"padding": float(effective_box.get("recommended_padding", 2.0) or 2.0)},
+                        reason="Use mask-derived padding for the visible lettering safe area.",
+                    )
+                )
+                score_before -= 0.12
 
         if blk.bubble_center is not None:
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
@@ -477,9 +577,12 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "center_in_bubble": [],
         "resize_to_fit_content": [],
         "shrink_to_fit": [],
+        "smart_fit": [],
+        "polish_typography": [],
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
+        "tighten_letter_spacing": [],
         "balance_lines": [],
         "apply_manga_preset": [],
         "set_line_break_strategy": [],
@@ -506,9 +609,12 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "center_in_bubble": [],
         "resize_to_fit_content": [],
         "shrink_to_fit": [],
+        "smart_fit": [],
+        "polish_typography": [],
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
+        "tighten_letter_spacing": [],
         "balance_lines": [],
         "apply_manga_preset": [],
         "set_line_break_strategy": [],

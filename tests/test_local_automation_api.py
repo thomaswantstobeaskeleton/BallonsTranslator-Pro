@@ -31,3 +31,18 @@ def test_local_automation_api_key_required():
     server.stop()
     assert ok
     assert out['ok'] is True
+
+
+def test_local_automation_api_health_lists_routes():
+    server = LocalAutomationApiServer('127.0.0.1', 39601, {'ping': lambda body: {'pong': 1}}, api_key='secret')
+    server.start()
+    req = urllib.request.Request('http://127.0.0.1:39601/health', method='GET', headers={'X-API-Key': 'secret'})
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        out = json.loads(resp.read().decode('utf-8'))
+    server.stop()
+    assert out['ok'] is True
+    assert out['status'] == 'ok'
+    assert out['count'] == 1
+    assert 'ping' in out['routes']
+    assert out['methods']['GET'] == ['health', 'routes']
+    assert out['methods']['POST'] == ['ping']

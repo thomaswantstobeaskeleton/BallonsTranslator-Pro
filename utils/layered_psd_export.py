@@ -6,7 +6,7 @@ import os.path as osp
 import shutil
 from typing import Dict, List, Tuple
 
-from utils.io_utils import imread, imwrite
+from utils.text_rendering import lettering_proof_metrics, resolve_writing_mode
 
 
 def _safe_copy(src: str, dst: str) -> bool:
@@ -53,6 +53,7 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
 
     if final_image is not None:
         final_path = osp.join(layer_dir, "05_final_composite.png")
+        from utils.io_utils import imwrite
         imwrite(final_path, final_image, ext=".png")
         layers["final_composite"] = osp.relpath(final_path, out_dir)
     else:
@@ -70,6 +71,20 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
         xyxy = list(getattr(blk, "xyxy", [0, 0, 0, 0]) or [0, 0, 0, 0])
         text_value = getattr(blk, "translation", "") or "\n".join(getattr(blk, "text", []) or [])
         diagnostics = analyze_text_block(blk, page_name, idx)
+        box_w = max(1.0, float((xyxy[2] - xyxy[0]) if len(xyxy) >= 4 else 1.0))
+        box_h = max(1.0, float((xyxy[3] - xyxy[1]) if len(xyxy) >= 4 else 1.0))
+        resolved_mode = resolve_writing_mode(getattr(ff, "writing_mode", "auto") if ff else "auto", text_value, (box_w, box_h))
+        proof_metrics = lettering_proof_metrics(
+            text_value, getattr(ff, "font_size", 24.0) if ff else 24.0, (box_w, box_h), resolved_mode,
+            line_spacing=getattr(ff, "line_spacing", 1.2) if ff else 1.2,
+            letter_spacing=getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
+            padding=getattr(ff, "text_padding", 0.0) if ff else 0.0,
+            stroke_width=getattr(ff, "stroke_width", 0.0) if ff else 0.0,
+            shadow_radius=getattr(ff, "shadow_radius", 0.0) if ff else 0.0,
+            shadow_offset=getattr(ff, "shadow_offset", [0.0, 0.0]) if ff else [0.0, 0.0],
+            line_break_strategy=getattr(ff, "line_break_strategy", "auto") if ff else "auto",
+            sample_limit=64,
+        )
         text_layers.append({
             "name": f"translated_text_{idx + 1:03d}",
             "text": text_value,
@@ -82,6 +97,7 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "stroke_rgb": getattr(ff, "srgb", [0, 0, 0]) if ff else [0, 0, 0],
             "stroke_width": getattr(ff, "stroke_width", 0.0) if ff else 0.0,
             "writing_mode": getattr(ff, "writing_mode", "auto") if ff else "auto",
+            "resolved_writing_mode": resolved_mode,
             "alignment": getattr(ff, "alignment", 0) if ff else 0,
             "line_spacing": getattr(ff, "line_spacing", 1.2) if ff else 1.2,
             "letter_spacing": getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
@@ -92,6 +108,8 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "fallback_font_chain": getattr(ff, "fallback_font_chain", "") if ff else "",
             "lettering_quality_score": diagnostics.get("quality_score", 1.0) if isinstance(diagnostics, dict) else 1.0,
             "safe_inner_bounds": diagnostics.get("safe_inner_bounds", []) if isinstance(diagnostics, dict) else [],
+            "proof_metrics": proof_metrics,
+            "psd_editability_warning": "Native PSD text writing is not available; use the JSX/manifest to recreate editable text layers in Photoshop/GIMP.",
             "rendering_diagnostics": diagnostics,
         })
         for warning in diagnostics.get("warnings", []) if isinstance(diagnostics, dict) else []:

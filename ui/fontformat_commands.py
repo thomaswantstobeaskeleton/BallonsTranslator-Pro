@@ -8,6 +8,7 @@ except:
     from qtpy.QtGui import QUndoCommand
 
 from . import shared_widget as SW
+from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt
 from .textitem import TextBlkItem
 
@@ -188,10 +189,10 @@ def ffmt_change_fallback_font_chain(param_name: str, values: str, act_ffmt: Font
 
 @font_formating(push_undostack=True)
 def ffmt_change_manga_preset(param_name: str, values: str, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
-    from utils.text_rendering import MANGA_PRESETS, normalize_writing_mode, resolve_writing_mode
+    from utils.text_rendering import manga_presets, normalize_writing_mode, resolve_writing_mode
     for blkitem, value in zip(blkitems, values):
         preset_id = str(value or "")
-        preset = MANGA_PRESETS.get(preset_id)
+        preset = manga_presets(pcfg).get(preset_id)
         if not preset:
             continue
         for key, preset_value in preset.items():

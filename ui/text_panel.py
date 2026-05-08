@@ -2,7 +2,7 @@ import copy
 import sys
 from typing import List
 
-from qtpy.QtWidgets import QLineEdit, QSizePolicy, QHBoxLayout, QVBoxLayout, QFrame, QFontComboBox, QApplication, QPushButton, QLabel, QGroupBox, QCheckBox, QSlider, QComboBox, QDoubleSpinBox
+from qtpy.QtWidgets import QLineEdit, QSizePolicy, QHBoxLayout, QVBoxLayout, QFrame, QFontComboBox, QApplication, QPushButton, QLabel, QGroupBox, QCheckBox, QSlider, QComboBox, QDoubleSpinBox, QInputDialog, QFileDialog, QMessageBox
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtGui import QFocusEvent, QMouseEvent, QTextCursor, QKeyEvent
 
@@ -10,7 +10,8 @@ from utils import shared
 from utils import config as C
 from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
-from utils.text_rendering import MANGA_PRESETS, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy
+from utils.text_rendering import MANGA_PRESETS, fit_font_size_to_box, manga_presets, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy, preset_from_font_format, preset_id_from_label, plan_typography_cleanup
+from utils.text_masking import masked_text_warnings, mask_effective_box
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .custom_widget.flow_layout import FlowLayout
 from .textitem import TextBlkItem
@@ -73,6 +74,35 @@ def _make_format_group(title: str, widgets: list, parent=None, tooltip: str = No
         widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         layout.addWidget(widget)
     return group
+
+
+def _font_list_from_config(attr: str) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for part in str(getattr(pcfg, attr, '') or '').split(','):
+        family = part.strip()
+        if family and family.lower() not in seen:
+            seen.add(family.lower())
+            out.append(family)
+    return out
+
+
+def _favorite_font_list() -> List[str]:
+    return _font_list_from_config('render_favorite_fonts')
+
+
+def _recent_font_list() -> List[str]:
+    return _font_list_from_config('render_recent_fonts')
+
+
+def _remember_recent_font(family: str):
+    family = str(family or '').strip()
+    if not family:
+        return
+    recent = [f for f in _recent_font_list() if f.lower() != family.lower()]
+    recent.insert(0, family)
+    pcfg.render_recent_fonts = ', '.join(recent[:16])
+    C.save_config()
 
 
 class AlignmentBtnGroup(QFrame):
@@ -254,6 +284,7 @@ class FontFamilyComboBox(QFontComboBox):
     def apply_fontfamily(self):
         ffamily = self.currentFont().family()
         if ffamily in shared.FONT_FAMILIES:
+            _remember_recent_font(ffamily)
             self.param_changed.emit('font_family', ffamily)
 
     def update_font_list(self, font_list):
@@ -297,6 +328,18 @@ class FontFormatPanel(Widget):
         self.familybox.setToolTip(self.tr("Font Family"))
         self.familybox.param_changed.connect(self.on_param_changed)
         self.familybox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.favoriteFontCombo = QComboBox(self)
+        self.favoriteFontCombo.setObjectName("FavoriteFontCombo")
+        self.favoriteFontCombo.setMinimumWidth(170)
+        self.favoriteFontCombo.setToolTip(self.tr("Favorite lettering fonts from Settings → Favorite lettering fonts. Choosing one applies it to the current selection/style."))
+        self.favoriteFontCombo.currentIndexChanged.connect(self._on_favorite_font_selected)
+        self.addFavoriteFontBtn = QPushButton(self.tr("★"), self)
+        self.addFavoriteFontBtn.setObjectName("AddFavoriteFontButton")
+        self.addFavoriteFontBtn.setToolTip(self.tr("Add the current font family to favorite lettering fonts."))
+        self.addFavoriteFontBtn.setFixedWidth(32)
+        self.addFavoriteFontBtn.clicked.connect(self._on_add_favorite_font_clicked)
+        self._refresh_favorite_fonts()
 
         self.fontsizebox = FontSizeBox(self)
         self.fontsizebox.setToolTip(self.tr("Font Size"))
@@ -370,13 +413,20 @@ class FontFormatPanel(Widget):
 
         self.mangaPresetCombo = QComboBox(self)
         self.mangaPresetCombo.setObjectName("MangaPresetCombo")
-        self.mangaPresetCombo.addItem(self.tr("Preset: none"), "")
-        for preset_id, preset in MANGA_PRESETS.items():
-            self.mangaPresetCombo.addItem(self.tr(preset.get("label", preset_id)), preset_id)
         self.mangaPresetCombo.setMinimumWidth(150)
         self.mangaPresetCombo.setToolTip(self.tr("Apply manga lettering presets to the current selection/style: stroke, spacing, writing mode, fit mode, alignment, and padding."))
         self.mangaPresetCombo.currentIndexChanged.connect(self._on_manga_preset_changed)
         self.mangaPresetCombo.currentTextChanged.connect(lambda _t: _set_combo_tooltip_to_current(self.mangaPresetCombo, self.tr("Manga lettering preset for current selection/style.")))
+        self.saveMangaPresetBtn = QPushButton(self.tr("Save preset"), self)
+        self.saveMangaPresetBtn.setToolTip(self.tr("Save the current style/textbox formatting as a reusable manga lettering preset."))
+        self.saveMangaPresetBtn.clicked.connect(self._on_save_manga_preset_clicked)
+        self.importMangaPresetsBtn = QPushButton(self.tr("Import presets"), self)
+        self.importMangaPresetsBtn.setToolTip(self.tr("Import a shared manga lettering preset JSON pack."))
+        self.importMangaPresetsBtn.clicked.connect(self._on_import_manga_presets_clicked)
+        self.exportMangaPresetsBtn = QPushButton(self.tr("Export presets"), self)
+        self.exportMangaPresetsBtn.setToolTip(self.tr("Export your custom manga lettering presets as a reusable JSON pack."))
+        self.exportMangaPresetsBtn.clicked.connect(self._on_export_manga_presets_clicked)
+        self._refresh_manga_presets()
 
         self.fallbackChainEdit = LineEdit(parent=self)
         self.fallbackChainEdit.setObjectName("FallbackFontChainEdit")
@@ -605,6 +655,8 @@ class FontFormatPanel(Widget):
         vl0.setContentsMargins(0, 0, 0, 0)
         hl1 = QHBoxLayout()
         hl1.addWidget(self.familybox)
+        hl1.addWidget(self.favoriteFontCombo)
+        hl1.addWidget(self.addFavoriteFontBtn)
         hl1.addWidget(self.fontsizebox)
         hl1.addWidget(self.lineSpacingLabel)
         hl1.addWidget(self.lineSpacingBox)
@@ -621,7 +673,7 @@ class FontFormatPanel(Widget):
         hl2.setContentsMargins(4, 0, 4, 0)
         layout_group = _make_format_group(
             self.tr("Selection layout overrides"),
-            [self.writingModeCombo, self.fitModeCombo, self.lineBreakCombo, self.mangaPresetCombo, self.textPaddingSpinBox, self.fitMinFontSizeSpinBox, self.fitMaxFontSizeSpinBox],
+            [self.writingModeCombo, self.fitModeCombo, self.lineBreakCombo, self.mangaPresetCombo, self.saveMangaPresetBtn, self.importMangaPresetsBtn, self.exportMangaPresetsBtn, self.textPaddingSpinBox, self.fitMinFontSizeSpinBox, self.fitMaxFontSizeSpinBox],
             self,
             self.tr("Current style/textbox controls. Project defaults are in Settings → Project text rendering defaults.")
         )
@@ -720,6 +772,111 @@ class FontFormatPanel(Widget):
             return af.fontfmt
         else:
             return None
+
+    def _refresh_manga_presets(self):
+        if not hasattr(self, 'mangaPresetCombo'):
+            return
+        current = self.mangaPresetCombo.currentData()
+        self.mangaPresetCombo.blockSignals(True)
+        self.mangaPresetCombo.clear()
+        self.mangaPresetCombo.addItem(self.tr("Preset: none"), "")
+        presets = manga_presets(pcfg)
+        for preset_id, preset in presets.items():
+            label = str(preset.get("label", preset_id) or preset_id)
+            if preset_id.startswith('custom:'):
+                label = self.tr('Custom: ') + label
+            self.mangaPresetCombo.addItem(self.tr(label), preset_id)
+        idx = self.mangaPresetCombo.findData(current) if current else 0
+        self.mangaPresetCombo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.mangaPresetCombo.blockSignals(False)
+
+    def _on_save_manga_preset_clicked(self):
+        fmt = self._current_format_for_reset()
+        if fmt is None:
+            return
+        default_name = getattr(fmt, '_style_name', '') or self.tr('Custom manga preset')
+        name, ok = QInputDialog.getText(self, self.tr('Save manga lettering preset'), self.tr('Preset name:'), text=default_name)
+        if not ok:
+            return
+        name = str(name or '').strip()
+        if not name:
+            return
+        custom = dict(getattr(pcfg, 'render_custom_manga_presets', {}) or {})
+        preset_id = preset_id_from_label(name, list(MANGA_PRESETS.keys()) + list(custom.keys()))
+        custom[preset_id] = preset_from_font_format(fmt, label=name)
+        pcfg.render_custom_manga_presets = custom
+        C.save_config()
+        self._refresh_manga_presets()
+        self._set_combo_by_data(self.mangaPresetCombo, preset_id)
+        self.on_param_changed('manga_preset', preset_id)
+
+    def _on_export_manga_presets_clicked(self):
+        from utils.rendering_preset_io import preset_font_diagnostics, write_preset_pack
+        default_path = 'manga_lettering_presets.json'
+        path, _ = QFileDialog.getSaveFileName(self, self.tr('Export manga lettering presets'), default_path, self.tr('Preset packs (*.json)'))
+        if not path:
+            return
+        pack = write_preset_pack(pcfg, path)
+        diagnostics = preset_font_diagnostics(pack.get('presets', {}), getattr(shared, 'FONT_FAMILIES', None) or [])
+        msg = self.tr('Exported {0} custom preset(s) to:\n{1}').format(len(pack.get('presets', {}) or {}), pack.get('path', path))
+        missing = diagnostics.get('missing', {}) if diagnostics.get('checked') else {}
+        if missing:
+            msg += '\n\n' + self.tr('Missing font families on this machine: ') + ', '.join(sorted(set(missing.values())))
+        QMessageBox.information(self, self.tr('Export presets'), msg)
+
+    def _on_import_manga_presets_clicked(self):
+        from utils.rendering_preset_io import import_preset_pack
+        path, _ = QFileDialog.getOpenFileName(self, self.tr('Import manga lettering presets'), '', self.tr('Preset packs (*.json)'))
+        if not path:
+            return
+        result = import_preset_pack(pcfg, path, overwrite=False)
+        C.save_config()
+        self._refresh_manga_presets()
+        QMessageBox.information(
+            self,
+            self.tr('Import presets'),
+            self.tr('Imported {0} preset(s). Total custom presets: {1}.').format(result.get('imported_count', 0), result.get('total_custom_presets', 0))
+        )
+
+    def _refresh_favorite_fonts(self):
+        if not hasattr(self, 'favoriteFontCombo'):
+            return
+        current = self.favoriteFontCombo.currentData()
+        self.favoriteFontCombo.blockSignals(True)
+        self.favoriteFontCombo.clear()
+        self.favoriteFontCombo.addItem(self.tr('Favorites / recent'), '')
+        favorites = _favorite_font_list()
+        for family in favorites:
+            self.favoriteFontCombo.addItem(self.tr('★ {0}').format(family), family)
+        fav_lower = {f.lower() for f in favorites}
+        for family in _recent_font_list():
+            if family.lower() not in fav_lower:
+                self.favoriteFontCombo.addItem(self.tr('Recent: {0}').format(family), family)
+        idx = self.favoriteFontCombo.findData(current) if current else 0
+        self.favoriteFontCombo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.favoriteFontCombo.blockSignals(False)
+
+    def _on_favorite_font_selected(self, index: int):
+        family = str(self.favoriteFontCombo.itemData(index) or '').strip()
+        if not family:
+            return
+        self.familybox.setCurrentText(family)
+        self.on_param_changed('font_family', family)
+        self.favoriteFontCombo.blockSignals(True)
+        self.favoriteFontCombo.setCurrentIndex(0)
+        self.favoriteFontCombo.blockSignals(False)
+
+    def _on_add_favorite_font_clicked(self):
+        family = self.familybox.currentFont().family() or self.familybox.currentText()
+        family = str(family or '').strip()
+        if not family:
+            return
+        favorites = _favorite_font_list()
+        if family.lower() not in {f.lower() for f in favorites}:
+            favorites.insert(0, family)
+            pcfg.render_favorite_fonts = ', '.join(favorites[:24])
+            C.save_config()
+        self._refresh_favorite_fonts()
 
     def on_param_changed(self, param_name: str, value):
         func = FM.handle_ffmt_change.get(param_name)
@@ -860,7 +1017,6 @@ class FontFormatPanel(Widget):
             self.letteringDiagnosticsLabel.setText(self.tr("Lettering diagnostics: select a textbox to see fit, fallback, and overflow status."))
             return
         try:
-            from utils.text_rendering import fit_font_size_to_box, missing_glyphs_after_fallback
             fitted_size, _text_out, diag = fit_font_size_to_box(
                 text,
                 float(getattr(font_format, 'font_size', 24.0) or 24.0),
@@ -876,14 +1032,42 @@ class FontFormatPanel(Widget):
                 line_break_strategy=getattr(font_format, 'line_break_strategy', 'auto'),
             )
             missing = missing_glyphs_after_fallback(getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', ''))
-            status = self.tr("OK") if not diag.overflow and not missing else self.tr("Needs review")
+            mask = getattr(getattr(self.textblk_item, 'blk', None), 'text_mask', None)
+            mask_diag = masked_text_warnings(mask, getattr(font_format, 'text_padding', 0.0))
+            effective = mask_effective_box(mask, box, getattr(font_format, 'text_padding', 0.0))
+            cleanup = plan_typography_cleanup(
+                text,
+                float(getattr(font_format, 'font_size', 24.0) or 24.0),
+                box,
+                getattr(font_format, 'writing_mode', 'auto'),
+                getattr(font_format, 'fit_mode', 'shrink'),
+                getattr(font_format, 'line_break_strategy', 'auto'),
+                line_spacing=float(getattr(font_format, 'line_spacing', 1.15) or 1.15),
+                letter_spacing=float(getattr(font_format, 'letter_spacing', 1.0) or 1.0),
+                text_padding=float(getattr(font_format, 'text_padding', 0.0) or 0.0),
+                font_family=getattr(font_format, 'font_family', ''),
+                fallback_font_chain=getattr(font_format, 'fallback_font_chain', ''),
+                config_obj=pcfg,
+                balance=False,
+            )
+            cleanup_note = ','.join(cleanup.actions[:3]) if cleanup.actions else self.tr('none')
+            mask_note = self.tr('mask none')
+            if mask_diag.get('warning'):
+                mask_note = self.tr('mask {coverage:.0%}, safe {w:.0f}×{h:.0f}').format(
+                    coverage=float(mask_diag.get('coverage', 0.0) or 0.0),
+                    w=float(effective.get('width', box[0]) or box[0]),
+                    h=float(effective.get('height', box[1]) or box[1]),
+                )
+            status = self.tr("OK") if not diag.overflow and not missing and 'safe' not in mask_note else self.tr("Needs review")
             self.letteringDiagnosticsLabel.setText(
-                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · missing {missing}").format(
+                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · polish {polish} · missing {missing} · {mask}").format(
                     status=status,
                     mode=diag.resolved_writing_mode,
                     fit=fitted_size,
                     quality=getattr(diag, 'quality_score', 1.0),
+                    polish=cleanup_note,
                     missing=''.join(missing) if missing else self.tr('none'),
+                    mask=mask_note,
                 )
             )
         except Exception as exc:
@@ -925,6 +1109,7 @@ class FontFormatPanel(Widget):
             font_size += "+"
         self.fontsizebox.fcombobox.setCurrentText(font_size)
         self.familybox.setCurrentText(font_format.font_family)
+        self._refresh_favorite_fonts()
         self.colorPicker.setPickerColor(font_format.foreground_color())
         self.strokeColorPicker.setPickerColor(font_format.stroke_color())
         self.strokeWidthBox.setValue(font_format.stroke_width)
@@ -940,6 +1125,7 @@ class FontFormatPanel(Widget):
         self.lineBreakCombo.blockSignals(True)
         self._set_combo_by_data(self.lineBreakCombo, normalize_line_break_strategy(getattr(font_format, 'line_break_strategy', 'auto')))
         self.lineBreakCombo.blockSignals(False)
+        self._refresh_manga_presets()
         self.mangaPresetCombo.blockSignals(True)
         self._set_combo_by_data(self.mangaPresetCombo, getattr(font_format, 'manga_preset', '') or '')
         self.mangaPresetCombo.blockSignals(False)

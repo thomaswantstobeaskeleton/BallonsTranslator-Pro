@@ -19,7 +19,41 @@ class LocalAutomationApiServer:
             return
         handlers = self.handlers
 
+        def _routes_payload():
+            routes = sorted(handlers.keys())
+            return {
+                'ok': True,
+                'routes': routes,
+                'count': len(routes),
+                'methods': {
+                    'GET': ['health', 'routes'],
+                    'POST': routes,
+                },
+            }
+
         class H(BaseHTTPRequestHandler):
+            def _auth_ok(self):
+                if self.server_ref.api_key:
+                    got = (self.headers.get('X-API-Key', '') or '').strip()
+                    if got != self.server_ref.api_key:
+                        self._send(401, {'ok': False, 'error': 'unauthorized'})
+                        return False
+                return True
+
+            def do_GET(self):
+                route = self.path.strip('/')
+                if route in {'', 'health'}:
+                    if not self._auth_ok():
+                        return
+                    self._send(200, {**_routes_payload(), 'status': 'ok'})
+                    return
+                if route == 'routes':
+                    if not self._auth_ok():
+                        return
+                    self._send(200, _routes_payload())
+                    return
+                self._send(404, {'ok': False, 'error': f'unknown route: {route}'})
+
             def do_POST(self):
                 ln = int(self.headers.get('Content-Length', '0') or 0)
                 raw = self.rfile.read(ln) if ln > 0 else b'{}'
@@ -28,11 +62,8 @@ class LocalAutomationApiServer:
                 except Exception:
                     body = {}
                 route = self.path.strip('/')
-                if self.server_ref.api_key:
-                    got = (self.headers.get('X-API-Key', '') or '').strip()
-                    if got != self.server_ref.api_key:
-                        self._send(401, {'ok': False, 'error': 'unauthorized'})
-                        return
+                if not self._auth_ok():
+                    return
                 fn = handlers.get(route)
                 if fn is None:
                     self._send(404, {'ok': False, 'error': f'unknown route: {route}'})

@@ -147,3 +147,83 @@ The layout review agent now consumes effect-aware `recommended_box_size` diagnos
 - **Configurable vertical plans:** `vertical_layout_plan()` now records whether latin glyph rotation and punctuation hanging were enabled, and Typography QA uses the live Config values. This makes UI, API, SVG/PSD handoff, and tests agree on vertical punctuation intent.
 - **Editor comfort setting:** Config → General → Rendering / Text Formatting includes **Text editor top padding**. It updates the side text editor list immediately, fixing the cramped first-visible-row feel even after scrolling while keeping dense manga editing workflows fast.
 - **Automation workflow helper:** local automation clients can call `POST /recent_projects` to retrieve recent project paths, existence checks, and JSON/folder type before opening or running a project.
+
+## 2026-05-07 pass: favorite fonts, visual fit, archive/export workflow
+
+- **Favorite lettering fonts:** Settings → Project text rendering defaults now includes **Favorite lettering fonts**. Enter comma-separated manga/comic font families there, then use the **Favorites** combo in the text formatting panel to apply one instantly to the current style or selected text box. The **★** button captures the currently selected font into the persisted favorites list.
+- **Visual-advance fit estimates:** Renderer diagnostics and layout review no longer treat every character as the same width. CJK punctuation, brackets, emoji/symbols, combining marks, and Latin runs use script-aware visual advance units, making overflow warnings and recommended box sizes less noisy for manga punctuation-heavy text.
+- **Letter-spacing review fix:** When wide text overflows horizontally, Typography QA / layout review can suggest and apply a conservative **tighten letter spacing** action before shrinking fonts or resizing boxes. This preserves lettering weight where possible.
+- **Export workflow polish:** Batch export has a persistent **Open output folder when done** option, and the automation export route can create ZIP/CBZ archives (`kind=archive`, `kind=zip`, or `kind=cbz`) from rendered pages plus optional clean/mask helper images.
+
+## 2026-05-07 pass: reusable manga lettering presets
+
+- **Save current style as a preset:** The text formatting panel now includes **Save preset** next to the manga preset picker. It captures the current font family, weight, size, colors, stroke, shadow, spacing, writing mode, fit mode, line-break strategy, padding, opacity, and fallback chain into a persisted custom preset.
+- **Built-in + custom preset parity:** Custom presets appear beside built-in presets and can be applied from the text panel, batch style override, layout review preset actions, and automation. Presets can be imported/exported as JSON packs for team handoff, with missing-font diagnostics when the current machine lacks a preset font family.
+- **Recent font recall:** Font choices are remembered as recent lettering fonts and shown alongside favorites, reducing repeated scrolling through long font lists while lettering a chapter.
+- **Automation:** Local clients can call `rendering_presets` with `action=list`, `action=save`, `action=save_current`, `action=import`, `action=export`, or `action=delete` to inspect, create, share, or prune reusable rendering presets.
+
+## Mask-safe lettering and overflow diagnostics
+
+When renderer diagnostics are enabled, selected text boxes now show both the measured text bounds and (when a text eraser/mask exists) the mask-safe lettering rectangle. Purple dotted overlay bounds indicate that the current mask leaves a narrow or off-center visible area that may clip strokes, shadows, punctuation, or vertical columns during final render/export.
+
+User-facing repair paths:
+
+- **Canvas context menu → Format → Apply mask-safe padding** increases the selected textbox inset based on the mask-safe insets and persists the result in the textbox `FontFormat.text_padding`.
+- **Tools/API Typography QA** reports `mask_safe_area` warnings with mask coverage, safe insets, and recommended padding.
+- **Layout Review** can apply `increase_padding` and `recenter` actions for masked/clipped text boxes, so selected-box, whole-page, and headless review flows share the same repair behavior.
+
+Known limitation: this pass avoids fake irregular text flow. The current implementation safely keeps ink away from mask edges; full non-rectangular squeezing around speech-bubble masks remains a later renderer/layout pass.
+
+## Mask-effective fitting and export fallback controls
+
+Mask diagnostics now feed fitting decisions, not just warnings. When a text eraser/mask leaves a narrow visible area, Typography QA computes a `mask_effective_box` from the mask-safe rectangle and can report `mask_safe_overflow` even if the text fits the full rectangular textbox. Project-wide fixes and layout review can then shrink to that visible safe area and/or increase padding. The text formatting panel's live diagnostics also show mask coverage and the effective safe dimensions for the selected textbox.
+
+Batch export has a workflow option for complete manga-reader handoff:
+
+- **Settings → Include unrendered pages in batch export** stores the default.
+- **Export all pages as… → Include pages without rendered results** applies it for the current export.
+- Local automation can pass `include_unrendered: true` to rendered/archive export calls.
+
+When enabled, export uses the rendered result when available, then falls back to the inpainted/clean image, then the original page. `export_manifest.json` records `source_kind` and `used_fallback_source` for every exported page so downstream scripts can distinguish translated pages from clean/original fallbacks.
+
+## Typography polish and automation pass (2026-05-08)
+
+BallonsTranslator-Pro now has a one-click **Polish typography** workflow for selected text boxes and local automation. It is deliberately conservative and runs before destructive resize operations:
+
+- resolves `Auto` writing mode from script + box geometry, so tall CJK boxes become `vertical_rl` and Arabic/Hebrew becomes `rtl`;
+- normalizes vertical CJK punctuation such as `?!`, `!!`, `??`, commas, and ellipses into forms that fit vertical columns better;
+- selects a script-aware line-break strategy (`cjk_strict` for CJK/vertical, `balanced` for multi-word Latin captions) when the style is still `auto`;
+- rebalances horizontal text with the dynamic-programming kinsoku wrapper where it reduces ragged/dangling lines;
+- raises too-small text padding to a safe minimum so strokes and punctuation have breathing room;
+- repairs per-textbox fallback font overrides when the configured project fallback chain can cover missing glyphs.
+
+Entry points:
+
+- Canvas context menu: **Format → Polish typography**.
+- Local automation API: `POST /polish_typography` with `mode: "page" | "selected"` or an explicit `indices` list.
+- Rendering QA/layout review: rows can suggest `polish_typography`; project fixes can apply it before smart fit or resizing.
+- Settings: **Project text rendering defaults → Auto-polish new OCR/detected textboxes** controls whether newly loaded run results receive conservative script/line-break/padding/fallback polish.
+
+Related automation/workflow helpers:
+
+- `POST /project_status` returns project/page/textbox counts, current page, completion states, and unsaved state for headless scripts before deciding which workflow action to run.
+- `POST /smart_fit_textboxes` remains available for stronger fitting after typography polish.
+
+## Lettering proof packs and vertical layout diagnostics (2026-05-08)
+
+For final lettering review and external editor handoff, BallonsTranslator-Pro can now export a **Lettering proof pack** for the current page:
+
+- Canvas context menu: **Review / QA → Export lettering proof pack**.
+- Local API: `POST /export_lettering_proof` or `POST /export` with `kind: "lettering_proof"`.
+- The pack contains `typography_qa.json`, `typography_qa.md`, an editable SVG text handoff, a PSD-helper manifest/layer folder when supported, and a `lettering_proof_manifest.json` summary.
+- Proof manifests include `proof_metrics` for each text layer: measured bounds, box clearance, overflow pixels, text density, recommended actions, and vertical glyph-cell samples for vertical CJK.
+
+The vertical glyph-cell diagnostics model the intended manga flow (top-to-bottom rows, right-to-left columns) and include punctuation class, rotation, scale, and hanging hints for handoff clients. This is not a full native PSD text writer yet; when PSD helper generation is unavailable, the proof pack records an explicit warning instead of silently pretending the PSD contains editable text.
+
+Automation helpers also expose `GET /health` and `GET /routes` on the local API server, making headless setup easier by listing available commands before a script starts a long workflow.
+
+### Follow-up proof index and route metadata
+
+Lettering proof packs now include `lettering_proof_index.html`, a browser-friendly summary that links the QA JSON/Markdown, editable SVG, PSD-helper manifest, final composite, warnings, and per-textbox proof metrics. This is intended for quick review before sending pages to another editor or before opening the raw JSON.
+
+`GET /health` and `GET /routes` now return a route count and method map (`GET` discovery routes plus available `POST` commands), so automation clients can validate capabilities without hard-coding the server's command list.

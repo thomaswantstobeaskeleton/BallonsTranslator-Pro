@@ -35,3 +35,23 @@ def test_apply_text_style_batch_can_target_only_auto_sized_blocks():
     assert project.pages["p1.png"][0].fontformat.font_family == "Noto Sans"
     assert project.pages["p1.png"][1].fontformat.font_family == "Old"
     assert project.pages["p2.png"][0].fontformat.alignment == 1
+
+
+def test_apply_text_style_batch_accepts_custom_manga_presets():
+    from types import SimpleNamespace
+    project = Project()
+    cfg = SimpleNamespace(render_custom_manga_presets={
+        "custom:quiet_caption": {
+            "label": "Quiet caption",
+            "font_size": 18,
+            "writing_mode": "horizontal_ltr",
+            "fit_mode": "balance",
+            "stroke_width": 0.02,
+            "letter_spacing": 0.93,
+        }
+    })
+    result = apply_text_style_batch(project, {"preset": "custom:quiet_caption"}, pages=["p1.png"], config_obj=cfg)
+    assert result["changed"] == 2
+    assert project.pages["p1.png"][0].fontformat.manga_preset == "custom:quiet_caption"
+    assert project.pages["p1.png"][0].fontformat.fit_mode == "balance"
+    assert project.pages["p1.png"][0].fontformat.letter_spacing == 0.93

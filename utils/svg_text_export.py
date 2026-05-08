@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Sequence, Tuple
 
 from .rendering_qa import analyze_text_block
-from .text_rendering import resolve_writing_mode, vertical_columns
+from .text_rendering import resolve_writing_mode, vertical_columns, lettering_proof_metrics
 
 
 def _page_size(project, page_name: str) -> Tuple[int, int]:
@@ -108,6 +108,7 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
         if mode == "vertical_rl":
             attrs.append('writing-mode="vertical-rl"')
             attrs.append('glyph-orientation-vertical="0"')
+            attrs.append('data-vertical-layout="top-to-bottom-right-to-left"')
         if mode == "rtl":
             attrs.append('direction="rtl"')
         svg.append('    <text ' + " ".join(attrs) + '>')
@@ -117,6 +118,16 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
             diagnostics = analyze_text_block(blk, page_name, idx, config_obj=object())
         except Exception as exc:
             diagnostics = {"warnings": ["svg_diagnostics_unavailable"], "error": str(exc)}
+        proof_metrics = lettering_proof_metrics(
+            text, font_size, (width, height), mode, line_spacing=line_spacing,
+            letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) if fmt else 1.0 or 1.0),
+            padding=float(getattr(fmt, "text_padding", 0.0) if fmt else 0.0 or 0.0),
+            stroke_width=float(getattr(fmt, "stroke_width", 0.0) if fmt else 0.0 or 0.0),
+            shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) if fmt else 0.0 or 0.0),
+            shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) if fmt else [0.0, 0.0],
+            line_break_strategy=getattr(fmt, "line_break_strategy", "auto") if fmt else "auto",
+            sample_limit=64,
+        )
         layer_entries.append({
             "index": idx,
             "text": text,
@@ -125,6 +136,7 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
             "font_family": getattr(fmt, "font_family", "") if fmt else "",
             "font_size": font_size,
             "diagnostics": diagnostics,
+            "proof_metrics": proof_metrics,
         })
         warnings.extend([f"Block {idx}: {w}" for w in diagnostics.get("warnings", [])])
     svg.append('  </g>')

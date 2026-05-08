@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set
 
 from .fontformat import FontFormat
+from .text_masking import masked_text_warnings, mask_effective_box
 from .text_rendering import (
     FIT_MODE_BALANCE,
     FIT_MODE_EXPAND,
@@ -14,6 +15,9 @@ from .text_rendering import (
     lettering_quality_score,
     safe_inner_bounds,
     fit_font_size_to_box,
+    smart_fit_text_to_box,
+    plan_typography_cleanup,
+    lettering_proof_metrics,
     line_break_opportunities,
     normalize_vertical_punctuation,
     resolve_fit_font_size_bounds,
@@ -22,6 +26,7 @@ from .text_rendering import (
     merge_font_fallback_chain,
     missing_glyphs_after_fallback,
     resolve_writing_mode,
+    recommended_tight_letter_spacing,
 )
 
 
@@ -106,6 +111,12 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if overflow:
         warnings.append("overflow")
         suggestions.append({"action": "shrink_to_fit", "reason": "Measured text bounds exceed textbox bounds."})
+        if measured[0] > box_w and float(getattr(fmt, "letter_spacing", 1.0) or 1.0) > 0.92:
+            suggestions.append({
+                "action": "tighten_letter_spacing",
+                "letter_spacing": recommended_tight_letter_spacing(float(getattr(fmt, "letter_spacing", 1.0) or 1.0), measured[0] / max(1.0, box_w)),
+                "reason": "Wide lettering can often fit by tightening tracking before shrinking the font.",
+            })
     if missing:
         warnings.append("missing_glyphs")
         chain = fallback_chain_for_text(text, config_obj)
@@ -125,6 +136,25 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     if float(getattr(fmt, "stroke_width", 0.0) or 0.0) > 0 and float(getattr(fmt, "text_padding", 0.0) or 0.0) < 1.0:
         warnings.append("low_padding_with_stroke")
         suggestions.append({"action": "increase_padding", "padding": 2.0, "reason": "Outlined text can clip without inset padding."})
+    mask_diag = masked_text_warnings(getattr(blk, "text_mask", None), float(getattr(fmt, "text_padding", 0.0) or 0.0))
+    effective_box = mask_effective_box(getattr(blk, "text_mask", None), (box_w, box_h), float(getattr(fmt, "text_padding", 0.0) or 0.0))
+    mask_overflow = bool(effective_box.get("uses_mask")) and (measured[0] > float(effective_box.get("width", box_w)) or measured[1] > float(effective_box.get("height", box_h)))
+    if mask_diag.get("fully_masked") or mask_diag.get("narrow_safe_area"):
+        warnings.append("mask_safe_area")
+        suggestions.append({
+            "action": "increase_padding",
+            "padding": mask_diag.get("recommended_padding", 2.0),
+            "mask_safe_insets": mask_diag.get("safe_insets", []),
+            "reason": "Text mask leaves a constrained safe area; add inset before render/export to avoid clipped lettering.",
+        })
+        suggestions.append({"action": "recenter", "reason": "Recenter ink in the mask-safe area."})
+    if mask_overflow:
+        warnings.append("mask_safe_overflow")
+        suggestions.append({
+            "action": "shrink_to_mask_safe_area",
+            "effective_box": [round(float(effective_box.get("width", box_w)), 2), round(float(effective_box.get("height", box_h)), 2)],
+            "reason": "Measured lettering exceeds the visible mask-safe area even if it fits the full text box.",
+        })
     if effect_suggestion.get("needs_effect") and float(getattr(fmt, "stroke_width", 0.0) or 0.0) <= 0:
         warnings.append("low_contrast_no_effect")
         suggestions.append({"action": "apply_contrast_stroke", **effect_suggestion, "reason": "Light lettering on a light bubble/page may need an outline or soft shadow."})
@@ -161,6 +191,60 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
     else:
         break_ops = line_break_opportunities(text, getattr(fmt, "line_break_strategy", "auto"))[:24]
 
+    typography_cleanup = plan_typography_cleanup(
+        text,
+        float(getattr(fmt, "font_size", 24.0) or 24.0),
+        (box_w, box_h),
+        getattr(fmt, "writing_mode", "auto"),
+        getattr(fmt, "fit_mode", FIT_MODE_SHRINK),
+        getattr(fmt, "line_break_strategy", "auto"),
+        line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
+        letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
+        text_padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+        font_family=getattr(fmt, "font_family", ""),
+        fallback_font_chain=getattr(fmt, "fallback_font_chain", ""),
+        config_obj=config_obj,
+    )
+    if typography_cleanup.actions:
+        suggestions.append({"action": "polish_typography", "typography_cleanup": typography_cleanup.to_dict(), "reason": "Normalize writing mode, line breaks, vertical punctuation, padding, and fallback fonts before fitting/export."})
+
+    proof_metrics = lettering_proof_metrics(
+        text,
+        float(getattr(fmt, "font_size", 24.0) or 24.0),
+        (box_w, box_h),
+        getattr(fmt, "writing_mode", "auto"),
+        line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
+        letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+        stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
+        line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
+        sample_limit=64,
+    )
+    if proof_metrics.get("density", 0) > 0.94 or any(float(v) > 0 for v in proof_metrics.get("overflow_pixels", [0, 0])):
+        suggestions.append({"action": "export_lettering_proof", "proof_metrics": proof_metrics, "reason": "Crowded or overflowing lettering should be reviewed in the proof handoff before final export."})
+
+    smart_fit = smart_fit_text_to_box(
+        text,
+        float(getattr(fmt, "font_size", 24.0) or 24.0),
+        (box_w, box_h),
+        getattr(fmt, "writing_mode", "auto"),
+        getattr(fmt, "fit_mode", FIT_MODE_SHRINK),
+        min_font_size=style_min,
+        max_font_size=style_max,
+        line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
+        letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+        stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
+        effective_box_size=(float(effective_box.get("width", box_w)), float(effective_box.get("height", box_h))) if effective_box.get("uses_mask") else None,
+    )
+    if smart_fit.actions and (overflow or mask_overflow or smart_fit.font_size < float(getattr(fmt, "font_size", 24.0) or 24.0) - 0.2):
+        suggestions.append({"action": "smart_fit", "smart_fit": smart_fit.to_dict(), "reason": "Apply balanced wrapping, tracking/leading tightening, writing-mode correction, and font fitting in a safe order."})
+
     return {
         "page": page,
         "index": index,
@@ -186,15 +270,20 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "effect_margin": effect_margin,
         "quality_score": quality_score,
         "suggested_font_size": fitted_size,
+        "smart_fit": smart_fit.to_dict(),
         "recommended_box_size": recommended_box,
         "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
         "ink_clip_risk": bool(getattr(fit_diag, "ink_clip_risk", False)),
+        "mask_diagnostics": mask_diag,
+        "mask_effective_box": effective_box,
         "preset_suggestion": preset_suggestion,
         "suggested_text": fitted_text if fitted_text != text else "",
         "contrast_effect": effect_suggestion,
         "vertical_layout_plan": vertical_plan,
         "line_break_opportunities": break_ops,
         "warnings": warnings,
+        "typography_cleanup": typography_cleanup.to_dict(),
+        "proof_metrics": proof_metrics,
         "suggestions": suggestions,
     }
 
@@ -264,6 +353,10 @@ def flatten_rendering_qa_rows(report: Dict) -> List[Dict]:
                 "quality_score": block.get("quality_score", 1.0),
                 "effect_margin": block.get("effect_margin", 0.0),
                 "safe_inner_bounds": block.get("safe_inner_bounds", []),
+                "mask_coverage": (block.get("mask_diagnostics", {}) or {}).get("coverage", 1.0),
+                "mask_warning": (block.get("mask_diagnostics", {}) or {}).get("warning", ""),
+                "mask_effective_box": block.get("mask_effective_box", {}),
+                "smart_fit_actions": (block.get("smart_fit", {}) or {}).get("actions", []),
             })
     return rows
 
@@ -360,8 +453,11 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
             if "rtl_left_alignment" in diag["warnings"] and wants("set_alignment"):
                 fmt.alignment = 2
                 changed.append("alignment")
-            if ("low_padding_with_stroke" in diag["warnings"] or "ink_clip_risk" in diag["warnings"]) and wants("increase_padding"):
-                fmt.text_padding = max(float(getattr(fmt, "text_padding", 0.0) or 0.0), 2.0)
+            if ("low_padding_with_stroke" in diag["warnings"] or "ink_clip_risk" in diag["warnings"] or "mask_safe_area" in diag["warnings"]) and wants("increase_padding"):
+                recommended_padding = 2.0
+                if "mask_safe_area" in diag["warnings"]:
+                    recommended_padding = float((diag.get("mask_diagnostics", {}) or {}).get("recommended_padding", 2.0) or 2.0)
+                fmt.text_padding = max(float(getattr(fmt, "text_padding", 0.0) or 0.0), recommended_padding)
                 changed.append("text_padding")
             if "horizontal_cjk_in_tall_box" in diag["warnings"] and wants("switch_writing_mode"):
                 fmt.writing_mode = "vertical_rl"
@@ -397,6 +493,95 @@ def apply_project_rendering_fixes(project, pages: Optional[Sequence[str]] = None
                             new_h = max(box_h, rec_h)
                             blk.xyxy = [cx - new_w / 2.0, cy - new_h / 2.0, cx + new_w / 2.0, cy + new_h / 2.0]
                             changed.append("textbox_size")
+            if "overflow" in diag["warnings"] and wants("tighten_letter_spacing"):
+                for suggestion in diag.get("suggestions", []) or []:
+                    if suggestion.get("action") == "tighten_letter_spacing":
+                        new_spacing = max(0.80, min(float(getattr(fmt, "letter_spacing", 1.0) or 1.0), float(suggestion.get("letter_spacing", 0.94) or 0.94)))
+                        if new_spacing < float(getattr(fmt, "letter_spacing", 1.0) or 1.0):
+                            fmt.letter_spacing = new_spacing
+                            changed.append("letter_spacing")
+                        break
+            if wants("smart_fit"):
+                smart = diag.get("smart_fit", {}) or {}
+                smart_actions = set(smart.get("actions", []) or [])
+                if smart_actions and ("overflow" in diag["warnings"] or "mask_safe_overflow" in diag["warnings"] or "horizontal_cjk_in_tall_box" in diag["warnings"]):
+                    try:
+                        smart_size = float(smart.get("font_size", 0.0) or 0.0)
+                    except Exception:
+                        smart_size = 0.0
+                    if smart_size > 0 and abs(smart_size - float(getattr(fmt, "font_size", 24.0) or 24.0)) > 0.2:
+                        fmt.font_size = smart_size
+                        changed.append("smart_font_size")
+                    if "tighten_letter_spacing" in smart_actions:
+                        try:
+                            fmt.letter_spacing = float(smart.get("letter_spacing", getattr(fmt, "letter_spacing", 1.0)) or getattr(fmt, "letter_spacing", 1.0))
+                            changed.append("smart_letter_spacing")
+                        except Exception:
+                            pass
+                    if "tighten_line_spacing" in smart_actions:
+                        try:
+                            fmt.line_spacing = float(smart.get("line_spacing", getattr(fmt, "line_spacing", 1.15)) or getattr(fmt, "line_spacing", 1.15))
+                            changed.append("smart_line_spacing")
+                        except Exception:
+                            pass
+                    if "switch_writing_mode" in smart_actions:
+                        fmt.writing_mode = str(smart.get("writing_mode", getattr(fmt, "writing_mode", "auto")) or "auto")
+                        fmt.vertical = fmt.writing_mode == "vertical_rl"
+                        changed.append("smart_writing_mode")
+                    new_text = str(smart.get("text", "") or "")
+                    if new_text and new_text != text and ("balance_lines" in smart_actions or "normalize_vertical_punctuation" in smart_actions):
+                        blk.translation = new_text
+                        changed.append("smart_text")
+                    if smart_actions:
+                        fmt.fit_mode = FIT_MODE_SHRINK
+            if wants("polish_typography"):
+                cleanup = diag.get("typography_cleanup", {}) or {}
+                cleanup_actions = set(cleanup.get("actions", []) or [])
+                if cleanup_actions:
+                    if "switch_writing_mode" in cleanup_actions:
+                        fmt.writing_mode = str(cleanup.get("writing_mode", getattr(fmt, "writing_mode", "auto")) or "auto")
+                        fmt.vertical = fmt.writing_mode == "vertical_rl"
+                        changed.append("polish_writing_mode")
+                    if "set_line_break_strategy" in cleanup_actions:
+                        fmt.line_break_strategy = str(cleanup.get("line_break_strategy", getattr(fmt, "line_break_strategy", "auto")) or "auto")
+                        changed.append("polish_line_breaks")
+                    if "increase_padding" in cleanup_actions:
+                        try:
+                            fmt.text_padding = max(float(getattr(fmt, "text_padding", 0.0) or 0.0), float(cleanup.get("text_padding", 0.0) or 0.0))
+                            changed.append("polish_padding")
+                        except Exception:
+                            pass
+                    if "apply_font_fallback" in cleanup_actions:
+                        chain = str(cleanup.get("fallback_font_chain", "") or "")
+                        if chain:
+                            fmt.fallback_font_chain = chain
+                            changed.append("polish_fallback")
+                    new_text = str(cleanup.get("text", "") or "")
+                    if new_text and new_text != text:
+                        blk.translation = new_text
+                        changed.append("polish_text")
+            if "mask_safe_overflow" in diag["warnings"] and wants("shrink_to_mask_safe_area"):
+                eff = diag.get("mask_effective_box", {}) or {}
+                try:
+                    eff_box = (max(1.0, float(eff.get("width", box_w))), max(1.0, float(eff.get("height", box_h))))
+                except Exception:
+                    eff_box = (box_w, box_h)
+                new_size, _new_text, _fit_diag = fit_font_size_to_box(
+                    text,
+                    float(getattr(fmt, "font_size", 24.0) or 24.0),
+                    eff_box,
+                    FIT_MODE_SHRINK,
+                    getattr(fmt, "writing_mode", "auto"),
+                    padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+                    stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+                    line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
+                    letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
+                    line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
+                )
+                if new_size < float(getattr(fmt, "font_size", 24.0) or 24.0) - 0.2:
+                    fmt.font_size = new_size
+                    fmt.fit_mode = FIT_MODE_SHRINK
+                    changed.append("mask_safe_font_size")
             if "overflow" in diag["warnings"] and (wants("shrink_to_fit") or wants("balance_lines")):
                 fit_mode = getattr(fmt, "fit_mode", FIT_MODE_SHRINK)
                 if fit_mode in (FIT_MODE_SHRINK, FIT_MODE_EXPAND, FIT_MODE_PRESERVE, FIT_MODE_BALANCE):
