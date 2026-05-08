@@ -709,7 +709,7 @@ class SceneTextManager(QObject):
             changed += 1
             blkitem.update()
         if changed:
-            self.canvas.setProjSaveState(False)
+            self.canvas.setProjSaveState(True)
             if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
                 self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Applied mask-safe padding to {0} text box(es)').format(changed))
 
@@ -1438,7 +1438,7 @@ class SceneTextManager(QObject):
         if changed:
             if push_undo:
                 self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
-            self.canvas.setProjSaveState(False)
+            self.canvas.setProjSaveState(True)
             if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
                 self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Polished typography for {0} text box(es)').format(changed))
         return changed
@@ -1522,7 +1522,7 @@ class SceneTextManager(QObject):
         if changed:
             if push_undo:
                 self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
-            self.canvas.setProjSaveState(False)
+            self.canvas.setProjSaveState(True)
             if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
                 self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Smart-fitted {0} text box(es)').format(changed))
         return changed
@@ -1599,9 +1599,11 @@ class SceneTextManager(QObject):
             ) if effective_box.get('uses_mask') else None,
         )
 
+        smart_dict = smart.to_dict() if hasattr(smart, 'to_dict') else {}
+
         measured_bounds = (
             fit_dict.get('measured_bounds')
-            or smart.get('measured_bounds')
+            or smart_dict.get('measured_bounds')
             or est
             or (0.0, 0.0)
         )
@@ -1616,11 +1618,10 @@ class SceneTextManager(QObject):
             effect_margin=float(
                 fit_dict.get(
                     'effect_margin',
-                    smart.get('effect_margin', 0.0),
+                    smart_dict.get('effect_margin', 0.0),
                 ) or 0.0
             ),
             padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
-        )
         )
         style = {
             'font_family': getattr(ff, 'font_family', ''),
@@ -1642,7 +1643,7 @@ class SceneTextManager(QObject):
             'mask_warning': mask_diag.get('warning', ''),
             'mask_recommended_padding': mask_diag.get('recommended_padding', 0.0),
             'mask_effective_box': effective_box,
-            'smart_fit': smart.to_dict(),
+            'smart_fit': smart_dict,
             'typography_cleanup': typography_cleanup.to_dict(),
             'mask_diagnostics': mask_diag,
         }
