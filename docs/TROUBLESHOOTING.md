@@ -101,6 +101,23 @@ The app will retry using the local HuggingFace cache only. If the model was neve
 | **Fresh venv** | `python -m venv venv`, activate, then `pip install -r requirements.txt` and `python launch.py`. Reduces conflicts from other projects. |
 | **Torch version** | `launch.py` installs PyTorch (CUDA or ROCm) automatically. To force a version, set **TORCH_COMMAND** (e.g. `pip install torch==... torchvision==... --index-url ...`) before running. See README or "Portable setup" for platform notes. |
 
+
+### Windows NVIDIA: torch/torchvision entry-point errors after auto-install
+
+**Symptoms:** First launch detects an NVIDIA GPU, installs CUDA PyTorch, then Windows shows `python.exe - Entry Point Not Found` dialogs mentioning `torch_cuda.dll`, `torchvision\_C.pyd`, or `operator torchvision::nms does not exist`.
+
+**Cause:** A CPU-only or mismatched PyTorch/torchvision wheel was already installed in the active Python. Older launchers imported `torch` while checking CUDA, so Windows could keep PyTorch DLLs loaded during `pip` replacement and leave a mixed install for the rest of that run.
+
+**Fix:** Use the current launcher, which probes PyTorch in a child process before reinstalling. If the environment is already mixed from a previous run, close BallonsTranslator-Pro and run:
+
+```bat
+python -m pip uninstall -y torch torchvision torchaudio
+python -m pip install --upgrade --force-reinstall torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118
+python launch.py
+```
+
+Delete any leftover `~orch`, `~orchvision`, or `~umpy` temporary folders under `Lib\site-packages` only after Python is closed; pip may leave these behind when files were locked.
+
 ---
 
 ## 6. First run seems stuck or very slow

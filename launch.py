@@ -7,6 +7,7 @@ import importlib
 import subprocess
 import shlex
 import warnings
+import json
 from platform import platform
 
 # Suppress requests' urllib3/chardet version mismatch warning (harmless for typical use)
@@ -655,13 +656,58 @@ def is_nvidia_gpu_present():
     return False
 
 
+def _probe_installed_torch():
+    """Return installed torch diagnostics without importing torch in this launcher.
+
+    Importing torch in the parent process before replacing wheels can keep
+    torch/torchvision DLLs loaded on Windows. That may leave a half-upgraded
+    install and cause entry-point errors such as ``torch_cuda.dll`` or
+    ``torchvision/_C.pyd`` symbol failures after the CUDA wheel is installed.
+    Probe in a short-lived child process instead so pip can safely uninstall
+    the old wheel.
+    """
+    probe_code = """
+import json
+import torch
+payload = {
+    'ok': True,
+    'version': getattr(torch, '__version__', None),
+    'cuda': getattr(getattr(torch, 'version', None), 'cuda', None),
+    'cuda_available': bool(torch.cuda.is_available()),
+}
+print(json.dumps(payload))
+"""
+    try:
+        result = subprocess.run(
+            [python, "-c", probe_code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+            env=os.environ,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "error": (result.stderr or result.stdout or f"probe exited with {result.returncode}").strip(),
+        }
+    try:
+        return json.loads((result.stdout or "{}").strip().splitlines()[-1])
+    except Exception as exc:
+        return {"ok": False, "error": f"invalid probe output: {exc}; stdout={result.stdout!r}"}
+
+
 def installed_torch_is_cpu_only():
     """Return True when installed torch cannot expose CUDA devices."""
-    import torch
-    try:
-        return getattr(torch.version, 'cuda', None) is None or not bool(torch.cuda.is_available())
-    except Exception:
+    info = _probe_installed_torch()
+    if not info.get("ok"):
+        print(f"Unable to inspect installed PyTorch without importing it: {info.get('error')}")
         return True
+    return info.get("cuda") is None or not bool(info.get("cuda_available"))
+
 
 def prepare_environment():
 
@@ -705,6 +751,7 @@ def prepare_environment():
         torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
     cuda_torch_reinstall_needed = (
         not os.environ.get("BT_SKIP_CUDA_TORCH_REINSTALL")
+        and os.environ.get("BT_CUDA_TORCH_REINSTALL_ATTEMPTED") != "1"
         and not is_amd_gpu()
         and is_nvidia_gpu_present()
         and is_installed("torch")
@@ -712,6 +759,7 @@ def prepare_environment():
     )
     if cuda_torch_reinstall_needed:
         print("NVIDIA GPU detected but installed PyTorch is CPU-only or cannot use CUDA; installing CUDA-enabled PyTorch.")
+        os.environ["BT_CUDA_TORCH_REINSTALL_ATTEMPTED"] = "1"
 
     if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision") or cuda_torch_reinstall_needed:
         install_torch_command = torch_command
