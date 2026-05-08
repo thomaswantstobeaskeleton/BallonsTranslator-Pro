@@ -1860,6 +1860,7 @@ class BottomBar(Widget):
         self.spellCheckChecker.setCheckable(True)
         self.spellCheckChecker.setAutoRaise(True)
         self.spellCheckChecker.setFixedSize(44, 40)
+        self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.spellCheckChecker.setToolTip(self.tr('Spell check panel: review OCR/translation spelling issues'))
         self.spellCheckChecker.setAccessibleName(self.tr('Spell check panel'))
         self.spellCheckChecker.setAccessibleDescription(self.tr('Toggle the spell check side panel.'))
@@ -1953,7 +1954,8 @@ class BottomBar(Widget):
 
         if osp.isfile(icon_path):
             self.spellCheckChecker.setIcon(QIcon(icon_path))
-            self.spellCheckChecker.setIconSize(QSize(20, 20))
+            # Match the visual weight of the neighboring bottom-bar checkbox icons.
+            self.spellCheckChecker.setIconSize(QSize(30, 30))
 
     def onPaintCheckerPressed(self):
         checked = self.paintChecker.isChecked()

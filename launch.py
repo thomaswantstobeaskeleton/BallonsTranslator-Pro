@@ -619,6 +619,50 @@ def supported_amd_nightly_gpu():
     except Exception:
         return "None"
 
+
+def is_nvidia_gpu_present():
+    """Best-effort physical NVIDIA GPU probe before importing PyTorch.
+
+    GitHub ZIP installs often already have a CPU-only torch in the Python
+    environment. In that case torch imports successfully, but CUDA device
+    selectors never show up in the app. Probe the host GPU separately so the
+    launcher can replace CPU-only torch with the CUDA wheel.
+    """
+    if os.environ.get("CUDA_VISIBLE_DEVICES", None) == "":
+        return False
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+        if output.strip():
+            return True
+    except Exception:
+        pass
+    try:
+        if sys.platform == 'win32':
+            output = subprocess.check_output(
+                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+            )
+            return any(keyword in output.lower() for keyword in ("nvidia", "geforce", "rtx", "gtx", "quadro"))
+    except Exception:
+        pass
+    return False
+
+
+def installed_torch_is_cpu_only():
+    """Return True when installed torch cannot expose CUDA devices."""
+    import torch
+    try:
+        return getattr(torch.version, 'cuda', None) is None or not bool(torch.cuda.is_available())
+    except Exception:
+        return True
+
 def prepare_environment():
 
     try:
@@ -659,8 +703,21 @@ def prepare_environment():
             torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
     else:
         torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
-    if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision"):
-        run(f'"{python}" -m {torch_command}', "Installing torch and torchvision", "Couldn't install torch", live=True)
+    cuda_torch_reinstall_needed = (
+        not os.environ.get("BT_SKIP_CUDA_TORCH_REINSTALL")
+        and not is_amd_gpu()
+        and is_nvidia_gpu_present()
+        and is_installed("torch")
+        and installed_torch_is_cpu_only()
+    )
+    if cuda_torch_reinstall_needed:
+        print("NVIDIA GPU detected but installed PyTorch is CPU-only or cannot use CUDA; installing CUDA-enabled PyTorch.")
+
+    if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision") or cuda_torch_reinstall_needed:
+        install_torch_command = torch_command
+        if cuda_torch_reinstall_needed and "TORCH_COMMAND" not in os.environ and "--force-reinstall" not in install_torch_command:
+            install_torch_command = f"{install_torch_command} --force-reinstall"
+        run(f'"{python}" -m {install_torch_command}', "Installing torch and torchvision", "Couldn't install torch", live=True)
         req_updated = True
 
     if not check_req_file(args.requirements):

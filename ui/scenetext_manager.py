@@ -1210,9 +1210,11 @@ class SceneTextManager(QObject):
             blkitem.fontformat.text_box_shape = "auto"
             return
         try:
+            cx, cy = br[0] + br[2] / 2, br[1] + br[3] / 2
             enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
             mask, _area, mask_xyxy, region_rect = extract_ballon_region(
-                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD,
+                seed_point_abs=(cx, cy),
             )
         except Exception:
             blkitem.fontformat.text_box_shape = "auto"
@@ -1946,7 +1948,8 @@ class SceneTextManager(QObject):
         try:
             enlarge_ratio = min(max(br[2] / max(br[3], 1), br[3] / max(br[2], 1)) * 1.5, 3.0)
             mask, _area, mask_xyxy, _region_rect = extract_ballon_region(
-                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD,
+                seed_point_abs=(abr.x() + abr.width() / 2, abr.y() + abr.height() / 2),
             )
             cx_crop, cy_crop = mask_centroid_in_crop(mask)
             return (float(mask_xyxy[0] + cx_crop), float(mask_xyxy[1] + cy_crop))
@@ -2301,7 +2304,8 @@ class SceneTextManager(QObject):
         try:
             enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
             mask, _area, mask_xyxy, region_rect = extract_ballon_region(
-                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+                img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD,
+                seed_point_abs=(cx, cy),
             )
         except Exception:
             return False
@@ -2315,6 +2319,15 @@ class SceneTextManager(QObject):
         bubble_x = mask_xyxy[0] + region_rect[0]
         bubble_y = mask_xyxy[1] + region_rect[1]
         bubble_w, bubble_h = region_rect[2], region_rect[3]
+        # Guard against contour extraction locking onto a neighboring bubble: the
+        # selected text center must be inside (or very near) the detected bubble,
+        # and the requested move must be plausible for this bubble size.
+        pad_x = max(10.0, bubble_w * 0.15)
+        pad_y = max(10.0, bubble_h * 0.15)
+        if not (bubble_x - pad_x <= cx <= bubble_x + bubble_w + pad_x and bubble_y - pad_y <= cy <= bubble_y + bubble_h + pad_y):
+            return False
+        if max(abs(im_cx - cx), abs(im_cy - cy)) > max(80.0, max(bubble_w, bubble_h) * 0.9):
+            return False
         min_x, min_y = bubble_x, bubble_y
         max_x = bubble_x + bubble_w - bw
         max_y = bubble_y + bubble_h - bh
@@ -2550,7 +2563,8 @@ class SceneTextManager(QObject):
             try:
                 enlarge_ratio = min(max(br[2] / br[3], br[3] / br[2]) * 1.5, 3.0)
                 mask, _area, mask_xyxy, region_rect = extract_ballon_region(
-                    img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD
+                    img, br, enlarge_ratio=enlarge_ratio, cal_region_rect=True, margin_px=LAYOUT_BALLOON_SHAPE_CROP_PAD,
+                    seed_point_abs=(cx, cy),
                 )
             except Exception:
                 continue
@@ -2564,6 +2578,14 @@ class SceneTextManager(QObject):
             bubble_x = mask_xyxy[0] + region_rect[0]
             bubble_y = mask_xyxy[1] + region_rect[1]
             bubble_w, bubble_h = region_rect[2], region_rect[3]
+            # Guard against centering to an unrelated contour/bubble. This keeps
+            # Format → Center in bubble from jumping dramatically across the page.
+            pad_x = max(10.0, bubble_w * 0.15)
+            pad_y = max(10.0, bubble_h * 0.15)
+            if not (bubble_x - pad_x <= cx <= bubble_x + bubble_w + pad_x and bubble_y - pad_y <= cy <= bubble_y + bubble_h + pad_y):
+                continue
+            if max(abs(im_cx - cx), abs(im_cy - cy)) > max(80.0, max(bubble_w, bubble_h) * 0.9):
+                continue
             min_x = bubble_x
             max_x = bubble_x + bubble_w - bw
             min_y = bubble_y

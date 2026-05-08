@@ -1106,7 +1106,7 @@ QLabel#angleLabel {
 QToolButton#SpellCheckChecker {
     border: none;
     border-radius: 4px;
-    padding: 3px;
+    padding: 1px;
     background-color: transparent;
 }
 QToolButton#SpellCheckChecker:hover {
