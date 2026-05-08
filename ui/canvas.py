@@ -208,12 +208,15 @@ class Canvas(QGraphicsScene):
     format_textblks = Signal()
     layout_textblks = Signal()
     auto_fit_font_signal = Signal()
+    smart_auto_fit_signal = Signal()
+    polish_typography_signal = Signal()
     auto_fit_binary_signal = Signal()
     set_balloon_shape_signal = Signal(str)
     resize_to_fit_content_signal = Signal()
     center_in_bubble_signal = Signal()
     set_writing_mode_signal = Signal(str)
     recenter_text_in_box_signal = Signal()
+    apply_mask_safe_padding_signal = Signal()
     fit_to_mask_safe_box_signal = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
@@ -230,6 +233,7 @@ class Canvas(QGraphicsScene):
     review_ocr_triage_signal = Signal()
     review_translation_qa_signal = Signal()
     review_auto_extract_glossary_signal = Signal()
+    export_lettering_proof_signal = Signal()
 
 
     begin_scale_tool = Signal(QPointF)
@@ -1184,7 +1188,7 @@ class Canvas(QGraphicsScene):
             merge_blocks_act = split_regions_act = move_up_act = move_down_act = None
             triage_add_act = triage_mark_act = None
             layout_review_selected_act = layout_review_page_act = layout_review_config_act = None
-            review_ocr_triage_act = review_translation_qa_act = review_auto_extract_glossary_act = None
+            review_ocr_triage_act = review_translation_qa_act = review_auto_extract_glossary_act = export_lettering_proof_act = None
             create_textbox_act = None
             block_menu = None
             if context_menu_visible('create_textbox'):
@@ -1217,6 +1221,27 @@ class Canvas(QGraphicsScene):
                         triage_add_act = block_menu.addAction(self.tr("Add selected to triage worklist"))
                     if context_menu_visible('block_triage_mark_reviewed'):
                         triage_mark_act = block_menu.addAction(self.tr("Mark selected as reviewed"))
+
+            review_menu = None
+            if context_menu_visible('format_layout_review_selected') and n_sel >= 1:
+                if review_menu is None: review_menu = menu.addMenu(self.tr("Review / QA"))
+                layout_review_selected_act = review_menu.addAction(self.tr("Layout review selected textboxes"))
+                layout_review_selected_act.setToolTip(self.tr("Run the lettering layout review agent on selected text boxes and apply safe fixes."))
+                actions_map['format_layout_review_selected'] = layout_review_selected_act
+            if context_menu_visible('format_layout_review_page'):
+                if review_menu is None: review_menu = menu.addMenu(self.tr("Review / QA"))
+                layout_review_page_act = review_menu.addAction(self.tr("Layout review entire page"))
+                layout_review_page_act.setToolTip(self.tr("Run the lettering layout review agent on all text boxes on this page."))
+                actions_map['format_layout_review_page'] = layout_review_page_act
+            if context_menu_visible('format_layout_review_config'):
+                if review_menu is None: review_menu = menu.addMenu(self.tr("Review / QA"))
+                layout_review_config_act = review_menu.addAction(self.tr("Layout review settings"))
+                actions_map['format_layout_review_config'] = layout_review_config_act
+            if context_menu_visible('review_export_lettering_proof'):
+                if review_menu is None: review_menu = menu.addMenu(self.tr("Review / QA"))
+                export_lettering_proof_act = review_menu.addAction(self.tr("Export lettering proof pack"))
+                export_lettering_proof_act.setToolTip(self.tr("Export QA JSON/Markdown, editable SVG handoff, PSD helper manifest, and final composite reference for this page."))
+                actions_map['review_export_lettering_proof'] = export_lettering_proof_act
 
             # --- Image / Overlay (selection) ---
             import_image_act = clear_overlay_act = None
@@ -1274,9 +1299,9 @@ class Canvas(QGraphicsScene):
             menu.addSeparator()
 
             # --- Format ---
-            format_act = layout_act = fit_to_bubble_act = auto_fit_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            format_act = layout_act = fit_to_bubble_act = auto_fit_act = smart_auto_fit_act = polish_typography_act = auto_fit_binary_act = angle_act = squeeze_act = None
             writing_auto_act = writing_ltr_act = writing_vertical_act = writing_rtl_act = recenter_text_in_box_act = None
-            resize_to_fit_content_act = center_in_bubble_act = fit_to_mask_safe_box_act = None
+            mask_safe_padding_act = resize_to_fit_content_act = center_in_bubble_act = fit_to_mask_safe_box_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
@@ -1300,6 +1325,18 @@ class Canvas(QGraphicsScene):
                 if auto_fit_act is not None:
                     auto_fit_act.setToolTip(self.tr("Scale font size so text fits the selected text box(es). Use after changing font."))
                 actions_map['format_auto_fit'] = auto_fit_act
+            if context_menu_visible('format_smart_auto_fit') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                smart_auto_fit_act = format_menu.addAction(self.tr("Smart auto fit lettering"))
+                if smart_auto_fit_act is not None:
+                    smart_auto_fit_act.setToolTip(self.tr("Balance lines, adjust writing mode/tracking/leading, and shrink font against mask-safe bounds before resizing."))
+                actions_map['format_smart_auto_fit'] = smart_auto_fit_act
+            if context_menu_visible('format_polish_typography') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                polish_typography_act = format_menu.addAction(self.tr("Polish typography"))
+                if polish_typography_act is not None:
+                    polish_typography_act.setToolTip(self.tr("Normalize vertical punctuation, choose script-aware line breaks, add safe padding, and repair fallback fonts."))
+                actions_map['format_polish_typography'] = polish_typography_act
             if context_menu_visible('format_auto_fit_binary') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 auto_fit_binary_act = format_menu.addAction(self.tr("Auto fit font size (binary search)"))
@@ -1350,6 +1387,13 @@ class Canvas(QGraphicsScene):
                 recenter_text_in_box_act = format_menu.addAction(self.tr("Recenter text in box"))
                 recenter_text_in_box_act.setToolTip(self.tr("Recenter the rendered ink inside the current text box without moving the box."))
                 actions_map['format_recenter_text_in_box'] = recenter_text_in_box_act
+            if n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                mask_safe_padding_act = format_menu.addAction(self.tr("Apply mask-safe padding"))
+                has_text_mask = any(getattr(getattr(item, 'blk', None), 'text_mask', None) is not None for item in sel)
+                mask_safe_padding_act.setEnabled(has_text_mask)
+                mask_safe_padding_act.setToolTip(self.tr("Increase text inset based on the selected block's text eraser/mask so ink does not clip during final render/export."))
+                actions_map['format_mask_safe_padding'] = mask_safe_padding_act
             if context_menu_visible('format_angle'):
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 angle_act = format_menu.addAction(self.tr("Reset Angle"))
@@ -1565,6 +1609,8 @@ class Canvas(QGraphicsScene):
                 self.review_translation_qa_signal.emit()
             elif review_auto_extract_glossary_act is not None and rst == review_auto_extract_glossary_act:
                 self.review_auto_extract_glossary_signal.emit()
+            elif export_lettering_proof_act is not None and rst == export_lettering_proof_act:
+                self.export_lettering_proof_signal.emit()
             elif move_up_act is not None and rst == move_up_act:
                 self.move_blocks_up_signal.emit()
             elif move_down_act is not None and rst == move_down_act:
@@ -1638,6 +1684,10 @@ class Canvas(QGraphicsScene):
                 self.layout_textblks.emit()
             elif rst == auto_fit_act:
                 self.auto_fit_font_signal.emit()
+            elif rst == smart_auto_fit_act:
+                self.smart_auto_fit_signal.emit()
+            elif rst == polish_typography_act:
+                self.polish_typography_signal.emit()
             elif rst == auto_fit_binary_act:
                 self.auto_fit_binary_signal.emit()
             elif rst == balloon_shape_round_act:
@@ -1674,6 +1724,8 @@ class Canvas(QGraphicsScene):
                 self.set_writing_mode_signal.emit("rtl")
             elif rst == recenter_text_in_box_act:
                 self.recenter_text_in_box_signal.emit()
+            elif rst == mask_safe_padding_act:
+                self.apply_mask_safe_padding_signal.emit()
             elif rst == angle_act:
                 self.reset_angle.emit()
             elif rst == squeeze_act:

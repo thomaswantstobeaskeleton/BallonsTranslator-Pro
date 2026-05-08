@@ -17,14 +17,19 @@ def build_export_manifest(
 ) -> Dict:
     """Build a stable export status manifest for batch/headless workflows."""
     missing = list(missing_pages or [])
+    options = dict(options or {})
+    export_sources = options.get("export_sources", {}) or {}
     pages = []
     for idx, (page_name, path) in enumerate(exported_paths or [], start=1):
+        source_kind = str(export_sources.get(page_name, "rendered") or "rendered")
         pages.append({
             "index": idx,
             "page": page_name,
             "path": osp.abspath(path),
             "relative_path": osp.relpath(path, out_dir) if out_dir else path,
             "exists": osp.exists(path),
+            "source_kind": source_kind,
+            "used_fallback_source": source_kind != "rendered",
             "completion_state": project.get_page_completion_state(page_name) if project is not None and hasattr(project, "get_page_completion_state") else "",
         })
     manifest = {
@@ -38,11 +43,14 @@ def build_export_manifest(
         "missing_count": len(missing),
         "pages": pages,
         "missing_pages": missing,
-        "options": dict(options or {}),
+        "options": options,
         "warnings": [],
     }
+    fallback_count = sum(1 for page in pages if page.get("used_fallback_source"))
+    if fallback_count:
+        manifest["warnings"].append(f"{fallback_count} page(s) used inpainted/original fallback sources because rendered results were missing.")
     if missing:
-        manifest["warnings"].append(f"{len(missing)} page(s) had no rendered result at export time.")
+        manifest["warnings"].append(f"{len(missing)} page(s) had no rendered result/source at export time.")
     return manifest
 
 

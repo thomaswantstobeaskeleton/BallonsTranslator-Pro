@@ -84,10 +84,21 @@ class ExportFormatDialog(QDialog):
         self.include_intermediate_check.setChecked(False)
         form.addRow('', self.include_intermediate_check)
 
+        self.include_unrendered_check = QCheckBox(self.tr('Include pages without rendered results'))
+        self.include_unrendered_check.setToolTip(self.tr(
+            'When a rendered result is missing, export the inpainted/clean page if available, '
+            'otherwise the original page. The manifest records which pages used a fallback source.'
+        ))
+        try:
+            self.include_unrendered_check.setChecked(bool(getattr(pcfg, 'export_include_unrendered_pages', False)))
+        except Exception:
+            self.include_unrendered_check.setChecked(False)
+        self.include_unrendered_check.toggled.connect(self._on_include_unrendered_toggled)
+        form.addRow('', self.include_unrendered_check)
+
         self.open_folder_after_export_check = QCheckBox(self.tr('Open output folder when done'))
         self.open_folder_after_export_check.setToolTip(self.tr('Use the persisted Settings default for this export.'))
         try:
-            from utils.config import pcfg
             self.open_folder_after_export_check.setChecked(bool(getattr(pcfg, 'export_open_folder_after_batch', False)))
         except Exception:
             self.open_folder_after_export_check.setChecked(False)
@@ -157,13 +168,20 @@ class ExportFormatDialog(QDialog):
 
     def _on_open_folder_after_export_toggled(self, checked: bool):
         try:
-            from utils.config import pcfg
             pcfg.export_open_folder_after_batch = bool(checked)
         except Exception:
             pass
 
+    def _on_include_unrendered_toggled(self, checked: bool):
+        try:
+            pcfg.export_include_unrendered_pages = bool(checked)
+        except Exception:
+            pass
     def get_include_intermediate(self) -> bool:
         return self.include_intermediate_check.isChecked()
+
+    def get_include_unrendered(self) -> bool:
+        return self.include_unrendered_check.isChecked()
 
     def get_open_folder_after_export(self) -> bool:
         return self.open_folder_after_export_check.isChecked()

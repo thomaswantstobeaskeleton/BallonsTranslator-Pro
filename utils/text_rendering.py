@@ -201,6 +201,69 @@ class TextRenderDiagnostics:
         }
 
 
+
+@dataclass
+class SmartFitResult:
+    font_size: float
+    text: str
+    writing_mode: str
+    resolved_writing_mode: str
+    line_spacing: float
+    letter_spacing: float
+    fit_mode: str
+    overflow: bool
+    quality_score: float
+    actions: List[str]
+    diagnostics: Dict[str, object]
+
+    def to_dict(self) -> dict:
+        return {
+            "font_size": self.font_size,
+            "text": self.text,
+            "writing_mode": self.writing_mode,
+            "resolved_writing_mode": self.resolved_writing_mode,
+            "line_spacing": self.line_spacing,
+            "letter_spacing": self.letter_spacing,
+            "fit_mode": self.fit_mode,
+            "overflow": bool(self.overflow),
+            "quality_score": self.quality_score,
+            "actions": list(self.actions or []),
+            "diagnostics": dict(self.diagnostics or {}),
+        }
+
+
+
+@dataclass
+class TypographyCleanupResult:
+    text: str
+    writing_mode: str
+    resolved_writing_mode: str
+    fit_mode: str
+    line_break_strategy: str
+    line_spacing: float
+    letter_spacing: float
+    text_padding: float
+    fallback_font_chain: str
+    preset_suggestion: str
+    actions: List[str]
+    diagnostics: Dict[str, object]
+
+    def to_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "writing_mode": self.writing_mode,
+            "resolved_writing_mode": self.resolved_writing_mode,
+            "fit_mode": self.fit_mode,
+            "line_break_strategy": self.line_break_strategy,
+            "line_spacing": self.line_spacing,
+            "letter_spacing": self.letter_spacing,
+            "text_padding": self.text_padding,
+            "fallback_font_chain": self.fallback_font_chain,
+            "preset_suggestion": self.preset_suggestion,
+            "actions": list(self.actions or []),
+            "diagnostics": dict(self.diagnostics or {}),
+        }
+
 def normalize_writing_mode(mode: Optional[str]) -> str:
     mode = str(mode or WRITING_MODE_AUTO).strip().lower().replace("-", "_")
     return mode if mode in WRITING_MODES else WRITING_MODE_AUTO
@@ -1163,6 +1226,345 @@ def fit_font_size_to_box(
     return best, text_out, diag
 
 
+
+
+def smart_fit_text_to_box(
+    text: str,
+    font_size: float,
+    box_size: Tuple[float, float],
+    writing_mode: str = WRITING_MODE_AUTO,
+    fit_mode: str = FIT_MODE_SHRINK,
+    min_font_size: float = 6.0,
+    max_font_size: float = 96.0,
+    line_spacing: float = 1.15,
+    letter_spacing: float = 1.0,
+    padding: float = 0.0,
+    stroke_width: float = 0.0,
+    line_break_strategy: str = LINE_BREAK_AUTO,
+    shadow_radius: float = 0.0,
+    shadow_offset: Sequence[float] | None = None,
+    effective_box_size: Optional[Tuple[float, float]] = None,
+    allow_writing_mode_switch: bool = True,
+    allow_tracking_tighten: bool = True,
+    allow_line_spacing_tighten: bool = True,
+    allow_balance: bool = True,
+) -> SmartFitResult:
+    """Plan a conservative multi-step manga lettering fit.
+
+    The plain fitter answers "what font size fits this box?". Smart fit answers
+    "which low-risk lettering edits should be applied first?" It tries, in
+    order: script/geometry writing-mode correction, CJK/Latin line balancing,
+    small tracking/leading reductions, then font-size fitting. The function is
+    renderer-neutral and safe for QA/API/headless use.
+    """
+    original_text = text or ""
+    box_w, box_h = box_size or (0.0, 0.0)
+    eff_w, eff_h = effective_box_size or box_size or (box_w, box_h)
+    eff_size = (max(1.0, float(eff_w or 1.0)), max(1.0, float(eff_h or 1.0)))
+    requested_mode = normalize_writing_mode(writing_mode)
+    active_mode = requested_mode
+    actions: List[str] = []
+    if allow_writing_mode_switch:
+        auto_mode = resolve_writing_mode(WRITING_MODE_AUTO, original_text, box_size)
+        if requested_mode == WRITING_MODE_AUTO:
+            active_mode = auto_mode
+        elif requested_mode == WRITING_MODE_HORIZONTAL_LTR and auto_mode in (WRITING_MODE_VERTICAL_RL, WRITING_MODE_RTL):
+            active_mode = auto_mode
+            actions.append("switch_writing_mode")
+    resolved = resolve_writing_mode(active_mode, original_text, box_size)
+
+    active_break = normalize_line_break_strategy(line_break_strategy)
+    active_text = normalize_vertical_punctuation(original_text) if resolved == WRITING_MODE_VERTICAL_RL else original_text
+    active_fit = FIT_MODE_BALANCE if allow_balance and resolved != WRITING_MODE_VERTICAL_RL else normalize_fit_mode(fit_mode)
+    active_spacing = max(0.1, float(letter_spacing or 1.0))
+    active_line_spacing = max(0.6, float(line_spacing or 1.0))
+
+    if allow_balance and resolved != WRITING_MODE_VERTICAL_RL:
+        avg = max(1.0, max(1.0, float(font_size or 1.0)) * 0.56 * active_spacing)
+        balanced = balance_lines(active_text.replace("\n", ""), max(2, int(max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / avg)), active_break)
+        if balanced and balanced != active_text:
+            active_text = balanced
+            actions.append("balance_lines")
+
+    size, fitted_text, diag = fit_font_size_to_box(
+        active_text, font_size, eff_size, active_fit, active_mode,
+        min_font_size=min_font_size, max_font_size=max_font_size,
+        line_spacing=active_line_spacing, letter_spacing=active_spacing,
+        padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+        shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+    )
+
+    if allow_tracking_tighten and diag.overflow and "x" in (diag.overflow_axes or []) and active_spacing > 0.90 and resolved != WRITING_MODE_VERTICAL_RL:
+        ratio = max(1.0, float(diag.measured_bounds[0] or 1.0) / max(1.0, eff_size[0]))
+        new_spacing = recommended_tight_letter_spacing(active_spacing, ratio)
+        if new_spacing < active_spacing - 0.005:
+            active_spacing = new_spacing
+            actions.append("tighten_letter_spacing")
+            size, fitted_text, diag = fit_font_size_to_box(
+                fitted_text, font_size, eff_size, active_fit, active_mode,
+                min_font_size=min_font_size, max_font_size=max_font_size,
+                line_spacing=active_line_spacing, letter_spacing=active_spacing,
+                padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+                shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+            )
+
+    if allow_line_spacing_tighten and diag.overflow and "y" in (diag.overflow_axes or []) and active_line_spacing > 1.0:
+        active_line_spacing = max(1.0, active_line_spacing - 0.08)
+        actions.append("tighten_line_spacing")
+        size, fitted_text, diag = fit_font_size_to_box(
+            fitted_text, font_size, eff_size, active_fit, active_mode,
+            min_font_size=min_font_size, max_font_size=max_font_size,
+            line_spacing=active_line_spacing, letter_spacing=active_spacing,
+            padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+            shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+        )
+
+    if size < float(font_size or size) - 0.2:
+        actions.append("shrink_to_fit")
+    if diag.overflow:
+        actions.append("resize_to_fit_content")
+    if resolved == WRITING_MODE_VERTICAL_RL and fitted_text != original_text:
+        actions.append("normalize_vertical_punctuation")
+
+    # Keep action order stable while removing duplicates.
+    deduped: List[str] = []
+    for action in actions + list(diag.recommended_actions or []):
+        if action and action not in deduped:
+            deduped.append(action)
+
+    return SmartFitResult(
+        font_size=round(float(size), 3),
+        text=fitted_text,
+        writing_mode=active_mode,
+        resolved_writing_mode=diag.resolved_writing_mode,
+        line_spacing=round(float(active_line_spacing), 3),
+        letter_spacing=round(float(active_spacing), 3),
+        fit_mode=FIT_MODE_SHRINK if size < float(font_size or size) - 0.2 else normalize_fit_mode(fit_mode),
+        overflow=bool(diag.overflow),
+        quality_score=float(getattr(diag, "quality_score", 1.0) or 1.0),
+        actions=deduped,
+        diagnostics={
+            "fit": diag.to_dict(),
+            "effective_box": [round(eff_size[0], 2), round(eff_size[1], 2)],
+            "requested_writing_mode": requested_mode,
+            "line_break_strategy": active_break,
+        },
+    )
+
+
+def plan_typography_cleanup(
+    text: str,
+    font_size: float,
+    box_size: Tuple[float, float],
+    writing_mode: str = WRITING_MODE_AUTO,
+    fit_mode: str = FIT_MODE_SHRINK,
+    line_break_strategy: str = LINE_BREAK_AUTO,
+    line_spacing: float = 1.15,
+    letter_spacing: float = 1.0,
+    text_padding: float = 0.0,
+    font_family: str = "",
+    fallback_font_chain: str = "",
+    config_obj=None,
+    balance: bool = True,
+    normalize_vertical: bool = True,
+    repair_fallback_chain: bool = True,
+) -> TypographyCleanupResult:
+    """Plan a conservative one-click typography cleanup for manga text boxes.
+
+    This is intentionally renderer-neutral so UI, local API, layout review, and
+    tests can agree on the same safe edits before applying them to a QText item.
+    It focuses on low-risk manual-work reducers inspired by Koharu typography
+    requests: resolve Auto writing mode, normalize vertical punctuation, choose a
+    script-aware line-break policy, rebalance awkward line breaks, and attach the
+    configured fallback chain when the selected font cannot cover the text.
+    """
+    original_text = text or ""
+    requested_mode = normalize_writing_mode(writing_mode)
+    resolved = resolve_writing_mode(requested_mode, original_text, box_size)
+    active_mode = requested_mode
+    active_text = original_text
+    actions: List[str] = []
+
+    if requested_mode == WRITING_MODE_AUTO and resolved != WRITING_MODE_HORIZONTAL_LTR:
+        active_mode = resolved
+        actions.append("switch_writing_mode")
+
+    if normalize_vertical and resolved == WRITING_MODE_VERTICAL_RL:
+        normalized = normalize_vertical_punctuation(active_text)
+        if normalized != active_text:
+            active_text = normalized
+            actions.append("normalize_vertical_punctuation")
+
+    active_break = normalize_line_break_strategy(line_break_strategy)
+    if active_break == LINE_BREAK_AUTO:
+        if resolved == WRITING_MODE_VERTICAL_RL or CJK_RE.search(active_text or ""):
+            active_break = LINE_BREAK_CJK_STRICT
+        elif len((active_text or "").split()) >= 4:
+            active_break = LINE_BREAK_BALANCED
+        if active_break != normalize_line_break_strategy(line_break_strategy):
+            actions.append("set_line_break_strategy")
+
+    if balance and resolved != WRITING_MODE_VERTICAL_RL:
+        width = max(1.0, float((box_size or (0.0, 0.0))[0] or 1.0) - 2 * float(text_padding or 0.0))
+        avg = max(1.0, max(1.0, float(font_size or 1.0)) * 0.54 * max(0.1, float(letter_spacing or 1.0)))
+        max_chars = max(2, int(width / avg))
+        balanced_lines = optimal_kinsoku_wrap(active_text.replace("\n", ""), max_chars, active_break)
+        balanced_text = "\n".join(balanced_lines) if balanced_lines else active_text
+        if balanced_text and balanced_text != active_text:
+            active_text = balanced_text
+            actions.append("balance_lines")
+
+    active_line_spacing = max(0.6, float(line_spacing or 1.15))
+    active_letter_spacing = max(0.1, float(letter_spacing or 1.0))
+    if resolved == WRITING_MODE_VERTICAL_RL and active_line_spacing > 1.1:
+        active_line_spacing = 1.08
+        actions.append("tighten_line_spacing")
+    elif resolved != WRITING_MODE_VERTICAL_RL and active_line_spacing < 1.0:
+        active_line_spacing = 1.0
+        actions.append("normalize_line_spacing")
+
+    active_padding = max(0.0, float(text_padding or 0.0))
+    min_padding = 2.0 if resolved != WRITING_MODE_VERTICAL_RL else 1.5
+    if active_padding < min_padding:
+        active_padding = min_padding
+        actions.append("increase_padding")
+
+    fallback_chain = str(fallback_font_chain or "").strip()
+    merged_chain = merge_font_fallback_chain(font_family, active_text, config_obj, fallback_chain)
+    missing = missing_glyphs_after_fallback(font_family, active_text, config_obj, fallback_chain)
+    if repair_fallback_chain and missing and len(merged_chain) > 1:
+        fallback_chain = ", ".join(merged_chain[1:])
+        actions.append("apply_font_fallback")
+
+    preset = suggest_manga_preset(active_text, box_size, resolved)
+    if preset:
+        actions.append("suggest_manga_preset")
+
+    deduped: List[str] = []
+    for action in actions:
+        if action and action not in deduped:
+            deduped.append(action)
+
+    return TypographyCleanupResult(
+        text=active_text,
+        writing_mode=active_mode,
+        resolved_writing_mode=resolved,
+        fit_mode=normalize_fit_mode(fit_mode),
+        line_break_strategy=active_break,
+        line_spacing=round(active_line_spacing, 3),
+        letter_spacing=round(active_letter_spacing, 3),
+        text_padding=round(active_padding, 3),
+        fallback_font_chain=fallback_chain,
+        preset_suggestion=preset,
+        actions=deduped,
+        diagnostics={
+            "requested_writing_mode": requested_mode,
+            "box_size": [round(float((box_size or (0.0, 0.0))[0] or 0.0), 2), round(float((box_size or (0.0, 0.0))[1] or 0.0), 2)],
+            "missing_glyphs": missing,
+            "merged_fallback_chain": merged_chain,
+            "balance_enabled": bool(balance),
+        },
+    )
+
+
+def vertical_layout_cells(
+    text: str,
+    font_size: float,
+    box_size: Tuple[float, float],
+    line_spacing: float = 1.0,
+    letter_spacing: float = 1.0,
+    padding: float = 0.0,
+    limit: int = 256,
+) -> List[Dict[str, object]]:
+    """Return a renderer-neutral vertical CJK glyph placement plan.
+
+    The live Qt renderer still owns painting, but QA/export/proof tools need a
+    deterministic model for columns flowing top-to-bottom and right-to-left.
+    Coordinates are box-local cell centers and include punctuation class/offset
+    hints so SVG/PSD handoff clients can preserve better vertical punctuation.
+    """
+    text = normalize_vertical_punctuation(text or "")
+    box_w, box_h = box_size or (0.0, 0.0)
+    fs = max(1.0, float(font_size or 1.0))
+    col_advance = fs * max(0.1, float(line_spacing or 1.0))
+    row_advance = fs * max(0.1, float(letter_spacing or 1.0))
+    inner_h = max(1.0, float(box_h or 1.0) - 2 * float(padding or 0.0))
+    max_chars = max(1, int(inner_h / max(1.0, row_advance)))
+    cols = vertical_columns(text, max_chars)
+    cells: List[Dict[str, object]] = []
+    for col_idx, col in enumerate(cols):
+        x = max(float(padding or 0.0) + fs / 2.0, float(box_w or 1.0) - float(padding or 0.0) - (col_idx + 0.5) * col_advance)
+        for row_idx, ch in enumerate(col):
+            if len(cells) >= int(limit or 256):
+                return cells
+            hint = vertical_punctuation_adjustment(ch, fs)
+            y = float(padding or 0.0) + (row_idx + 0.5) * row_advance
+            cells.append({
+                "char": ch,
+                "column": col_idx,
+                "row": row_idx,
+                "x": round(x + float(hint.get("dx", 0.0) or 0.0), 3),
+                "y": round(y + float(hint.get("dy", 0.0) or 0.0), 3),
+                "punctuation_class": hint.get("class", "normal"),
+                "rotate_degrees": hint.get("rotate_degrees", 0.0),
+                "scale": hint.get("scale", 1.0),
+                "hang": bool(hint.get("hang", False)),
+            })
+    return cells
+
+
+def lettering_proof_metrics(
+    text: str,
+    font_size: float,
+    box_size: Tuple[float, float],
+    writing_mode: str = WRITING_MODE_AUTO,
+    line_spacing: float = 1.15,
+    letter_spacing: float = 1.0,
+    padding: float = 0.0,
+    stroke_width: float = 0.0,
+    shadow_radius: float = 0.0,
+    shadow_offset: Sequence[float] | None = None,
+    line_break_strategy: str = LINE_BREAK_AUTO,
+    sample_limit: int = 128,
+) -> Dict[str, object]:
+    """Summarize final-lettering safety for QA/export proof manifests."""
+    box_w, box_h = box_size or (0.0, 0.0)
+    resolved = resolve_writing_mode(writing_mode, text, box_size)
+    measured = estimate_text_bounds(
+        text, font_size, resolved, float(box_w or 1.0), float(box_h or 1.0),
+        line_spacing=line_spacing, letter_spacing=letter_spacing, padding=padding,
+        stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+        line_break_strategy=line_break_strategy,
+    )
+    overflow_x = max(0.0, float(measured[0]) - float(box_w or 0.0))
+    overflow_y = max(0.0, float(measured[1]) - float(box_h or 0.0))
+    clearance_x = float(box_w or 0.0) - float(measured[0])
+    clearance_y = float(box_h or 0.0) - float(measured[1])
+    density = min(1.0, max(float(measured[0]) / max(1.0, float(box_w or 1.0)), float(measured[1]) / max(1.0, float(box_h or 1.0))))
+    actions: List[str] = []
+    if overflow_x > 0 or overflow_y > 0:
+        actions.append("shrink_to_fit")
+    effect_margin = safe_inner_bounds(box_size, font_size, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)[1]
+    if min(clearance_x, clearance_y) < effect_margin:
+        actions.append("increase_padding")
+    if density > 0.92 and resolved != WRITING_MODE_VERTICAL_RL:
+        actions.append("balance_lines")
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        actions.append("check_vertical_punctuation")
+    cells = vertical_layout_cells(text, font_size, box_size, line_spacing, letter_spacing, padding, limit=sample_limit) if resolved == WRITING_MODE_VERTICAL_RL else []
+    return {
+        "resolved_writing_mode": resolved,
+        "measured_bounds": [round(float(measured[0]), 3), round(float(measured[1]), 3)],
+        "box_bounds": [round(float(box_w or 0.0), 3), round(float(box_h or 0.0), 3)],
+        "clearance": [round(clearance_x, 3), round(clearance_y, 3)],
+        "overflow_pixels": [round(overflow_x, 3), round(overflow_y, 3)],
+        "density": round(density, 4),
+        "line_count": int(measured[2]),
+        "column_count": int(measured[3]),
+        "effect_margin": round(float(effect_margin), 3),
+        "recommended_actions": actions,
+        "vertical_cells": cells,
+    }
 
 def _qt_font_metrics_available() -> bool:
     # Headless Linux CI images may have qtpy installed but lack libGL; avoid

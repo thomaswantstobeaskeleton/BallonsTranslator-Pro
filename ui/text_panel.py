@@ -10,7 +10,8 @@ from utils import shared
 from utils import config as C
 from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
-from utils.text_rendering import MANGA_PRESETS, manga_presets, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy, preset_from_font_format, preset_id_from_label
+from utils.text_rendering import MANGA_PRESETS, fit_font_size_to_box, manga_presets, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy, preset_from_font_format, preset_id_from_label, plan_typography_cleanup
+from utils.text_masking import masked_text_warnings, mask_effective_box
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .custom_widget.flow_layout import FlowLayout
 from .textitem import TextBlkItem
@@ -1016,7 +1017,6 @@ class FontFormatPanel(Widget):
             self.letteringDiagnosticsLabel.setText(self.tr("Lettering diagnostics: select a textbox to see fit, fallback, and overflow status."))
             return
         try:
-            from utils.text_rendering import fit_font_size_to_box, missing_glyphs_after_fallback
             fitted_size, _text_out, diag = fit_font_size_to_box(
                 text,
                 float(getattr(font_format, 'font_size', 24.0) or 24.0),
@@ -1032,14 +1032,42 @@ class FontFormatPanel(Widget):
                 line_break_strategy=getattr(font_format, 'line_break_strategy', 'auto'),
             )
             missing = missing_glyphs_after_fallback(getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', ''))
-            status = self.tr("OK") if not diag.overflow and not missing else self.tr("Needs review")
+            mask = getattr(getattr(self.textblk_item, 'blk', None), 'text_mask', None)
+            mask_diag = masked_text_warnings(mask, getattr(font_format, 'text_padding', 0.0))
+            effective = mask_effective_box(mask, box, getattr(font_format, 'text_padding', 0.0))
+            cleanup = plan_typography_cleanup(
+                text,
+                float(getattr(font_format, 'font_size', 24.0) or 24.0),
+                box,
+                getattr(font_format, 'writing_mode', 'auto'),
+                getattr(font_format, 'fit_mode', 'shrink'),
+                getattr(font_format, 'line_break_strategy', 'auto'),
+                line_spacing=float(getattr(font_format, 'line_spacing', 1.15) or 1.15),
+                letter_spacing=float(getattr(font_format, 'letter_spacing', 1.0) or 1.0),
+                text_padding=float(getattr(font_format, 'text_padding', 0.0) or 0.0),
+                font_family=getattr(font_format, 'font_family', ''),
+                fallback_font_chain=getattr(font_format, 'fallback_font_chain', ''),
+                config_obj=pcfg,
+                balance=False,
+            )
+            cleanup_note = ','.join(cleanup.actions[:3]) if cleanup.actions else self.tr('none')
+            mask_note = self.tr('mask none')
+            if mask_diag.get('warning'):
+                mask_note = self.tr('mask {coverage:.0%}, safe {w:.0f}×{h:.0f}').format(
+                    coverage=float(mask_diag.get('coverage', 0.0) or 0.0),
+                    w=float(effective.get('width', box[0]) or box[0]),
+                    h=float(effective.get('height', box[1]) or box[1]),
+                )
+            status = self.tr("OK") if not diag.overflow and not missing and 'safe' not in mask_note else self.tr("Needs review")
             self.letteringDiagnosticsLabel.setText(
-                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · missing {missing}").format(
+                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · polish {polish} · missing {missing} · {mask}").format(
                     status=status,
                     mode=diag.resolved_writing_mode,
                     fit=fitted_size,
                     quality=getattr(diag, 'quality_score', 1.0),
+                    polish=cleanup_note,
                     missing=''.join(missing) if missing else self.tr('none'),
+                    mask=mask_note,
                 )
             )
         except Exception as exc:

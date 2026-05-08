@@ -13,6 +13,8 @@ ActionType = Literal[
     "center_in_bubble",
     "resize_to_fit_content",
     "shrink_to_fit",
+    "smart_fit",
+    "polish_typography",
     "switch_writing_mode",
     "recenter",
     "increase_padding",
@@ -44,7 +46,7 @@ class ReviewAction:
 
     action: ActionType
     block_index: int
-    args: Dict[str, float | int | str | bool] = field(default_factory=dict)
+    args: Dict[str, Any] = field(default_factory=dict)
     reason: str = ""
 
 
@@ -68,6 +70,9 @@ class BlockSnapshot:
     text_style: Dict[str, Any] = field(default_factory=dict)
     font_fallback_warning: str = ""
     quality_score: float = 1.0
+    mask_coverage: float = 1.0
+    mask_safe_insets: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    mask_warning: str = ""
 
 
 @dataclass
@@ -104,7 +109,12 @@ class ReviewModelConfig:
 
 
 class ReviewProvider(Protocol):
-    def review(self, page_name: str, blocks: Sequence[BlockSnapshot], config: ReviewModelConfig) -> PageReviewResult:
+    def review(
+        self,
+        page_name: str,
+        blocks: Sequence[BlockSnapshot],
+        config: ReviewModelConfig,
+    ) -> PageReviewResult:
         ...
 
 
@@ -116,7 +126,11 @@ class LayoutReviewPlanner:
     these actions, re-render, then feed updated snapshots back for another pass.
     """
 
-    def review_page(self, page_name: str, blocks: Sequence[BlockSnapshot]) -> PageReviewResult:
+    def review_page(
+        self,
+        page_name: str,
+        blocks: Sequence[BlockSnapshot],
+    ) -> PageReviewResult:
         reviewed: List[BlockReviewResult] = []
         for blk in blocks:
             issues, actions, before, after = self._review_block(blk)
@@ -164,6 +178,7 @@ class LayoutReviewPlanner:
                 rec_h = float(recommended[1])
             except Exception:
                 rec_w = rec_h = 0.0
+
             if rec_w > bw * 1.02 or rec_h > bh * 1.02:
                 actions.append(
                     ReviewAction(
@@ -173,6 +188,28 @@ class LayoutReviewPlanner:
                         reason="Use effect-aware fit diagnostics to resize the box just enough for the measured lettering.",
                     )
                 )
+
+            actions.append(
+                ReviewAction(
+                    action="polish_typography",
+                    block_index=blk.block_index,
+                    args={
+                        "typography_cleanup": (blk.text_style or {}).get(
+                            "typography_cleanup",
+                            {},
+                        )
+                    },
+                    reason="Normalize script-aware typography before destructive resize.",
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="smart_fit",
+                    block_index=blk.block_index,
+                    args={"smart_fit": (blk.text_style or {}).get("smart_fit", {})},
+                    reason="Apply balanced wrapping/tracking/leading before destructive resize.",
+                )
+            )
             actions.append(
                 ReviewAction(
                     action="shrink_to_fit",
@@ -187,18 +224,31 @@ class LayoutReviewPlanner:
                     reason="Compatibility action: reduce font size to fit current box before resizing.",
                 )
             )
-            letter_spacing = float((blk.text_style or {}).get("letter_spacing", 1.0) or 1.0)
+
+            letter_spacing = float(
+                (blk.text_style or {}).get("letter_spacing", 1.0) or 1.0
+            )
             if overflow_x and letter_spacing > 0.92:
                 from .text_rendering import recommended_tight_letter_spacing
+
                 actions.append(
                     ReviewAction(
                         action="tighten_letter_spacing",
                         block_index=blk.block_index,
-                        args={"letter_spacing": recommended_tight_letter_spacing(letter_spacing, max(est_w / max(1.0, bw), 1.0))},
+                        args={
+                            "letter_spacing": recommended_tight_letter_spacing(
+                                letter_spacing,
+                                max(est_w / max(1.0, bw), 1.0),
+                            )
+                        },
                         reason="Tighten tracking slightly before shrinking/resizing wide manga lettering.",
                     )
                 )
-            if (blk.text_style or {}).get("fit_mode") == "balance" or (blk.text_style or {}).get("line_break_strategy") != "balanced":
+
+            if (
+                (blk.text_style or {}).get("fit_mode") == "balance"
+                or (blk.text_style or {}).get("line_break_strategy") != "balanced"
+            ):
                 actions.append(
                     ReviewAction(
                         action="balance_lines",
@@ -206,6 +256,7 @@ class LayoutReviewPlanner:
                         reason="Rebalance line breaks to reduce overflow without changing wording.",
                     )
                 )
+
             actions.append(
                 ReviewAction(
                     action="resize_to_fit_content",
@@ -215,10 +266,92 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.25
 
+        # Coarse mask coverage warning from PR-side snapshots.
+        if blk.mask_warning or float(getattr(blk, "mask_coverage", 1.0) or 1.0) < 0.72:
+            issues.append(
+                ReviewIssue(
+                    code="mask_safe_area",
+                    severity="warning",
+                    message=blk.mask_warning
+                    or "Text mask leaves limited visible area for lettering.",
+                    score_penalty=0.10,
+                )
+            )
+            style_padding = float((blk.text_style or {}).get("text_padding", 0.0) or 0.0)
+            insets = getattr(blk, "mask_safe_insets", (0, 0, 0, 0)) or (0, 0, 0, 0)
 
-        # Mask-visible area can overflow even when the raw rectangle does not.
-        mask_diag = (blk.text_style or {}).get("mask_diagnostics") or {}
-        if bool(mask_diag.get("mask_overflow")) and not any(i.code == "mask_visible_area_overflow" for i in issues):
+            try:
+                recommended_padding = max(
+                    style_padding + 1.0,
+                    2.0,
+                    min(24.0, max(float(v) for v in insets) + 1.0),
+                )
+            except Exception:
+                recommended_padding = max(style_padding + 1.0, 2.0)
+
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": recommended_padding},
+                    reason="Move rendered ink away from mask edges/holes before final compositing.",
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="recenter",
+                    block_index=blk.block_index,
+                    reason="Recenter text inside the current box after accounting for the mask-safe area.",
+                )
+            )
+            score_before -= 0.10
+
+        # Effective mask-safe box diagnostics from PR-side text style payloads.
+        effective_box = (blk.text_style or {}).get("mask_effective_box", {}) or {}
+        if bool(effective_box.get("uses_mask")):
+            try:
+                eff_w = float(effective_box.get("width", bw))
+                eff_h = float(effective_box.get("height", bh))
+            except Exception:
+                eff_w, eff_h = bw, bh
+
+            if est_w > eff_w or est_h > eff_h:
+                issues.append(
+                    ReviewIssue(
+                        code="mask_safe_overflow",
+                        severity="warning",
+                        message="Text fits the full box but exceeds the visible mask-safe area.",
+                        score_penalty=0.12,
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="smart_fit",
+                        block_index=blk.block_index,
+                        args={"smart_fit": (blk.text_style or {}).get("smart_fit", {})},
+                        reason="Apply smart fit against the visible mask-safe area before export.",
+                    )
+                )
+                actions.append(
+                    ReviewAction(
+                        action="increase_padding",
+                        block_index=blk.block_index,
+                        args={
+                            "padding": float(
+                                effective_box.get("recommended_padding", 2.0) or 2.0
+                            )
+                        },
+                        reason="Use mask-derived padding for the visible lettering safe area.",
+                    )
+                )
+                score_before -= 0.12
+
+        # Main-branch mask-visible diagnostics. These can catch overflow even when
+        # the raw rectangle itself does not overflow.
+        mask_diag = (blk.text_style or {}).get("mask_diagnostics", {}) or {}
+        if bool(mask_diag.get("mask_overflow")) and not any(
+            i.code == "mask_visible_area_overflow" for i in issues
+        ):
             issues.append(
                 ReviewIssue(
                     code="mask_visible_area_overflow",
@@ -227,17 +360,48 @@ class LayoutReviewPlanner:
                     score_penalty=0.14,
                 )
             )
+
+            recommended = mask_diag.get("recommended_box_size") or ()
+            try:
+                rec_w = float(recommended[0])
+                rec_h = float(recommended[1])
+            except Exception:
+                rec_w = rec_h = 0.0
+
+            if rec_w > bw * 1.02 or rec_h > bh * 1.02:
+                resize_w = max(bw, rec_w)
+                resize_h = max(bh, rec_h)
+            else:
+                fallback_size = mask_diag.get("recommended_box_size") or [bw, bh]
+                try:
+                    resize_w = float(fallback_size[0])
+                    resize_h = float(fallback_size[1])
+                except Exception:
+                    resize_w = bw
+                    resize_h = bh
+
             actions.append(
                 ReviewAction(
                     action="resize_to_mask_safe_box",
                     block_index=blk.block_index,
-                    args={"width": float((mask_diag.get("recommended_box_size") or [bw, bh])[0]), "height": float((mask_diag.get("recommended_box_size") or [bw, bh])[1])},
+                    args={"width": resize_w, "height": resize_h},
                     reason="Grow the textbox enough that rendered lettering fits inside the mask-visible area.",
                 )
             )
+            actions.append(
+                ReviewAction(
+                    action="increase_padding",
+                    block_index=blk.block_index,
+                    args={"padding": float(mask_diag.get("text_padding", 2.0) or 2.0)},
+                    reason="Keep lettering away from text-mask edges before final render/export.",
+                )
+            )
             score_before -= 0.14
+
         mask_info = mask_diag.get("mask") or {}
-        if bool(mask_info.get("edge_hidden")) and not any(i.code == "text_mask_erases_edge" for i in issues):
+        if bool(mask_info.get("edge_hidden")) and not any(
+            i.code == "text_mask_erases_edge" for i in issues
+        ):
             issues.append(
                 ReviewIssue(
                     code="text_mask_erases_edge",
@@ -250,7 +414,15 @@ class LayoutReviewPlanner:
                 ReviewAction(
                     action="increase_padding",
                     block_index=blk.block_index,
-                    args={"padding": max(2.0, float((blk.text_style or {}).get("text_padding", 0.0) or 0.0) + 1.0)},
+                    args={
+                        "padding": max(
+                            2.0,
+                            float(
+                                (blk.text_style or {}).get("text_padding", 0.0) or 0.0
+                            )
+                            + 1.0,
+                        )
+                    },
                     reason="Inset lettering away from erased mask edges.",
                 )
             )
@@ -298,7 +470,6 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.15
 
-
         if blk.font_fallback_warning:
             issues.append(
                 ReviewIssue(
@@ -328,8 +499,9 @@ class LayoutReviewPlanner:
                 )
             score_before -= 0.12
 
-
-        if blk.resolved_writing_mode == "vertical_rl" and any(seq in (blk.text or "") for seq in ("?!", "!?", "!!", "??", "...")):
+        if blk.resolved_writing_mode == "vertical_rl" and any(
+            seq in (blk.text or "") for seq in ("?!", "!?", "!!", "??", "...")
+        ):
             issues.append(
                 ReviewIssue(
                     code="vertical_punctuation_normalization",
@@ -347,7 +519,10 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.03
 
-        if blk.resolved_writing_mode == "rtl" and int((blk.text_style or {}).get("alignment", 0) or 0) == 0:
+        if (
+            blk.resolved_writing_mode == "rtl"
+            and int((blk.text_style or {}).get("alignment", 0) or 0) == 0
+        ):
             issues.append(
                 ReviewIssue(
                     code="rtl_alignment",
@@ -366,7 +541,10 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.05
 
-        if float((blk.text_style or {}).get("contrast_ratio", 7.0) or 7.0) < 4.5 and float((blk.text_style or {}).get("stroke_width", 0.0) or 0.0) <= 0:
+        if (
+            float((blk.text_style or {}).get("contrast_ratio", 7.0) or 7.0) < 4.5
+            and float((blk.text_style or {}).get("stroke_width", 0.0) or 0.0) <= 0
+        ):
             issues.append(
                 ReviewIssue(
                     code="low_contrast_no_effect",
@@ -398,14 +576,24 @@ class LayoutReviewPlanner:
                 ReviewAction(
                     action="increase_padding",
                     block_index=blk.block_index,
-                    args={"padding": max(2.0, float((blk.text_style or {}).get("text_padding", 0.0) or 0.0) + 1.0)},
+                    args={
+                        "padding": max(
+                            2.0,
+                            float(
+                                (blk.text_style or {}).get("text_padding", 0.0) or 0.0
+                            )
+                            + 1.0,
+                        )
+                    },
                     reason="Increase inset before final render so manga effects have safe ink margin.",
                 )
             )
             score_before -= 0.06
 
         suggested_preset = str((blk.text_style or {}).get("preset_suggestion", "") or "")
-        if suggested_preset and suggested_preset != str((blk.text_style or {}).get("preset", "") or ""):
+        if suggested_preset and suggested_preset != str(
+            (blk.text_style or {}).get("preset", "") or ""
+        ):
             if suggested_preset in {"vertical_cjk_bubble", "sfx_bold", "caption_box"}:
                 issues.append(
                     ReviewIssue(
@@ -439,7 +627,11 @@ class LayoutReviewPlanner:
         style = blk.text_style or {}
         padding = float(style.get("text_padding", 0.0) or 0.0)
         stroke_width = float(style.get("stroke_width", 0.0) or 0.0)
-        if blk.resolved_writing_mode == "vertical_rl" and style.get("line_break_strategy") not in ("cjk_strict", "balanced"):
+
+        if (
+            blk.resolved_writing_mode == "vertical_rl"
+            and style.get("line_break_strategy") not in ("cjk_strict", "balanced")
+        ):
             issues.append(
                 ReviewIssue(
                     code="vertical_cjk_line_break_policy",
@@ -458,7 +650,10 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.04
 
-        if blk.resolved_writing_mode == "vertical_rl" and style.get("fit_mode") in (None, "", "preserve"):
+        if (
+            blk.resolved_writing_mode == "vertical_rl"
+            and style.get("fit_mode") in (None, "", "preserve")
+        ):
             issues.append(
                 ReviewIssue(
                     code="vertical_manga_preset_recommended",
@@ -476,6 +671,7 @@ class LayoutReviewPlanner:
                 )
             )
             score_before -= 0.04
+
         if stroke_width > 0 and padding < 1.0:
             issues.append(
                 ReviewIssue(
@@ -532,6 +728,8 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "center_in_bubble": [],
         "resize_to_fit_content": [],
         "shrink_to_fit": [],
+        "smart_fit": [],
+        "polish_typography": [],
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
@@ -563,6 +761,8 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "center_in_bubble": [],
         "resize_to_fit_content": [],
         "shrink_to_fit": [],
+        "smart_fit": [],
+        "polish_typography": [],
         "switch_writing_mode": [],
         "recenter": [],
         "increase_padding": [],
@@ -595,7 +795,12 @@ class HeuristicReviewProvider:
     def __init__(self):
         self.planner = LayoutReviewPlanner()
 
-    def review(self, page_name: str, blocks: Sequence[BlockSnapshot], config: ReviewModelConfig) -> PageReviewResult:
+    def review(
+        self,
+        page_name: str,
+        blocks: Sequence[BlockSnapshot],
+        config: ReviewModelConfig,
+    ) -> PageReviewResult:
         return self.planner.review_page(page_name, blocks)
 
 
@@ -605,10 +810,21 @@ class ExternalReviewProvider:
     `handler` should accept `(page_name, blocks, config)` and return `PageReviewResult`.
     """
 
-    def __init__(self, handler: Callable[[str, Sequence[BlockSnapshot], ReviewModelConfig], PageReviewResult]):
+    def __init__(
+        self,
+        handler: Callable[
+            [str, Sequence[BlockSnapshot], ReviewModelConfig],
+            PageReviewResult,
+        ],
+    ):
         self.handler = handler
 
-    def review(self, page_name: str, blocks: Sequence[BlockSnapshot], config: ReviewModelConfig) -> PageReviewResult:
+    def review(
+        self,
+        page_name: str,
+        blocks: Sequence[BlockSnapshot],
+        config: ReviewModelConfig,
+    ) -> PageReviewResult:
         return self.handler(page_name, blocks, config)
 
 

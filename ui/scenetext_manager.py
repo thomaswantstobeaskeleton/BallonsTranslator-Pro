@@ -37,10 +37,15 @@ from utils.text_rendering import (
     merge_font_fallback_chain,
     missing_glyphs_after_fallback,
     normalize_vertical_punctuation,
+    resolve_fit_font_size_bounds,
     resolve_writing_mode,
+    smart_fit_text_to_box,
+    plan_typography_cleanup,
 )
 from utils.line_breaking import split_long_token_with_hyphenation
+from utils.text_masking import masked_text_warnings, recommended_padding_for_mask, mask_effective_box
 from utils.textbox_masking import centered_resize_xyxy, mask_aware_textbox_diagnostics
+
 from utils.layout_review_agent import (
     BlockSnapshot,
     ExternalReviewProvider,
@@ -625,6 +630,10 @@ class SceneTextManager(QObject):
         self.canvas.format_textblks.connect(self.onFormatTextblks)
         self.canvas.layout_textblks.connect(self.onAutoLayoutTextblks)
         self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
+        if hasattr(self.canvas, "smart_auto_fit_signal"):
+            self.canvas.smart_auto_fit_signal.connect(self.onSmartAutoFitTextToBox)
+        if hasattr(self.canvas, "polish_typography_signal"):
+            self.canvas.polish_typography_signal.connect(self.onPolishTypography)
         self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
         self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
         self.canvas.resize_to_fit_content_signal.connect(self.onResizeToFitContent)
@@ -633,6 +642,8 @@ class SceneTextManager(QObject):
             self.canvas.set_writing_mode_signal.connect(self.onSetWritingMode)
         if hasattr(self.canvas, "recenter_text_in_box_signal"):
             self.canvas.recenter_text_in_box_signal.connect(self.onRecenterTextInBox)
+        if hasattr(self.canvas, "apply_mask_safe_padding_signal"):
+            self.canvas.apply_mask_safe_padding_signal.connect(self.onApplyMaskSafePadding)
         if hasattr(self.canvas, "fit_to_mask_safe_box_signal"):
             self.canvas.fit_to_mask_safe_box_signal.connect(self.onFitToMaskSafeBox)
         self.canvas.reset_angle.connect(self.onResetAngle)
@@ -681,6 +692,26 @@ class SceneTextManager(QObject):
                 pass
             blkitem.update()
         self.canvas.setProjSaveState(False)
+
+    def onApplyMaskSafePadding(self):
+        changed = 0
+        for blkitem in self.canvas.selected_text_items():
+            blk = getattr(blkitem, 'blk', None)
+            if blk is None or getattr(blk, 'text_mask', None) is None:
+                continue
+            current = float(getattr(blkitem.fontformat, 'text_padding', blkitem.padding()) or 0.0)
+            padding = recommended_padding_for_mask(getattr(blk, 'text_mask', None), current_padding=current)
+            if padding <= current + 0.01:
+                continue
+            blkitem.fontformat.text_padding = padding
+            blkitem.setPadding(padding)
+            blk.fontformat.text_padding = padding
+            changed += 1
+            blkitem.update()
+        if changed:
+            self.canvas.setProjSaveState(False)
+            if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
+                self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Applied mask-safe padding to {0} text box(es)').format(changed))
 
     def on_switch_textitem(self, switch_delta: int, key_event: QKeyEvent = None, current_editing_widget: Union[SourceTextEdit, TransTextEdit] = None):
         n_blk = len(self.textblk_item_list)
@@ -794,6 +825,11 @@ class SceneTextManager(QObject):
             if gb_radius > 0 and getattr(blk.fontformat, "text_box_corner_radius", 0.0) == 0.0:
                 blk.fontformat.text_box_corner_radius = gb_radius
             # Load block as-is (saved layout). Auto layout is only run explicitly after Run or via menu.
+            if self.auto_textlayout_flag and bool(getattr(pcfg, 'render_auto_polish_on_ocr', True)):
+                try:
+                    self._polish_textblock_model(blk)
+                except Exception as e:
+                    LOGGER.warning('Auto typography polish skipped: %s', e)
             blk_item = TextBlkItem(blk, len(self.textblk_item_list), show_rect=self.canvas.textblock_mode)
         self.addTextBlkItem(blk_item)
 
@@ -1302,6 +1338,198 @@ class SceneTextManager(QObject):
             self._scale_font_to_fit_box(blkitem)
         self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
 
+
+    def _polish_textblock_model(self, blk: TextBlock) -> bool:
+        ff = blk.fontformat
+        xyxy = list(getattr(blk, 'xyxy', []) or [])
+        if len(xyxy) >= 4:
+            box = (max(1.0, float(xyxy[2]) - float(xyxy[0])), max(1.0, float(xyxy[3]) - float(xyxy[1])))
+        else:
+            box = (1.0, 1.0)
+        text = getattr(blk, 'translation', '') or blk.get_text()
+        result = plan_typography_cleanup(
+            text, float(getattr(ff, 'font_size', 24.0) or 24.0), box,
+            getattr(ff, 'writing_mode', getattr(pcfg, 'render_default_writing_mode', 'auto')),
+            getattr(ff, 'fit_mode', getattr(pcfg, 'render_default_fit_mode', 'shrink')),
+            getattr(ff, 'line_break_strategy', getattr(pcfg, 'render_default_line_break_strategy', 'auto')),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            text_padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            font_family=getattr(ff, 'font_family', ''),
+            fallback_font_chain=getattr(ff, 'fallback_font_chain', ''),
+            config_obj=pcfg,
+        )
+        changed = False
+        if result.text and result.text != getattr(blk, 'translation', ''):
+            blk.translation = result.text
+            changed = True
+        for attr, value in [
+            ('writing_mode', result.writing_mode),
+            ('fit_mode', result.fit_mode),
+            ('line_break_strategy', result.line_break_strategy),
+            ('line_spacing', result.line_spacing),
+            ('letter_spacing', result.letter_spacing),
+            ('text_padding', result.text_padding),
+            ('fallback_font_chain', result.fallback_font_chain),
+        ]:
+            if hasattr(ff, attr) and value is not None and getattr(ff, attr) != value:
+                setattr(ff, attr, value)
+                changed = True
+        ff.vertical = result.resolved_writing_mode == 'vertical_rl'
+        return changed
+
+    def _apply_typography_cleanup_to_item(self, blkitem: TextBlkItem) -> bool:
+        rect = blkitem.absBoundingRect(qrect=True)
+        ff = blkitem.fontformat
+        result = plan_typography_cleanup(
+            blkitem.toPlainText(), float(getattr(ff, 'font_size', 24.0) or 24.0), (rect.width(), rect.height()),
+            getattr(ff, 'writing_mode', 'auto'), getattr(ff, 'fit_mode', 'shrink'), getattr(ff, 'line_break_strategy', 'auto'),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            text_padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            font_family=getattr(ff, 'font_family', ''),
+            fallback_font_chain=getattr(ff, 'fallback_font_chain', ''),
+            config_obj=pcfg,
+        )
+        changed = False
+        if result.text and result.text != blkitem.toPlainText():
+            blkitem.setPlainText(result.text)
+            if blkitem.blk is not None:
+                blkitem.blk.translation = result.text
+            changed = True
+        for attr, value in [
+            ('writing_mode', result.writing_mode),
+            ('fit_mode', result.fit_mode),
+            ('line_break_strategy', result.line_break_strategy),
+            ('line_spacing', result.line_spacing),
+            ('letter_spacing', result.letter_spacing),
+            ('text_padding', result.text_padding),
+            ('fallback_font_chain', result.fallback_font_chain),
+        ]:
+            if hasattr(ff, attr) and value is not None and getattr(ff, attr) != value:
+                setattr(ff, attr, value)
+                changed = True
+        vertical = result.resolved_writing_mode == 'vertical_rl'
+        if getattr(ff, 'vertical', False) != vertical:
+            ff.vertical = vertical
+            changed = True
+        if changed:
+            blkitem.set_fontformat(ff)
+            if blkitem.blk is not None:
+                blkitem.blk.fontformat = ff.deepcopy()
+        return changed
+
+    def polish_typography_textboxes(self, indices: List[int] = None, push_undo: bool = True) -> int:
+        if indices is None:
+            target_blks = self.canvas.selected_text_items()
+        else:
+            wanted = set(int(i) for i in indices)
+            target_blks = [blk for blk in self.textblk_item_list if blk.idx in wanted]
+        if not target_blks:
+            return 0
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        changed = 0
+        for blkitem in target_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            if self._apply_typography_cleanup_to_item(blkitem):
+                changed += 1
+        if changed:
+            if push_undo:
+                self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+            self.canvas.setProjSaveState(False)
+            if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
+                self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Polished typography for {0} text box(es)').format(changed))
+        return changed
+
+    def onPolishTypography(self):
+        self.polish_typography_textboxes(indices=None, push_undo=True)
+
+    def _apply_smart_fit_to_item(self, blkitem: TextBlkItem) -> bool:
+        rect = blkitem.absBoundingRect(qrect=True)
+        ff = blkitem.fontformat
+        text = blkitem.toPlainText()
+        mask = getattr(getattr(blkitem, 'blk', None), 'text_mask', None)
+        effective = mask_effective_box(mask, (rect.width(), rect.height()), getattr(ff, 'text_padding', 0.0))
+        style_min, style_max = resolve_fit_font_size_bounds(
+            getattr(ff, 'fit_font_size_min', 0.0),
+            getattr(ff, 'fit_font_size_max', 0.0),
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0),
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0),
+        )
+        result = smart_fit_text_to_box(
+            text,
+            float(getattr(ff, 'font_size', 24.0) or 24.0),
+            (rect.width(), rect.height()),
+            getattr(ff, 'writing_mode', 'auto'),
+            getattr(ff, 'fit_mode', 'shrink'),
+            min_font_size=style_min,
+            max_font_size=style_max,
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
+            shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+            shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            effective_box_size=(float(effective.get('width', rect.width())), float(effective.get('height', rect.height()))) if effective.get('uses_mask') else None,
+        )
+        changed = False
+        if result.text and result.text != text:
+            blkitem.setPlainText(result.text)
+            if blkitem.blk is not None:
+                blkitem.blk.translation = result.text
+            changed = True
+        for attr, value in [
+            ('font_size', result.font_size),
+            ('line_spacing', result.line_spacing),
+            ('letter_spacing', result.letter_spacing),
+            ('writing_mode', result.writing_mode),
+            ('fit_mode', result.fit_mode),
+        ]:
+            if hasattr(ff, attr) and getattr(ff, attr) != value:
+                setattr(ff, attr, value)
+                changed = True
+        if result.resolved_writing_mode == 'vertical_rl' and not getattr(ff, 'vertical', False):
+            ff.vertical = True
+            changed = True
+        elif result.resolved_writing_mode != 'vertical_rl' and getattr(ff, 'vertical', False):
+            ff.vertical = False
+            changed = True
+        if changed:
+            blkitem.set_fontformat(ff)
+            if blkitem.blk is not None:
+                blkitem.blk.fontformat = ff.deepcopy()
+        return changed
+
+    def smart_fit_textboxes(self, indices: List[int] = None, push_undo: bool = True) -> int:
+        if indices is None:
+            target_blks = self.canvas.selected_text_items()
+        else:
+            wanted = set(int(i) for i in indices)
+            target_blks = [blk for blk in self.textblk_item_list if blk.idx in wanted]
+        if not target_blks:
+            return 0
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        changed = 0
+        for blkitem in target_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            if self._apply_smart_fit_to_item(blkitem):
+                changed += 1
+        if changed:
+            if push_undo:
+                self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+            self.canvas.setProjSaveState(False)
+            if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
+                self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Smart-fitted {0} text box(es)').format(changed))
+        return changed
+
+    def onSmartAutoFitTextToBox(self):
+        self.smart_fit_textboxes(indices=None, push_undo=True)
+
     def _layout_review_snapshot_for_item(self, blk: TextBlkItem) -> BlockSnapshot:
         """Build a renderer-aware snapshot for the layout review agent."""
         abr = blk.absBoundingRect(qrect=True)
@@ -1331,13 +1559,68 @@ class SceneTextManager(QObject):
             fit_dict = fit_diag.to_dict()
         except Exception:
             fit_dict = {}
+        effective_box = mask_effective_box(
+            getattr(getattr(blk, 'blk', None), 'text_mask', None),
+            box_size,
+            getattr(ff, 'text_padding', 0.0),
+        )
+
+        typography_cleanup = plan_typography_cleanup(
+            text,
+            max(1.0, float(getattr(ff, 'font_size', blk.font().pointSizeF() or blk.font().pointSize() or 1.0) or 1.0)),
+            box_size,
+            getattr(ff, 'writing_mode', 'auto'),
+            getattr(ff, 'fit_mode', 'shrink'),
+            getattr(ff, 'line_break_strategy', 'auto'),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.2) or 1.2),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            text_padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            font_family=getattr(ff, 'font_family', ''),
+            fallback_font_chain=getattr(ff, 'fallback_font_chain', ''),
+            config_obj=pcfg,
+        )
+
+        smart = smart_fit_text_to_box(
+            text,
+            max(1.0, float(getattr(ff, 'font_size', blk.font().pointSizeF() or blk.font().pointSize() or 1.0) or 1.0)),
+            box_size,
+            getattr(ff, 'writing_mode', 'auto'),
+            getattr(ff, 'fit_mode', 'shrink'),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.2) or 1.2),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
+            shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+            shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            effective_box_size=(
+                float(effective_box.get('width', box_size[0])),
+                float(effective_box.get('height', box_size[1])),
+            ) if effective_box.get('uses_mask') else None,
+        )
+
+        measured_bounds = (
+            fit_dict.get('measured_bounds')
+            or smart.get('measured_bounds')
+            or est
+            or (0.0, 0.0)
+        )
+
         mask_diag = mask_aware_textbox_diagnostics(
             box_size,
-            (float(fit_dict.get('measured_bounds', est or (0.0, 0.0))[0]) if fit_dict.get('measured_bounds') else (est or (0.0, 0.0))[0],
-             float(fit_dict.get('measured_bounds', est or (0.0, 0.0))[1]) if fit_dict.get('measured_bounds') else (est or (0.0, 0.0))[1]),
+            (
+                float(measured_bounds[0]),
+                float(measured_bounds[1]),
+            ),
             getattr(getattr(blk, 'blk', None), 'text_mask', None),
-            effect_margin=float(fit_dict.get('effect_margin', 0.0) or 0.0),
+            effect_margin=float(
+                fit_dict.get(
+                    'effect_margin',
+                    smart.get('effect_margin', 0.0),
+                ) or 0.0
+            ),
             padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+        )
         )
         style = {
             'font_family': getattr(ff, 'font_family', ''),
@@ -1354,6 +1637,13 @@ class SceneTextManager(QObject):
             'ink_clip_risk': fit_dict.get('ink_clip_risk', False),
             'preset_suggestion': fit_dict.get('preset_suggestion', ''),
             'safe_inner_bounds': fit_dict.get('safe_inner_bounds', []),
+            'mask_coverage': mask_diag.get('coverage', 1.0),
+            'mask_safe_insets': mask_diag.get('safe_insets', []),
+            'mask_warning': mask_diag.get('warning', ''),
+            'mask_recommended_padding': mask_diag.get('recommended_padding', 0.0),
+            'mask_effective_box': effective_box,
+            'smart_fit': smart.to_dict(),
+            'typography_cleanup': typography_cleanup.to_dict(),
             'mask_diagnostics': mask_diag,
         }
         return BlockSnapshot(
@@ -1370,6 +1660,9 @@ class SceneTextManager(QObject):
             text_style=style,
             font_fallback_warning=', '.join(missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
             quality_score=float(fit_dict.get('quality_score', 1.0) or 1.0),
+            mask_coverage=float(mask_diag.get('coverage', 1.0) or 1.0),
+            mask_safe_insets=tuple(mask_diag.get('safe_insets', [0, 0, 0, 0]) or [0, 0, 0, 0]),
+            mask_warning=str(mask_diag.get('warning', '') or ''),
         )
 
     def onFitToMaskSafeBox(self):
@@ -1676,7 +1969,7 @@ class SceneTextManager(QObject):
                 scale = float(action.args.get("scale", 1.0) or 1.0)
                 if scale <= 0 or abs(scale - 1.0) < 1e-6:
                     continue
-            elif action.action in ("resize_to_recommended_box", "resize_to_mask_safe_box"):
+            elif action.action in {"resize_to_recommended_box", "resize_to_mask_safe_box"}:
                 width = float(action.args.get("width", 0.0) or 0.0)
                 height = float(action.args.get("height", 0.0) or 0.0)
                 if width <= 0 or height <= 0:
@@ -1710,7 +2003,7 @@ class SceneTextManager(QObject):
                 self.onAutoFitFontToBox()
             if grouped["resize_to_fit_content"]:
                 self.onResizeToFitContent()
-            for action in grouped["resize_to_recommended_box"] + grouped["resize_to_mask_safe_box"]:
+            for action in grouped["resize_to_recommended_box"] + grouped.get("resize_to_mask_safe_box", []):
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
                     continue
@@ -1753,6 +2046,16 @@ class SceneTextManager(QObject):
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.stroke_width = blkitem.fontformat.stroke_width
                 blkitem.set_fontformat(blkitem.fontformat)
+            for action in grouped.get("polish_typography", []):
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                self._apply_typography_cleanup_to_item(blkitem)
+            for action in grouped.get("smart_fit", []):
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                self._apply_smart_fit_to_item(blkitem)
             for action in grouped["switch_writing_mode"]:
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:

@@ -576,6 +576,7 @@ class ProgramConfig(Config):
     render_default_reading_order: str = "auto"
     render_overflow_warnings: bool = True
     render_diagnostics_overlay: bool = False
+    render_auto_polish_on_ocr: bool = True
     render_default_font_family: str = ""
     render_default_stroke_width: float = 0.08
     render_default_shadow_radius: float = 0.0
@@ -590,6 +591,7 @@ class ProgramConfig(Config):
     render_recent_fonts: str = ""  # Recently applied text-panel font families for quick reuse.
     render_custom_manga_presets: Dict = field(default_factory=dict)
     export_open_folder_after_batch: bool = False
+    export_include_unrendered_pages: bool = False
     text_editor_top_padding: int = 14
     # Smooth scroll: animate scroll position on wheel (ms). 0 = off. 80–200 = subtle enhanced feel.
     smooth_scroll_duration_ms: int = 0
@@ -710,7 +712,7 @@ CONFIG_KEY_ORDER = (
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
-    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "render_favorite_fonts", "render_recent_fonts", "render_custom_manga_presets", "export_open_folder_after_batch", "text_editor_top_padding",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_auto_polish_on_ocr", "render_default_font_family", "render_default_stroke_width", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "render_favorite_fonts", "render_recent_fonts", "render_custom_manga_presets", "export_open_folder_after_batch", "export_include_unrendered_pages", "text_editor_top_padding",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",

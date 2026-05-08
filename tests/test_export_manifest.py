@@ -40,3 +40,21 @@ def test_mark_exported_pages_updates_completion_state(tmp_path):
     assert mark_exported_pages(project, [("p1.png", str(page)), ("missing.png", str(out / "missing.png"))]) == 1
     assert project.get_page_completion_state("p1.png") == "exported"
     assert project.get_page_completion_state("missing.png") == "todo"
+
+
+def test_export_manifest_records_unrendered_fallback_sources(tmp_path):
+    out = tmp_path / "out"
+    page = out / "002.png"
+    out.mkdir()
+    page.write_bytes(b"x")
+    project = Project()
+    manifest = write_export_manifest(
+        project,
+        str(out),
+        [("p2.png", str(page))],
+        [],
+        options={"include_unrendered": True, "export_sources": {"p2.png": "original_fallback"}},
+    )
+    assert manifest["pages"][0]["source_kind"] == "original_fallback"
+    assert manifest["pages"][0]["used_fallback_source"] is True
+    assert "fallback" in manifest["warnings"][0]

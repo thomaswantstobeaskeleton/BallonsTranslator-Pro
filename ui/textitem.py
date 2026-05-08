@@ -16,6 +16,7 @@ from utils.imgproc_utils import xywh2xyxypoly, rotate_polygons
 from utils.fontformat import FontFormat, px2pt, pt2px
 from utils.config import pcfg
 from utils.text_rendering import estimate_text_bounds, first_missing_glyphs, font_fallback_runs, merge_font_fallback_chain, missing_glyphs_after_fallback, resolve_writing_mode
+from utils.text_masking import mask_safe_rect
 from .misc import td_pattern, table_pattern, pixmap2ndarray, ndarray2pixmap
 from .image_edit import ImageEditMode
 from .scene_textlayout import VerticalTextDocumentLayout, HorizontalTextDocumentLayout, SceneTextLayout
@@ -768,12 +769,14 @@ class TextBlkItem(QGraphicsTextItem):
         )
         families = merge_font_fallback_chain(getattr(ff, 'font_family', ''), self.toPlainText(), pcfg, getattr(ff, 'fallback_font_chain', ''))
         missing = missing_glyphs_after_fallback(getattr(ff, 'font_family', ''), self.toPlainText(), pcfg, getattr(ff, 'fallback_font_chain', '')) if self.toPlainText() else []
+        mask_diag = mask_safe_rect(getattr(getattr(self, 'blk', None), 'text_mask', None))
         return {
             'mode': mode,
             'measured': measured,
             'overflow': measured[0] > br.width() or measured[1] > br.height(),
             'fallback': ', '.join(families),
             'missing': ''.join(missing),
+            'mask': mask_diag.to_dict(),
         }
 
     def _draw_renderer_diagnostics_overlay(self, painter: QPainter):
@@ -783,6 +786,7 @@ class TextBlkItem(QGraphicsTextItem):
         if diag is None:
             return
         br = self.boundingRect()
+        ff = self.fontformat
         painter.save()
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         painter.setPen(QPen(QColor(255, 128, 0, 190) if diag['overflow'] else QColor(0, 180, 255, 160), 1.5 / max(0.01, self.get_scale()), Qt.PenStyle.DashLine))
@@ -791,9 +795,23 @@ class TextBlkItem(QGraphicsTextItem):
         measured_w, measured_h = diag['measured'][0], diag['measured'][1]
         painter.setPen(QPen(QColor(255, 64, 64, 170), 1 / max(0.01, self.get_scale())))
         painter.drawRect(QRectF(0, 0, measured_w, measured_h))
-        label = f"{diag['mode']} {getattr(self.fontformat, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
+        mask_diag = diag.get('mask') or {}
+        if mask_diag.get('narrow_safe_area') or mask_diag.get('fully_masked'):
+            sr = mask_diag.get('safe_rect') or [0, 0, 0, 0]
+            painter.setPen(QPen(QColor(180, 80, 255, 190), 1 / max(0.01, self.get_scale()), Qt.PenStyle.DotLine))
+            painter.drawRect(QRectF(
+                float(sr[0]),
+                float(sr[1]),
+                max(0.0, float(sr[2]) - float(sr[0])),
+                max(0.0, float(sr[3]) - float(sr[1])),
+            ))
+
+        ff = getattr(self, 'fontformat', None)
+        label = f"{diag['mode']} {getattr(ff, 'line_break_strategy', 'auto')} {measured_w:.0f}×{measured_h:.0f}"
         if diag['missing']:
             label += f" missing: {diag['missing']}"
+        if (diag.get('mask') or {}).get('warning'):
+            label += f" mask: {(diag.get('mask') or {}).get('coverage', 0):.0%}"
         painter.setPen(QColor(255, 128, 0) if diag['overflow'] else QColor(0, 128, 255))
         painter.drawText(QPointF(2, max(10.0, 10.0 / max(0.01, self.get_scale()))), label)
         painter.restore()
@@ -961,6 +979,7 @@ class TextBlkItem(QGraphicsTextItem):
 
     def _draw_accessories(self, painter: QPainter):
         br = self.boundingRect()
+        ff = self.fontformat
         painter.save()
         
         if self.background_pixmap is not None:

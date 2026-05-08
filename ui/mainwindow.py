@@ -74,6 +74,7 @@ from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
+from utils.lettering_proof_export import build_lettering_proof_pack
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
@@ -504,6 +505,7 @@ class MainWindow(mainwindow_cls):
         self.canvas.review_ocr_triage_signal.connect(self.on_open_ocr_triage_current_page)
         self.canvas.review_translation_qa_signal.connect(self.on_translation_qa_report_current_page)
         self.canvas.review_auto_extract_glossary_signal.connect(self.on_auto_extract_glossary_current_page)
+        self.canvas.export_lettering_proof_signal.connect(self.on_export_lettering_proof_pack)
 
         self.app.installEventFilter(self)
         self.canvas.gv.installEventFilter(self)
@@ -561,8 +563,9 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
         self.pipelineInsightsPanel.open_batch_style_requested.connect(self.on_open_batch_style_override)
         self.pipelineInsightsPanel.open_typography_qa_requested.connect(self.on_open_typography_qa_report)
-        self.pipelineInsightsPanel.apply_workflow_preset_requested.connect(self.on_apply_workflow_preset_requested)
-        self.pipelineInsightsPanel.run_workflow_preset_requested.connect(lambda preset_id: self.on_apply_workflow_preset_requested(preset_id, run_after=True))
+        if hasattr(self.pipelineInsightsPanel, 'apply_workflow_preset_requested'):
+            self.pipelineInsightsPanel.apply_workflow_preset_requested.connect(self.on_apply_workflow_preset_requested)
+            self.pipelineInsightsPanel.run_workflow_preset_requested.connect(lambda preset_id: self.on_apply_workflow_preset_requested(preset_id, run_after=True))
         self.rightComicTransStackPanel.addWidget(self.pipelineInsightsPanel)
         self.maskDiagnosticsPanel = MaskDiagnosticsWidget(self)
         self.rightComicTransStackPanel.addWidget(self.maskDiagnosticsPanel)
@@ -868,6 +871,7 @@ class MainWindow(mainwindow_cls):
             'page_state': self._api_page_state,
             'list_pages': self._api_list_pages,
             'recent_projects': self._api_recent_projects,
+            'project_status': self._api_project_status,
             'pipeline_presets': self._api_pipeline_presets,
             'export_structured_ocr': self._api_export_structured_ocr,
             'render_current_page': self._api_render_current_page,
@@ -875,7 +879,10 @@ class MainWindow(mainwindow_cls):
             'apply_rendering_preset': self._api_apply_rendering_preset,
             'rendering_presets': self._api_rendering_presets,
             'fix_rendering_issues': self._api_fix_rendering_issues,
+            'smart_fit_textboxes': self._api_smart_fit_textboxes,
+            'polish_typography': self._api_polish_typography,
             'export_rendering_qa': self._api_export_rendering_qa,
+            'export_lettering_proof': self._api_export_lettering_proof,
             'apply_project_rendering_fixes': self._api_apply_project_rendering_fixes,
             'apply_text_style_batch': self._api_apply_text_style_batch,
         }
@@ -885,6 +892,7 @@ class MainWindow(mainwindow_cls):
             self.pipelineInsightsPanel.add_event('API', self.tr('Local automation API started'))
         except Exception as e:
             self.pipelineInsightsPanel.add_warning('API', self.tr(f'Failed to start automation API: {e}'))
+
 
     def _api_pipeline_presets(self, body: dict):
         return self._api_call_ui(self._api_pipeline_presets_ui, body)
@@ -930,6 +938,29 @@ class MainWindow(mainwindow_cls):
                 'name': _osp.basename(path.rstrip(_osp.sep)) or path,
             })
         return {'recent_projects': entries, 'count': len(entries)}
+
+
+    def _api_project_status(self, body: dict):
+        return self._api_call_ui(self._api_project_status_ui, body)
+
+    def _api_project_status_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            return {'open': False, 'message': 'no project open'}
+        pages = list(getattr(self.imgtrans_proj, 'pages', {}) or {})
+        current = getattr(self.imgtrans_proj, 'current_img', '') or ''
+        states = {}
+        if hasattr(self.imgtrans_proj, 'get_page_completion_state'):
+            for page in pages:
+                states[page] = self.imgtrans_proj.get_page_completion_state(page)
+        return {
+            'open': True,
+            'directory': getattr(self.imgtrans_proj, 'directory', ''),
+            'current_page': current,
+            'page_count': len(pages),
+            'textbox_count': sum(len(self.imgtrans_proj.pages.get(p, []) or []) for p in pages),
+            'unsaved': bool(getattr(self.canvas, 'projstate_unsaved', False)),
+            'states': states,
+        }
 
     def _api_run_pipeline(self, body: dict):
         return self._api_call_ui(self._api_run_pipeline_ui, body)
@@ -979,7 +1010,7 @@ class MainWindow(mainwindow_cls):
                 out_dir = osp.join(self.imgtrans_proj.directory, 'exports')
             ext = str((body or {}).get('ext', '') or '').strip().lower() or None
             also_pdf = bool((body or {}).get('also_pdf', False))
-            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)))
+            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)), include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))))
             self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
             return {'ok': True, **(result or {})}
         if kind in {'archive', 'zip', 'cbz'}:
@@ -989,7 +1020,7 @@ class MainWindow(mainwindow_cls):
             out_dir = str((body or {}).get('out_dir', '') or '').strip()
             if not out_dir:
                 out_dir = tempfile.mkdtemp(prefix='bt_export_')
-            result = self._do_batch_export(out_dir, ext=str((body or {}).get('ext', '') or '').strip().lower() or None, also_pdf=bool((body or {}).get('also_pdf', False)), show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)))
+            result = self._do_batch_export(out_dir, ext=str((body or {}).get('ext', '') or '').strip().lower() or None, also_pdf=bool((body or {}).get('also_pdf', False)), show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)), include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))))
             if not archive_path:
                 archive_path = osp.join(self.imgtrans_proj.directory, 'exports', ('exported.cbz' if archive_format == 'cbz' else 'exported.zip'))
             os.makedirs(osp.dirname(archive_path), exist_ok=True)
@@ -1019,6 +1050,8 @@ class MainWindow(mainwindow_cls):
             final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
             manifest = build_layered_psd_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr)
             return {'ok': True, 'manifest': manifest}
+        if kind in {'lettering_proof', 'proof_pack', 'typography_proof'}:
+            return self._api_export_lettering_proof_ui(body)
         raise ValueError(f'unknown export kind: {kind}')
 
     def _api_layout_review(self, body: dict):
@@ -1134,6 +1167,23 @@ class MainWindow(mainwindow_cls):
 
 
 
+
+    def _api_export_lettering_proof(self, body: dict):
+        return self._api_call_ui(self._api_export_lettering_proof_ui, body)
+
+    def _api_export_lettering_proof_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        out_dir = str((body or {}).get('out_dir', '') or '').strip() or osp.join(self.imgtrans_proj.directory, 'lettering_proofs')
+        include_final = bool((body or {}).get('include_final', True))
+        final_arr = None
+        if include_final:
+            qimg = self.canvas.render_result_img()
+            final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
+        manifest = build_lettering_proof_pack(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr, config_obj=pcfg)
+        self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Exported lettering proof pack: {0}').format(manifest.get('page_dir', out_dir)))
+        return {'ok': True, 'manifest': manifest}
+
     def _api_export_rendering_qa(self, body: dict):
         return self._api_call_ui(self._api_export_rendering_qa_ui, body)
 
@@ -1173,6 +1223,46 @@ class MainWindow(mainwindow_cls):
             self.canvas.setProjSaveState(False)
         self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Applied project rendering fixes: {0} text boxes').format(result.get('applied_count', 0)))
         return {'ok': True, **result}
+
+
+    def _api_polish_typography(self, body: dict):
+        return self._api_call_ui(self._api_polish_typography_ui, body)
+
+    def _api_polish_typography_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        mode = str((body or {}).get('mode', 'page') or 'page').strip().lower()
+        if mode == 'selected':
+            indices = [blk.idx for blk in self.canvas.selected_text_items()]
+        else:
+            indices = [blk.idx for blk in getattr(self.st_manager, 'textblk_item_list', [])]
+        explicit = (body or {}).get('indices')
+        if explicit is not None:
+            indices = [int(i) for i in explicit]
+        changed = self.st_manager.polish_typography_textboxes(indices=indices, push_undo=False)
+        if changed and self.imgtrans_proj and self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+        self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Polished typography: {0} text boxes').format(changed))
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'changed': changed, 'indices': indices}
+
+    def _api_smart_fit_textboxes(self, body: dict):
+        return self._api_call_ui(self._api_smart_fit_textboxes_ui, body)
+
+    def _api_smart_fit_textboxes_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        mode = str((body or {}).get('mode', 'page') or 'page').strip().lower()
+        if mode == 'selected':
+            indices = [blk.idx for blk in self.canvas.selected_text_items()]
+        else:
+            indices = [blk.idx for blk in getattr(self.st_manager, 'textblk_item_list', [])]
+        explicit = (body or {}).get('indices')
+        if explicit is not None:
+            indices = [int(i) for i in explicit]
+        changed = self.st_manager.smart_fit_textboxes(indices=indices, push_undo=False)
+        if changed and self.imgtrans_proj and self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'changed': changed, 'indices': indices}
 
     def _api_fix_rendering_issues(self, body: dict):
         return self._api_call_ui(self._api_fix_rendering_issues_ui, body)
@@ -3868,7 +3958,8 @@ class MainWindow(mainwindow_cls):
     def _sync_stage_actions_from_config(self):
         for idx, sa in enumerate(getattr(self.titleBar, 'stageActions', []) or []):
             sa.setChecked(pcfg.module.stage_enabled(idx))
-        self._update_run_button_tooltip()
+        if hasattr(self, '_update_run_button_tooltip'):
+            self._update_run_button_tooltip()
 
     def on_apply_workflow_preset_requested(self, preset_id: str, run_after: bool = False):
         try:
@@ -3966,6 +4057,7 @@ class MainWindow(mainwindow_cls):
                 show_message=not export_as_zip,
                 clean_after_export=dlg.get_clean_after_export() if not export_as_zip else False,
                 include_intermediate=dlg.get_include_intermediate(),
+                include_unrendered=dlg.get_include_unrendered(),
             )
             if export_as_zip and zip_path and osp.isdir(out_dir):
                 import zipfile
@@ -4004,30 +4096,53 @@ class MainWindow(mainwindow_cls):
         except Exception as e:
             LOGGER.warning('Could not open export folder %s: %s', path, e)
 
-    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False):
+    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False, include_unrendered: bool = False):
+        from utils.io_utils import imread, imwrite
         try:
-            from utils.io_utils import imread, imwrite
+            os.makedirs(out_dir, exist_ok=True)
             result_dir = self.imgtrans_proj.result_dir()
             exported = 0
             missing = []
             exported_paths = []  # (pagename, path) in page order for PDF
+            rendered_exported_paths = []
             helper_paths = []
+            fallback_paths = []
+            export_sources = {}
             page_order = list(self.imgtrans_proj.pages.keys())
             for i, pagename in enumerate(page_order):
                 result_path = self.imgtrans_proj.get_result_path(pagename)
-                if osp.exists(result_path):
-                    use_ext = ext if ext else osp.splitext(result_path)[1]
+                source_path = result_path if osp.exists(result_path) else ''
+                source_kind = 'rendered'
+                if not source_path and include_unrendered:
+                    try:
+                        clean_path = self.imgtrans_proj.get_inpainted_path(pagename, get_last_modified=True)
+                    except TypeError:
+                        clean_path = self.imgtrans_proj.get_inpainted_path(pagename)
+                    original_path = osp.join(self.imgtrans_proj.directory, pagename)
+                    if clean_path and osp.exists(clean_path):
+                        source_path = clean_path
+                        source_kind = 'clean_fallback'
+                    elif osp.exists(original_path):
+                        source_path = original_path
+                        source_kind = 'original_fallback'
+                if source_path and osp.exists(source_path):
+                    use_ext = ext if ext else osp.splitext(source_path)[1]
                     if use_ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
                         use_ext = '.png'
                     # Export with consistent 001, 002, 003 naming (same as manga download / natural sort)
                     dest = osp.join(out_dir, f"{i + 1:03d}{use_ext}")
-                    img = imread(result_path)
+                    img = imread(source_path)
                     kw = {'ext': use_ext, 'quality': pcfg.imgsave_quality}
                     if use_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
                         kw['webp_lossless'] = True
                     imwrite(dest, img, **kw)
                     exported += 1
                     exported_paths.append((pagename, dest))
+                    export_sources[pagename] = source_kind
+                    if source_kind == 'rendered':
+                        rendered_exported_paths.append((pagename, dest))
+                    else:
+                        fallback_paths.append((pagename, source_kind, dest))
                     if include_intermediate:
                         import shutil
                         for kind, getter, subdir in [
@@ -4062,14 +4177,14 @@ class MainWindow(mainwindow_cls):
                     LOGGER.exception(e)
                     msg += '\n' + self.tr('PDF export failed: {}').format(str(e))
             from utils.export_manifest import mark_exported_pages, write_export_manifest
-            marked_exported = mark_exported_pages(self.imgtrans_proj, exported_paths)
+            marked_exported = mark_exported_pages(self.imgtrans_proj, rendered_exported_paths)
             manifest = write_export_manifest(
                 self.imgtrans_proj,
                 out_dir,
                 exported_paths,
                 missing,
                 export_kind='rendered_images',
-                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'helper_paths': helper_paths},
+                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'include_unrendered': bool(include_unrendered), 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'export_sources': export_sources},
             )
             msg += '\n' + self.tr('Export manifest: {0}').format(manifest.get('manifest_path', ''))
             if marked_exported:
@@ -4081,15 +4196,17 @@ class MainWindow(mainwindow_cls):
                     LOGGER.warning('Failed to save exported page completion state: %s', e)
             if helper_paths:
                 msg += '\n' + self.tr('Included {0} clean/mask helper image(s).').format(len(helper_paths))
+            if fallback_paths:
+                msg += '\n' + self.tr('Included {0} unrendered page fallback(s).').format(len(fallback_paths))
             if missing:
-                msg += '\n' + self.tr('Missing result for {0} page(s). Run pipeline first.').format(len(missing))
+                msg += '\n' + self.tr('Missing result/source for {0} page(s). Run pipeline first or restore original files.').format(len(missing))
             if clean_after_export and self.imgtrans_proj is not None:
                 self.imgtrans_proj.clean_mask_and_inpainted_cache()
                 msg += '\n' + self.tr('Cache cleaned.')
             if show_message:
                 QMessageBox.information(self, self.tr('Export'), msg)
                 self._open_export_folder_if_requested(out_dir)
-            return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'helper_paths': helper_paths, 'manifest': manifest, 'marked_exported': marked_exported}
+            return {'exported': exported, 'missing': missing, 'paths': exported_paths, 'rendered_paths': rendered_exported_paths, 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'manifest': manifest, 'marked_exported': marked_exported}
         except Exception as e:
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Batch export failed'), 'BatchExport')
@@ -4357,11 +4474,10 @@ class MainWindow(mainwindow_cls):
             if pcfg.imgsave_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
                 save_params['webp_lossless'] = True
             self.imsave_thread.saveImg(imsave_path, img, self.imgtrans_proj.current_img, save_params=save_params, keep_alpha=self.imgtrans_proj.current_has_alpha())
+            self.canvas.setProjSaveState(False)
+            self.canvas.update_saved_undostep()
         except Exception as e:
             LOGGER.error(f"Failed to render and save result image: {e}")
-            
-        self.canvas.setProjSaveState(False)
-        self.canvas.update_saved_undostep()
 
         if restore_interface:
             if restore_textblock_mode:
@@ -5145,6 +5261,25 @@ class MainWindow(mainwindow_cls):
             create_error_dialog(e, self.tr('Failed to export as TEXT file'))
 
 
+
+
+    def on_export_lettering_proof_pack(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project and select a page first.'))
+            return
+        default_dir = osp.join(self.imgtrans_proj.directory, 'lettering_proofs')
+        out_dir = QFileDialog.getExistingDirectory(self, self.tr('Export lettering proof pack'), default_dir)
+        if not out_dir:
+            return
+        try:
+            qimg = self.canvas.render_result_img()
+            final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
+            manifest = build_lettering_proof_pack(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr, config_obj=pcfg)
+            QMessageBox.information(self, self.tr('Lettering proof'), self.tr('Lettering proof pack exported to {0}').format(manifest.get('page_dir', out_dir)))
+            self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Exported lettering proof pack: {0}').format(manifest.get('page_dir', out_dir)))
+        except Exception as e:
+            LOGGER.exception(e)
+            create_error_dialog(e, self.tr('Failed to export lettering proof pack'))
 
     def on_export_svg_text_handoff(self):
         if not self.imgtrans_proj or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:

@@ -919,6 +919,11 @@ class ConfigPanel(Widget):
             discription=self.tr('Draw text box, measured bounds, writing mode, and missing-glyph warnings on the canvas.')
         )
         self.render_diagnostics_overlay_checker.stateChanged.connect(self.on_render_diagnostics_overlay_changed)
+        self.render_auto_polish_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Auto-polish new OCR/detected textboxes'),
+            discription=self.tr('Apply script-aware writing mode, CJK/RTL line-break defaults, safe padding, and fallback-font repair when text boxes are first loaded from a run.')
+        )
+        self.render_auto_polish_checker.stateChanged.connect(self.on_render_auto_polish_changed)
         self.text_editor_top_padding_spin = QSpinBox(self)
         self.text_editor_top_padding_spin.setRange(0, 80)
         self.text_editor_top_padding_spin.setSingleStep(2)
@@ -957,6 +962,11 @@ class ConfigPanel(Widget):
             discription=self.tr('After Export all pages as..., open the output folder so exported pages/CBZ/manifest are immediately visible.')
         )
         self.export_open_folder_after_batch_checker.stateChanged.connect(self.on_export_open_folder_after_batch_changed)
+        self.export_include_unrendered_pages_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Include unrendered pages in batch export'),
+            discription=self.tr('When a page has no rendered result, export the inpainted/clean page if available, otherwise the original, and record the fallback in the manifest.')
+        )
+        self.export_include_unrendered_pages_checker.stateChanged.connect(self.on_export_include_unrendered_pages_changed)
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
         self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
@@ -1890,6 +1900,8 @@ class ConfigPanel(Widget):
         pcfg.render_overflow_warnings = self.render_overflow_warnings_checker.isChecked()
     def on_render_diagnostics_overlay_changed(self):
         pcfg.render_diagnostics_overlay = self.render_diagnostics_overlay_checker.isChecked()
+    def on_render_auto_polish_changed(self):
+        pcfg.render_auto_polish_on_ocr = self.render_auto_polish_checker.isChecked()
     def on_render_fallback_changed(self, attr: str, text: str):
         setattr(pcfg, attr, text or '')
 
@@ -1898,6 +1910,9 @@ class ConfigPanel(Widget):
 
     def on_export_open_folder_after_batch_changed(self):
         pcfg.export_open_folder_after_batch = self.export_open_folder_after_batch_checker.isChecked()
+
+    def on_export_include_unrendered_pages_changed(self):
+        pcfg.export_include_unrendered_pages = self.export_include_unrendered_pages_checker.isChecked()
 
     def on_text_editor_top_padding_changed(self):
         pcfg.text_editor_top_padding = int(self.text_editor_top_padding_spin.value())
@@ -2133,6 +2148,8 @@ class ConfigPanel(Widget):
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
             self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
             self.render_diagnostics_overlay_checker.setChecked(bool(getattr(pcfg, 'render_diagnostics_overlay', False)))
+            if hasattr(self, 'render_auto_polish_checker'):
+                self.render_auto_polish_checker.setChecked(bool(getattr(pcfg, 'render_auto_polish_on_ocr', True)))
             if hasattr(self, 'text_editor_top_padding_spin'):
                 self.text_editor_top_padding_spin.setValue(int(getattr(pcfg, 'text_editor_top_padding', 14) or 0))
             self.render_fallback_latin_edit.setText(str(getattr(pcfg, 'render_fallback_fonts_latin', '') or ''))
@@ -2144,6 +2161,8 @@ class ConfigPanel(Widget):
                 self.render_favorite_fonts_edit.setText(str(getattr(pcfg, 'render_favorite_fonts', '') or ''))
             if hasattr(self, 'export_open_folder_after_batch_checker'):
                 self.export_open_folder_after_batch_checker.setChecked(bool(getattr(pcfg, 'export_open_folder_after_batch', False)))
+            if hasattr(self, 'export_include_unrendered_pages_checker'):
+                self.export_include_unrendered_pages_checker.setChecked(bool(getattr(pcfg, 'export_include_unrendered_pages', False)))
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)
