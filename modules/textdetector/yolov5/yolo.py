@@ -2,7 +2,7 @@ import ast
 from packaging.version import parse as package_version_parse
 
 from .yolov5_utils import scale_img
-from copy import deepcopy
+from copy import deepcopy   
 from .common import *
 
 class Detect(nn.Module):
@@ -213,7 +213,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         "SPP": SPP, "SPPF": SPPF, "DWConv": DWConv, "Focus": Focus, "BottleneckCSP": BottleneckCSP,
         "C3": C3, "C3TR": C3TR, "C3SPP": C3SPP, "C3Ghost": C3Ghost, "Concat": Concat,
         "Detect": Detect, "Contract": Contract, "Expand": Expand, "nn.BatchNorm2d": nn.BatchNorm2d,
-        "BatchNorm2d": nn.BatchNorm2d,
+        "BatchNorm2d": nn.BatchNorm2d, "nn.Upsample": nn.Upsample, "Upsample": nn.Upsample,
     }
 
     def resolve_module(module):
@@ -262,6 +262,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+        elif m is nn.Upsample:
+            c2 = ch[f]
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:
@@ -286,7 +288,7 @@ def load_yolov5(weights, map_location='cuda', fuse=True, inplace=True, out_indic
         ckpt = torch.load(weights, map_location=map_location)  # load
     else:
         ckpt = weights
-    
+
     if fuse:
         model = ckpt['model'].float().fuse().eval()  # FP32 model
     else:
@@ -311,10 +313,10 @@ def load_yolov5_ckpt(weights, map_location='cpu', fuse=True, inplace=True, out_i
         ckpt = torch.load(weights, map_location=map_location)  # load
     else:
         ckpt = weights
-    
+
     model = Model(ckpt['cfg'])
     model.load_state_dict(ckpt['weights'], strict=True)
-    
+
     if fuse:
         model = model.float().fuse().eval()  # FP32 model
     else:
