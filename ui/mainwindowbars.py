@@ -1857,6 +1857,14 @@ class BottomBar(Widget):
         self.texteditChecker.clicked.connect(self.onTextEditCheckerPressed)
         self.spellCheckChecker = BottomModeToolButton(self)
         self.spellCheckChecker.setObjectName('SpellCheckChecker')
+
+        # Keep the spell-check bottom-bar icon centered like the neighboring
+        # QCheckBox indicator buttons. Without fixed button/icon metrics,
+        # QToolButton style metrics can shift this icon differently in the
+        # settings stack vs the normal canvas stack.
+        self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.spellCheckChecker.setFixedSize(44, 34)
+        self.spellCheckChecker.setIconSize(QSize(28, 28))
         self.spellCheckChecker.setCheckable(True)
         self.spellCheckChecker.setAutoRaise(True)
         self.spellCheckChecker.setFixedSize(44, 40)
