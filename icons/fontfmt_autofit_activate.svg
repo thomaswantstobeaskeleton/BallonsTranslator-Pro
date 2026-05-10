@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg class="icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+  <path d="M204 196h616v632H204V196zm76 76v480h464V272H280z" fill="#f5f5f5"/>
+  <path d="M350 360h324v86H555v286h-86V446H350z" fill="#f5f5f5"/>
+  <path d="M137 512l128-112v78h139v68H265v78L137 512zm750 0L759 624v-78H620v-68h139v-78l128 112z" fill="#f5f5f5"/>
+</svg>
