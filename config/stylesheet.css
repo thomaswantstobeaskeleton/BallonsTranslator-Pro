@@ -306,6 +306,22 @@ QFontChecker#FontVerticalChecker::indicator:checked {
     image: url(icons/fontfmt_vertical_activate.svg);
 }
 
+QFontChecker#FontStrikethroughChecker::indicator {
+    image: url(icons/fontfmt_strikethrough.svg);
+}
+
+QFontChecker#FontStrikethroughChecker::indicator:checked {
+    image: url(icons/fontfmt_strikethrough_activate.svg);
+}
+
+QFontChecker#AutoFitFontSizeChecker::indicator {
+    image: url(icons/fontfmt_autofit.svg);
+}
+
+QFontChecker#AutoFitFontSizeChecker::indicator:checked {
+    image: url(icons/fontfmt_autofit_activate.svg);
+}
+
 TextEditListScrollArea {
     border-style: none;
 }
