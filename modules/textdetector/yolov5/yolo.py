@@ -5,12 +5,39 @@ from .yolov5_utils import scale_img
 from copy import deepcopy   
 from .common import *
 
+def _literal_or_original(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
+
+def _coerce_int_cfg(value, key):
+    value = _literal_or_original(value)
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {key!r} in YOLO model config: {value!r}")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {key!r} in YOLO model config: {value!r}") from exc
+
+def _coerce_float_cfg(value, key):
+    value = _literal_or_original(value)
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {key!r} in YOLO model config: {value!r}")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {key!r} in YOLO model config: {value!r}") from exc
+
 class Detect(nn.Module):
     stride = None  # strides computed during build
     onnx_dynamic = False  # ONNX export parameter
 
     def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super().__init__()
+        nc = _coerce_int_cfg(nc, 'nc')
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
@@ -68,13 +95,19 @@ class Model(nn.Module):
                 self.yaml = yaml.safe_load(f)  # model dict
 
         # Define model
-        ch = self.yaml['ch'] = self.yaml.get('ch', ch)  # input channels
-        if nc and nc != self.yaml['nc']:
+        self.yaml['nc'] = _coerce_int_cfg(self.yaml.get('nc', nc if nc is not None else 80), 'nc')
+        self.yaml['depth_multiple'] = _coerce_float_cfg(self.yaml.get('depth_multiple', 1.0), 'depth_multiple')
+        self.yaml['width_multiple'] = _coerce_float_cfg(self.yaml.get('width_multiple', 1.0), 'width_multiple')
+        self.yaml['anchors'] = _literal_or_original(self.yaml.get('anchors', anchors if anchors is not None else ()))
+        ch = self.yaml['ch'] = _coerce_int_cfg(self.yaml.get('ch', ch), 'ch')  # input channels
+        if nc is not None:
+            nc = _coerce_int_cfg(nc, 'nc')
+        if nc is not None and nc != self.yaml['nc']:
             # LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
         if anchors:
             # LOGGER.info(f'Overriding model.yaml anchors with anchors={anchors}')
-            self.yaml['anchors'] = round(anchors)  # override yaml value
+            self.yaml['anchors'] = _literal_or_original(anchors)  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.inplace = self.yaml.get('inplace', True)
@@ -226,14 +259,22 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     def parse_arg(value):
         if not isinstance(value, str):
             return value
-        if value in module_registry:
-            return module_registry[value]
-        try:
-            return ast.literal_eval(value)
-        except (ValueError, SyntaxError):
-            return value
+        stripped = value.strip()
+        if stripped in module_registry:
+            return module_registry[stripped]
+        if stripped in config_symbols:
+            return config_symbols[stripped]
+        return _literal_or_original(stripped)
 
-    anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+    anchors = _literal_or_original(d['anchors'])
+    nc = _coerce_int_cfg(d['nc'], 'nc')
+    gd = _coerce_float_cfg(d['depth_multiple'], 'depth_multiple')
+    gw = _coerce_float_cfg(d['width_multiple'], 'width_multiple')
+    d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple'] = anchors, nc, gd, gw
+    config_symbols = {
+        'anchors': anchors, 'nc': nc, 'depth_multiple': gd, 'width_multiple': gw,
+        'gd': gd, 'gw': gw, 'ch': ch[-1] if ch else None,
+    }
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
