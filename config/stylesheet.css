@@ -1118,11 +1118,18 @@ QLabel#TitleLabel {
 QLabel#angleLabel {
     border-radius: 12px;
 }
-/* Bottom-bar spell check is a real mode button (not a checkbox indicator). */
+/* Bottom-bar spell check is a real mode button (not a checkbox indicator).
+   Keep its geometry pinned so QToolButton style metrics do not shift the icon
+   between canvas and settings views. */
 QToolButton#SpellCheckChecker {
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 34px;
+    max-height: 34px;
     border: none;
     border-radius: 4px;
-    padding: 1px;
+    padding: 0px;
+    margin: 0px;
     background-color: transparent;
 }
 QToolButton#SpellCheckChecker:hover {
