@@ -131,7 +131,7 @@ class YSGYoloDetector(TextDetectorBase):
 
     @property
     def is_ysg(self):
-        return osp.basename(self.get_param_value('model path').startswith('ysg'))
+        return osp.basename(self.get_param_value('model path')).startswith('ysg')
 
     def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
         result = self.model.predict(
