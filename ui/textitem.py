@@ -283,50 +283,100 @@ class TextBlkItem(QGraphicsTextItem):
         paint_stroke = self.fontformat.stroke_width > 0
         paint_shadow = self.fontformat.shadow_radius > 0 and self.fontformat.shadow_strength > 0
         warp_style = getattr(self.fontformat, 'warp_style', 0)
-        if not use_path and not paint_shadow and not paint_stroke and not warp_style or empty:
+
+        if (not use_path and not paint_shadow and not paint_stroke and not warp_style) or empty:
             self.background_pixmap = None
             return
-        
+
         self.repainting = True
-        font_size = self.layout.max_font_size(to_px=True)
-        br_size = self.boundingRect().size().toSize()
-        if br_size.width() < 1 or br_size.height() < 1:
-            self.background_pixmap = None
-            self.repainting = False
-            return
-        target_map = QPixmap(br_size)
-        target_map.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(target_map)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        
-        if use_path:
-            self._paint_text_on_path(painter, draw_stroke=paint_stroke, draw_fill=not getattr(self.fontformat, 'outline_only', False))
-        else:
+        try:
+            font_size = self.layout.max_font_size(to_px=True)
+            br = self.boundingRect()
+            br_size = br.size().toSize()
+            if br_size.width() < 1 or br_size.height() < 1:
+                self.background_pixmap = None
+                return
+
+            # Issue #105 fix:
+            # boundingRect() may have a negative top-left because stroke/shadow
+            # expands the item bounds. _draw_accessories() later draws this
+            # pixmap at br.toRect(), so any document-space drawing inside the
+            # pixmap must be translated by -br.topLeft().
+            #
+            # Also, for normal text, do not draw document fill into the visible
+            # effect pixmap. super().paint(...) already draws the QTextDocument
+            # fill. Drawing fill here too creates the visible duplicated /
+            # ghosted translation. We still draw a hidden silhouette map for
+            # shadow generation.
+            draw_offset = -br.topLeft()
             outline_only = getattr(self.fontformat, 'outline_only', False)
-            if outline_only and paint_stroke:
-                self.paint_stroke(painter)
-            else:
-                if paint_stroke:
-                    self.paint_stroke(painter)
-                if not outline_only:
-                    self.document().drawContents(painter)
 
-        # shadow
-        if paint_shadow:
-            r = int(round(self.fontformat.shadow_radius * font_size))
-            xoffset, yoffset = int(self.fontformat.shadow_offset[0] * font_size), int(self.fontformat.shadow_offset[1] * font_size)
-            shadow_map, img_array = apply_shadow_effect(target_map, self.fontformat.shadow_color, self.fontformat.shadow_strength, r)
-            cm = painter.compositionMode()
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
-            painter.drawPixmap(xoffset, yoffset, shadow_map)
-            painter.setCompositionMode(cm)
+            effect_map = QPixmap(br_size)
+            effect_map.fill(Qt.GlobalColor.transparent)
+            effect_painter = QPainter(effect_map)
+            effect_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            effect_painter.translate(draw_offset)
 
-        painter.end()
-        if warp_style and target_map.width() > 2 and target_map.height() > 2:
-            target_map = self._apply_warp_preset(target_map, warp_style, getattr(self.fontformat, 'warp_strength', 0.5))
-        self.background_pixmap = target_map
-        self.repainting = False
-        
+            silhouette_map = QPixmap(br_size)
+            silhouette_map.fill(Qt.GlobalColor.transparent)
+            silhouette_painter = QPainter(silhouette_map)
+            silhouette_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            silhouette_painter.translate(draw_offset)
+
+            try:
+                if use_path:
+                    # Text-on-path is not drawn by the base QGraphicsTextItem
+                    # paint path, so keep both fill and effects in this cached
+                    # layer for path text only.
+                    self._paint_text_on_path(
+                        effect_painter,
+                        draw_stroke=paint_stroke,
+                        draw_fill=not outline_only,
+                    )
+                    self._paint_text_on_path(
+                        silhouette_painter,
+                        draw_stroke=paint_stroke,
+                        draw_fill=True,
+                    )
+                else:
+                    if paint_stroke:
+                        self.paint_stroke(effect_painter)
+                        self.paint_stroke(silhouette_painter)
+
+                    if not outline_only:
+                        # Shadow silhouette only. Do not draw this into
+                        # effect_map, otherwise normal text is painted twice.
+                        self.document().drawContents(silhouette_painter)
+            finally:
+                silhouette_painter.end()
+
+            if paint_shadow:
+                r = int(round(self.fontformat.shadow_radius * font_size))
+                xoffset = int(self.fontformat.shadow_offset[0] * font_size)
+                yoffset = int(self.fontformat.shadow_offset[1] * font_size)
+                shadow_map, _img_array = apply_shadow_effect(
+                    silhouette_map,
+                    self.fontformat.shadow_color,
+                    self.fontformat.shadow_strength,
+                    r,
+                )
+                cm = effect_painter.compositionMode()
+                effect_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
+                effect_painter.drawPixmap(xoffset, yoffset, shadow_map)
+                effect_painter.setCompositionMode(cm)
+
+            effect_painter.end()
+
+            if warp_style and effect_map.width() > 2 and effect_map.height() > 2:
+                effect_map = self._apply_warp_preset(
+                    effect_map,
+                    warp_style,
+                    getattr(self.fontformat, 'warp_strength', 0.5),
+                )
+
+            self.background_pixmap = effect_map
+        finally:
+            self.repainting = False
     def docSizeChanged(self):
         self.setCenterTransform()
         self.doc_size_changed.emit(self.idx)
