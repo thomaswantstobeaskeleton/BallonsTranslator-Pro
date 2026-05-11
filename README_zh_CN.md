@@ -5,9 +5,6 @@
 
 BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的增强分支，面向严肃漫画/条漫翻译工作流。
 
-<p align="center">
-  <img src="doc/src/1111.png" width="100%">
-</p>
 
 从整体流程看，BallonsTranslator-Pro 可以帮助你：
 
