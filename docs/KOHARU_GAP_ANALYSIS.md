@@ -1,6 +1,91 @@
 # Koharu Gap Analysis and Implementation Audit
 
-_Last audited: 2026-05-08 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (660 all-state issues/PRs scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (800 all-state issues/PRs scanned), and recent upstream `dev` commits fetched from Git._
+_Last audited: 2026-05-14 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (660 all-state issues/PRs scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (800 all-state issues/PRs scanned), and recent upstream `dev` commits fetched from Git._
+
+## Newly implemented in this pass (2026-05-14: review response, batch lettering dialog, live fixes, upstream shortcut dependency port)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Real vertical CJK rendering improvement | Extended the Qt vertical text layout to keep short ASCII tate-chu-yoko groups upright/compact instead of rotating each digit/mark separately, while preserving the prior right-to-left column model and punctuation diagnostics. | Koharu #597 manual direction, #509 vertical layout bug, #583 Arabic/auto-size pain, #594 advanced text formatting; upstream #1128 vertical text and #1132 Latin text after original language. | `ui/scene_textlayout.py`, `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| Precise lettering bounds diagnostics | Added `precise_text_bounds` with Qt font metrics fallback and surfaced `precise_measured_bounds` in proof metrics so QA/proof packs can compare stable estimates against real glyph metrics for clipping/overflow review. | Koharu #545 DPI/restricted rendering area, #547 render size display, #649/#640 fixed/global font workflows; upstream #1169/#1077 fit-to-box requests. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| Live selected-textbox diagnostic fixes | Added a visible **Apply diagnostics fixes** button in the text formatting panel that applies typography polish + smart fit to the selected textbox: writing mode, vertical punctuation, line breaks, padding, fallback chain, and font size. | Koharu #649 global font override, #640 fixed font options, #594 line spacing/kerning, #595 font UX, #583 RTL sizing. | `ui/text_panel.py` |
+| Batch lettering workflow dialog | Replaced the previous one-click message flow with a reviewable dialog for current, selected, or whole-project scope, showing ordered workflow steps and highest-priority textboxes before applying fixes/proof/render actions. Added page-list context action for selected pages. | Koharu #691 quick navigation/resume, #601 reorder/textbox workflow, #559 multi-select editing, #519 processing shortcuts/workflow, #592 workflow presets. | `ui/lettering_workflow_dialog.py`, `ui/mainwindow.py`, `ui/mainwindowbars.py` |
+| Multi-page workflow/API behavior | `lettering_workflow` now accepts multiple pages, applies project-level renderer fixes across them, exports proof packs per page, renders the current page with a manifest when requested, and reports warnings for deferred batch rerender cases instead of silently doing current-page-only work. | Koharu #535 custom export/include pages, #558/#587 PSD/export handoff, #610 batch projects; upstream #1134 export image workflow. | `ui/mainwindow.py`, `utils/lettering_workflow.py`, `docs/RENDERING_TEXT_FORMATTING.md` |
+| Upstream dependency/shortcut compatibility port | Adapted upstream dev commit `a390d4c` by removing the hard `keyboard` import/dependency, adding a `pynput`-first SalaDict shortcut backend with graceful fallback, and porting `utils.structures.get_annotations` compatibility behavior. | dmMaze dev `a390d4c`, upstream packaging/shortcut compatibility. | `ui/textedit_area.py`, `requirements.txt`, `utils/structures.py`, `docs/UPSTREAM_BALLONSTRANSLATOR_DEV_SYNC.md` |
+
+### Progress audit update for this pass
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Real Qt vertical layout now honors compact tate-chu-yoko groups; proof metrics include precise Qt bounds; selected textboxes have one-click diagnostic fixes. | HarfBuzz/OpenType shaping remains deferred because it requires optional dependency/design validation. |
+| Layout review agent | Implemented / advanced | Batch workflow dialog uses renderer QA to decide when layout review is needed and exposes focus rows before applying fixes. | LLM-specific review quality remains provider/model dependent. |
+| PSD/export workflow | Partially implemented / advanced | Multi-page workflow can export proof packs per page and current-page render manifests with explicit warnings for unsupported batch rerender. | Native editable PSD text writer remains deferred pending PSD validation. |
+| Settings/config polish | Implemented / maintained | Live fixes and batch workflow consume existing persisted rendering defaults/fallback chains instead of creating duplicate settings. | Additional onboarding wizard remains a future pass. |
+| Keyboard/tool UX | Implemented / advanced | Page-list context action, workflow dialog, selected textbox fix button, and upstream `keyboard` dependency removal improve discoverability and compatibility. | Full custom shortcut conflict UI remains deferred. |
+| Automation/API/headless | Implemented / advanced | Multi-page `lettering_workflow` applies fixes and proof exports across pages and reports warnings for skipped batch rerender. | Streaming progress/events remain deferred. |
+| Upstream BallonsTranslator sync | Active | Ported `a390d4c` manually without overwriting Pro shortcut systems; retained previous `6649de1` port and documented newer deferrals. | `c80eb81` transformers pin and provider/dependency commits remain deferred pending Pro compatibility testing. |
+
+### Koharu issue-inspired items implemented/deferred
+
+- Implemented/advanced: #597/#509/#583/#594 vertical/RTL/text formatting, #649/#640/#595 font/fixed rendering workflows, #601/#559/#519/#691 fewer-click editor/page workflow, #535/#558/#587 proof/export handoff status.
+- Deferred: #558/#587 native editable PSD text layers, #591 XCF parity, #610 full parent/child CBZ queue, #698 double-outline effect controls beyond existing stroke/effect stack.
+
+### Upstream BallonsTranslator issue/dev items implemented/deferred
+
+- Implemented/advanced: upstream #1169/#1077 fit-to-box access, #1128/#1132 vertical/Latin text handling, #1122 font diagnostics, #1134 render/export workflow, dev `a390d4c` shortcut/dependency compatibility.
+- Reviewed/deferred: dev `4c14019` direct replace-and-render UI freeze port pending conflict audit; `c80eb81`/`04c3414` transformer pins pending Pro module testing; `1958f66` Ollama provider pass pending settings integration.
+
+### Next batch candidates
+
+1. Native editable PSD text-layer writer validation for Koharu #558/#587.
+2. True queued batch rerender after multi-page lettering workflow with progress/cancel.
+3. Direct upstream `4c14019` replace-and-render freeze/save-state audit against Pro global search.
+4. Visual regression captures for Qt tate-chu-yoko and vertical punctuation across Qt5/Qt6/Windows DPI.
+5. Provider/model onboarding diagnostics for Ollama/Flux/gguf dependency issues from upstream #1167/#1171/#1175.
+6. Double-outline/advanced effect controls for Koharu #698.
+
+
+## Newly implemented in this pass (2026-05-13: lettering workflow, vertical diagnostics, issue navigation)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Advanced vertical lettering diagnostics | Added vertical column orphan balancing and tate-chu-yoko orientation metadata to the renderer-neutral vertical cell plan so QA/proof/export handoffs can preserve compact `12`/`!?` runs and avoid single-glyph leftmost columns. | Koharu #597/#583/#509/#594, upstream #1128/#1132/#1169/#1077. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| One-click lettering workflow | Added `utils.lettering_workflow` to convert rendering QA into ordered steps: typography polish, smart fit, layout review, proof pack, and render. Wired it to a Tools → Project action and `lettering_workflow` local API route with optional apply/export/render behavior. | Koharu #649/#640/#592/#519/#601, upstream #1169/#1077/#1134. | `utils/lettering_workflow.py`, `ui/mainwindow.py`, `ui/mainwindowbars.py`, `tests/test_lettering_workflow.py` |
+| Next rendering issue navigation | Added a user-visible Tools → Project command and `next_rendering_issue` API route to jump through current-page overflow/glyph/mask/writing-mode issues, reducing manual inspection clicks after QA. | Koharu #601/#559/#519 editor workflow requests; upstream #1122/#1128 font/vertical reports. | `utils/lettering_workflow.py`, `ui/mainwindow.py`, `ui/mainwindowbars.py` |
+| Export/render status manifest | Extended `render_current_page` automation export with an optional `.render-manifest.json` describing path, extension, quality, page, and warnings for headless workflows and export diagnostics. | Koharu #535/#558/#587/#591 export requests; upstream #1134 export workflow request. | `ui/mainwindow.py` |
+| Backlog/sync pipeline refresh | Refreshed Koharu and upstream issue backlogs from paginated GitHub REST API results and upstream dev sync from fetched `dmMaze/BallonsTranslator dev` commits; documented implemented/deferred items and next candidates. | GitHub issue/commit research on 2026-05-13. | `docs/KOHARU_ISSUE_BACKLOG.md`, `docs/UPSTREAM_BALLONSTRANSLATOR_ISSUE_BACKLOG.md`, `docs/UPSTREAM_BALLONSTRANSLATOR_DEV_SYNC.md` |
+
+### Progress audit update for this pass
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Vertical diagnostics now expose tate-chu-yoko orientation and avoid orphan columns; workflow applies polish + smart-fit across the page. | True HarfBuzz shaping and native editable PSD text layers remain deferred pending visual/PSD writer validation. |
+| Layout review agent | Implemented / advanced | Lettering workflow now escalates high-risk QA rows into a layout-review step and can apply existing review-compatible fixes before proof/render. | Direct LLM provider quality still depends on configured API/model; no new provider was added this pass. |
+| PSD/export workflow | Partially implemented / advanced | API render now can emit a manifest; lettering workflow includes proof-pack handoff step. | Native PSD text-layer writer remains deferred for #558/#587 because current safe handoff avoids corrupt PSD output. |
+| Settings/config polish | Implemented / maintained | Existing rendering defaults/fallback settings are consumed by the new workflow and diagnostics. | No new settings added because relevant rendering settings already exist and adding duplicate UI would violate no-dead-UI constraints. |
+| Keyboard/tool UX | Implemented / advanced | Added click-only menu actions owned by TitleBar/MainWindow without QAction shortcut duplication. | Full shortcut editor redesign deferred; existing conflict tests remain the guardrail. |
+| Automation/API/headless | Implemented / advanced | Added `lettering_workflow` and `next_rendering_issue`; `render_current_page` can write a manifest. | Event-stream progress remains deferred. |
+| Upstream BallonsTranslator sync | Active | Reviewed recent dev commits; adapted export/workflow status improvements safely while retaining prior `6649de1` port. | Dependency/provider commits (`c80eb81`, `04c3414`, `88d4969`, `1958f66`) deferred until Pro compatibility matrix is tested. |
+
+### Koharu issue-inspired items implemented/deferred
+
+- Implemented/advanced: #597 manual direction controls, #583 Arabic/RTL auto-size pain, #509 vertical wrapping, #594 advanced formatting, #649/#640 global/fixed rendering workflow, #601/#559/#519 fewer-click editor navigation, #535 export naming/status.
+- Deferred: #558/#587 native editable PSD text fidelity, #591 XCF/SVG parity beyond current SVG handoff, #592 full cross-page workflow preset UI beyond current page lettering workflow.
+
+### Upstream BallonsTranslator issue/dev items implemented/deferred
+
+- Implemented/advanced: #1169/#1077 font-size based on block dimensions via workflow-accessible smart fit, #1128/#1132 vertical/Latin text diagnostics, #1122 font fallback diagnostics, #1134 current-page render manifest.
+- Reviewed/deferred: dev `4c14019` replace-and-render freeze/save fix pending Pro conflict audit; `1958f66` Ollama OCR/translation provider changes pending settings integration; dependency commits `c80eb81`/`04c3414`/`88d4969` pending install matrix testing.
+
+### Next batch candidates
+
+1. Native editable PSD text-layer writer validation for Koharu #558/#587.
+2. Cross-page/batch lettering workflow with progress/cancel and proof-pack queue.
+3. Direct upstream `4c14019` file-level port if Pro still reproduces replace-and-render UI freezing/save-state issues.
+4. Visual regression screenshots for vertical punctuation and tate-chu-yoko painting on Qt5/Qt6/Windows DPI.
+5. Provider/model onboarding diagnostics for Ollama/Flux/gguf dependency issues from upstream #1167/#1171/#1175.
+6. Shortcut conflict UI surfacing for custom single-key tool shortcuts.
+
 
 ## Newly implemented in this pass (2026-05-08: typography polish, workflow API, upstream save-state fix)
 
@@ -51,7 +136,7 @@ _Last audited: 2026-05-08 against BallonsTranslator-Pro current branch, public `
 
 ## Previous audit history
 
-_Last audited: 2026-05-08 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (660 all-state issues/PRs scanned, including #669 through #1)._
+_Last audited: 2026-05-14 against BallonsTranslator-Pro current branch and public `mayocream/koharu` issues via GitHub REST API (660 all-state issues/PRs scanned, including #669 through #1)._
 
 ## Audit scope
 

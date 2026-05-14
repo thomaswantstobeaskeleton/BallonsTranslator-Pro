@@ -227,3 +227,18 @@ Automation helpers also expose `GET /health` and `GET /routes` on the local API 
 Lettering proof packs now include `lettering_proof_index.html`, a browser-friendly summary that links the QA JSON/Markdown, editable SVG, PSD-helper manifest, final composite, warnings, and per-textbox proof metrics. This is intended for quick review before sending pages to another editor or before opening the raw JSON.
 
 `GET /health` and `GET /routes` now return a route count and method map (`GET` discovery routes plus available `POST` commands), so automation clients can validate capabilities without hard-coding the server's command list.
+
+## 2026-05-13 lettering workflow additions
+
+- **One-click lettering workflow (current page)** is available from Tools → Project and via the local automation API route `POST /lettering_workflow`. It plans typography polish, smart fit, layout review escalation, proof-pack export, and final render steps from the same rendering QA diagnostics used by the proof reports.
+- **Next rendering issue** is available from Tools → Project and via `POST /next_rendering_issue`. It selects the next current-page textbox with overflow, missing glyphs, mask-safe-area, writing-mode, or vertical punctuation warnings.
+- `POST /render_current_page` now accepts `write_manifest: true` and writes a sidecar `.render-manifest.json` with page, path, extension, quality, and warning fields for headless export logs.
+- Vertical CJK proof diagnostics now include tate-chu-yoko metadata (`orientation: upright_compact`) and avoid single-glyph orphan columns in strict vertical wrapping.
+
+## 2026-05-14 batch lettering and live fix controls
+
+- Tools → Project → **Lettering workflow...** now opens a review dialog instead of immediately applying changes. It supports current page, selected pages from the page list, or the whole project; previews ordered steps; and shows the highest-priority textboxes before running fixes.
+- The page list context menu has **Lettering workflow for selected pages...** for fewer-click multi-page typography QA.
+- The text formatting panel includes **Apply diagnostics fixes** for the selected textbox. It applies the same conservative typography polish and smart-fit logic used by layout review/API workflows.
+- `POST /lettering_workflow` accepts multiple pages and returns `proof_manifests`, `warnings`, and applied action counts. Batch proof packs are supported; full batch rerender remains explicitly warned/deferred.
+- Vertical CJK rendering now keeps short ASCII tate-chu-yoko runs upright/compact in the Qt vertical layout, and proof metrics include both estimated and `precise_measured_bounds` values for clipping diagnostics.

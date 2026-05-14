@@ -754,6 +754,14 @@ class TitleBar(Widget):
         layoutReviewConfigAction.setToolTip(self.tr('Configure provider/model/prompt for page review agent.'))
         self.layout_review_config_trigger = layoutReviewConfigAction.triggered
 
+        letteringWorkflowAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignc.svg')), self.tr('Lettering workflow...'), self)
+        letteringWorkflowAction.setToolTip(self.tr('Plan/apply typography polish, smart fit, layout review, proof export, and render steps for current, selected, or all pages.'))
+        self.lettering_workflow_trigger = letteringWorkflowAction.triggered
+
+        nextRenderingIssueAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')), self.tr('Next rendering issue'), self)
+        nextRenderingIssueAction.setToolTip(self.tr('Select the next textbox with overflow, glyph, mask, or writing-mode warnings on the current page.'))
+        self.next_rendering_issue_trigger = nextRenderingIssueAction.triggered
+
         applyRunProfileAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr('Apply run profile snapshot...'), self)
         applyRunProfileAction.setToolTip(self.tr('Apply a previously saved project-local run profile.'))
         self.apply_run_profile_trigger = applyRunProfileAction.triggered
@@ -780,6 +788,8 @@ class TitleBar(Widget):
         projectMenu.addAction(layoutReviewSelectedAction)
         projectMenu.addAction(layoutReviewPageAction)
         projectMenu.addAction(layoutReviewConfigAction)
+        projectMenu.addAction(letteringWorkflowAction)
+        projectMenu.addAction(nextRenderingIssueAction)
         projectMenu.addSeparator()
         projectMenu.addAction(translationQaAction)
         projectMenu.addAction(ocrTriageAction)
