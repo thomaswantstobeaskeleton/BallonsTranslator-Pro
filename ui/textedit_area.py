@@ -3,7 +3,8 @@ from typing import List, Union
 from qtpy.QtWidgets import QStackedWidget, QSizePolicy, QTextEdit, QScrollArea, QGraphicsDropShadowEffect, QVBoxLayout, QApplication, QHBoxLayout, QSizePolicy, QLabel, QLineEdit
 from qtpy.QtCore import Signal, Qt, QMimeData, QEvent, QPoint, QSize
 from qtpy.QtGui import QIntValidator, QColor, QFocusEvent, QInputMethodEvent, QDragEnterEvent, QDropEvent, QKeyEvent, QTextCursor, QMouseEvent, QDrag, QPixmap, QKeySequence
-import keyboard
+import importlib
+import importlib.util
 import webbrowser
 import numpy as np
 
@@ -16,6 +17,36 @@ from utils.logger import logger as LOGGER
 STYLE_TRANSPAIR_CHECKED = "background-color: rgba(30, 147, 229, 20%);"
 STYLE_TRANSPAIR_BOTTOM = "border-width: 5px; border-bottom-style: solid; border-color: rgb(30, 147, 229);"
 STYLE_TRANSPAIR_TOP = "border-width: 5px; border-top-style: solid; border-color: rgb(30, 147, 229);"
+
+
+def _press_system_shortcut(shortcut: str) -> bool:
+    """Press a global shortcut for SalaDict without hard-depending on deprecated keyboard."""
+    shortcut = str(shortcut or '').strip()
+    if not shortcut:
+        return False
+    if importlib.util.find_spec('pynput') is not None:
+        kb = importlib.import_module('pynput.keyboard')
+        controller = kb.Controller()
+        key_map = {
+            'ctrl': kb.Key.ctrl, 'control': kb.Key.ctrl, 'shift': kb.Key.shift,
+            'alt': kb.Key.alt, 'option': kb.Key.alt, 'cmd': kb.Key.cmd, 'meta': kb.Key.cmd,
+            'win': kb.Key.cmd, 'space': kb.Key.space, 'enter': kb.Key.enter, 'return': kb.Key.enter,
+            'esc': kb.Key.esc, 'escape': kb.Key.esc, 'tab': kb.Key.tab,
+        }
+        parts = [p.strip().lower() for p in shortcut.replace('-', '+').split('+') if p.strip()]
+        keys = [key_map.get(p, p) for p in parts]
+        for key in keys:
+            controller.press(key)
+        for key in reversed(keys):
+            controller.release(key)
+        return True
+    if importlib.util.find_spec('keyboard') is not None:
+        keyboard_mod = importlib.import_module('keyboard')
+        keyboard_mod.press(shortcut)
+        keyboard_mod.release(shortcut)
+        return True
+    LOGGER.warning('No pynput/keyboard backend available for SalaDict shortcut: %s', shortcut)
+    return False
 
 
 class SelectTextMiniMenu(Widget):
@@ -50,8 +81,7 @@ class SelectTextMiniMenu(Widget):
     def on_saladict(self):
         self.app.clipboard().setText(self.selected_text)
         self.block_current_editor.emit(True)
-        keyboard.press(pcfg.saladict_shortcut)
-        keyboard.release(pcfg.saladict_shortcut)
+        _press_system_shortcut(pcfg.saladict_shortcut)
         self.block_current_editor.emit(False)
         self.hide()
 

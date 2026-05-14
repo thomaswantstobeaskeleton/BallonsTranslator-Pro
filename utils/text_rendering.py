@@ -963,9 +963,22 @@ def balance_lines(text: str, max_chars: int, strategy: str = LINE_BREAK_BALANCED
 
 
 def vertical_columns(text: str, max_chars_per_column: int, strategy: str = LINE_BREAK_CJK_STRICT) -> List[str]:
-    """Return logical vertical-rl columns. Each string is top-to-bottom; list order is right-to-left."""
+    """Return logical vertical-rl columns. Each string is top-to-bottom; list order is right-to-left.
+
+    Besides kinsoku guards, this avoids a common manga-lettering artifact where
+    the final leftmost column contains a single dangling glyph while the previous
+    column has spare room.
+    """
     normalized = normalize_vertical_punctuation(text).replace("\n", "")
-    return kinsoku_wrap(normalized, max_chars_per_column, strategy)
+    cols = kinsoku_wrap(normalized, max_chars_per_column, strategy)
+    if normalize_line_break_strategy(strategy) != LINE_BREAK_LOOSE and len(cols) > 1 and len(cols[-1]) == 1 and len(cols[-2]) > 2:
+        # Move one glyph from the previous column to keep the leftmost column from
+        # looking like an orphan.  Do not violate opening-punctuation end rules.
+        candidate = cols[-2][-1] + cols[-1]
+        if cols[-2][:-1] and not cols[-2][:-1].endswith(tuple(KINSOKU_PROHIBITED_LINE_END)) and candidate[0] not in KINSOKU_PROHIBITED_LINE_START:
+            cols[-1] = candidate
+            cols[-2] = cols[-2][:-1]
+    return cols
 
 
 
@@ -1127,6 +1140,73 @@ def estimate_text_bounds(
     extra = 2 * padding + 2 * sw_px + shadow_px
     return measured_w + extra, measured_h + extra, line_count, col_count
 
+
+
+def precise_text_bounds(
+    text: str,
+    font_family: str = "",
+    font_size: float = 24.0,
+    mode: str = WRITING_MODE_HORIZONTAL_LTR,
+    max_width: float = 0.0,
+    max_height: float = 0.0,
+    line_spacing: float = 1.15,
+    letter_spacing: float = 1.0,
+    padding: float = 0.0,
+    stroke_width: float = 0.0,
+    shadow_radius: float = 0.0,
+    shadow_offset: Sequence[float] | None = None,
+    line_break_strategy: str = LINE_BREAK_AUTO,
+) -> Tuple[float, float, int, int]:
+    """Best-effort Qt font-metric bounds with dependency-free fallback.
+
+    `estimate_text_bounds` is intentionally stable for headless tests. This helper
+    uses QFontMetricsF when a Qt GUI stack is available so diagnostics/proof packs
+    can report tighter glyph bounds and catch clipping caused by real font ascent,
+    descent, punctuation, or fallback differences.
+    """
+    if not _qt_font_metrics_available():
+        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, shadow_radius, shadow_offset, line_break_strategy)
+    try:
+        from qtpy.QtGui import QFont, QFontMetricsF
+        fs = max(1.0, float(font_size or 1.0))
+        font = QFont(font_family or "")
+        font.setPointSizeF(fs)
+        metrics = QFontMetricsF(font)
+        resolved = normalize_writing_mode(mode)
+        line_break_strategy = normalize_line_break_strategy(line_break_strategy)
+        leading = max(metrics.height(), fs) * max(0.1, float(line_spacing or 1.0))
+        tracking = max(0.1, float(letter_spacing or 1.0))
+        if resolved == WRITING_MODE_VERTICAL_RL:
+            usable_h = max(1.0, float(max_height or fs * 8) - 2 * float(padding or 0.0))
+            max_chars = max(1, int(usable_h / max(1.0, metrics.height() * tracking)))
+            cols = vertical_columns(text or "", max_chars, line_break_strategy)
+            col_widths = []
+            col_heights = []
+            for col in cols:
+                widths = [max(1.0, metrics.tightBoundingRect(ch).width(), metrics.horizontalAdvance(ch)) for ch in col]
+                heights = [max(1.0, metrics.tightBoundingRect(ch).height(), metrics.height()) for ch in col]
+                col_widths.append(max(widths or [fs]))
+                col_heights.append(sum(heights) * tracking)
+            measured_w = sum(max(w, leading * 0.8) for w in col_widths) if col_widths else fs
+            measured_h = max(col_heights or [fs])
+            line_count = max((len(c) for c in cols), default=0)
+            col_count = len(cols)
+        else:
+            avg = max(1.0, metrics.averageCharWidth() * tracking)
+            usable_w = max(1.0, float(max_width or fs * 12) - 2 * float(padding or 0.0))
+            max_chars = max(1, int(usable_w / avg))
+            lines = kinsoku_wrap(text or "", max_chars, line_break_strategy) if (contains_cjk(text or "") or resolved == WRITING_MODE_RTL) else wrap_latin_text(text or "", max_chars)
+            measured_w = max((metrics.horizontalAdvance(line) * tracking for line in lines), default=fs)
+            measured_h = max(1, len(lines)) * leading
+            line_count = len(lines)
+            col_count = 0
+        sw_px = fs * max(0.0, float(stroke_width or 0.0))
+        shadow_offset = shadow_offset or (0.0, 0.0)
+        shadow_px = fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(abs(float(shadow_offset[0] if len(shadow_offset) > 0 else 0.0)), abs(float(shadow_offset[1] if len(shadow_offset) > 1 else 0.0)))
+        extra = 2 * float(padding or 0.0) + 2 * sw_px + shadow_px
+        return measured_w + extra, measured_h + extra, line_count, col_count
+    except Exception:
+        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, shadow_radius, shadow_offset, line_break_strategy)
 
 def fit_font_size_to_box(
     text: str,
@@ -1491,7 +1571,13 @@ def vertical_layout_cells(
     inner_h = max(1.0, float(box_h or 1.0) - 2 * float(padding or 0.0))
     max_chars = max(1, int(inner_h / max(1.0, row_advance)))
     cols = vertical_columns(text, max_chars)
+    tcy_groups = vertical_tate_chu_yoko_groups(text)
+    tcy_index_by_pos: Dict[int, int] = {}
+    for group_idx, group in enumerate(tcy_groups):
+        for pos in range(int(group.get("start", -1)), int(group.get("end", -1))):
+            tcy_index_by_pos[pos] = group_idx
     cells: List[Dict[str, object]] = []
+    logical_idx = 0
     for col_idx, col in enumerate(cols):
         x = max(float(padding or 0.0) + fs / 2.0, float(box_w or 1.0) - float(padding or 0.0) - (col_idx + 0.5) * col_advance)
         for row_idx, ch in enumerate(col):
@@ -1509,7 +1595,12 @@ def vertical_layout_cells(
                 "rotate_degrees": hint.get("rotate_degrees", 0.0),
                 "scale": hint.get("scale", 1.0),
                 "hang": bool(hint.get("hang", False)),
+                "logical_index": logical_idx,
+                "tate_chu_yoko": logical_idx in tcy_index_by_pos,
+                "tate_chu_yoko_group": tcy_index_by_pos.get(logical_idx, -1),
+                "orientation": "upright_compact" if logical_idx in tcy_index_by_pos else ("rotated" if float(hint.get("rotate_degrees", 0.0) or 0.0) else "upright"),
             })
+            logical_idx += 1
     return cells
 
 
@@ -1536,6 +1627,12 @@ def lettering_proof_metrics(
         stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
         line_break_strategy=line_break_strategy,
     )
+    precise_measured = precise_text_bounds(
+        text, "", font_size, resolved, float(box_w or 1.0), float(box_h or 1.0),
+        line_spacing=line_spacing, letter_spacing=letter_spacing, padding=padding,
+        stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+        line_break_strategy=line_break_strategy,
+    )
     overflow_x = max(0.0, float(measured[0]) - float(box_w or 0.0))
     overflow_y = max(0.0, float(measured[1]) - float(box_h or 0.0))
     clearance_x = float(box_w or 0.0) - float(measured[0])
@@ -1555,6 +1652,7 @@ def lettering_proof_metrics(
     return {
         "resolved_writing_mode": resolved,
         "measured_bounds": [round(float(measured[0]), 3), round(float(measured[1]), 3)],
+        "precise_measured_bounds": [round(float(precise_measured[0]), 3), round(float(precise_measured[1]), 3)],
         "box_bounds": [round(float(box_w or 0.0), 3), round(float(box_h or 0.0), 3)],
         "clearance": [round(clearance_x, 3), round(clearance_y, 3)],
         "overflow_pixels": [round(overflow_x, 3), round(overflow_y, 3)],

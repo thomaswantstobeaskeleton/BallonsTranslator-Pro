@@ -13,6 +13,7 @@ from .misc import pixmap2ndarray, LruIgnoreArg
 from utils import shared as C
 from utils.fontformat import pt2px, FontFormat, LineSpacingType
 from utils.config import pcfg
+from utils.text_rendering import vertical_tate_chu_yoko_groups
 
 def print_transform(tr: QTransform):
     print(f'[[{tr.m11(), tr.m12(), tr.m13()}]\n [{tr.m21(), tr.m22(), tr.m23()}]\n [{tr.m31(), tr.m32(), tr.m33()}]]')
@@ -461,7 +462,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 if num_lspaces > 0:
                     space_shift = num_lspaces * cfmt.space_width
 
-                should_rotate = char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
+                rec = char_records.get(char_idx, {})
+                should_rotate = (not rec.get('tate_chu_yoko')) and char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
                 if should_rotate:
                     char = blk_text[char_idx]
                     if char.isalpha():
@@ -572,7 +574,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 if line_width < 0:
                     line_width = cfmt.tbr.width()
                 
-                should_rotate = char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
+                rec = char_records.get(char_idx, {})
+                should_rotate = (not rec.get('tate_chu_yoko')) and char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
                 if should_rotate:
                     line_x, line_y = line.x(), line.y()
                     y_x = line_y - line_x
@@ -706,6 +709,7 @@ class VerticalTextDocumentLayout(SceneTextLayout):
             x_offset = self.x_offset_lst[-1]
 
         char_idx = 0
+        tcy_starts = {int(g.get('start', -1)): max(1, int(g.get('end', -1)) - int(g.get('start', -1))) for g in vertical_tate_chu_yoko_groups(blk_text)}
         tl = block.layout()
         tl.beginLayout()
         option = doc.defaultTextOption()
@@ -726,7 +730,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                 break
 
             line.setLineWidth(block_width)
-            line.setNumColumns(1)
+            group_len = int(tcy_starts.get(char_idx, 1) or 1)
+            line.setNumColumns(group_len)
             
             available_height = self.available_height + doc_margin
             text_len = line.textLength()
@@ -764,7 +769,11 @@ class VerticalTextDocumentLayout(SceneTextLayout):
 
                 tbr_h = cfmt.tbr.height() + let_sp_offset
                 char = blk_text[char_idx]
-                if char in PUNSET_VERNEEDROTATE:
+                is_tcy = char_idx in tcy_starts and text_len >= tcy_starts.get(char_idx, 1)
+                if is_tcy:
+                    tbr_h = max(cfmt.tbr.height(), line.height()) + let_sp_offset
+                    single_char_h = None
+                elif char in PUNSET_VERNEEDROTATE:
                     tbr, br = cfmt.punc_rect(char)
                     single_char_h = tbr.width()
                     tbr_h = tbr.width() * text_len
@@ -819,7 +828,10 @@ class VerticalTextDocumentLayout(SceneTextLayout):
             else:
                 cfmt = self.get_char_fontfmt(block_no, char_idx)
                 if cfmt is not None:
-                    width_list.append(cfmt.tbr.width())
+                    if char_idx in tcy_starts and text_len >= tcy_starts.get(char_idx, 1):
+                        width_list.append(max(cfmt.tbr.width(), line.naturalTextWidth()))
+                    else:
+                        width_list.append(cfmt.tbr.width())
                 else:
                     width_list.append(-1)
 
@@ -851,7 +863,10 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                     line_char_ids = [char_idx]
                 end_char_id = line_char_ids[-1]
                 for cidx in line_char_ids:
-                    char_records[cidx] = {'line_width': idea_line_width}
+                    rec = {'line_width': idea_line_width}
+                    if cidx in tcy_starts:
+                        rec.update({'tate_chu_yoko': True, 'tate_chu_yoko_len': tcy_starts[cidx]})
+                    char_records[cidx] = rec
                 line_char_ids = []
 
                 x_offset = x_offset - self.calculate_line_spacing(idea_line_width, line_spacing)
@@ -863,7 +878,10 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                         if not len(line_not_set) == 1:
                             x_offset = x_offset - self.calculate_line_spacing(end_w, line_spacing)
                         end_line.setPosition(QPointF(x_offset, end_ypos))
-                        char_records[end_char_id] = {'line_width': end_w}
+                        rec = {'line_width': end_w}
+                        if end_char_id in tcy_starts:
+                            rec.update({'tate_chu_yoko': True, 'tate_chu_yoko_len': tcy_starts[end_char_id]})
+                        char_records[end_char_id] = rec
                     else:
                         line_not_set = [end_line]
                         ypos_list = [end_ypos]

@@ -69,6 +69,7 @@ from .ocr_crop_inspector_widget import OcrCropInspectorWidget
 from .project_ops_dialog import ProjectOpsDialog
 from .reading_order_editor_dialog import ReadingOrderEditorDialog
 from .layout_review_report_dialog import LayoutReviewReportDialog
+from .lettering_workflow_dialog import LetteringWorkflowDialog
 from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
@@ -95,6 +96,7 @@ class PageListView(QListWidget):
     run_detect_images = Signal(list)
     toggle_ignore_requested = Signal(list, bool)  # (pagenames, ignored)
     set_completion_requested = Signal(list, str)  # (pagenames, todo|translated|reviewed|exported)
+    lettering_workflow_requested = Signal(list)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -130,6 +132,9 @@ class PageListView(QListWidget):
             include_act = menu.addAction(self.tr('Include in run'))
             include_act.setToolTip(self.tr('Do not skip these pages in full run and batch.'))
             menu.addSeparator()
+            lettering_workflow_act = menu.addAction(self.tr('Lettering workflow for selected pages...'))
+            lettering_workflow_act.setToolTip(self.tr('Plan/apply typography polish, smart fit, layout review, and proof/render steps for these pages.'))
+            menu.addSeparator()
             completion_menu = menu.addMenu(QIcon(osp.join(shared.PROGRAM_PATH, 'icons', 'page_completion.svg')), self.tr('Page completion state'))
             mark_todo_act = completion_menu.addAction(self.tr('Needs work'))
             mark_translated_act = completion_menu.addAction(self.tr('Translated'))
@@ -145,6 +150,8 @@ class PageListView(QListWidget):
             self.selectAll()
         elif selected_items and rst == translate_act:
             self.translate_images.emit([item.text() for item in selected_items])
+        elif selected_items and 'lettering_workflow_act' in locals() and rst == lettering_workflow_act:
+            self.lettering_workflow_requested.emit([item.text() for item in selected_items])
         elif selected_items and rst == run_detect_act:
             self.run_detect_images.emit([item.text() for item in selected_items])
         elif selected_items and rst == run_ocr_act:
@@ -418,6 +425,7 @@ class MainWindow(mainwindow_cls):
         self.pageList.translate_images.connect(self.on_translate_images)
         self.pageList.toggle_ignore_requested.connect(self.on_toggle_page_ignored)
         self.pageList.set_completion_requested.connect(self.on_set_page_completion_state)
+        self.pageList.lettering_workflow_requested.connect(self.on_lettering_workflow_pages)
         self.pageList.run_ocr_images.connect(self.on_run_ocr_images)
         self.pageList.run_translate_images.connect(self.on_run_translate_images)
         self.pageList.run_inpaint_images.connect(self.on_run_inpaint_images)
@@ -885,6 +893,8 @@ class MainWindow(mainwindow_cls):
             'export_lettering_proof': self._api_export_lettering_proof,
             'apply_project_rendering_fixes': self._api_apply_project_rendering_fixes,
             'apply_text_style_batch': self._api_apply_text_style_batch,
+            'lettering_workflow': self._api_lettering_workflow,
+            'next_rendering_issue': self._api_next_rendering_issue,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -1088,7 +1098,26 @@ class MainWindow(mainwindow_cls):
         ext = osp.splitext(path)[1].lower() or pcfg.imgsave_ext or '.png'
         imwrite(path, arr, ext=ext, quality=pcfg.imgsave_quality)
         self.pipelineInsightsPanel.add_event('API', self.tr('Rendered current page to {0}').format(path))
-        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'path': path}
+        manifest_path = str((body or {}).get('manifest_path', '') or '').strip()
+        manifest = {
+            'format': 'ballonstranslator.render_current_page.v1',
+            'page': self.imgtrans_proj.current_img,
+            'path': path,
+            'extension': ext,
+            'quality': pcfg.imgsave_quality,
+            'warnings': [],
+        }
+        if bool((body or {}).get('write_manifest', False)):
+            import json
+            if not manifest_path:
+                manifest_path = osp.splitext(path)[0] + '.render-manifest.json'
+            manifest_dir = osp.dirname(manifest_path)
+            if manifest_dir:
+                os.makedirs(manifest_dir, exist_ok=True)
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            manifest['manifest_path'] = manifest_path
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'path': path, 'manifest': manifest}
 
     def _api_list_rendering_issues(self, body: dict):
         return self._api_call_ui(self._api_list_rendering_issues_ui, body)
@@ -1107,6 +1136,86 @@ class MainWindow(mainwindow_cls):
                 if include_ok or block.get('warnings'):
                     issues.append(block)
         return {'ok': True, 'issues': issues, 'rows': rows, 'count': len(issues), 'summary': report.get('summary', {}), 'action_summary': summarize_suggested_actions(report)}
+
+    def _api_lettering_workflow(self, body: dict):
+        return self._api_call_ui(self._api_lettering_workflow_ui, body)
+
+    def _api_lettering_workflow_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        from utils.lettering_workflow import build_lettering_workflow_plan
+        requested_pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img])
+        pages = [p for p in requested_pages if p in (getattr(self.imgtrans_proj, 'pages', {}) or {})]
+        if not pages:
+            raise ValueError('no valid pages for lettering workflow')
+        plan = build_lettering_workflow_plan(self.imgtrans_proj, pages=pages, config_obj=pcfg, include_ok=bool((body or {}).get('include_ok', False)))
+        apply = bool((body or {}).get('apply', False))
+        export_proof = bool((body or {}).get('export_proof', False))
+        render = bool((body or {}).get('render', False))
+        warnings = []
+        result = {'ok': True, 'pages': pages, 'plan': plan, 'applied_actions': 0, 'proof_manifests': [], 'proof_manifest': None, 'rendered': None, 'warnings': warnings}
+        if apply and plan.get('selected_fixes'):
+            from utils.rendering_qa import apply_project_rendering_fixes
+            fix_result = apply_project_rendering_fixes(self.imgtrans_proj, pages=pages, config_obj=pcfg, selected_fixes=plan.get('selected_fixes'))
+            result['fix_result'] = fix_result
+            result['applied_actions'] = int(fix_result.get('applied_count', 0) or 0)
+            if self.imgtrans_proj.current_img in pages:
+                self.st_manager.updateSceneTextitems()
+            if self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        if export_proof:
+            out_dir = str((body or {}).get('out_dir', '') or '').strip() or osp.join(self.imgtrans_proj.directory, 'lettering_proofs')
+            include_final = bool((body or {}).get('include_final', True))
+            for page in pages:
+                final_arr = None
+                if include_final and page == self.imgtrans_proj.current_img:
+                    qimg = self.canvas.render_result_img()
+                    final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
+                elif include_final:
+                    warnings.append(f'proof final composite only included for current page; skipped final render for {page}')
+                manifest = build_lettering_proof_pack(self.imgtrans_proj, page, out_dir, final_image=final_arr, config_obj=pcfg)
+                result['proof_manifests'].append(manifest)
+                if result.get('proof_manifest') is None:
+                    result['proof_manifest'] = manifest
+        if render:
+            if self.imgtrans_proj.current_img in pages:
+                result['rendered'] = self._api_render_current_page_ui({'path': (body or {}).get('render_path', ''), 'write_manifest': True})
+            else:
+                warnings.append('render_current_page skipped because current page is outside workflow scope')
+            if len(pages) > 1:
+                warnings.append('batch rerender is deferred; use batch export after opening each page or run pipeline/export queue')
+        self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Lettering workflow planned {0} step(s), applied {1} action(s) across {2} page(s)').format(len(plan.get('steps', [])), result.get('applied_actions', 0), len(pages)))
+        return result
+
+    def _api_next_rendering_issue(self, body: dict):
+        return self._api_call_ui(self._api_next_rendering_issue_ui, body)
+
+    def _api_next_rendering_issue_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        from utils.rendering_qa import build_project_rendering_qa
+        from utils.lettering_workflow import next_rendering_issue
+        page = str((body or {}).get('after_page', '') or self.imgtrans_proj.current_img)
+        after_index = int((body or {}).get('after_index', -1) if (body or {}).get('after_index', None) is not None else -1)
+        if bool((body or {}).get('after_selection', False)):
+            sel = self.canvas.selected_text_items()
+            if sel:
+                after_index = max(int(getattr(x, 'idx', -1)) for x in sel)
+        report = build_project_rendering_qa(self.imgtrans_proj, pages=[self.imgtrans_proj.current_img], include_ok=False, config_obj=pcfg)
+        issue = next_rendering_issue(report, after_page=page, after_index=after_index)
+        if bool((body or {}).get('select', False)) and issue.get('found') and issue.get('page') == self.imgtrans_proj.current_img:
+            idx = int(issue.get('index', -1))
+            if 0 <= idx < len(self.st_manager.textblk_item_list):
+                self.canvas.block_selection_signal = True
+                self.canvas.clearSelection()
+                item = self.st_manager.textblk_item_list[idx]
+                item.setSelected(True)
+                self.canvas.block_selection_signal = False
+                self.canvas.gv.ensureVisible(item)
+                self.st_manager.txtblkShapeControl.setBlkItem(item)
+                self.st_manager.textEditList.set_selected_list([idx])
+        return {'ok': True, **issue}
 
 
     def _api_list_pages(self, body: dict):
@@ -2196,6 +2305,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.layout_review_selected_trigger.connect(self.shortcutLayoutReviewSelected)
         self.titleBar.layout_review_page_trigger.connect(self.shortcutLayoutReviewPage)
         self.titleBar.layout_review_config_trigger.connect(self.shortcutLayoutReviewConfig)
+        self.titleBar.lettering_workflow_trigger.connect(self.on_lettering_workflow_current_page)
+        self.titleBar.next_rendering_issue_trigger.connect(self.on_next_rendering_issue)
         self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
         self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
         self.titleBar.runtime_resource_summary_trigger.connect(self.on_runtime_resource_summary)
@@ -5269,6 +5380,64 @@ class MainWindow(mainwindow_cls):
             create_error_dialog(e, self.tr('Failed to export as TEXT file'))
 
 
+
+
+    def _selected_page_names(self) -> List[str]:
+        try:
+            return [item.text() for item in self.pageList.selectedItems()]
+        except Exception:
+            return []
+
+    def on_lettering_workflow_current_page(self):
+        self.on_lettering_workflow_pages(self._selected_page_names())
+
+    def on_lettering_workflow_pages(self, page_names: List[str] = None):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            create_info_dialog({'title': self.tr('Lettering workflow'), 'text': self.tr('Open a project and select a page first.')})
+            return
+        try:
+            dlg = LetteringWorkflowDialog(self.imgtrans_proj, self.imgtrans_proj.current_img, page_names or [], pcfg, self)
+            if not dlg.exec():
+                return
+            result = self._api_lettering_workflow_ui({
+                'pages': dlg.selected_pages(),
+                'apply': dlg.should_apply(),
+                'export_proof': dlg.should_export_proof(),
+                'render': dlg.should_render(),
+                'include_final': True,
+            })
+            plan = result.get('plan', {}) or {}
+            msg = [self.tr('Processed {pages} page(s); planned {steps} step(s); applied {applied} formatting fix(es).').format(
+                pages=len(result.get('pages', []) or []),
+                steps=len(plan.get('steps', []) or []),
+                applied=result.get('applied_actions', 0),
+            )]
+            if result.get('proof_manifests'):
+                msg.append(self.tr('Proof packs exported: {0}').format(len(result.get('proof_manifests', []))))
+            if result.get('rendered'):
+                msg.append(self.tr('Rendered current page: {0}').format((result.get('rendered') or {}).get('path', '')))
+            for warning in result.get('warnings', [])[:5]:
+                msg.append(self.tr('Warning: ') + str(warning))
+            QMessageBox.information(self, self.tr('Lettering workflow'), "\n".join(msg))
+        except Exception as e:
+            LOGGER.error(traceback.format_exc())
+            create_error_dialog(e, self.tr('Lettering workflow failed'))
+
+    def on_next_rendering_issue(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            create_info_dialog({'title': self.tr('Rendering issue'), 'text': self.tr('Open a project and select a page first.')})
+            return
+        try:
+            result = self._api_next_rendering_issue_ui({'after_selection': True, 'select': True})
+            if not result.get('found'):
+                self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('No rendering issues on current page.'))
+                QMessageBox.information(self, self.tr('Rendering issue'), self.tr('No rendering issues found on the current page.'))
+                return
+            warnings = ', '.join((result.get('issue') or {}).get('warnings', []) or [])
+            self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Selected rendering issue #{0}: {1}').format(result.get('index'), warnings))
+        except Exception as e:
+            LOGGER.error(traceback.format_exc())
+            create_error_dialog(e, self.tr('Find rendering issue failed'))
 
 
     def on_export_lettering_proof_pack(self):

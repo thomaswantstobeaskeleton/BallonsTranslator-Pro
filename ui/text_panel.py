@@ -10,7 +10,7 @@ from utils import shared
 from utils import config as C
 from utils.config import pcfg
 from utils.fontformat import FontFormat, px2pt, LineSpacingType
-from utils.text_rendering import MANGA_PRESETS, fit_font_size_to_box, manga_presets, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy, preset_from_font_format, preset_id_from_label, plan_typography_cleanup
+from utils.text_rendering import MANGA_PRESETS, fit_font_size_to_box, manga_presets, merge_font_fallback_chain, missing_glyphs_after_fallback, normalize_fit_mode, normalize_writing_mode, normalize_line_break_strategy, preset_from_font_format, preset_id_from_label, plan_typography_cleanup, smart_fit_text_to_box
 from utils.text_masking import masked_text_warnings, mask_effective_box
 from .custom_widget import Widget, ColorPickerLabel, ClickableLabel, CheckableLabel, TextCheckerLabel, AlignmentChecker, QFontChecker, SizeComboBox, SizeControlLabel
 from .custom_widget.flow_layout import FlowLayout
@@ -18,6 +18,7 @@ from .textitem import TextBlkItem
 from .text_advanced_format import TextAdvancedFormatPanel
 from .text_style_presets import TextStylePresetPanel
 from . import funcmaps as FM
+from . import shared_widget as SW
 
 
 class LineEdit(QLineEdit):
@@ -461,6 +462,9 @@ class FontFormatPanel(Widget):
         self.letteringDiagnosticsLabel.setObjectName("LetteringDiagnosticsLabel")
         self.letteringDiagnosticsLabel.setWordWrap(True)
         self.letteringDiagnosticsLabel.setToolTip(self.tr("Live estimate for the active text box/style: writing mode, fit result, overflow, fallback glyphs, and quality score."))
+        self.applyDiagnosticsFixesBtn = QPushButton(self.tr("Apply diagnostics fixes"), self)
+        self.applyDiagnosticsFixesBtn.setToolTip(self.tr("Apply safe typography polish and smart fit to the selected textbox: writing mode, punctuation, line breaks, padding, fallback chain, and font size."))
+        self.applyDiagnosticsFixesBtn.clicked.connect(self._on_apply_diagnostics_fixes)
 
         self.textPaddingSpinBox = QDoubleSpinBox(self)
         self.textPaddingSpinBox.setObjectName("TextPaddingSpinBox")
@@ -698,6 +702,7 @@ class FontFormatPanel(Widget):
         hl2b = QVBoxLayout()
         hl2b.addWidget(self.formatScopeLabel)
         hl2b.addWidget(self.letteringDiagnosticsLabel)
+        hl2b.addWidget(self.applyDiagnosticsFixesBtn)
         hl2b.addWidget(layout_group)
         hl2b.addWidget(fallback_group)
         hl2b.addWidget(effects_group)
@@ -966,6 +971,86 @@ class FontFormatPanel(Widget):
             ('warp_strength', 0.5),
             ('text_box_corner_radius', 0.0),
         ])
+
+
+    def _on_apply_diagnostics_fixes(self):
+        if self.textblk_item is None:
+            self.letteringDiagnosticsLabel.setText(self.tr("Select a textbox before applying diagnostics fixes."))
+            return
+        fmt = self._current_format_for_reset()
+        if fmt is None:
+            return
+        try:
+            text = self.textblk_item.toPlainText()
+            rect = self.textblk_item.absBoundingRect(qrect=True)
+            box = (float(rect.width()), float(rect.height()))
+            cleanup = plan_typography_cleanup(
+                text,
+                float(getattr(fmt, 'font_size', 24.0) or 24.0),
+                box,
+                getattr(fmt, 'writing_mode', 'auto'),
+                getattr(fmt, 'fit_mode', 'shrink'),
+                getattr(fmt, 'line_break_strategy', 'auto'),
+                line_spacing=float(getattr(fmt, 'line_spacing', 1.15) or 1.15),
+                letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
+                text_padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),
+                font_family=getattr(fmt, 'font_family', ''),
+                fallback_font_chain=getattr(fmt, 'fallback_font_chain', ''),
+                config_obj=pcfg,
+            )
+            if cleanup.text and cleanup.text != text:
+                if hasattr(self.textblk_item, 'setPlainTextAndKeepUndoStack'):
+                    self.textblk_item.setPlainTextAndKeepUndoStack(cleanup.text)
+                else:
+                    self.textblk_item.setPlainText(cleanup.text)
+                if getattr(self.textblk_item, 'blk', None) is not None:
+                    self.textblk_item.blk.translation = cleanup.text
+                text = cleanup.text
+            params = [
+                ('writing_mode', cleanup.writing_mode),
+                ('fit_mode', cleanup.fit_mode),
+                ('line_break_strategy', cleanup.line_break_strategy),
+                ('line_spacing', cleanup.line_spacing),
+                ('letter_spacing', cleanup.letter_spacing),
+                ('text_padding', cleanup.text_padding),
+                ('fallback_font_chain', cleanup.fallback_font_chain),
+            ]
+            smart = smart_fit_text_to_box(
+                text,
+                float(getattr(fmt, 'font_size', 24.0) or 24.0),
+                box,
+                cleanup.writing_mode,
+                cleanup.fit_mode,
+                min_font_size=float(getattr(fmt, 'fit_font_size_min', 0.0) or getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0)),
+                max_font_size=float(getattr(fmt, 'fit_font_size_max', 0.0) or getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0)),
+                line_spacing=cleanup.line_spacing,
+                letter_spacing=cleanup.letter_spacing,
+                padding=cleanup.text_padding,
+                stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+                line_break_strategy=cleanup.line_break_strategy,
+                shadow_radius=float(getattr(fmt, 'shadow_radius', 0.0) or 0.0),
+                shadow_offset=getattr(fmt, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            )
+            if smart.text and smart.text != text:
+                if hasattr(self.textblk_item, 'setPlainTextAndKeepUndoStack'):
+                    self.textblk_item.setPlainTextAndKeepUndoStack(smart.text)
+                else:
+                    self.textblk_item.setPlainText(smart.text)
+                if getattr(self.textblk_item, 'blk', None) is not None:
+                    self.textblk_item.blk.translation = smart.text
+            if abs(float(smart.font_size or 0.0) - float(getattr(fmt, 'font_size', 0.0) or 0.0)) > 0.2:
+                params.append(('font_size', float(smart.font_size)))
+            if smart.letter_spacing != getattr(fmt, 'letter_spacing', smart.letter_spacing):
+                params.append(('letter_spacing', float(smart.letter_spacing)))
+            if smart.line_spacing != getattr(fmt, 'line_spacing', smart.line_spacing):
+                params.append(('line_spacing', float(smart.line_spacing)))
+            self._apply_format_params(params)
+            canvas = getattr(SW, 'canvas', None)
+            if canvas is not None:
+                canvas.setProjSaveState(True)
+            self.letteringDiagnosticsLabel.setText(self.tr("Applied diagnostics fixes: {0}").format(', '.join((cleanup.actions or []) + (smart.actions or [])) or self.tr('none')))
+        except Exception as exc:
+            self.letteringDiagnosticsLabel.setText(self.tr("Diagnostics fix failed: {0}").format(exc))
 
     def _update_format_scope_label(self):
         if self.global_mode():

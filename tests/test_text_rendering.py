@@ -398,3 +398,26 @@ def test_lettering_proof_metrics_reports_overflow_and_vertical_cells():
     assert metrics["resolved_writing_mode"] == "vertical_rl"
     assert metrics["vertical_cells"]
     assert "check_vertical_punctuation" in metrics["recommended_actions"]
+
+
+def test_vertical_columns_avoids_single_glyph_leftmost_orphan():
+    from utils.text_rendering import vertical_columns
+    cols = vertical_columns("天地玄黄宇", 4)
+    assert cols == ["天地玄", "黄宇"]
+
+
+def test_vertical_layout_cells_expose_tate_chu_yoko_orientation():
+    from utils.text_rendering import vertical_layout_cells
+    cells = vertical_layout_cells("第12話", 20, (80, 120), padding=2)
+    tcy = [c for c in cells if c.get("tate_chu_yoko")]
+    assert [c["char"] for c in tcy] == ["1", "2"]
+    assert all(c["orientation"] == "upright_compact" for c in tcy)
+
+
+def test_precise_text_bounds_degrades_and_proof_exposes_precise_bounds():
+    from utils.text_rendering import precise_text_bounds, lettering_proof_metrics
+    bounds = precise_text_bounds("Hello", "", 18, "horizontal_ltr", 120, 60)
+    assert bounds[0] > 0 and bounds[1] > 0
+    metrics = lettering_proof_metrics("Hello", 18, (120, 60), "horizontal_ltr")
+    assert "precise_measured_bounds" in metrics
+    assert metrics["precise_measured_bounds"][0] > 0
