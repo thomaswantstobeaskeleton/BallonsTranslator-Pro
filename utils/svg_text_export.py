@@ -94,6 +94,8 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
         fill = _rgb(getattr(fmt, "frgb", None) if fmt else None)
         stroke = _rgb(getattr(fmt, "srgb", None) if fmt else None)
         stroke_width = max(0.0, font_size * float(getattr(fmt, "stroke_width", 0.0) if fmt else 0.0 or 0.0))
+        secondary_stroke_width = max(0.0, font_size * float(getattr(fmt, "secondary_stroke_width", 0.0) if fmt else 0.0 or 0.0))
+        secondary_stroke = _rgb(getattr(fmt, "secondary_srgb", [255, 255, 255]) if fmt else [255, 255, 255])
         anchor = "middle" if int(getattr(fmt, "alignment", 0) if fmt else 0 or 0) == 1 else ("end" if int(getattr(fmt, "alignment", 0) if fmt else 0 or 0) == 2 else "start")
         attrs = [
             f'id="text_{idx + 1:03d}"',
@@ -111,6 +113,14 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
             attrs.append('data-vertical-layout="top-to-bottom-right-to-left"')
         if mode == "rtl":
             attrs.append('direction="rtl"')
+        if secondary_stroke_width > 0:
+            back_attrs = list(attrs)
+            back_attrs = [a for a in back_attrs if not a.startswith('id=') and not a.startswith('stroke=') and not a.startswith('stroke-width=') and not a.startswith('fill=')]
+            back_attrs.insert(0, f'id="text_{idx + 1:03d}_back_outline"')
+            back_attrs.extend([f'fill="none"', f'stroke="{secondary_stroke}"', f'stroke-width="{secondary_stroke_width:.2f}"'])
+            svg.append('    <text ' + " ".join(back_attrs) + '>')
+            svg.append(_text_svg_lines(text, mode, x1, y1, width, height, font_size, line_spacing))
+            svg.append('    </text>')
         svg.append('    <text ' + " ".join(attrs) + '>')
         svg.append(_text_svg_lines(text, mode, x1, y1, width, height, font_size, line_spacing))
         svg.append('    </text>')
@@ -123,6 +133,7 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
             letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) if fmt else 1.0 or 1.0),
             padding=float(getattr(fmt, "text_padding", 0.0) if fmt else 0.0 or 0.0),
             stroke_width=float(getattr(fmt, "stroke_width", 0.0) if fmt else 0.0 or 0.0),
+            secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) if fmt else 0.0 or 0.0),
             shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) if fmt else 0.0 or 0.0),
             shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) if fmt else [0.0, 0.0],
             line_break_strategy=getattr(fmt, "line_break_strategy", "auto") if fmt else "auto",
@@ -135,6 +146,7 @@ def build_svg_text_handoff(project, page_name: str, out_dir: str, final_image_pa
             "writing_mode": mode,
             "font_family": getattr(fmt, "font_family", "") if fmt else "",
             "font_size": font_size,
+            "secondary_stroke_width": secondary_stroke_width,
             "diagnostics": diagnostics,
             "proof_metrics": proof_metrics,
         })

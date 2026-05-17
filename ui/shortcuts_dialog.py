@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QFileDialog,
 )
 
-from utils.shortcuts import get_shortcut_info, get_default_shortcuts, find_shortcut_conflicts, classify_shortcut_conflicts, auto_resolve_shortcut_conflicts
+from utils.shortcuts import get_shortcut_info, get_default_shortcuts, find_shortcut_conflicts, classify_shortcut_conflicts, auto_resolve_shortcut_conflicts, shortcut_safety_warnings
 from utils.config import pcfg, save_config
 
 
@@ -69,6 +69,11 @@ class ShortcutsDialog(QDialog):
         jump_layout.addWidget(self.key_jump_edit)
         layout.addLayout(jump_layout)
 
+        self.warning_label = QLabel(self)
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setStyleSheet("color: #b36b00;")
+        layout.addWidget(self.warning_label)
+
         # Table: Category | Action | Shortcut
         self.table = QTableWidget(self)
         self.table.setColumnCount(4)
@@ -111,6 +116,27 @@ class ShortcutsDialog(QDialog):
 
         self._populate_table()
         self._apply_filter()
+        self._update_shortcut_warnings()
+
+
+    def _update_shortcut_warnings(self):
+        try:
+            current = self.get_current_shortcuts()
+        except Exception:
+            current = self._current
+        action_labels = {aid: desc for (aid, _d, _c, desc) in self._info}
+        warnings = shortcut_safety_warnings(current)
+        if not warnings:
+            self.warning_label.setText(self.tr("No shortcut safety warnings."))
+            return
+        examples = []
+        for item in warnings[:4]:
+            examples.append(f"{item.get('key')}: {action_labels.get(item.get('action_id'), item.get('action_id'))}")
+        suffix = "" if len(warnings) <= 4 else self.tr(" and {0} more").format(len(warnings) - 4)
+        self.warning_label.setText(
+            self.tr("Single-key tool/navigation shortcuts are suppressed while typing in text fields: ")
+            + "; ".join(examples) + suffix
+        )
 
     def _populate_table(self):
         self.table.setRowCount(len(self._info))
@@ -129,6 +155,7 @@ class ShortcutsDialog(QDialog):
             key_edit.setMaximumWidth(180)
             key_edit.setProperty("action_id", action_id)
             key_edit.setProperty("default_key", default_key)
+            key_edit.keySequenceChanged.connect(self._update_shortcut_warnings)
             self._key_edits.append(key_edit)
             self.table.setCellWidget(row, 2, key_edit)
 
@@ -258,7 +285,12 @@ class ShortcutsDialog(QDialog):
                         action_id = key_edit.property("action_id")
                         key = self._current.get(action_id, "")
                         key_edit.setKeySequence(QKeySequence.fromString(key) if key else QKeySequence())
+            self._update_shortcut_warnings()
             return
+
+        soft_warnings = shortcut_safety_warnings(self._current)
+        if soft_warnings:
+            self._update_shortcut_warnings()
 
         if not isinstance(pcfg.shortcuts, dict):
             pcfg.shortcuts = {}

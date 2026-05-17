@@ -93,6 +93,8 @@ MANGA_PRESETS = {
         "fit_mode": FIT_MODE_EXPAND,
         "font_size": 36.0,
         "stroke_width": 0.14,
+        "secondary_stroke_width": 0.22,
+        "secondary_srgb": [255, 255, 255],
         "line_spacing": 1.0,
         "letter_spacing": 1.08,
         "alignment": 1,
@@ -135,6 +137,8 @@ STYLE_PRESET_FIELDS = (
     "frgb",
     "srgb",
     "stroke_width",
+    "secondary_stroke_width",
+    "secondary_srgb",
     "shadow_radius",
     "shadow_strength",
     "shadow_color",
@@ -175,6 +179,7 @@ class TextRenderDiagnostics:
     box_scale_hint: float = 1.0
     ink_clip_risk: bool = False
     preset_suggestion: str = ""
+    line_break_quality: Dict[str, object] = None
 
     def to_dict(self) -> dict:
         return {
@@ -198,6 +203,36 @@ class TextRenderDiagnostics:
             "box_scale_hint": self.box_scale_hint,
             "ink_clip_risk": bool(self.ink_clip_risk),
             "preset_suggestion": self.preset_suggestion,
+            "line_break_quality": self.line_break_quality or {},
+        }
+
+
+@dataclass
+class LineBreakQuality:
+    """Renderer-neutral readability diagnostics for wrapped lettering."""
+
+    lines: List[str]
+    max_units: float
+    min_units: float
+    raggedness: float
+    has_widow: bool
+    has_kinsoku_violation: bool
+    recommended_strategy: str = ""
+
+    @property
+    def needs_balance(self) -> bool:
+        return bool(self.has_widow or self.has_kinsoku_violation or self.raggedness > 0.38)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "lines": list(self.lines),
+            "max_units": round(float(self.max_units), 3),
+            "min_units": round(float(self.min_units), 3),
+            "raggedness": round(float(self.raggedness), 4),
+            "has_widow": bool(self.has_widow),
+            "has_kinsoku_violation": bool(self.has_kinsoku_violation),
+            "needs_balance": self.needs_balance,
+            "recommended_strategy": self.recommended_strategy,
         }
 
 
@@ -313,7 +348,7 @@ def sanitize_manga_preset(preset: Dict[str, object], label: str = "") -> Dict[st
                 value = normalize_fit_mode(value)
             else:
                 value = normalize_line_break_strategy(value)
-        elif key in {"font_size", "stroke_width", "shadow_radius", "shadow_strength", "line_spacing", "letter_spacing", "text_padding", "fit_font_size_min", "fit_font_size_max", "opacity"}:
+        elif key in {"font_size", "stroke_width", "secondary_stroke_width", "shadow_radius", "shadow_strength", "line_spacing", "letter_spacing", "text_padding", "fit_font_size_min", "fit_font_size_max", "opacity"}:
             try:
                 value = float(value)
             except Exception:
@@ -331,7 +366,7 @@ def sanitize_manga_preset(preset: Dict[str, object], label: str = "") -> Dict[st
                 value = max(0, min(2, int(value)))
             except Exception:
                 continue
-        elif key in {"frgb", "srgb", "shadow_color", "shadow_offset"}:
+        elif key in {"frgb", "srgb", "secondary_srgb", "shadow_color", "shadow_offset"}:
             try:
                 seq = list(value or [])
                 limit = 2 if key == "shadow_offset" else 3
@@ -570,6 +605,45 @@ def max_visual_line_units(lines: Sequence[str], mode: str = WRITING_MODE_HORIZON
     return max((glyph_advance_units(line, mode) for line in lines or []), default=0.0)
 
 
+def line_break_quality(
+    text: str,
+    max_chars: int,
+    strategy: str = LINE_BREAK_AUTO,
+    mode: str = WRITING_MODE_HORIZONTAL_LTR,
+) -> LineBreakQuality:
+    """Score wrapped lines for manga lettering readability.
+
+    Fit-to-box can produce technically fitting text that still looks bad: a
+    one-character final line, dangling punctuation, or very ragged line lengths.
+    This helper gives QA, the layout-review agent, and API clients a shared
+    signal for when a conservative balance-lines pass should run.
+    """
+    strategy = normalize_line_break_strategy(strategy)
+    mode = normalize_writing_mode(mode)
+    raw = str(text or "")
+    if "\n" in raw:
+        lines = [ln for ln in raw.splitlines() if ln]
+    elif mode == WRITING_MODE_VERTICAL_RL:
+        lines = vertical_columns(raw, max(1, int(max_chars or 1)), strategy)
+    elif contains_cjk(raw) or mode == WRITING_MODE_RTL:
+        lines = kinsoku_wrap(raw, max(1, int(max_chars or 1)), strategy)
+    else:
+        lines = wrap_latin_text(raw, max(1, int(max_chars or 1)), split_long_words=True)
+    units = [glyph_advance_units(ln, mode) for ln in lines if ln]
+    max_u = max(units or [0.0])
+    min_u = min(units or [0.0])
+    avg_u = sum(units) / len(units) if units else 0.0
+    ragged = (max_u - min_u) / max(1.0, avg_u) if len(units) > 1 else 0.0
+    last = lines[-1] if lines else ""
+    has_widow = len(lines) > 1 and glyph_advance_units(last, mode) <= max(1.25, max_u * 0.34)
+    violation = any(
+        bool(ln) and (ln[0] in KINSOKU_PROHIBITED_LINE_START or ln[-1] in KINSOKU_PROHIBITED_LINE_END)
+        for ln in lines
+    )
+    recommended = LINE_BREAK_BALANCED if mode != WRITING_MODE_VERTICAL_RL else LINE_BREAK_CJK_STRICT
+    return LineBreakQuality(lines, max_u, min_u, ragged, has_widow, violation, recommended)
+
+
 def recommended_tight_letter_spacing(current: float, overflow_ratio: float, floor: float = 0.88) -> float:
     """Return a conservative manga-lettering tracking value for overflow fixes."""
     cur = max(0.1, float(current or 1.0))
@@ -604,18 +678,19 @@ def vertical_tate_chu_yoko_groups(text: str) -> List[Dict[str, object]]:
     return groups
 
 
-def effect_margin_px(font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0) -> float:
+def effect_margin_px(font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0, secondary_stroke_width: float = 0.0) -> float:
     fs = max(1.0, float(font_size or 1.0))
     shadow_offset = shadow_offset or (0.0, 0.0)
     sx = abs(float(shadow_offset[0] if len(shadow_offset) > 0 else 0.0))
     sy = abs(float(shadow_offset[1] if len(shadow_offset) > 1 else 0.0))
-    return max(0.0, float(padding or 0.0)) + fs * max(0.0, float(stroke_width or 0.0)) + fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(sx, sy)
+    outline = max(max(0.0, float(stroke_width or 0.0)), max(0.0, float(secondary_stroke_width or 0.0)))
+    return max(0.0, float(padding or 0.0)) + fs * outline + fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(sx, sy)
 
 
-def safe_inner_bounds(box_size: Tuple[float, float], font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0) -> Tuple[Tuple[float, float], float]:
+def safe_inner_bounds(box_size: Tuple[float, float], font_size: float, stroke_width: float = 0.0, shadow_radius: float = 0.0, shadow_offset: Sequence[float] | None = None, padding: float = 0.0, secondary_stroke_width: float = 0.0) -> Tuple[Tuple[float, float], float]:
     """Return effect-aware inner width/height and total margin for diagnostics."""
     w, h = box_size or (0.0, 0.0)
-    margin = effect_margin_px(font_size, stroke_width, shadow_radius, shadow_offset, padding)
+    margin = effect_margin_px(font_size, stroke_width, shadow_radius, shadow_offset, padding, secondary_stroke_width)
     return (max(1.0, float(w or 0.0) - 2 * margin), max(1.0, float(h or 0.0) - 2 * margin)), margin
 
 
@@ -1091,6 +1166,20 @@ def suggest_manga_effects_for_background(
     }
 
 
+def suggested_back_outline_rgb(fill_rgb: Sequence[float], stroke_rgb: Sequence[float] | None = None) -> List[int]:
+    """Choose a high-contrast back outline color for manga SFX.
+
+    White back outlines are common around dark SFX; black back outlines protect
+    light lettering. If the primary stroke already uses that color, choose the
+    opposite so the two outline bands remain visually distinct.
+    """
+    fill_lum = relative_luminance(fill_rgb)
+    preferred = [255, 255, 255] if fill_lum < 0.45 else [0, 0, 0]
+    if stroke_rgb is not None and contrast_ratio(preferred, stroke_rgb) < 1.5:
+        preferred = [0, 0, 0] if preferred == [255, 255, 255] else [255, 255, 255]
+    return preferred
+
+
 def estimate_text_bounds(
     text: str,
     font_size: float,
@@ -1101,6 +1190,7 @@ def estimate_text_bounds(
     letter_spacing: float = 1.0,
     padding: float = 0.0,
     stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
     shadow_radius: float = 0.0,
     shadow_offset: Sequence[float] | None = None,
     line_break_strategy: str = LINE_BREAK_AUTO,
@@ -1134,7 +1224,7 @@ def estimate_text_bounds(
         measured_h = max(1, len(lines)) * leading
         line_count = len(lines)
         col_count = 0
-    sw_px = fs * max(0.0, float(stroke_width or 0.0))
+    sw_px = fs * max(max(0.0, float(stroke_width or 0.0)), max(0.0, float(secondary_stroke_width or 0.0)))
     shadow_offset = shadow_offset or (0.0, 0.0)
     shadow_px = fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(abs(float(shadow_offset[0] if len(shadow_offset) > 0 else 0.0)), abs(float(shadow_offset[1] if len(shadow_offset) > 1 else 0.0)))
     extra = 2 * padding + 2 * sw_px + shadow_px
@@ -1153,6 +1243,7 @@ def precise_text_bounds(
     letter_spacing: float = 1.0,
     padding: float = 0.0,
     stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
     shadow_radius: float = 0.0,
     shadow_offset: Sequence[float] | None = None,
     line_break_strategy: str = LINE_BREAK_AUTO,
@@ -1165,7 +1256,7 @@ def precise_text_bounds(
     descent, punctuation, or fallback differences.
     """
     if not _qt_font_metrics_available():
-        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, shadow_radius, shadow_offset, line_break_strategy)
+        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, secondary_stroke_width, shadow_radius, shadow_offset, line_break_strategy)
     try:
         from qtpy.QtGui import QFont, QFontMetricsF
         fs = max(1.0, float(font_size or 1.0))
@@ -1200,13 +1291,13 @@ def precise_text_bounds(
             measured_h = max(1, len(lines)) * leading
             line_count = len(lines)
             col_count = 0
-        sw_px = fs * max(0.0, float(stroke_width or 0.0))
+        sw_px = fs * max(max(0.0, float(stroke_width or 0.0)), max(0.0, float(secondary_stroke_width or 0.0)))
         shadow_offset = shadow_offset or (0.0, 0.0)
         shadow_px = fs * max(0.0, float(shadow_radius or 0.0)) + fs * max(abs(float(shadow_offset[0] if len(shadow_offset) > 0 else 0.0)), abs(float(shadow_offset[1] if len(shadow_offset) > 1 else 0.0)))
         extra = 2 * float(padding or 0.0) + 2 * sw_px + shadow_px
         return measured_w + extra, measured_h + extra, line_count, col_count
     except Exception:
-        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, shadow_radius, shadow_offset, line_break_strategy)
+        return estimate_text_bounds(text, font_size, mode, max_width, max_height, line_spacing, letter_spacing, padding, stroke_width, secondary_stroke_width, shadow_radius, shadow_offset, line_break_strategy)
 
 def fit_font_size_to_box(
     text: str,
@@ -1220,6 +1311,7 @@ def fit_font_size_to_box(
     letter_spacing: float = 1.0,
     padding: float = 0.0,
     stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
     line_break_strategy: str = LINE_BREAK_AUTO,
     shadow_radius: float = 0.0,
     shadow_offset: Sequence[float] | None = None,
@@ -1239,8 +1331,17 @@ def fit_font_size_to_box(
     current = max(lo, min(hi, float(font_size or lo)))
 
     def over(size: float) -> Tuple[bool, Tuple[float, float, int, int]]:
-        b = estimate_text_bounds(text_out, size, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
+        b = estimate_text_bounds(text_out, size, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
         return b[0] > box_w or b[1] > box_h, b
+
+    def _line_quality(size: float) -> LineBreakQuality:
+        if resolved == WRITING_MODE_VERTICAL_RL:
+            row_advance = max(1.0, float(size or 1.0) * max(0.1, float(letter_spacing or 1.0)))
+            max_chars = max(1, int(max(1.0, float(box_h or 1.0) - 2 * float(padding or 0.0)) / row_advance))
+        else:
+            avg = max(1.0, float(size or 1.0) * 0.56 * max(0.1, float(letter_spacing or 1.0)))
+            max_chars = max(1, int(max(1.0, float(box_w or 1.0) - 2 * float(padding or 0.0)) / avg))
+        return line_break_quality(text_out, max_chars, line_break_strategy, resolved)
 
     if fit_mode == FIT_MODE_PRESERVE:
         is_over, bounds = over(current)
@@ -1250,7 +1351,7 @@ def fit_font_size_to_box(
         if bounds[1] > box_h:
             axes.append("y")
         actions = ["shrink_to_fit"] if axes else []
-        inner, margin = safe_inner_bounds((box_w, box_h), current, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
+        inner, margin = safe_inner_bounds((box_w, box_h), current, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
         quality = lettering_quality_score(is_over, [], 7.0, margin, (box_w, box_h))
         scale_hint = max(bounds[0] / max(1.0, box_w), bounds[1] / max(1.0, box_h), 1.0)
         rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
@@ -1259,11 +1360,19 @@ def fit_font_size_to_box(
             actions.append("increase_padding")
         if axes and float(letter_spacing or 1.0) > 0.9:
             actions.append("tighten_letter_spacing")
+        quality_info = _line_quality(current)
+        if quality_info.needs_balance and resolved != WRITING_MODE_VERTICAL_RL and "balance_lines" not in actions:
+            actions.append("balance_lines")
         preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
-        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
+        diag = TextRenderDiagnostics(resolved, is_over, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, current, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset, quality_info.to_dict())
         return current, text_out, diag
 
     target_largest = fit_mode in (FIT_MODE_EXPAND, FIT_MODE_BALANCE)
+    if target_largest and resolved == WRITING_MODE_RTL:
+        # Arabic/Hebrew connected scripts can appear oversized when the generic
+        # expand-to-fill heuristic chases every spare pixel.  Cap expansion to a
+        # conservative step so issue-reported Arabic auto-fit does not balloon.
+        hi = min(hi, max(current, current * 1.35))
     low, high = lo, hi if target_largest else current
     best = current
     for _ in range(14):
@@ -1276,7 +1385,7 @@ def fit_font_size_to_box(
             low = mid
     if fit_mode == FIT_MODE_SHRINK:
         best = min(current, best)
-    bounds = estimate_text_bounds(text_out, best, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
+    bounds = estimate_text_bounds(text_out, best, resolved, box_w, box_h, line_spacing, letter_spacing, padding, stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, line_break_strategy=line_break_strategy)
     overflow = bounds[0] > box_w or bounds[1] > box_h
     axes = []
     if bounds[0] > box_w:
@@ -1290,7 +1399,7 @@ def fit_font_size_to_box(
         actions.append("balance_lines")
     if resolved == WRITING_MODE_VERTICAL_RL:
         actions.append("check_vertical_punctuation")
-    inner, margin = safe_inner_bounds((box_w, box_h), best, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
+    inner, margin = safe_inner_bounds((box_w, box_h), best, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)
     quality = lettering_quality_score(overflow, [], 7.0, margin, (box_w, box_h))
     scale_hint = max(bounds[0] / max(1.0, box_w), bounds[1] / max(1.0, box_h), 1.0)
     rec_box = (round(max(box_w, bounds[0] + 2 * margin), 2), round(max(box_h, bounds[1] + 2 * margin), 2))
@@ -1301,8 +1410,11 @@ def fit_font_size_to_box(
         actions.append("increase_padding")
     if axes and float(letter_spacing or 1.0) > 0.9:
         actions.append("tighten_letter_spacing")
+    quality_info = _line_quality(best)
+    if quality_info.needs_balance and resolved != WRITING_MODE_VERTICAL_RL and "balance_lines" not in actions:
+        actions.append("balance_lines")
     preset = suggest_manga_preset(text_out, (box_w, box_h), resolved)
-    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset)
+    diag = TextRenderDiagnostics(resolved, overflow, (bounds[0], bounds[1]), (box_w, box_h), [], "", fit_mode, best, bounds[2], bounds[3], line_break_strategy, axes, actions, inner, margin, quality, rec_box, round(scale_hint, 3), clip, preset, quality_info.to_dict())
     return best, text_out, diag
 
 
@@ -1320,6 +1432,7 @@ def smart_fit_text_to_box(
     letter_spacing: float = 1.0,
     padding: float = 0.0,
     stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
     line_break_strategy: str = LINE_BREAK_AUTO,
     shadow_radius: float = 0.0,
     shadow_offset: Sequence[float] | None = None,
@@ -1370,7 +1483,7 @@ def smart_fit_text_to_box(
         active_text, font_size, eff_size, active_fit, active_mode,
         min_font_size=min_font_size, max_font_size=max_font_size,
         line_spacing=active_line_spacing, letter_spacing=active_spacing,
-        padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+        padding=padding, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, line_break_strategy=active_break,
         shadow_radius=shadow_radius, shadow_offset=shadow_offset,
     )
 
@@ -1384,7 +1497,7 @@ def smart_fit_text_to_box(
                 fitted_text, font_size, eff_size, active_fit, active_mode,
                 min_font_size=min_font_size, max_font_size=max_font_size,
                 line_spacing=active_line_spacing, letter_spacing=active_spacing,
-                padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+                padding=padding, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, line_break_strategy=active_break,
                 shadow_radius=shadow_radius, shadow_offset=shadow_offset,
             )
 
@@ -1395,7 +1508,7 @@ def smart_fit_text_to_box(
             fitted_text, font_size, eff_size, active_fit, active_mode,
             min_font_size=min_font_size, max_font_size=max_font_size,
             line_spacing=active_line_spacing, letter_spacing=active_spacing,
-            padding=padding, stroke_width=stroke_width, line_break_strategy=active_break,
+            padding=padding, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, line_break_strategy=active_break,
             shadow_radius=shadow_radius, shadow_offset=shadow_offset,
         )
 
@@ -1613,6 +1726,7 @@ def lettering_proof_metrics(
     letter_spacing: float = 1.0,
     padding: float = 0.0,
     stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
     shadow_radius: float = 0.0,
     shadow_offset: Sequence[float] | None = None,
     line_break_strategy: str = LINE_BREAK_AUTO,
@@ -1624,13 +1738,13 @@ def lettering_proof_metrics(
     measured = estimate_text_bounds(
         text, font_size, resolved, float(box_w or 1.0), float(box_h or 1.0),
         line_spacing=line_spacing, letter_spacing=letter_spacing, padding=padding,
-        stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+        stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
         line_break_strategy=line_break_strategy,
     )
     precise_measured = precise_text_bounds(
         text, "", font_size, resolved, float(box_w or 1.0), float(box_h or 1.0),
         line_spacing=line_spacing, letter_spacing=letter_spacing, padding=padding,
-        stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+        stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset,
         line_break_strategy=line_break_strategy,
     )
     overflow_x = max(0.0, float(measured[0]) - float(box_w or 0.0))
@@ -1641,7 +1755,7 @@ def lettering_proof_metrics(
     actions: List[str] = []
     if overflow_x > 0 or overflow_y > 0:
         actions.append("shrink_to_fit")
-    effect_margin = safe_inner_bounds(box_size, font_size, stroke_width=stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)[1]
+    effect_margin = safe_inner_bounds(box_size, font_size, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, shadow_radius=shadow_radius, shadow_offset=shadow_offset, padding=padding)[1]
     if min(clearance_x, clearance_y) < effect_margin:
         actions.append("increase_padding")
     if density > 0.92 and resolved != WRITING_MODE_VERTICAL_RL:
@@ -1649,6 +1763,13 @@ def lettering_proof_metrics(
     if resolved == WRITING_MODE_VERTICAL_RL:
         actions.append("check_vertical_punctuation")
     cells = vertical_layout_cells(text, font_size, box_size, line_spacing, letter_spacing, padding, limit=sample_limit) if resolved == WRITING_MODE_VERTICAL_RL else []
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        max_chars = max(1, int(max(1.0, float(box_h or 1.0) - 2 * float(padding or 0.0)) / max(1.0, float(font_size or 1.0) * max(0.1, float(letter_spacing or 1.0)))))
+    else:
+        max_chars = max(1, int(max(1.0, float(box_w or 1.0) - 2 * float(padding or 0.0)) / max(1.0, float(font_size or 1.0) * 0.56 * max(0.1, float(letter_spacing or 1.0)))))
+    break_quality = line_break_quality(text, max_chars, line_break_strategy, resolved)
+    if break_quality.needs_balance and resolved != WRITING_MODE_VERTICAL_RL and "balance_lines" not in actions:
+        actions.append("balance_lines")
     return {
         "resolved_writing_mode": resolved,
         "measured_bounds": [round(float(measured[0]), 3), round(float(measured[1]), 3)],
@@ -1662,6 +1783,7 @@ def lettering_proof_metrics(
         "effect_margin": round(float(effect_margin), 3),
         "recommended_actions": actions,
         "vertical_cells": cells,
+        "line_break_quality": break_quality.to_dict(),
     }
 
 def _qt_font_metrics_available() -> bool:

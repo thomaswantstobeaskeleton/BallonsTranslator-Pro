@@ -237,6 +237,31 @@ def ffmt_change_stroke_width(param_name: str, values: float, act_ffmt: FontForma
     for blkitem, value in zip(blkitems, values):
         blkitem.setStrokeWidth(value, **set_kwargs)
 
+
+@font_formating(push_undostack=True)
+def ffmt_change_secondary_stroke_width(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        v = max(0.0, float(value or 0.0))
+        blkitem.fontformat.secondary_stroke_width = v
+        if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+            blkitem.blk.fontformat.secondary_stroke_width = v
+        blkitem.repaint_background()
+        blkitem.update()
+
+
+@font_formating(push_undostack=True)
+def ffmt_change_secondary_srgb(param_name: str, values, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], **kwargs):
+    for blkitem, value in zip(blkitems, values):
+        try:
+            color = [int(value[0]), int(value[1]), int(value[2])]
+        except Exception:
+            color = [255, 255, 255]
+        blkitem.fontformat.secondary_srgb = color
+        if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+            blkitem.blk.fontformat.secondary_srgb = color
+        blkitem.repaint_background()
+        blkitem.update()
+
 @font_formating()
 def ffmt_change_font_size(param_name: str, values: float, act_ffmt: FontFormat, is_global: bool, blkitems: List[TextBlkItem], clip_size=False, **kwargs):
     set_kwargs = global_default_set_kwargs if is_global else local_default_set_kwargs

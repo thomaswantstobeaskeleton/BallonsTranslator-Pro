@@ -61,8 +61,12 @@ class FontFormat(Config):
     font_family: str = shared.DEFAULT_FONT_FAMILY # to always apply shared.DEFAULT_FONT_FAMILY
     font_size: float = 24
     stroke_width: float = 0.
+    # Optional second/back outline for manga SFX and high-contrast bubble lettering.
+    # The normal stroke is drawn above this wider outline. Width is relative to font size.
+    secondary_stroke_width: float = 0.0
     frgb: List = field(default_factory=lambda: [0, 0, 0])
     srgb: List = field(default_factory=lambda: [0, 0, 0])
+    secondary_srgb: List = field(default_factory=lambda: [255, 255, 255])
     bold: bool = False
     underline: bool = False
     strikethrough: bool = False
@@ -150,6 +154,15 @@ class FontFormat(Config):
         except Exception:
             pass
         self.font_weight = fix_fontweight_qt(self.font_weight)
+        try:
+            self.secondary_stroke_width = max(0.0, float(getattr(self, "secondary_stroke_width", 0.0) or 0.0))
+        except Exception:
+            self.secondary_stroke_width = 0.0
+        try:
+            color = list(getattr(self, "secondary_srgb", [255, 255, 255]) or [255, 255, 255])[:3]
+            self.secondary_srgb = [max(0, min(255, int(c))) for c in color]
+        except Exception:
+            self.secondary_srgb = [255, 255, 255]
         self.deprecated_attributes = {}
 
     def deepcopy(self):

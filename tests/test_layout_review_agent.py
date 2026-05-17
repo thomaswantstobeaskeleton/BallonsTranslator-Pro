@@ -201,3 +201,19 @@ def test_planner_proposes_rtl_alignment_and_contrast_stroke():
     actions = [a.action for a in rst.blocks[0].actions]
     assert "set_alignment" in actions
     assert "apply_contrast_stroke" in actions
+
+
+def test_layout_review_suggests_double_outline_for_sfx():
+    planner = LayoutReviewPlanner()
+    rst = planner.review_page(
+        "p1",
+        [BlockSnapshot(
+            block_index=0,
+            xyxy=(0, 0, 100, 60),
+            text="BOOM!!",
+            font_size=36,
+            text_style={"preset_suggestion": "sfx_bold", "secondary_stroke_width": 0.0},
+        )],
+    )
+    actions = [a.action for a in rst.blocks[0].actions]
+    assert "apply_double_outline" in actions
