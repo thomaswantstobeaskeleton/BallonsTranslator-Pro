@@ -26,10 +26,10 @@ At a high level, BallonsTranslator-Pro helps you:
 
 After cloning/downloading and opening the project folder:
 
-- **Windows (recommended):** double-click `launch_win.bat`
-- **Windows (nightly update + launch):** double-click `launch_win_amd_nightly.bat`
-- **Windows (launch + auto-update):** double-click `launch_win_with_autoupdate.bat`
-- **Cross-platform (manual):** run `python launch.py` in terminal
+- **Windows (recommended):** double-click `launcher.bat` for a single menu with setup, auto-update, AMD/NVIDIA/CPU GPU modes.
+- **Windows quick start:** double-click `launch_win.bat` to start immediately with auto GPU detection.
+- **Cross-platform (manual):** run `python launch.py` in terminal.
+- **GPU help:** see [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md), especially for AMD Radeon RX 9070/9060/7900 cards.
 
 If batch files are blocked by Windows SmartScreen, right-click the `.bat` file → **Run as administrator** (or choose **More info → Run anyway**).
 

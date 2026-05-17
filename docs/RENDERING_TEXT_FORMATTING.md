@@ -311,3 +311,11 @@ Atomic bubble fit now has density/profile modes instead of a single hard-coded l
 Settings now persist an **Atomic bubble fit default profile** alongside fill target and max expansion. The canvas context menu also exposes **Atomic bubble fit profile** as a one-off submenu so editors can apply a different density to selected bubbles without changing the global default. Automation callers can pass `profile` to `atomic_bubble_fit`; QA diagnostics include the resolved profile in the `atomic_bubble_fit` payload, so headless review/apply loops can reproduce the same formatting choice.
 
 The profile presets scale the existing fill-target and max-expansion settings instead of replacing them. This keeps older configs compatible while letting users tune the overall aggressiveness once and still switch between roomy, compact, caption, and SFX behavior.
+
+## New in current pass: export-faithful vertical text and portable proof archives
+
+SVG text handoff now uses the same renderer-neutral `vertical_layout_plan()` data consumed by typography QA. For vertical JP/CN text, the exported editable SVG records positioned glyph `<tspan>` entries with column/row coordinates, punctuation classes, rotation hints, and compact `data-tate-chu-yoko="true"` runs for short digit/Latin groups such as chapter numbers and combined punctuation. Horizontal and vertical handoffs also include `font_runs` and `fallback_runs` in the manifest so vector/PSD reconstruction tools can distinguish primary-font text from fallback-font spans.
+
+Layered PSD handoff manifests now include the same `font_runs`, `fallback_runs`, and `vertical_layout_plan` metadata for each translated text layer. Native editable PSD text writing is still deferred, but the manifest/JSX path no longer loses the layout information needed to rebuild vertical or mixed-script text layers faithfully in Photoshop/GIMP-oriented workflows.
+
+Lettering proof packs now write a portable `*_lettering_proof.zip` next to the per-page proof folder. The archive includes the QA JSON/Markdown, editable SVG handoff, PSD helper manifest/JSX, copied helper layers when available, HTML index, and final composite reference when available. This reduces batch/export review friction because a single file can be attached to issue reports or sent to a letterer without manually collecting several subfolders.

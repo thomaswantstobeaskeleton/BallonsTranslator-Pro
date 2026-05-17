@@ -25,4 +25,7 @@ def test_svg_text_handoff_writes_editable_vertical_text(tmp_path):
     assert manifest["text_layers"][0]["writing_mode"] == "vertical_rl"
     assert 'writing-mode="vertical-rl"' in svg
     assert "text_001" in svg
+    assert "data-tate-chu-yoko" in svg
+    assert manifest["text_layers"][0]["vertical_layout_plan"]["tate_chu_yoko_groups"]
+    assert manifest["text_layers"][0]["font_runs"]
     assert manifest["warnings"]

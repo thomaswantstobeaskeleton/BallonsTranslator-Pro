@@ -16,6 +16,18 @@ _Refreshed: 2026-05-17. Source: `git fetch upstream-base dev --depth=120`, then 
 
 ## Recent dev commit review
 
+
+### Current pass review addendum (2026-05-17: `c80eb81` adapted)
+
+Reviewed recent upstream `dev` commits through `6649de1..c80eb81` plus the adjacent dependency/provider commits. This pass safely adapted `c80eb81` (`fix #1179`) by changing Pro's `requirements.txt` from `transformers>=4.56` to `transformers>=4.57.6`. Unlike upstream, Pro keeps a lower-bound requirement rather than an exact pin so Pro-specific GLM-OCR/HF modules and future transformer-compatible providers are not forcibly downgraded. The Google translator `64a5713` was confirmed already represented in Pro (`TransGoogle.concate_text = False`) and left unchanged.
+
+| Upstream commit | Summary | Changed files | Category | Relevant to Pro | Already implemented in Pro | Ported this pass | Porting notes / conflicts / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `c80eb81` | fix #1179 | `requirements.txt` | Dependency/platform compatibility | Yes | No | Yes (adapted) | Raised Pro's transformer floor to `>=4.57.6` instead of exact-pinning `4.57.6`, preserving Pro's broader compatibility while incorporating the upstream PaddleOCRVLManga fix. |
+| `64a5713` | fix #1172 | `modules/translators/trans_google.py` | Bugfix | Yes | Yes | No new change | Pro already has `TransGoogle.concate_text = False`, matching the upstream fix intent without reverting Pro's custom Google API-key handling. |
+| `4c14019` | replace-all/render-all UI lag and save bug | `ui/global_search_widget.py`, `ui/mainwindow.py` | UI/UX improvement | Yes | Partial/custom | Deferred | Still conflicts with Pro global-search/workflow changes; proof/archive/export status work advanced separately. |
+| `1958f66` | Ollama as translation/OCR provider | OCR/provider files | OCR/detection/inpainting/translation module update | Yes | Partial/custom | Deferred | Needs provider settings/onboarding integration rather than blind cherry-pick. |
+
 | Upstream commit | Summary | Changed files | Category | Relevant to Pro | Already implemented in Pro | Ported this pass | Porting notes / conflicts / deferred reason |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `6649de1` | update project save state logic #1178 | `ui/mainwindow.py` | Bugfix | Yes | Partial | Yes (adapted) | Manual audit found and fixed a Pro-specific selected-page detect-only `_run_stages_restore` tuple bug without overwriting Pro save/render logic. Exact grayscale inpaint fix remains fixture-deferred. |

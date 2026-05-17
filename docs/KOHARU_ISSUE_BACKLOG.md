@@ -4,6 +4,20 @@ _Refreshed: 2026-05-17. Source: GitHub REST API because `gh` is unavailable; sca
 
 ## Implemented or advanced in this pass (2026-05-17)
 
+
+### Current pass addendum (2026-05-17: SVG/PSD proof fidelity + portable proof archive)
+
+- [#591](https://github.com/mayocream/koharu/issues/591), [#558](https://github.com/mayocream/koharu/issues/558), [#587](https://github.com/mayocream/koharu/issues/587), and [#454](https://github.com/mayocream/koharu/issues/454) advanced with SVG/PSD handoff fidelity: editable SVG text now uses the renderer-neutral vertical layout plan for real vertical-RL glyph positions, punctuation classes, rotation hints, compact tate-chu-yoko groups, and font-run metadata; layered PSD manifests now preserve the same vertical layout and font-run metadata for downstream editable text reconstruction.
+- [#602](https://github.com/mayocream/koharu/issues/602), [#597](https://github.com/mayocream/koharu/issues/597), and [#509](https://github.com/mayocream/koharu/issues/509) advanced by carrying vertical punctuation/tate-chu-yoko and fallback font runs into export/proof artifacts instead of only the live renderer diagnostics.
+- [#610](https://github.com/mayocream/koharu/issues/610), [#541](https://github.com/mayocream/koharu/issues/541), and [#535](https://github.com/mayocream/koharu/issues/535) advanced with a portable `*_lettering_proof.zip` generated alongside each lettering proof pack so reviewers/batch scripts can hand off QA JSON, Markdown, SVG, PSD-helper manifests, helper layers, and final composite in one archive.
+
+| Issue | Title | Category | Labels | Maps to Pro | Implemented in Pro | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [#591](https://github.com/mayocream/koharu/issues/591) | Add Support for exporting to SVG and/or XCF | PSD/export/layers | feature request, export | Yes | Partial/advanced this pass | High | SVG export now carries editable text plus vertical layout/tate-chu-yoko/fallback-run metadata. XCF remains deferred because no native writer is present. |
+| [#558](https://github.com/mayocream/koharu/issues/558) | PSD export rasterizes all text layers | PSD/export/layers | bug, psd, export | Yes | Partial/advanced this pass | High | Native PSD text writing remains unavailable, but PSD helper handoff now preserves richer editable text metadata and warnings instead of silently rasterizing. |
+| [#587](https://github.com/mayocream/koharu/issues/587) | Text boxes in exported PSD do not match original positions | PSD/export/layers | bug, psd, export | Yes | Partial/advanced this pass | High | PSD helper manifests now include renderer-neutral vertical glyph plans and bounds metadata for more faithful reconstruction. |
+| [#541](https://github.com/mayocream/koharu/issues/541) | Export to large batch fails ~2GB limit? | Batch/project workflow | export, batch | Yes | Partial | Medium | Portable proof ZIP improves review handoff granularity; large native PSD/archive splitting remains deferred to batch-export queue work. |
+
 - [#698](https://github.com/mayocream/koharu/issues/698) **Double outline** — implemented a persisted back/second outline for manga SFX and high-contrast lettering: `FontFormat.secondary_stroke_width`, `secondary_srgb`, renderer compositing, SVG editable-text handoff, text-panel controls, Rendering settings default, layout-review suggestion/action, and tests.
 - [#594](https://github.com/mayocream/koharu/issues/594), [#446](https://github.com/mayocream/koharu/issues/446), [#447](https://github.com/mayocream/koharu/issues/447), [#545](https://github.com/mayocream/koharu/issues/545) — advanced clipping-safe typography by making effect-margin and fit diagnostics account for the larger of primary and back outlines.
 - [#612](https://github.com/mayocream/koharu/issues/612), [#610](https://github.com/mayocream/koharu/issues/610), [#691](https://github.com/mayocream/koharu/issues/691) — extended the local automation/page-list workflow with `list_pages(include_rendering_qa=true)` so headless tools can list pages, textboxes, writing/fit modes, and current rendering issues in one call.

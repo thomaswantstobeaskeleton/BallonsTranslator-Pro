@@ -74,12 +74,12 @@ if errorlevel 1 (
 
 echo.
 echo Setup done. Next:
-echo   1. Run:  launch_win.bat  (or: %PYTHON% launch.py)
-echo   2. First run will install PyTorch (auto-detects NVIDIA/AMD GPU or CPU).
+echo   1. Run:  launcher.bat  (recommended menu) or launch_win.bat
+echo   2. First run will install the GPU runtime (NVIDIA CUDA / AMD ROCm-DirectML / CPU).
 echo   3. Fonts:  fonts\   (add .ttf/.otf here)
 echo   4. Models: data\    (downloaded on first use; copy this folder when moving)
 echo   5. Output: saved in each project folder you open
-echo   6. Problems? See docs\TROUBLESHOOTING.md
+echo   6. GPU problems? See docs\GPU_ACCELERATION.md and docs\TROUBLESHOOTING.md
 echo.
 pause
 endlocal

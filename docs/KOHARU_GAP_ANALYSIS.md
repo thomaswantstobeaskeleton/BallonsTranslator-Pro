@@ -2,6 +2,44 @@
 
 _Last audited: 2026-05-17 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (300 all-state issues plus topic searches scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (300 all-state issues plus topic searches scanned), and recent upstream `dev` commits fetched from Git._
 
+## Newly implemented in this pass (2026-05-17 fourth follow-up: export-faithful vertical handoff and proof archive)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Export-faithful vertical SVG text | Editable SVG handoff now emits vertical-RL text from `vertical_layout_plan()` as positioned glyph tspans with column/row metadata, punctuation classes, rotation hints, and compact tate-chu-yoko groups instead of depending on a single browser-rendered vertical string. | Koharu #591 SVG/XCF export, #509 vertical wrap, #597 manual direction, #602 Arabic/export; upstream #1128 vertical text and #995 punctuation conversion. | `utils/svg_text_export.py`, `tests/test_svg_text_export.py` |
+| Font-run/fallback metadata in handoff | SVG and layered PSD helper manifests now include `font_runs` plus `fallback_runs`, and PSD helper text layers include the same vertical layout plan used by QA/proof metrics for better editable-text reconstruction. | Koharu #558/#587/#454 PSD editable text/position fidelity and #595 font UX; upstream #1122 font problems and #1169/#1077 fit/export parity. | `utils/svg_text_export.py`, `utils/layered_psd_export.py`, `tests/test_layered_psd_export.py` |
+| Portable lettering proof archives | Each lettering proof pack now creates a `*_lettering_proof.zip` containing QA JSON/Markdown, HTML index, editable SVG, PSD-helper manifest/JSX, helper layers, and final composite when available. | Koharu #610/#541/#535 batch/export handoff pain; upstream #1020 batch queue and #1052 better error/log attachments. | `utils/lettering_proof_export.py`, `tests/test_lettering_proof_export.py`, `docs/RENDERING_TEXT_FORMATTING.md` |
+| Upstream dependency compatibility | Adapted upstream dev `c80eb81` / issue #1179 by raising Pro's transformer floor to `>=4.57.6` without exact-pinning, preserving Pro's broader module compatibility. | dmMaze/BallonsTranslator #1179, commit `c80eb81`. | `requirements.txt`, `docs/UPSTREAM_BALLONSTRANSLATOR_DEV_SYNC.md` |
+
+### Progress audit update for this fourth follow-up
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Vertical export now preserves per-glyph column/row placement, punctuation class, rotate hints, and tate-chu-yoko groups from the shared layout plan. | Native HarfBuzz/OpenType vertical alternates and visual regression snapshots remain deferred. |
+| PSD/export/layers | Implemented / advanced | PSD helper manifests now carry font-run and vertical layout metadata; proof packs are zipped for one-file handoff. | Native editable PSD text layers remain deferred because the available Python stack still lacks safe cross-editor text-layer writing. |
+| Workflow/export UX | Implemented / advanced | Letterers/reviewers can send one ZIP per proof page instead of collecting JSON, Markdown, SVG, helper layer, and manifest files manually. | Full batch export queue/large archive splitting remains deferred. |
+| Upstream BallonsTranslator sync | Active | Ported `c80eb81` as an adapted transformer lower-bound update and confirmed `64a5713` is already represented in Pro. | `4c14019` and `1958f66` remain deferred due Pro-specific workflow/provider conflicts. |
+
+### Koharu issue-inspired items implemented/deferred
+
+- Implemented/advanced: #591 SVG export, #558/#587/#454 PSD editable text/style/position handoff, #509/#597/#602 vertical/RTL export parity, #610/#541/#535 portable batch/export proof handoff.
+- Deferred: XCF export from #591, native editable PSD writing from #558/#587, full large-batch archive splitting from #541.
+
+### Upstream BallonsTranslator issue/dev items implemented/deferred
+
+- Implemented/advanced: #1179 via adapted `c80eb81`, #1128/#995 through explicit vertical punctuation export metadata, #1134 through richer export/proof artifacts.
+- Reviewed/deferred: `4c14019` replace-all/render-all UI changes pending Pro global-search conflict audit; `1958f66` Ollama provider integration pending settings/onboarding pass; `88d4969` gguf dependency pending module matrix.
+
+### Next batch candidates
+
+1. Native editable PSD text-layer writer validation for Koharu #558/#587, using current manifest as the contract.
+2. Visual regression screenshots for SVG/Qt vertical punctuation and tate-chu-yoko on Qt5/Qt6/Windows DPI.
+3. Cross-page/batch proof ZIP queue with progress/cancel and optional archive splitting for Koharu #541/#610.
+4. Provider/model onboarding diagnostics for Ollama/Flux/gguf from upstream #1167/#1171/#1175.
+5. Direct `4c14019` conflict-aware port if Pro reproduces replace-and-render save/UI lag.
+6. XCF handoff export investigation for Koharu #591.
+
+
 
 ## Newly implemented in this pass (2026-05-17 third follow-up: atomic bubble fitting)
 

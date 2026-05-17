@@ -62,6 +62,8 @@ echo Couldn't install pip
 goto :show_stdout_stderr
 
 :launch
+echo Using: %PYTHON%
+echo GPU runtime: auto by default. Use --gpu-profile amd-directml, amd-rocm-preview, nvidia-cuda, or cpu to force.
 start "BallonsTranslator" cmd /k "cd /d ""%~dp0"" && %PYTHON% launch.py %*"
 exit /b
 
