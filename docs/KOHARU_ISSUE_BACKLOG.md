@@ -17,6 +17,8 @@ _Refreshed: 2026-05-17. Source: GitHub REST API because `gh` is unavailable; sca
 - Second follow-up 2026-05-17: [#602](https://github.com/mayocream/koharu/issues/602) and [#583](https://github.com/mayocream/koharu/issues/583) advanced with an RTL expand-to-fill cap so Arabic/Hebrew auto-fit no longer inflates dramatically in large boxes.
 - Second follow-up 2026-05-17: [#535](https://github.com/mayocream/koharu/issues/535), [#568](https://github.com/mayocream/koharu/issues/568), and [#610](https://github.com/mayocream/koharu/issues/610) advanced by adding persisted batch export filename templates in Settings, the export dialog, and the automation API.
 
+- Third follow-up 2026-05-17: [#117](https://github.com/mayocream/koharu/issues/117), [#594](https://github.com/mayocream/koharu/issues/594), [#649](https://github.com/mayocream/koharu/issues/649), and [#528](https://github.com/mayocream/koharu/issues/528) advanced with Atomic bubble fit: one undoable formatter for bubble-safe font size, padding, centered alignment, and balanced line spread.
+
 ## Issue backlog
 
 | Issue | Title | Category | Labels | Maps to Pro | Implemented in Pro | Priority | Notes / deferred reason |

@@ -4,6 +4,7 @@ _Refreshed: 2026-05-17. Source: `git fetch upstream-base dev --depth=120`, then 
 
 ## Ported/adapted in this pass
 
+- Third follow-up 2026-05-17: no new direct cherry-pick; atomic bubble fit adapts upstream auto-sizing/workflow issue pressure while preserving Pro-specific rendering QA and context-menu architecture.
 - Second follow-up 2026-05-17: refreshed `upstream-base/dev` and reviewed current head range `6649de1`..`91f5d13` again. No requirements/provider commit was safe to cherry-pick without Pro module-matrix validation, so this pass adapted upstream issue themes instead: safer fit/export behavior and batch filename workflow without overwriting Pro automation/rendering systems.
 - Second follow-up 2026-05-17: rechecked `4c14019` (replace-all/render-all UI freeze/save bug) and kept the direct port deferred because Pro's global-search and batch-export code diverged; Pro-specific export manifest/naming improvements were implemented instead.
 - Follow-up 2026-05-17: reviewed `d677d1b`, `1c6643b`, and `36fa134`; Pro already contains the progress-window and continue-mode fixes, while this pass safely advanced related shortcut/workflow polish without cherry-picking incompatible UI code.

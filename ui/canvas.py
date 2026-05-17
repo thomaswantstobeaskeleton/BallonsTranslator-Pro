@@ -209,6 +209,8 @@ class Canvas(QGraphicsScene):
     layout_textblks = Signal()
     auto_fit_font_signal = Signal()
     smart_auto_fit_signal = Signal()
+    atomic_bubble_fit_signal = Signal()
+    atomic_bubble_fit_profile_signal = Signal(str)
     polish_typography_signal = Signal()
     auto_fit_binary_signal = Signal()
     set_balloon_shape_signal = Signal(str)
@@ -1299,7 +1301,8 @@ class Canvas(QGraphicsScene):
             menu.addSeparator()
 
             # --- Format ---
-            format_act = layout_act = fit_to_bubble_act = auto_fit_act = smart_auto_fit_act = polish_typography_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            format_act = layout_act = fit_to_bubble_act = auto_fit_act = smart_auto_fit_act = atomic_bubble_fit_act = polish_typography_act = auto_fit_binary_act = angle_act = squeeze_act = None
+            atomic_comfortable_act = atomic_dense_act = atomic_caption_act = atomic_sfx_act = None
             writing_auto_act = writing_ltr_act = writing_vertical_act = writing_rtl_act = recenter_text_in_box_act = None
             mask_safe_padding_act = resize_to_fit_content_act = center_in_bubble_act = fit_to_mask_safe_box_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
@@ -1331,6 +1334,18 @@ class Canvas(QGraphicsScene):
                 if smart_auto_fit_act is not None:
                     smart_auto_fit_act.setToolTip(self.tr("Balance lines, adjust writing mode/tracking/leading, and shrink font against mask-safe bounds before resizing."))
                 actions_map['format_smart_auto_fit'] = smart_auto_fit_act
+            if context_menu_visible('format_atomic_bubble_fit') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                atomic_bubble_fit_act = format_menu.addAction(self.tr("Atomic bubble fit"))
+                if atomic_bubble_fit_act is not None:
+                    atomic_bubble_fit_act.setToolTip(self.tr("Format the selected text as one balanced block inside the bubble using the configured default profile."))
+                atomic_profile_menu = format_menu.addMenu(self.tr("Atomic bubble fit profile"))
+                atomic_profile_menu.setToolTip(self.tr("Choose a one-off density/profile for the selected bubble text."))
+                atomic_comfortable_act = atomic_profile_menu.addAction(self.tr("Comfortable / roomy"))
+                atomic_dense_act = atomic_profile_menu.addAction(self.tr("Dense / compact"))
+                atomic_caption_act = atomic_profile_menu.addAction(self.tr("Caption / narration"))
+                atomic_sfx_act = atomic_profile_menu.addAction(self.tr("SFX / loud"))
+                actions_map['format_atomic_bubble_fit'] = atomic_bubble_fit_act
             if context_menu_visible('format_polish_typography') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 polish_typography_act = format_menu.addAction(self.tr("Polish typography"))
@@ -1686,6 +1701,16 @@ class Canvas(QGraphicsScene):
                 self.auto_fit_font_signal.emit()
             elif rst == smart_auto_fit_act:
                 self.smart_auto_fit_signal.emit()
+            elif rst == atomic_bubble_fit_act:
+                self.atomic_bubble_fit_signal.emit()
+            elif rst == atomic_comfortable_act:
+                self.atomic_bubble_fit_profile_signal.emit('comfortable')
+            elif rst == atomic_dense_act:
+                self.atomic_bubble_fit_profile_signal.emit('dense')
+            elif rst == atomic_caption_act:
+                self.atomic_bubble_fit_profile_signal.emit('caption')
+            elif rst == atomic_sfx_act:
+                self.atomic_bubble_fit_profile_signal.emit('sfx')
             elif rst == polish_typography_act:
                 self.polish_typography_signal.emit()
             elif rst == auto_fit_binary_act:

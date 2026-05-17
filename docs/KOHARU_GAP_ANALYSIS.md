@@ -3,6 +3,24 @@
 _Last audited: 2026-05-17 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (300 all-state issues plus topic searches scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (300 all-state issues plus topic searches scanned), and recent upstream `dev` commits fetched from Git._
 
 
+## Newly implemented in this pass (2026-05-17 third follow-up: atomic bubble fitting)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Atomic bubble-aware lettering fit | Added a one-shot `plan_atomic_bubble_fit` formatter that treats the textbox/bubble as a single composition: comfortable inset, centered alignment, balanced line spread, conservative leading/tracking, safe max expansion, writing-mode awareness, and effect-aware font fitting. | Follow-up to Koharu #117 word splitting, #594 advanced formatting, #509 vertical wrapping, #583/#602 Arabic sizing, and upstream #1077 auto text sizing. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| User-visible atomic fit workflow | Added an **Atomic bubble fit** context-menu action for selected textboxes, scene-manager application with undo support, persisted Rendering settings for target fill/max expansion, and a local automation `atomic_bubble_fit` command. | Koharu workflow requests #589/#649/#528/#535 around fewer manual steps and consistent lettering; upstream workflow/fit requests #1077/#229. | `ui/canvas.py`, `ui/scenetext_manager.py`, `ui/configpanel.py`, `utils/config.py`, `ui/mainwindow.py` |
+| QA/workflow integration | Rendering QA now reports underfilled/overfilled bubble text, includes atomic-fit payloads, applies selected `atomic_bubble_fit` fixes, and lettering workflow treats it as a core auto-fix step. | Koharu final lettering quality and batch QA workflow; upstream auto-fit/export review. | `utils/rendering_qa.py`, `utils/lettering_workflow.py`, `tests/test_rendering_qa.py` |
+
+### Progress audit update for this third follow-up
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Atomic bubble fitting now combines sizing, padding, line spread, alignment, writing mode, line-break policy, and effect-safe bounds in one reusable backend plan. | Native glyph-shape/hyphenation dictionaries remain deferred. |
+| Editor workflow | Implemented / advanced | A selected textbox can now be formatted as a coherent bubble lettering block from the context menu instead of separately running polish, smart-fit, padding, and alignment actions. | Dedicated toolbar button/icon is deferred because the context menu/API path is connected and avoids adding more top-level chrome. |
+| Automation/API/headless | Implemented / advanced | `atomic_bubble_fit` API action enables batch/headless tools to apply the same bubble-aware formatter to selected indices. | Multi-page atomic fit through API can be added after selection/index semantics are finalized. |
+
+
+
 ## Newly implemented in this pass (2026-05-17 second follow-up: line-quality QA, RTL fit safety, export naming)
 
 | Area | Implemented | Research source | Files |

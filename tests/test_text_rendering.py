@@ -449,3 +449,48 @@ def test_rtl_expand_is_capped_for_arabic_auto_fit():
     expanded, _text, diag = fit_font_size_to_box("مرحبا بالعالم", 20, (500, 160), FIT_MODE_EXPAND, max_font_size=96)
     assert diag.resolved_writing_mode == WRITING_MODE_RTL
     assert expanded <= 27.1
+
+
+def test_atomic_bubble_fit_balances_lines_and_uses_readable_fill():
+    from utils.text_rendering import plan_atomic_bubble_fit
+    result = plan_atomic_bubble_fit(
+        "This is a compact speech bubble with uneven wording",
+        18,
+        (180, 100),
+        line_spacing=1.35,
+        letter_spacing=1.12,
+        padding=0,
+        target_fill=0.76,
+        max_expand_ratio=1.15,
+    )
+    assert result.font_size <= 18 * 1.15 + 0.1
+    assert result.text_padding >= 1.5
+    assert result.alignment == 1
+    assert "\n" in result.text
+    assert 0.2 < result.fill_ratio < 0.95
+    assert "line_break_quality" in result.to_dict()
+
+
+def test_atomic_bubble_fit_respects_vertical_cjk_and_punctuation():
+    from utils.text_rendering import plan_atomic_bubble_fit
+    result = plan_atomic_bubble_fit("第12話!?", 18, (60, 180), writing_mode="auto")
+    assert result.resolved_writing_mode == WRITING_MODE_VERTICAL_RL
+    assert "⁉" in result.text or "⁈" in result.text
+    assert result.text_padding >= 1.0
+
+
+def test_atomic_bubble_fit_profiles_change_density_and_export_profile():
+    from utils.text_rendering import plan_atomic_bubble_fit
+
+    text = "A short line should breathe in one bubble but grow louder in SFX"
+    comfortable = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="roomy")
+    dense = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="dense")
+    sfx = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="sound-effect")
+
+    assert comfortable.profile == "comfortable"
+    assert dense.profile == "dense"
+    assert sfx.profile == "sfx"
+    assert dense.text_padding <= comfortable.text_padding
+    assert dense.diagnostics["target_fill"] > comfortable.diagnostics["target_fill"]
+    assert sfx.line_break_strategy == "loose"
+    assert sfx.to_dict()["profile"] == "sfx"

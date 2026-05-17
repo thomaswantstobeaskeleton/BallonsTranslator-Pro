@@ -12,6 +12,7 @@ from .custom_widget.focus_ring import FocusRingFrame
 from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils.data_path_manager import resolve_data_path, free_space_gb, ensure_data_path
+from utils.text_rendering import ATOMIC_FIT_BALANCED, ATOMIC_FIT_COMFORTABLE, ATOMIC_FIT_DENSE, ATOMIC_FIT_CAPTION, ATOMIC_FIT_SFX, normalize_atomic_fit_mode
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .glossary_map_dialog import GlossaryMapDialog
@@ -943,6 +944,34 @@ class ConfigPanel(Widget):
         self.render_default_text_padding_spin.setDecimals(1)
         self.render_default_text_padding_spin.valueChanged.connect(self.on_render_default_text_padding_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_text_padding_spin, self.tr('Default text padding'), discription=self.tr('Inset in image pixels to avoid clipped strokes/punctuation.')))
+        self.render_atomic_fit_profile_combo = QComboBox(self)
+        for label, value in [
+            (self.tr('Balanced speech'), ATOMIC_FIT_BALANCED),
+            (self.tr('Comfortable / roomy'), ATOMIC_FIT_COMFORTABLE),
+            (self.tr('Dense / compact'), ATOMIC_FIT_DENSE),
+            (self.tr('Caption / narration'), ATOMIC_FIT_CAPTION),
+            (self.tr('SFX / loud'), ATOMIC_FIT_SFX),
+        ]:
+            self.render_atomic_fit_profile_combo.addItem(label, value)
+        self.render_atomic_fit_profile_combo.currentIndexChanged.connect(self.on_render_atomic_fit_profile_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_atomic_fit_profile_combo,
+            self.tr('Atomic bubble fit default profile'),
+            discription=self.tr('Controls the one-click bubble formatter density: roomy dialogue, compact dialogue, captions, or SFX-style loose wrapping.')
+        ))
+        self.render_atomic_fit_target_fill_spin = QDoubleSpinBox(self)
+        self.render_atomic_fit_target_fill_spin.setRange(0.55, 0.94)
+        self.render_atomic_fit_target_fill_spin.setSingleStep(0.01)
+        self.render_atomic_fit_target_fill_spin.setDecimals(2)
+        self.render_atomic_fit_target_fill_spin.valueChanged.connect(self.on_render_atomic_fit_target_fill_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_atomic_fit_target_fill_spin, self.tr('Atomic bubble fit fill target'), discription=self.tr('How much of the bubble-safe area atomic fit should occupy. Lower values leave more breathing room.')))
+        self.render_atomic_fit_max_expand_spin = QDoubleSpinBox(self)
+        self.render_atomic_fit_max_expand_spin.setRange(1.0, 1.8)
+        self.render_atomic_fit_max_expand_spin.setSingleStep(0.02)
+        self.render_atomic_fit_max_expand_spin.setDecimals(2)
+        self.render_atomic_fit_max_expand_spin.valueChanged.connect(self.on_render_atomic_fit_max_expand_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_atomic_fit_max_expand_spin, self.tr('Atomic bubble fit max font expansion'), discription=self.tr('Maximum one-click font size growth relative to the current textbox style.')))
+
         self.render_overflow_warnings_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Enable renderer overflow warnings'),
             discription=self.tr('Layout review and diagnostics flag text whose measured bounds exceed the box.')
@@ -1958,6 +1987,12 @@ class ConfigPanel(Widget):
         pcfg.render_default_shadow_radius = float(self.render_default_shadow_radius_spin.value())
     def on_render_default_text_padding_changed(self):
         pcfg.render_default_text_padding = float(self.render_default_text_padding_spin.value())
+    def on_render_atomic_fit_profile_changed(self):
+        pcfg.render_atomic_fit_profile = normalize_atomic_fit_mode(self.render_atomic_fit_profile_combo.currentData())
+    def on_render_atomic_fit_target_fill_changed(self):
+        pcfg.render_atomic_fit_target_fill = float(self.render_atomic_fit_target_fill_spin.value())
+    def on_render_atomic_fit_max_expand_changed(self):
+        pcfg.render_atomic_fit_max_expand = float(self.render_atomic_fit_max_expand_spin.value())
     def on_render_overflow_warnings_changed(self):
         pcfg.render_overflow_warnings = self.render_overflow_warnings_checker.isChecked()
     def on_render_diagnostics_overlay_changed(self):
@@ -2214,6 +2249,13 @@ class ConfigPanel(Widget):
                 self._set_render_secondary_stroke_color_button()
             self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
+            if hasattr(self, 'render_atomic_fit_profile_combo'):
+                idx = self.render_atomic_fit_profile_combo.findData(normalize_atomic_fit_mode(getattr(pcfg, 'render_atomic_fit_profile', 'balanced')))
+                self.render_atomic_fit_profile_combo.setCurrentIndex(max(0, idx))
+            if hasattr(self, 'render_atomic_fit_target_fill_spin'):
+                self.render_atomic_fit_target_fill_spin.setValue(float(getattr(pcfg, 'render_atomic_fit_target_fill', 0.78)))
+            if hasattr(self, 'render_atomic_fit_max_expand_spin'):
+                self.render_atomic_fit_max_expand_spin.setValue(float(getattr(pcfg, 'render_atomic_fit_max_expand', 1.22)))
             self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
             self.render_diagnostics_overlay_checker.setChecked(bool(getattr(pcfg, 'render_diagnostics_overlay', False)))
             if hasattr(self, 'render_auto_polish_checker'):

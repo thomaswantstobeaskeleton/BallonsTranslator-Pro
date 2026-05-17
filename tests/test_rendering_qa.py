@@ -172,3 +172,35 @@ def test_rendering_qa_can_balance_widow_lines():
     project = type("P", (), {"pages": {"p.png": [blk]}})()
     result = apply_project_rendering_fixes(project, pages=["p.png"], config_obj=Cfg(), selected_fixes=[{"page": "p.png", "index": 0, "actions": ["balance_lines"]}])
     assert result["applied_count"] >= 0
+
+
+def test_rendering_qa_suggests_atomic_bubble_fit_for_poor_bubble_fill():
+    from utils.fontformat import FontFormat
+    from utils.rendering_qa import analyze_text_block, apply_project_rendering_fixes
+
+    class Cfg:
+        render_fallback_fonts_latin = ""
+        render_fallback_fonts_cjk = ""
+        render_fallback_fonts_korean = ""
+        render_fallback_fonts_rtl = ""
+        render_fallback_fonts_emoji = ""
+        render_atomic_fit_target_fill = 0.76
+        render_atomic_fit_max_expand = 1.15
+        render_atomic_fit_profile = "dense"
+        module = type("M", (), {"layout_font_size_min": 6.0, "layout_font_size_max": 96.0})()
+
+    blk = type("B", (), {})()
+    blk.xyxy = [0, 0, 220, 120]
+    blk.translation = "tiny"
+    blk.rich_text = ""
+    blk.text = []
+    blk.text_mask = None
+    blk.fontformat = FontFormat(font_size=8, writing_mode="horizontal_ltr", fit_mode="shrink", line_break_strategy="auto", text_padding=0)
+    diag = analyze_text_block(blk, "p.png", 0, config_obj=Cfg())
+    assert any(s.get("action") == "atomic_bubble_fit" for s in diag["suggestions"])
+    assert diag["atomic_bubble_fit"]["profile"] == "dense"
+    project = type("P", (), {"pages": {"p.png": [blk]}})()
+    result = apply_project_rendering_fixes(project, pages=["p.png"], config_obj=Cfg(), selected_fixes=[{"page": "p.png", "index": 0, "actions": ["atomic_bubble_fit"]}])
+    assert result["applied_count"] >= 1
+    assert blk.fontformat.font_size >= 8
+    assert blk.fontformat.text_padding > 0

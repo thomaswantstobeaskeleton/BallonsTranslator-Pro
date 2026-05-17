@@ -15,6 +15,8 @@ _Refreshed: 2026-05-17. Source: GitHub REST API because `gh` is unavailable; sca
 - Second follow-up 2026-05-17: [#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077), [#995](https://github.com/dmMaze/BallonsTranslator/issues/995), and font/layout bug reports such as [#862](https://github.com/dmMaze/BallonsTranslator/issues/862)/[#972](https://github.com/dmMaze/BallonsTranslator/issues/972) advanced with line-break quality diagnostics, safer RTL expand-to-fill, and a secondary-outline fit-margin regression fix.
 - Second follow-up 2026-05-17: [#229](https://github.com/dmMaze/BallonsTranslator/issues/229) export suggestions advanced with Settings/dialog/API batch export filename templates and safe cross-platform filename sanitization.
 
+- Third follow-up 2026-05-17: [#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077) and [#229](https://github.com/dmMaze/BallonsTranslator/issues/229) advanced with Atomic bubble fit plus an automation command for coherent bubble-internal formatting.
+
 ## Issue backlog
 
 | Issue | Title | Category | Labels | Maps to Pro | Implemented in Pro | Priority | Notes / deferred reason |

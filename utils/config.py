@@ -584,6 +584,9 @@ class ProgramConfig(Config):
     render_default_shadow_radius: float = 0.0
     render_default_shadow_strength: float = 1.0
     render_default_text_padding: float = 2.0
+    render_atomic_fit_target_fill: float = 0.78
+    render_atomic_fit_max_expand: float = 1.22
+    render_atomic_fit_profile: str = "balanced"
     render_fallback_fonts_latin: str = "Arial, Noto Sans, DejaVu Sans"
     render_fallback_fonts_cjk: str = "Noto Sans CJK JP, Noto Sans CJK SC, Yu Gothic, Microsoft YaHei"
     render_fallback_fonts_korean: str = "Noto Sans CJK KR, Malgun Gothic"
@@ -715,7 +718,7 @@ CONFIG_KEY_ORDER = (
     "model_packages_enabled", "model_package_preset_ids",
     "dev_mode",
     "diagnostic_mode",
-    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_auto_polish_on_ocr", "render_default_font_family", "render_default_stroke_width", "render_default_secondary_stroke_width", "render_default_secondary_stroke_color", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "render_favorite_fonts", "render_recent_fonts", "render_custom_manga_presets", "export_open_folder_after_batch", "export_include_unrendered_pages", "export_filename_template", "text_editor_top_padding",
+    "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_auto_polish_on_ocr", "render_default_font_family", "render_default_stroke_width", "render_default_secondary_stroke_width", "render_default_secondary_stroke_color", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_atomic_fit_target_fill", "render_atomic_fit_max_expand", "render_atomic_fit_profile", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "render_favorite_fonts", "render_recent_fonts", "render_custom_manga_presets", "export_open_folder_after_batch", "export_include_unrendered_pages", "export_filename_template", "text_editor_top_padding",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
     "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
     "huggingface_token", "translator_last_model_by_provider",

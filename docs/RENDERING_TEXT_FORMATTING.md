@@ -290,3 +290,24 @@ Rendering QA and layout review can now propose/apply `balance_lines` for poor wr
 RTL expand-to-fill fitting is capped for Arabic/Hebrew text so Auto/Expand does not exaggerate font size in large boxes. This is a conservative guard until full optional shaping/ligature metrics are introduced.
 
 Batch export now supports a persisted filename template in Settings and the Export dialog. Supported tokens are `{index}`, `{index:03d}`, `{page}`, `{stem}`, `{source}`, and `{ext}`. The automation `export` route also accepts `filename_template`, and the export manifest records the template used. Filenames are sanitized for Windows and path separators before writing.
+
+
+## 2026-05-17 third follow-up: Atomic bubble fit
+
+Selected textboxes now have an **Atomic bubble fit** action in the canvas context menu. It is designed for the common manga-editing case where text technically fits but does not feel like a single well-composed block inside the speech bubble. The formatter plans padding/inset, balanced line breaks, line spacing, letter spacing, centered alignment, writing mode, and font size together, then applies the result as one undoable edit.
+
+The same formatter is available to automation as `atomic_bubble_fit` and through rendering QA as an `atomic_bubble_fit` suggestion. Rendering settings expose two tuning values: **Atomic bubble fit fill target** and **Atomic bubble fit max font expansion**. Lower fill targets leave more breathing room; lower max expansion prevents short text from becoming too large.
+
+## 2026-05-17 fourth follow-up: Atomic fit profiles and one-off modes
+
+Atomic bubble fit now has density/profile modes instead of a single hard-coded layout personality:
+
+- **Balanced speech** remains the default one-click formatter for normal bubbles.
+- **Comfortable / roomy** leaves extra inset and avoids over-enlarging short lines.
+- **Dense / compact** fills more of the safe bubble area for crowded dialogue.
+- **Caption / narration** favors balanced horizontal blocks with left alignment for rectangular narration boxes.
+- **SFX / loud** allows looser wrapping and more expansion for sound-effect lettering.
+
+Settings now persist an **Atomic bubble fit default profile** alongside fill target and max expansion. The canvas context menu also exposes **Atomic bubble fit profile** as a one-off submenu so editors can apply a different density to selected bubbles without changing the global default. Automation callers can pass `profile` to `atomic_bubble_fit`; QA diagnostics include the resolved profile in the `atomic_bubble_fit` payload, so headless review/apply loops can reproduce the same formatting choice.
+
+The profile presets scale the existing fill-target and max-expansion settings instead of replacing them. This keeps older configs compatible while letting users tune the overall aggressiveness once and still switch between roomy, compact, caption, and SFX behavior.

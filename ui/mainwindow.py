@@ -888,6 +888,7 @@ class MainWindow(mainwindow_cls):
             'rendering_presets': self._api_rendering_presets,
             'fix_rendering_issues': self._api_fix_rendering_issues,
             'smart_fit_textboxes': self._api_smart_fit_textboxes,
+            'atomic_bubble_fit': self._api_atomic_bubble_fit,
             'polish_typography': self._api_polish_typography,
             'export_rendering_qa': self._api_export_rendering_qa,
             'export_lettering_proof': self._api_export_lettering_proof,
@@ -1394,6 +1395,27 @@ class MainWindow(mainwindow_cls):
             self.imgtrans_proj.save()
         self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Polished typography: {0} text boxes').format(changed))
         return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'changed': changed, 'indices': indices}
+
+
+    def _api_atomic_bubble_fit(self, body: dict):
+        return self._api_call_ui(self._api_atomic_bubble_fit_ui, body)
+
+    def _api_atomic_bubble_fit_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        indices = (body or {}).get('indices')
+        if indices is not None:
+            indices = [int(i) for i in indices]
+        before = len(indices) if indices is not None else len(self.canvas.selected_text_items())
+        profile = (body or {}).get('profile')
+        changed = self.st_manager.atomic_bubble_fit_textboxes(indices=indices, push_undo=False, profile=profile)
+        if changed:
+            self.st_manager.updateSceneTextitems()
+            if self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.canvas.setProjSaveState(False)
+        self.pipelineInsightsPanel.add_event('API', self.tr('Atomic bubble fit updated {0} / {1} text boxes').format(changed, before))
+        return {'ok': True, 'changed': changed, 'target_count': before, 'page': self.imgtrans_proj.current_img, 'profile': profile}
 
     def _api_smart_fit_textboxes(self, body: dict):
         return self._api_call_ui(self._api_smart_fit_textboxes_ui, body)

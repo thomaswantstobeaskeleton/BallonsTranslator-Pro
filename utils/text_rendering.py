@@ -38,6 +38,26 @@ READING_ORDER_LTR = "ltr"
 READING_ORDER_TTB = "ttb"
 READING_ORDERS = {READING_ORDER_AUTO, READING_ORDER_RTL, READING_ORDER_LTR, READING_ORDER_TTB}
 
+ATOMIC_FIT_BALANCED = "balanced"
+ATOMIC_FIT_COMFORTABLE = "comfortable"
+ATOMIC_FIT_DENSE = "dense"
+ATOMIC_FIT_CAPTION = "caption"
+ATOMIC_FIT_SFX = "sfx"
+ATOMIC_FIT_MODES = {
+    ATOMIC_FIT_BALANCED,
+    ATOMIC_FIT_COMFORTABLE,
+    ATOMIC_FIT_DENSE,
+    ATOMIC_FIT_CAPTION,
+    ATOMIC_FIT_SFX,
+}
+ATOMIC_FIT_MODE_PRESETS = {
+    ATOMIC_FIT_BALANCED: {"target_fill": 0.78, "max_expand_ratio": 1.22, "padding_scale": 1.0, "spacing_max": 1.08, "leading_max": 1.18, "alignment": 1},
+    ATOMIC_FIT_COMFORTABLE: {"target_fill": 0.70, "max_expand_ratio": 1.12, "padding_scale": 1.25, "spacing_max": 1.04, "leading_max": 1.16, "alignment": 1},
+    ATOMIC_FIT_DENSE: {"target_fill": 0.88, "max_expand_ratio": 1.38, "padding_scale": 0.72, "spacing_max": 1.02, "leading_max": 1.06, "alignment": 1},
+    ATOMIC_FIT_CAPTION: {"target_fill": 0.90, "max_expand_ratio": 1.18, "padding_scale": 1.15, "spacing_max": 1.0, "leading_max": 1.16, "alignment": 0, "force_break": LINE_BREAK_BALANCED},
+    ATOMIC_FIT_SFX: {"target_fill": 0.92, "max_expand_ratio": 1.55, "padding_scale": 0.90, "spacing_max": 1.10, "leading_max": 1.02, "alignment": 1, "force_break": LINE_BREAK_LOOSE},
+}
+
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 KOREAN_RE = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
 RTL_RE = re.compile(r"[\u0590-\u05ff\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
@@ -269,6 +289,50 @@ class SmartFitResult:
 
 
 @dataclass
+class AtomicBubbleFitResult:
+    """One-shot formatting plan for keeping text visually atomic inside a bubble."""
+
+    profile: str
+    font_size: float
+    text: str
+    writing_mode: str
+    resolved_writing_mode: str
+    fit_mode: str
+    line_break_strategy: str
+    line_spacing: float
+    letter_spacing: float
+    text_padding: float
+    alignment: int
+    overflow: bool
+    quality_score: float
+    fill_ratio: float
+    line_break_quality: Dict[str, object]
+    actions: List[str]
+    diagnostics: Dict[str, object]
+
+    def to_dict(self) -> dict:
+        return {
+            "profile": self.profile,
+            "font_size": self.font_size,
+            "text": self.text,
+            "writing_mode": self.writing_mode,
+            "resolved_writing_mode": self.resolved_writing_mode,
+            "fit_mode": self.fit_mode,
+            "line_break_strategy": self.line_break_strategy,
+            "line_spacing": self.line_spacing,
+            "letter_spacing": self.letter_spacing,
+            "text_padding": self.text_padding,
+            "alignment": self.alignment,
+            "overflow": bool(self.overflow),
+            "quality_score": self.quality_score,
+            "fill_ratio": self.fill_ratio,
+            "line_break_quality": dict(self.line_break_quality or {}),
+            "actions": list(self.actions or []),
+            "diagnostics": dict(self.diagnostics or {}),
+        }
+
+
+@dataclass
 class TypographyCleanupResult:
     text: str
     writing_mode: str
@@ -319,6 +383,13 @@ def normalize_reading_order(order: Optional[str]) -> str:
     aliases = {"right_to_left": READING_ORDER_RTL, "left_to_right": READING_ORDER_LTR, "top_to_bottom": READING_ORDER_TTB}
     order = aliases.get(order, order)
     return order if order in READING_ORDERS else READING_ORDER_AUTO
+
+
+def normalize_atomic_fit_mode(mode: Optional[str]) -> str:
+    mode = str(mode or ATOMIC_FIT_BALANCED).strip().lower().replace("-", "_")
+    aliases = {"normal": ATOMIC_FIT_BALANCED, "roomy": ATOMIC_FIT_COMFORTABLE, "compact": ATOMIC_FIT_DENSE, "sound_effect": ATOMIC_FIT_SFX}
+    mode = aliases.get(mode, mode)
+    return mode if mode in ATOMIC_FIT_MODES else ATOMIC_FIT_BALANCED
 
 
 def preset_id_from_label(label: str, existing: Optional[Sequence[str]] = None) -> str:
@@ -1541,6 +1612,188 @@ def smart_fit_text_to_box(
             "effective_box": [round(eff_size[0], 2), round(eff_size[1], 2)],
             "requested_writing_mode": requested_mode,
             "line_break_strategy": active_break,
+        },
+    )
+
+def _candidate_atomic_lines(text: str, max_chars: int, strategy: str, mode: str) -> List[str]:
+    mode = normalize_writing_mode(mode)
+    strategy = normalize_line_break_strategy(strategy)
+    if mode == WRITING_MODE_VERTICAL_RL:
+        return vertical_columns(text or "", max(1, int(max_chars or 1)), strategy)
+    if contains_cjk(text or "") or mode == WRITING_MODE_RTL:
+        return optimal_kinsoku_wrap((text or "").replace("\n", ""), max(1, int(max_chars or 1)), strategy)
+    return wrap_latin_text((text or "").replace("\n", " "), max(1, int(max_chars or 1)), split_long_words=True)
+
+
+def plan_atomic_bubble_fit(
+    text: str,
+    font_size: float,
+    box_size: Tuple[float, float],
+    writing_mode: str = WRITING_MODE_AUTO,
+    fit_mode: str = FIT_MODE_SHRINK,
+    line_break_strategy: str = LINE_BREAK_AUTO,
+    line_spacing: float = 1.15,
+    letter_spacing: float = 1.0,
+    padding: float = 0.0,
+    stroke_width: float = 0.0,
+    secondary_stroke_width: float = 0.0,
+    shadow_radius: float = 0.0,
+    shadow_offset: Sequence[float] | None = None,
+    min_font_size: float = 6.0,
+    max_font_size: float = 96.0,
+    bubble_box_size: Optional[Tuple[float, float]] = None,
+    target_fill: float = 0.78,
+    max_expand_ratio: float = 1.22,
+    profile: str = ATOMIC_FIT_BALANCED,
+) -> AtomicBubbleFitResult:
+    """Plan a one-click, bubble-aware text formatting update.
+
+    Unlike plain smart-fit, this tries to keep the text as one visually atomic
+    lettering block inside the bubble: comfortable inset, centered alignment,
+    balanced lines, conservative tracking/leading, and a font size that fills the
+    bubble without touching balloon edges or masks.
+    """
+    original = text or ""
+    box_w, box_h = box_size or (0.0, 0.0)
+    bub_w, bub_h = bubble_box_size or box_size or (box_w, box_h)
+    bub_w = max(1.0, float(bub_w or 1.0))
+    bub_h = max(1.0, float(bub_h or 1.0))
+    profile = normalize_atomic_fit_mode(profile)
+    profile_cfg = ATOMIC_FIT_MODE_PRESETS.get(profile, ATOMIC_FIT_MODE_PRESETS[ATOMIC_FIT_BALANCED])
+    requested_fill = float(target_fill or ATOMIC_FIT_MODE_PRESETS[ATOMIC_FIT_BALANCED]["target_fill"])
+    requested_expand = float(max_expand_ratio or ATOMIC_FIT_MODE_PRESETS[ATOMIC_FIT_BALANCED]["max_expand_ratio"])
+    fill_scale = float(profile_cfg.get("target_fill", requested_fill) or requested_fill) / ATOMIC_FIT_MODE_PRESETS[ATOMIC_FIT_BALANCED]["target_fill"]
+    expand_scale = float(profile_cfg.get("max_expand_ratio", requested_expand) or requested_expand) / ATOMIC_FIT_MODE_PRESETS[ATOMIC_FIT_BALANCED]["max_expand_ratio"]
+    target_fill = max(0.55, min(0.94, requested_fill * fill_scale))
+    max_expand_ratio = max(1.0, min(float(max_font_size or 96.0), requested_expand * expand_scale))
+    requested_mode = normalize_writing_mode(writing_mode)
+    resolved = resolve_writing_mode(requested_mode, original, (bub_w, bub_h))
+    active_mode = resolved if requested_mode == WRITING_MODE_AUTO else requested_mode
+    active_break = normalize_line_break_strategy(line_break_strategy)
+    forced_break = profile_cfg.get("force_break")
+    if forced_break:
+        active_break = normalize_line_break_strategy(str(forced_break))
+    elif active_break == LINE_BREAK_AUTO:
+        active_break = LINE_BREAK_CJK_STRICT if resolved == WRITING_MODE_VERTICAL_RL or contains_cjk(original) else LINE_BREAK_BALANCED
+
+    min_dim = min(bub_w, bub_h)
+    padding_scale = max(0.35, float(profile_cfg.get("padding_scale", 1.0) or 1.0))
+    target_padding = max(float(padding or 0.0), min(10.0, max(1.5, min_dim * 0.045)) * padding_scale)
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        target_padding = max(float(padding or 0.0), min(8.0, max(1.0, min_dim * 0.035)) * padding_scale)
+    fit_w = max(1.0, bub_w * target_fill - 2 * target_padding)
+    fit_h = max(1.0, bub_h * target_fill - 2 * target_padding)
+
+    active_text = normalize_vertical_punctuation(original) if resolved == WRITING_MODE_VERTICAL_RL else original.replace("\n", " ")
+    active_spacing = max(0.86, min(float(profile_cfg.get("spacing_max", 1.08) or 1.08), float(letter_spacing or 1.0)))
+    active_leading = max(0.90, min(float(profile_cfg.get("leading_max", 1.18) or 1.18), float(line_spacing or 1.15)))
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        active_leading = min(active_leading, 1.08)
+
+    actions: List[str] = []
+    if profile != ATOMIC_FIT_BALANCED:
+        actions.append("set_atomic_profile")
+    if active_text != original:
+        actions.append("normalize_text_flow")
+    if abs(target_padding - float(padding or 0.0)) > 0.05:
+        actions.append("set_atomic_padding")
+    if active_break != normalize_line_break_strategy(line_break_strategy):
+        actions.append("set_line_break_strategy")
+
+    best_text = active_text
+    best_score = float("inf")
+    best_quality = line_break_quality(active_text, 9999, active_break, resolved).to_dict()
+    if resolved == WRITING_MODE_VERTICAL_RL:
+        max_chars = max(1, int(fit_h / max(1.0, float(font_size or 1.0) * active_spacing)))
+        lines = _candidate_atomic_lines(active_text, max_chars, active_break, resolved)
+        best_text = "".join(lines)
+        best_quality = line_break_quality(best_text, max_chars, active_break, resolved).to_dict()
+    else:
+        total_units = max(1.0, glyph_advance_units(active_text, resolved))
+        avg_unit_px = max(1.0, float(font_size or 1.0) * 0.56 * active_spacing)
+        natural_chars = max(2, int(fit_w / avg_unit_px))
+        max_candidate_lines = max(1, min(8, int(max(1.0, fit_h) / max(1.0, float(font_size or 1.0) * active_leading))))
+        for line_count in range(1, max_candidate_lines + 1):
+            target_units = max(1.0, total_units / line_count)
+            max_chars = max(2, int(target_units / 0.56))
+            max_chars = max(2, min(max(natural_chars * 2, 2), max_chars))
+            lines = _candidate_atomic_lines(active_text, max_chars, active_break, resolved)
+            if not lines:
+                continue
+            quality = line_break_quality("\n".join(lines), max_chars, active_break, resolved)
+            line_units = [glyph_advance_units(ln, resolved) for ln in lines]
+            line_count_penalty = abs(len(lines) - line_count) * 0.18
+            height_ratio = (len(lines) * float(font_size or 1.0) * active_leading) / max(1.0, fit_h)
+            width_ratio = (max(line_units or [0.0]) * float(font_size or 1.0) * active_spacing) / max(1.0, fit_w)
+            density = max(width_ratio, height_ratio)
+            density_penalty = abs(density - 0.82) * 0.55
+            score = float(quality.raggedness) + (0.9 if quality.has_widow else 0.0) + (1.2 if quality.has_kinsoku_violation else 0.0) + line_count_penalty + density_penalty
+            if score < best_score:
+                best_score = score
+                best_text = "\n".join(lines)
+                best_quality = quality.to_dict()
+    if best_text != original and "balance_lines" not in actions and resolved != WRITING_MODE_VERTICAL_RL:
+        actions.append("balance_lines")
+
+    max_for_atomic = max(min_font_size, min(float(max_font_size or 96.0), float(font_size or min_font_size) * max(1.0, float(max_expand_ratio or 1.22))))
+    size, fitted_text, diag = fit_font_size_to_box(
+        best_text,
+        float(font_size or min_font_size),
+        (fit_w, fit_h),
+        FIT_MODE_EXPAND if normalize_fit_mode(fit_mode) != FIT_MODE_PRESERVE else FIT_MODE_SHRINK,
+        active_mode,
+        min_font_size=min_font_size,
+        max_font_size=max_for_atomic,
+        line_spacing=active_leading,
+        letter_spacing=active_spacing,
+        padding=target_padding,
+        stroke_width=stroke_width,
+        secondary_stroke_width=secondary_stroke_width,
+        line_break_strategy=active_break,
+        shadow_radius=shadow_radius,
+        shadow_offset=shadow_offset,
+    )
+    measured = diag.measured_bounds or (0.0, 0.0)
+    fill_ratio = max(float(measured[0]) / max(1.0, bub_w), float(measured[1]) / max(1.0, bub_h))
+    if abs(float(size) - float(font_size or size)) > 0.2:
+        actions.append("set_font_size")
+    if abs(active_spacing - float(letter_spacing or 1.0)) > 0.005:
+        actions.append("set_letter_spacing")
+    if abs(active_leading - float(line_spacing or 1.15)) > 0.005:
+        actions.append("set_line_spacing")
+    if diag.overflow:
+        actions.append("shrink_to_fit")
+    if resolved != requested_mode and requested_mode == WRITING_MODE_AUTO:
+        actions.append("resolve_writing_mode")
+
+    deduped: List[str] = []
+    for action in actions + list(diag.recommended_actions or []):
+        if action and action not in deduped:
+            deduped.append(action)
+    return AtomicBubbleFitResult(
+        profile=profile,
+        font_size=round(float(size), 3),
+        text=fitted_text,
+        writing_mode=active_mode,
+        resolved_writing_mode=diag.resolved_writing_mode,
+        fit_mode=FIT_MODE_SHRINK,
+        line_break_strategy=active_break,
+        line_spacing=round(float(active_leading), 3),
+        letter_spacing=round(float(active_spacing), 3),
+        text_padding=round(float(target_padding), 3),
+        alignment=2 if resolved == WRITING_MODE_RTL else int(profile_cfg.get("alignment", 1) or 1),
+        overflow=bool(diag.overflow),
+        quality_score=float(getattr(diag, "quality_score", 1.0) or 1.0),
+        fill_ratio=round(float(fill_ratio), 4),
+        line_break_quality=best_quality,
+        actions=deduped,
+        diagnostics={
+            "fit": diag.to_dict(),
+            "bubble_box_size": [round(bub_w, 2), round(bub_h, 2)],
+            "target_box_size": [round(fit_w, 2), round(fit_h, 2)],
+            "profile": profile,
+            "target_fill": round(target_fill, 3),
+            "max_expand_ratio": round(float(max_expand_ratio or 1.22), 3),
         },
     )
 
