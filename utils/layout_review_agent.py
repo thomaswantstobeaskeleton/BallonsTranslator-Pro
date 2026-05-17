@@ -27,6 +27,7 @@ ActionType = Literal[
     "normalize_vertical_punctuation",
     "set_alignment",
     "apply_contrast_stroke",
+    "apply_double_outline",
 ]
 
 
@@ -265,6 +266,26 @@ class LayoutReviewPlanner:
                 )
             )
             score_before -= 0.25
+
+        line_quality = (blk.text_style or {}).get("line_break_quality", {}) or {}
+        if line_quality.get("needs_balance") and not any(a.action == "balance_lines" for a in actions):
+            issues.append(
+                ReviewIssue(
+                    code="line_break_quality",
+                    severity="info",
+                    message="Wrapped lines have a widow, kinsoku issue, or ragged balance.",
+                    score_penalty=0.06,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="balance_lines",
+                    block_index=blk.block_index,
+                    args={"line_break_quality": line_quality},
+                    reason="Rebalance line breaks before final lettering/export.",
+                )
+            )
+            score_before -= 0.06
 
         # Coarse mask coverage warning from PR-side snapshots.
         if blk.mask_warning or float(getattr(blk, "mask_coverage", 1.0) or 1.0) < 0.72:
@@ -563,6 +584,28 @@ class LayoutReviewPlanner:
             )
             score_before -= 0.10
 
+        if (
+            (blk.text_style or {}).get("preset_suggestion") == "sfx_bold"
+            and float((blk.text_style or {}).get("secondary_stroke_width", 0.0) or 0.0) <= 0
+        ):
+            issues.append(
+                ReviewIssue(
+                    code="sfx_missing_back_outline",
+                    severity="info",
+                    message="SFX-style lettering can benefit from a second/back outline for manga readability.",
+                    score_penalty=0.03,
+                )
+            )
+            actions.append(
+                ReviewAction(
+                    action="apply_double_outline",
+                    block_index=blk.block_index,
+                    args={"secondary_stroke_width": 0.20, "secondary_srgb": [255, 255, 255]},
+                    reason="Add a wider back outline while preserving the primary stroke/fill.",
+                )
+            )
+            score_before -= 0.03
+
         if bool((blk.text_style or {}).get("ink_clip_risk", False)):
             issues.append(
                 ReviewIssue(
@@ -742,6 +785,7 @@ def collect_actions_by_type(page_result: PageReviewResult) -> Dict[ActionType, L
         "normalize_vertical_punctuation": [],
         "set_alignment": [],
         "apply_contrast_stroke": [],
+        "apply_double_outline": [],
     }
     for blk in page_result.blocks:
         for action in blk.actions:
@@ -775,6 +819,7 @@ def collect_actions_from_list(actions: Sequence[ReviewAction]) -> Dict[ActionTyp
         "normalize_vertical_punctuation": [],
         "set_alignment": [],
         "apply_contrast_stroke": [],
+        "apply_double_outline": [],
     }
     for action in actions:
         grouped[action.action].append(action)

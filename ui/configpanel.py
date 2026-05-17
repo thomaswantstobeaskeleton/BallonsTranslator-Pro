@@ -914,6 +914,23 @@ class ConfigPanel(Widget):
         self.render_default_stroke_width_spin.setDecimals(3)
         self.render_default_stroke_width_spin.valueChanged.connect(self.on_render_default_stroke_width_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_stroke_width_spin, self.tr('Default stroke width'), discription=self.tr('Relative manga outline width for presets/new styles.')))
+        self.render_default_secondary_stroke_width_spin = QDoubleSpinBox(self)
+        self.render_default_secondary_stroke_width_spin.setRange(0.0, 1.0)
+        self.render_default_secondary_stroke_width_spin.setSingleStep(0.01)
+        self.render_default_secondary_stroke_width_spin.setDecimals(3)
+        self.render_default_secondary_stroke_width_spin.valueChanged.connect(self.on_render_default_secondary_stroke_width_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_secondary_stroke_width_spin,
+            self.tr('Default back/second outline width'),
+            discription=self.tr('Relative back outline for double-outline SFX presets. 0 disables the second outline by default.')
+        ))
+        self.render_default_secondary_stroke_color_btn = QPushButton(self.tr('Choose...'), self)
+        self.render_default_secondary_stroke_color_btn.clicked.connect(self.on_render_default_secondary_stroke_color_clicked)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_secondary_stroke_color_btn,
+            self.tr('Default back/second outline color'),
+            discription=self.tr('Color used when project text defaults or SFX presets apply a second/back outline.')
+        ))
         self.render_default_shadow_radius_spin = QDoubleSpinBox(self)
         self.render_default_shadow_radius_spin.setRange(0.0, 1.0)
         self.render_default_shadow_radius_spin.setSingleStep(0.01)
@@ -984,6 +1001,14 @@ class ConfigPanel(Widget):
             discription=self.tr('When a page has no rendered result, export the inpainted/clean page if available, otherwise the original, and record the fallback in the manifest.')
         )
         self.export_include_unrendered_pages_checker.stateChanged.connect(self.on_export_include_unrendered_pages_changed)
+        self.export_filename_template_edit = QLineEdit(self)
+        self.export_filename_template_edit.setPlaceholderText('{index:03d} or {stem}_{index:03d}')
+        self.export_filename_template_edit.textChanged.connect(self.on_export_filename_template_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.export_filename_template_edit,
+            self.tr('Batch export filename template'),
+            discription=self.tr('Tokens: {index}, {index:03d}, {page}, {stem}, {source}, {ext}. The extension is added automatically.')
+        ))
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
         self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
@@ -1909,6 +1934,26 @@ class ConfigPanel(Widget):
         pcfg.render_default_reading_order = str(self.render_default_reading_order_combo.currentData() or 'auto')
     def on_render_default_stroke_width_changed(self):
         pcfg.render_default_stroke_width = float(self.render_default_stroke_width_spin.value())
+    def _set_render_secondary_stroke_color_button(self):
+        if not hasattr(self, 'render_default_secondary_stroke_color_btn'):
+            return
+        color = list(getattr(pcfg, 'render_default_secondary_stroke_color', [255, 255, 255]) or [255, 255, 255])[:3]
+        while len(color) < 3:
+            color.append(255)
+        color = [max(0, min(255, int(c))) for c in color]
+        self.render_default_secondary_stroke_color_btn.setText(f"RGB {color[0]}, {color[1]}, {color[2]}")
+        self.render_default_secondary_stroke_color_btn.setStyleSheet(f"background-color: rgb({color[0]}, {color[1]}, {color[2]});")
+
+    def on_render_default_secondary_stroke_width_changed(self):
+        pcfg.render_default_secondary_stroke_width = float(self.render_default_secondary_stroke_width_spin.value())
+    def on_render_default_secondary_stroke_color_clicked(self):
+        color = list(getattr(pcfg, 'render_default_secondary_stroke_color', [255, 255, 255]) or [255, 255, 255])[:3]
+        while len(color) < 3:
+            color.append(255)
+        qcolor = QColorDialog.getColor(QColor(int(color[0]), int(color[1]), int(color[2])), self, self.tr('Default back/second outline color'))
+        if qcolor.isValid():
+            pcfg.render_default_secondary_stroke_color = [qcolor.red(), qcolor.green(), qcolor.blue()]
+            self._set_render_secondary_stroke_color_button()
     def on_render_default_shadow_radius_changed(self):
         pcfg.render_default_shadow_radius = float(self.render_default_shadow_radius_spin.value())
     def on_render_default_text_padding_changed(self):
@@ -1930,6 +1975,9 @@ class ConfigPanel(Widget):
 
     def on_export_include_unrendered_pages_changed(self):
         pcfg.export_include_unrendered_pages = self.export_include_unrendered_pages_checker.isChecked()
+
+    def on_export_filename_template_changed(self, text: str):
+        pcfg.export_filename_template = (text or '').strip() or '{index:03d}'
 
     def on_text_editor_top_padding_changed(self):
         pcfg.text_editor_top_padding = int(self.text_editor_top_padding_spin.value())
@@ -2161,6 +2209,9 @@ class ConfigPanel(Widget):
                 idx = self.render_default_reading_order_combo.findData(getattr(pcfg, 'render_default_reading_order', 'auto'))
                 self.render_default_reading_order_combo.setCurrentIndex(max(0, idx))
             self.render_default_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_stroke_width', 0.08)))
+            if hasattr(self, 'render_default_secondary_stroke_width_spin'):
+                self.render_default_secondary_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_secondary_stroke_width', 0.0)))
+                self._set_render_secondary_stroke_color_button()
             self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
             self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
@@ -2180,6 +2231,8 @@ class ConfigPanel(Widget):
                 self.export_open_folder_after_batch_checker.setChecked(bool(getattr(pcfg, 'export_open_folder_after_batch', False)))
             if hasattr(self, 'export_include_unrendered_pages_checker'):
                 self.export_include_unrendered_pages_checker.setChecked(bool(getattr(pcfg, 'export_include_unrendered_pages', False)))
+            if hasattr(self, 'export_filename_template_edit'):
+                self.export_filename_template_edit.setText(str(getattr(pcfg, 'export_filename_template', '{index:03d}') or '{index:03d}'))
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)

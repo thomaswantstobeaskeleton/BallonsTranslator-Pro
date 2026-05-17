@@ -1020,7 +1020,13 @@ class MainWindow(mainwindow_cls):
                 out_dir = osp.join(self.imgtrans_proj.directory, 'exports')
             ext = str((body or {}).get('ext', '') or '').strip().lower() or None
             also_pdf = bool((body or {}).get('also_pdf', False))
-            result = self._do_batch_export(out_dir, ext=ext, also_pdf=also_pdf, show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)), include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))))
+            result = self._do_batch_export(
+                out_dir, ext=ext, also_pdf=also_pdf, show_message=False,
+                clean_after_export=bool((body or {}).get('clean_after_export', False)),
+                include_intermediate=bool((body or {}).get('include_intermediate', False)),
+                include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))),
+                filename_template=str((body or {}).get('filename_template', '') or getattr(pcfg, 'export_filename_template', '{index:03d}')),
+            )
             self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
             return {'ok': True, **(result or {})}
         if kind in {'archive', 'zip', 'cbz'}:
@@ -1030,7 +1036,16 @@ class MainWindow(mainwindow_cls):
             out_dir = str((body or {}).get('out_dir', '') or '').strip()
             if not out_dir:
                 out_dir = tempfile.mkdtemp(prefix='bt_export_')
-            result = self._do_batch_export(out_dir, ext=str((body or {}).get('ext', '') or '').strip().lower() or None, also_pdf=bool((body or {}).get('also_pdf', False)), show_message=False, clean_after_export=bool((body or {}).get('clean_after_export', False)), include_intermediate=bool((body or {}).get('include_intermediate', False)), include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))))
+            result = self._do_batch_export(
+                out_dir,
+                ext=str((body or {}).get('ext', '') or '').strip().lower() or None,
+                also_pdf=bool((body or {}).get('also_pdf', False)),
+                show_message=False,
+                clean_after_export=bool((body or {}).get('clean_after_export', False)),
+                include_intermediate=bool((body or {}).get('include_intermediate', False)),
+                include_unrendered=bool((body or {}).get('include_unrendered', getattr(pcfg, 'export_include_unrendered_pages', False))),
+                filename_template=str((body or {}).get('filename_template', '') or getattr(pcfg, 'export_filename_template', '{index:03d}')),
+            )
             if not archive_path:
                 archive_path = osp.join(self.imgtrans_proj.directory, 'exports', ('exported.cbz' if archive_format == 'cbz' else 'exported.zip'))
             os.makedirs(osp.dirname(archive_path), exist_ok=True)
@@ -1056,10 +1071,23 @@ class MainWindow(mainwindow_cls):
             if not self.imgtrans_proj.current_img:
                 raise ValueError('select a page first')
             out_dir = str((body or {}).get('out_dir', '') or '').strip() or osp.join(self.imgtrans_proj.directory, 'psd_handoff')
-            qimg = self.canvas.render_result_img()
-            final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
-            manifest = build_layered_psd_handoff(self.imgtrans_proj, self.imgtrans_proj.current_img, out_dir, final_image=final_arr)
-            return {'ok': True, 'manifest': manifest}
+            requested_pages = list((body or {}).get('pages') or [self.imgtrans_proj.current_img])
+            pages = [p for p in requested_pages if p in (getattr(self.imgtrans_proj, 'pages', {}) or {})]
+            if not pages:
+                raise ValueError('no valid pages for PSD handoff export')
+            manifests = []
+            warnings = []
+            for page in pages:
+                final_arr = None
+                if page == self.imgtrans_proj.current_img:
+                    qimg = self.canvas.render_result_img()
+                    final_arr = pixmap2ndarray(qimg, keep_alpha=False) if qimg is not None and not qimg.isNull() else None
+                elif bool((body or {}).get('include_final', False)):
+                    warnings.append(f'final composite render is only available for current page; using saved result for {page}')
+                manifest = build_layered_psd_handoff(self.imgtrans_proj, page, out_dir, final_image=final_arr)
+                manifests.append(manifest)
+            self.pipelineInsightsPanel.add_event('API', self.tr('Layered PSD handoff via API: {0} page(s)').format(len(manifests)))
+            return {'ok': True, 'manifest': manifests[0] if len(manifests) == 1 else None, 'manifests': manifests, 'warnings': warnings, 'count': len(manifests)}
         if kind in {'lettering_proof', 'proof_pack', 'typography_proof'}:
             return self._api_export_lettering_proof_ui(body)
         raise ValueError(f'unknown export kind: {kind}')
@@ -1227,6 +1255,16 @@ class MainWindow(mainwindow_cls):
         from utils.text_rendering import sort_blocks_for_reading_order
         order = str((body or {}).get('reading_order', '') or getattr(pcfg, 'render_default_reading_order', 'auto') or 'auto')
         include_blocks = bool((body or {}).get('include_blocks', True))
+        include_rendering_qa = bool((body or {}).get('include_rendering_qa', False))
+        qa_by_page = {}
+        if include_blocks and include_rendering_qa:
+            try:
+                from utils.rendering_qa import build_project_rendering_qa
+                qa_report = build_project_rendering_qa(self.imgtrans_proj, pages=list(self.imgtrans_proj.pages.keys()), include_ok=True, config_obj=pcfg)
+                for page_entry in qa_report.get('pages', []) or []:
+                    qa_by_page[page_entry.get('page')] = {int(block.get('index', -1)): block for block in page_entry.get('blocks', []) or []}
+            except Exception as exc:
+                qa_by_page['__error__'] = str(exc)
         pages_out = []
         for page_index, page_name in enumerate(list(self.imgtrans_proj.pages.keys())):
             blocks = list(self.imgtrans_proj.pages.get(page_name, []) or [])
@@ -1248,9 +1286,12 @@ class MainWindow(mainwindow_cls):
                         'text': getattr(block, 'translation', '') or (block.get_text() if hasattr(block, 'get_text') else ''),
                         'writing_mode': getattr(getattr(block, 'fontformat', None), 'writing_mode', 'auto'),
                         'fit_mode': getattr(getattr(block, 'fontformat', None), 'fit_mode', 'shrink'),
+                        **({'rendering_qa': qa_by_page.get(page_name, {}).get(original_index.get(id(block), i), {})} if include_rendering_qa else {}),
                     }
                     for i, block in enumerate(sorted_blocks)
                 ]
+                if include_rendering_qa and '__error__' in qa_by_page:
+                    entry['rendering_qa_error'] = qa_by_page['__error__']
             pages_out.append(entry)
         return {'ok': True, 'count': len(pages_out), 'pages': pages_out}
 
@@ -4177,6 +4218,7 @@ class MainWindow(mainwindow_cls):
                 clean_after_export=dlg.get_clean_after_export() if not export_as_zip else False,
                 include_intermediate=dlg.get_include_intermediate(),
                 include_unrendered=dlg.get_include_unrendered(),
+                filename_template=dlg.get_filename_template(),
             )
             if export_as_zip and zip_path and osp.isdir(out_dir):
                 import zipfile
@@ -4215,8 +4257,9 @@ class MainWindow(mainwindow_cls):
         except Exception as e:
             LOGGER.warning('Could not open export folder %s: %s', path, e)
 
-    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False, include_unrendered: bool = False):
+    def _do_batch_export(self, out_dir: str, ext: str = None, also_pdf: bool = False, show_message: bool = True, clean_after_export: bool = False, include_intermediate: bool = False, include_unrendered: bool = False, filename_template: str = None):
         from utils.io_utils import imread, imwrite
+        from utils.export_naming import render_export_filename
         try:
             os.makedirs(out_dir, exist_ok=True)
             result_dir = self.imgtrans_proj.result_dir()
@@ -4227,6 +4270,7 @@ class MainWindow(mainwindow_cls):
             helper_paths = []
             fallback_paths = []
             export_sources = {}
+            used_export_names = set()
             page_order = list(self.imgtrans_proj.pages.keys())
             for i, pagename in enumerate(page_order):
                 result_path = self.imgtrans_proj.get_result_path(pagename)
@@ -4248,8 +4292,14 @@ class MainWindow(mainwindow_cls):
                     use_ext = ext if ext else osp.splitext(source_path)[1]
                     if use_ext not in ('.png', '.jpg', '.jpeg', '.webp', '.jxl'):
                         use_ext = '.png'
-                    # Export with consistent 001, 002, 003 naming (same as manga download / natural sort)
-                    dest = osp.join(out_dir, f"{i + 1:03d}{use_ext}")
+                    fname = render_export_filename(filename_template or getattr(pcfg, 'export_filename_template', '{index:03d}'), pagename, i + 1, use_ext, source_kind)
+                    base_name, base_ext = osp.splitext(fname)
+                    dedupe = 2
+                    while fname.lower() in used_export_names:
+                        fname = f"{base_name}_{dedupe}{base_ext}"
+                        dedupe += 1
+                    used_export_names.add(fname.lower())
+                    dest = osp.join(out_dir, fname)
                     img = imread(source_path)
                     kw = {'ext': use_ext, 'quality': pcfg.imgsave_quality}
                     if use_ext == '.webp' and getattr(pcfg, 'imgsave_webp_lossless', False):
@@ -4303,7 +4353,7 @@ class MainWindow(mainwindow_cls):
                 exported_paths,
                 missing,
                 export_kind='rendered_images',
-                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'include_unrendered': bool(include_unrendered), 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'export_sources': export_sources},
+                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'include_unrendered': bool(include_unrendered), 'filename_template': filename_template or getattr(pcfg, 'export_filename_template', '{index:03d}'), 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'export_sources': export_sources},
             )
             msg += '\n' + self.tr('Export manifest: {0}').format(manifest.get('manifest_path', ''))
             if marked_exported:

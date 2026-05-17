@@ -5,6 +5,7 @@ import os
 import os.path as osp
 import shutil
 from typing import Dict, List, Tuple
+from types import SimpleNamespace
 
 from utils.text_rendering import lettering_proof_metrics, resolve_writing_mode
 
@@ -70,7 +71,12 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
         ff = getattr(blk, "fontformat", None)
         xyxy = list(getattr(blk, "xyxy", [0, 0, 0, 0]) or [0, 0, 0, 0])
         text_value = getattr(blk, "translation", "") or "\n".join(getattr(blk, "text", []) or [])
-        diagnostics = analyze_text_block(blk, page_name, idx)
+        qa_config = SimpleNamespace(
+            render_fallback_fonts_latin="", render_fallback_fonts_cjk="",
+            render_fallback_fonts_korean="", render_fallback_fonts_rtl="",
+            render_fallback_fonts_emoji="", module=SimpleNamespace(layout_font_size_min=6.0, layout_font_size_max=96.0),
+        )
+        diagnostics = analyze_text_block(blk, page_name, idx, config_obj=qa_config)
         box_w = max(1.0, float((xyxy[2] - xyxy[0]) if len(xyxy) >= 4 else 1.0))
         box_h = max(1.0, float((xyxy[3] - xyxy[1]) if len(xyxy) >= 4 else 1.0))
         resolved_mode = resolve_writing_mode(getattr(ff, "writing_mode", "auto") if ff else "auto", text_value, (box_w, box_h))
@@ -80,6 +86,7 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             letter_spacing=getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
             padding=getattr(ff, "text_padding", 0.0) if ff else 0.0,
             stroke_width=getattr(ff, "stroke_width", 0.0) if ff else 0.0,
+            secondary_stroke_width=getattr(ff, "secondary_stroke_width", 0.0) if ff else 0.0,
             shadow_radius=getattr(ff, "shadow_radius", 0.0) if ff else 0.0,
             shadow_offset=getattr(ff, "shadow_offset", [0.0, 0.0]) if ff else [0.0, 0.0],
             line_break_strategy=getattr(ff, "line_break_strategy", "auto") if ff else "auto",
@@ -96,6 +103,8 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "fill_rgb": getattr(ff, "frgb", [0, 0, 0]) if ff else [0, 0, 0],
             "stroke_rgb": getattr(ff, "srgb", [0, 0, 0]) if ff else [0, 0, 0],
             "stroke_width": getattr(ff, "stroke_width", 0.0) if ff else 0.0,
+            "secondary_stroke_rgb": getattr(ff, "secondary_srgb", [255, 255, 255]) if ff else [255, 255, 255],
+            "secondary_stroke_width": getattr(ff, "secondary_stroke_width", 0.0) if ff else 0.0,
             "writing_mode": getattr(ff, "writing_mode", "auto") if ff else "auto",
             "resolved_writing_mode": resolved_mode,
             "alignment": getattr(ff, "alignment", 0) if ff else 0,
@@ -162,7 +171,7 @@ def _build_photoshop_jsx(manifest_path: str, manifest: Dict) -> str:
             f"  lyr.textItem.position = [{float(x1):.2f}, {float(y1):.2f}];",
             f"  lyr.textItem.size = {size_pt:.2f};",
             f"  lyr.opacity = {max(0.0, min(100.0, float(layer.get('opacity', 1.0)) * 100.0)):.2f};",
-            "  // Style notes: writing_mode=" + json.dumps(str(layer.get('writing_mode', 'auto'))) + ", fit_mode=" + json.dumps(str(layer.get('fit_mode', 'shrink'))) + ", fit_min=" + json.dumps(str(layer.get('fit_font_size_min', 0))) + ", fit_max=" + json.dumps(str(layer.get('fit_font_size_max', 0))) + ", fallback_chain=" + json.dumps(str(layer.get('fallback_font_chain', ''))) + ";",
+            "  // Style notes: writing_mode=" + json.dumps(str(layer.get('writing_mode', 'auto'))) + ", fit_mode=" + json.dumps(str(layer.get('fit_mode', 'shrink'))) + ", stroke_width=" + json.dumps(str(layer.get('stroke_width', 0))) + ", secondary_stroke_width=" + json.dumps(str(layer.get('secondary_stroke_width', 0))) + ", secondary_stroke_rgb=" + json.dumps(str(layer.get('secondary_stroke_rgb', ''))) + ", fit_min=" + json.dumps(str(layer.get('fit_font_size_min', 0))) + ", fit_max=" + json.dumps(str(layer.get('fit_font_size_max', 0))) + ", fallback_chain=" + json.dumps(str(layer.get('fallback_font_chain', ''))) + ";",
             "}",
         ])
     lines.append("if (doc) { alert('Editable text layers created. Save as PSD from Photoshop.'); }")

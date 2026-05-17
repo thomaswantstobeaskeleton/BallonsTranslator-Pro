@@ -820,6 +820,9 @@ class SceneTextManager(QObject):
             if blk.fontformat.stroke_width == 0 and getattr(pcfg.global_fontformat, 'stroke_width', 0) > 0:
                 blk.fontformat.stroke_width = pcfg.global_fontformat.stroke_width
                 blk.fontformat.srgb = list(getattr(pcfg.global_fontformat, 'srgb', [0, 0, 0]))
+            if getattr(blk.fontformat, 'secondary_stroke_width', 0.0) == 0 and getattr(pcfg.global_fontformat, 'secondary_stroke_width', 0) > 0:
+                blk.fontformat.secondary_stroke_width = pcfg.global_fontformat.secondary_stroke_width
+                blk.fontformat.secondary_srgb = list(getattr(pcfg.global_fontformat, 'secondary_srgb', [255, 255, 255]))
             # Apply global text box corner radius default (shape) when present: 0 = rectangle, >0 = rounded / circle-like.
             gb_radius = float(getattr(pcfg.global_fontformat, "text_box_corner_radius", 0.0) or 0.0)
             if gb_radius > 0 and getattr(blk.fontformat, "text_box_corner_radius", 0.0) == 0.0:
@@ -1552,6 +1555,7 @@ class SceneTextManager(QObject):
                 getattr(ff, 'writing_mode', 'auto'),
                 padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
                 line_spacing=float(getattr(ff, 'line_spacing', 1.2) or 1.2),
                 letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
                 line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
@@ -1630,6 +1634,8 @@ class SceneTextManager(QObject):
             'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
             'fit_mode': getattr(ff, 'fit_mode', 'shrink'),
             'stroke_width': getattr(ff, 'stroke_width', 0.0),
+            'secondary_stroke_width': getattr(ff, 'secondary_stroke_width', 0.0),
+            'secondary_srgb': getattr(ff, 'secondary_srgb', [255, 255, 255]),
             'text_padding': getattr(ff, 'text_padding', 0.0),
             'line_spacing': getattr(ff, 'line_spacing', 1.2),
             'letter_spacing': getattr(ff, 'letter_spacing', 1.0),
@@ -1640,6 +1646,7 @@ class SceneTextManager(QObject):
             'ink_clip_risk': fit_dict.get('ink_clip_risk', False),
             'preset_suggestion': fit_dict.get('preset_suggestion', ''),
             'safe_inner_bounds': fit_dict.get('safe_inner_bounds', []),
+            'line_break_quality': fit_dict.get('line_break_quality', {}),
             'mask_coverage': mask_diag.get('coverage', 1.0),
             'mask_safe_insets': mask_diag.get('safe_insets', []),
             'mask_warning': mask_diag.get('warning', ''),
@@ -2050,6 +2057,19 @@ class SceneTextManager(QObject):
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.stroke_width = blkitem.fontformat.stroke_width
                 blkitem.set_fontformat(blkitem.fontformat)
+            for action in grouped.get("apply_double_outline", []):
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                back_width = max(0.0, float(action.args.get("secondary_stroke_width", 0.20) or 0.20))
+                back_color = action.args.get("secondary_srgb", [255, 255, 255]) or [255, 255, 255]
+                blkitem.fontformat.secondary_stroke_width = max(float(getattr(blkitem.fontformat, "secondary_stroke_width", 0.0) or 0.0), back_width)
+                blkitem.fontformat.secondary_srgb = list(back_color)[:3]
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.secondary_stroke_width = blkitem.fontformat.secondary_stroke_width
+                    blkitem.blk.fontformat.secondary_srgb = blkitem.fontformat.secondary_srgb
+                blkitem.set_fontformat(blkitem.fontformat)
+                blkitem.repaint_background()
             for action in grouped.get("polish_typography", []):
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -2734,6 +2754,7 @@ class SceneTextManager(QObject):
                 letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
                 padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(fmt, 'secondary_stroke_width', 0.0) or 0.0),
                 line_break_strategy=getattr(fmt, 'line_break_strategy', 'auto'),
             )
             if fit_mode in ('shrink', 'expand') and abs(fitted_size - blk_font.pointSizeF()) > 0.2:
