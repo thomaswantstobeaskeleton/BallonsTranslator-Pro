@@ -1,6 +1,119 @@
 # Koharu Gap Analysis and Implementation Audit
 
-_Last audited: 2026-05-14 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (660 all-state issues/PRs scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (800 all-state issues/PRs scanned), and recent upstream `dev` commits fetched from Git._
+_Last audited: 2026-05-17 against BallonsTranslator-Pro current branch, public `mayocream/koharu` issues via GitHub REST API (300 all-state issues plus topic searches scanned), upstream `dmMaze/BallonsTranslator` issues via REST API (300 all-state issues plus topic searches scanned), and recent upstream `dev` commits fetched from Git._
+
+
+## Newly implemented in this pass (2026-05-17 third follow-up: atomic bubble fitting)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Atomic bubble-aware lettering fit | Added a one-shot `plan_atomic_bubble_fit` formatter that treats the textbox/bubble as a single composition: comfortable inset, centered alignment, balanced line spread, conservative leading/tracking, safe max expansion, writing-mode awareness, and effect-aware font fitting. | Follow-up to Koharu #117 word splitting, #594 advanced formatting, #509 vertical wrapping, #583/#602 Arabic sizing, and upstream #1077 auto text sizing. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| User-visible atomic fit workflow | Added an **Atomic bubble fit** context-menu action for selected textboxes, scene-manager application with undo support, persisted Rendering settings for target fill/max expansion, and a local automation `atomic_bubble_fit` command. | Koharu workflow requests #589/#649/#528/#535 around fewer manual steps and consistent lettering; upstream workflow/fit requests #1077/#229. | `ui/canvas.py`, `ui/scenetext_manager.py`, `ui/configpanel.py`, `utils/config.py`, `ui/mainwindow.py` |
+| QA/workflow integration | Rendering QA now reports underfilled/overfilled bubble text, includes atomic-fit payloads, applies selected `atomic_bubble_fit` fixes, and lettering workflow treats it as a core auto-fix step. | Koharu final lettering quality and batch QA workflow; upstream auto-fit/export review. | `utils/rendering_qa.py`, `utils/lettering_workflow.py`, `tests/test_rendering_qa.py` |
+
+### Progress audit update for this third follow-up
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Atomic bubble fitting now combines sizing, padding, line spread, alignment, writing mode, line-break policy, and effect-safe bounds in one reusable backend plan. | Native glyph-shape/hyphenation dictionaries remain deferred. |
+| Editor workflow | Implemented / advanced | A selected textbox can now be formatted as a coherent bubble lettering block from the context menu instead of separately running polish, smart-fit, padding, and alignment actions. | Dedicated toolbar button/icon is deferred because the context menu/API path is connected and avoids adding more top-level chrome. |
+| Automation/API/headless | Implemented / advanced | `atomic_bubble_fit` API action enables batch/headless tools to apply the same bubble-aware formatter to selected indices. | Multi-page atomic fit through API can be added after selection/index semantics are finalized. |
+
+
+
+## Newly implemented in this pass (2026-05-17 second follow-up: line-quality QA, RTL fit safety, export naming)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Line-break quality / final lettering QA | Added renderer-neutral `line_break_quality` diagnostics for widows, kinsoku violations, and ragged lines; fit diagnostics/proof metrics now recommend `balance_lines`, the Text panel displays line-balance status, and project rendering fixes can apply balanced wraps. | Koharu #117 word splitting, #594 advanced formatting, #509 vertical wrap pain, #649/#528 global consistent lettering; upstream #1077 fit-to-box and #995 punctuation/width conversion reports. | `utils/text_rendering.py`, `utils/rendering_qa.py`, `ui/text_panel.py`, `tests/test_text_rendering.py`, `tests/test_rendering_qa.py` |
+| RTL/Arabic auto-fit guard | Expand-to-fill sizing now caps RTL expansion to avoid Arabic/Hebrew text ballooning in large boxes while preserving shrink/preserve behavior. | Koharu #602 Arabic rendering/export, #583 Arabic auto font size exaggeration; upstream font/layout bug reports #862/#972. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| Effect-aware fit regression fix | Final fit bounds now include `secondary_stroke_width` in the non-preserve path, so back-outline margins are not lost after binary fitting. | Koharu #698 double outline, #446/#447 cropping, upstream #1077 fit-to-box. | `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| Layout review line-quality action | Scene snapshots pass line-break quality to the layout review planner, which can now propose `balance_lines` even when text technically fits but has a poor final lettering wrap. | Koharu #117/#594 layout quality; upstream #1077. | `ui/scenetext_manager.py`, `utils/layout_review_agent.py`, `tests/test_layout_review_agent.py` |
+| Batch export filename workflow | Batch export dialog, settings, automation API, export manifest, and a new safe filename renderer now support templates such as `{stem}_{index:03d}` while sanitizing Windows/path-unsafe names. | Koharu #535 custom filename/include unrendered pages, #568 export skips pages, #610 batch projects; upstream #229 export suggestions. | `ui/export_dialog.py`, `ui/configpanel.py`, `ui/mainwindow.py`, `utils/config.py`, `utils/export_naming.py`, `tests/test_export_naming.py` |
+
+### Progress audit update for this second follow-up
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Line-quality diagnostics now flow through fit, proof packs, QA, layout review, UI diagnostics, and auto-fix; RTL expand is safer; secondary outline fit margins are preserved. | Full HarfBuzz shaping/ligature metrics remain deferred to an optional dependency pass. |
+| Layout review agent | Implemented / advanced | Review snapshots include line quality and planner proposes balance-line fixes for poor wraps, not only overflow. | Provider prompt schema can be expanded later to include the raw line-quality object. |
+| Export/batch workflow | Implemented / advanced | Users and API callers can choose persisted filename templates with safe sanitization and manifest recording. | Per-page export queue progress events remain deferred. |
+| Upstream BallonsTranslator sync | Active | Reviewed current upstream `dev` head (`6649de1` through `91f5d13`) again; this pass adapted issue-inspired export naming and typography safety instead of unsafe broad cherry-picks. | Requirements/provider commits still deferred pending Pro dependency/provider matrix. |
+
+
+## Newly implemented in this pass (2026-05-17 follow-up: PSD style fidelity, shortcut safety, settings color polish)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| PSD/export style fidelity | Layered PSD handoff manifests and Photoshop JSX notes now preserve secondary/back outline width and color, and proof metrics include the secondary outline in effect margins without requiring OpenCV-backed global config import. | Koharu #454/#558 PSD text-layer issues, #698 double outline, #591 export interoperability; upstream #50/#364 Photoshop/PSD export. | `utils/layered_psd_export.py`, `tests/test_layered_psd_export.py` |
+| Batch/headless PSD handoff workflow | The local automation `export` route can now export layered PSD handoff manifests for multiple requested pages in one call, using the live final composite for the current page and saved result fallbacks for other pages with explicit warnings. | Koharu #610 batch projects, #612 API/headless, #558/#587 export handoff; upstream #1094 automation and #1020 batch queue. | `ui/mainwindow.py` |
+| Shortcut/keybind safety polish | Shortcut conflict detection now canonicalizes equivalent key strings (for example `Ctrl++` and `control++`) and the keyboard shortcuts dialog shows live warnings for single-key tool/navigation shortcuts that are intentionally suppressed while typing. | Koharu workflow/keybind search, #519 fewer processing friction; upstream #1180 spacebar panning, #568 keyboard block navigation, #1104 workflow polish. | `utils/shortcuts.py`, `ui/shortcuts_dialog.py`, `tests/test_shortcuts_rendering.py` |
+| Rendering settings color completion | The Rendering/Text Formatting settings section now exposes a persisted default back/second-outline color picker, completing the previous width-only default and making project defaults fully discoverable. | Koharu #595 font UX, #593 text presets, #698 double outline. | `ui/configpanel.py`, `utils/config.py` |
+
+### Progress audit update for this follow-up
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Back-outline style now reaches settings color defaults, PSD handoff metadata, proof metrics, JSX notes, and tests. | Native PSD editable layer effects are still handoff/JSX metadata rather than true PSD text effects. |
+| PSD/export workflow | Partially implemented / advanced | Multi-page API PSD handoff export and richer text style metadata reduce manual export steps. | Native PSD writer remains deferred for cross-app validation. |
+| Keyboard/tool UX | Implemented / advanced | Canonical conflict detection and live single-key safety warnings improve shortcut setup without adding duplicate QAction/QShortcut owners. | Spacebar panning itself remains deferred to a dedicated canvas input pass. |
+| Automation/API/headless | Implemented / advanced | `export(kind=psd_handoff, pages=[...])` now handles multi-page handoff exports with warnings. | Streaming progress events remain deferred. |
+| Upstream BallonsTranslator sync | Active | Reviewed recent `dev` commits again and documented safe/unsafe ports; no blind cherry-picks. | Dependency/provider/inpaint commits remain deferred pending Pro compatibility matrix. |
+
+## Newly implemented in this pass (2026-05-17: double-outline lettering, QA-enriched automation, upstream stage-restore fix)
+
+| Area | Implemented | Research source | Files |
+| --- | --- | --- | --- |
+| Manga double-outline/back-stroke rendering | Added persisted `secondary_stroke_width` and `secondary_srgb` style fields, normalized legacy/project data on load, drew the back outline before the primary outline/fill in normal and text-on-path rendering, and included the larger outline in effect-cache rendering. | Koharu #698 double outline, #594 advanced formatting, #446/#447 border cropping; upstream #35 wishes, #1138 text-on-path, #1077 fit-to-box. | `utils/fontformat.py`, `ui/textitem.py`, `utils/text_rendering.py`, `tests/test_text_rendering.py` |
+| Effect-aware fit/bounds diagnostics | Updated fit diagnostics, precise/proof metrics, renderer QA, and layout snapshots so the back outline contributes to safe inner bounds, overflow, recommended box sizing, and clipping risk. | Koharu #545 DPI/restricted rendering area, #594 formatting, #640 fixed font options; upstream #1077 auto-size. | `utils/text_rendering.py`, `utils/rendering_qa.py`, `ui/scenetext_manager.py`, `ui/text_panel.py` |
+| Visible text formatting controls and defaults | Added text-panel controls for back-outline width/color, a persisted Rendering setting for default back-outline width, and project-default application that carries primary stroke, secondary stroke, shadow, padding, writing, fit, and line-break defaults. | Koharu #593 presets, #595 font UX, #640 fixed font options, #698 double outline. | `ui/text_panel.py`, `ui/configpanel.py`, `utils/config.py`, `ui/fontformat_commands.py` |
+| Layout review agent action | Layout review now flags SFX-style text missing a back outline and can apply an `apply_double_outline` action through the existing scene-text manager, preserving user undo/update behavior. | Koharu #698, #594; upstream #1077. | `utils/layout_review_agent.py`, `ui/scenetext_manager.py`, `tests/test_layout_review_agent.py` |
+| Editable export/handoff metadata | SVG editable text handoff now emits a separate back-outline text layer before the main editable text layer and records secondary outline metrics in the manifest/proof metrics. | Koharu #454/#558 PSD text-layer issues, #591 export interoperability; upstream #50/#364/#749 export requests. | `utils/svg_text_export.py` |
+| Automation/headless page QA workflow | Extended the local automation `list_pages` backend with `include_rendering_qa=true`, returning each textbox's rendering QA warnings/metrics alongside reading-order blocks so headless/batch tools can triage pages without separate calls. | Koharu #612 API/headless, #610 batch projects, #691 quick navigation; upstream #1094 automation, #1020/#841 batch queue/resume. | `ui/mainwindow.py` |
+| Upstream workflow/stability adaptation | Reviewed upstream dev `6649de1` and adjacent workflow fixes, then fixed a Pro-specific selected-page detect-only restore tuple regression that could crash pipeline-finished stage restoration. | dmMaze #1178 / dev `6649de1`; upstream workflow stability. | `ui/mainwindow.py` |
+
+### Progress audit update for this pass
+
+| Capability | Status | Newly implemented | Deferred with reason |
+| --- | --- | --- | --- |
+| Advanced text rendering / formatting | Implemented / advanced | Double-outline/back-stroke rendering, text-on-path support, SVG handoff support, effect-aware fit/proof diagnostics, text-panel controls, and preset/default integration. | HarfBuzz/OpenType shaping and native editable PSD text effects still need optional dependency and cross-app validation. |
+| Layout review agent | Implemented / advanced | SFX missing-back-outline issue and `apply_double_outline` action added; snapshots include secondary outline style. | LLM provider quality and full model-specific review remain provider-dependent. |
+| PSD/export workflow | Partially implemented / advanced | SVG editable text handoff preserves back-outline as a separate layer; proof metrics include secondary outline. | Native PSD editable text writer remains deferred. |
+| Settings/config polish | Implemented / advanced | Rendering defaults now include a persisted back-outline width; project-default application applies outline/shadow/padding formatting defaults. | Default back-outline color UI is stored with config but not yet exposed as a dedicated color picker in Settings; the text panel exposes per-style color. |
+| Keyboard/tool UX | Maintained | No new shortcut owners were added; UI controls are direct widgets, avoiding QAction/QShortcut ambiguity. | Spacebar panning/custom shortcut conflict UI remains a future pass. |
+| Automation/API/headless | Implemented / advanced | `list_pages(include_rendering_qa=true)` gives pages/textboxes/rendering issues in one call for batch/headless tooling. | Streaming progress/events remain deferred. |
+| Upstream BallonsTranslator sync | Active | Reviewed recent dev commits and adapted a safe Pro stage-restore stability fix inspired by `6649de1`; dependency commits documented as deferred. | Requirements pins and large provider/inpaint commits remain deferred pending Pro compatibility tests. |
+
+### Koharu issue-inspired items implemented/deferred
+
+- Implemented/advanced: #698 double outline, #594 advanced text formatting, #593 presets, #595 font UX, #640 fixed font options, #612/#610/#691 API/batch/navigation QA workflow.
+- Deferred: #454/#558 native editable PSD text/effects, #602/#583 full RTL shaping, #705 VRAM model cancellation, #693 large-history Save As crash until reproducible fixtures are available.
+
+### Upstream BallonsTranslator issue-inspired items implemented/deferred
+
+- Implemented/advanced: #1077 auto-size/effect-aware fitting, #1138 text-on-path effects, #1094 automation, #1020/#841 batch/headless triage, #1178 workflow stability area.
+- Deferred: #1179/#1177/#1175 dependency pins, #1172 translator fix, #1180 spacebar panning, #50/#364 native PSD handoff.
+
+### Upstream dev commits ported/deferred
+
+- Ported/adapted: `6649de1` reviewed; Pro-specific detect-only `_run_stages_restore` stability fix applied.
+- Reviewed/deferred: `c80eb81`, `04c3414`, `88d4969` dependency changes; `485bbe8` FLUX inpaint; `4c14019` replace/render responsiveness; `1958f66` Ollama provider; `64a5713` Google translator fix.
+
+### Next batch candidates
+
+1. Native PSD editable translated text/effects with helper layers and warnings.
+2. Optional HarfBuzz shaping for RTL/Arabic with package-safe fallback.
+3. Shortcut conflict UI and spacebar panning without QAction/QShortcut ambiguity.
+4. Dependency matrix for PaddleOCRVLManga/transformers/gguf upstream fixes.
+5. Replace-all/render-all responsiveness and save-state audit against `4c14019`.
+6. Batch pause/resume/cancel and model-unload workflow.
+7. Default back-outline color picker in Rendering settings.
+8. More vertical punctuation/bracket optical placement fixtures.
+
+
+---
+
+## Previous implementation history
 
 ## Newly implemented in this pass (2026-05-14: review response, batch lettering dialog, live fixes, upstream shortcut dependency port)
 

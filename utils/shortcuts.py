@@ -3,6 +3,7 @@ Default keyboard shortcuts and helpers for customizable keybinds.
 Keys are stored as strings (e.g. "Ctrl+S", "Ctrl+Shift+M") and merged from config.
 """
 from typing import Dict, List, Tuple, Optional
+import re
 
 # List of (action_id, default_key, category, description) for UI and defaults.
 # category is used for grouping in the shortcuts dialog.
@@ -76,6 +77,51 @@ SHORTCUT_SCHEMA: List[Tuple[str, str, str, str]] = [
 ]
 
 
+_SINGLE_KEY_TEXT_GUARDED_PREFIXES = ("draw.", "view.", "go.", "canvas.")
+_TEXT_SAFE_SINGLE_KEYS = {"escape", "delete", "backspace", "tab", "enter", "return"}
+
+
+def normalize_shortcut_key(key: str) -> str:
+    """Return a canonical shortcut key for conflict detection.
+
+    Qt may serialize the same shortcut as ``Ctrl++``/``Ctrl+Plus`` or with
+    different casing.  Conflict checks should be stricter than plain string
+    equality so imported JSON cannot create QAction/QShortcut ambiguity that
+    the dialog misses.
+    """
+    k = str(key or "").strip()
+    if not k:
+        return ""
+    k = k.replace(" ", "")
+    k = re.sub(r"(?i)control", "Ctrl", k)
+    aliases = {
+        "ctrl++": "Ctrl+Plus",
+        "ctrl+=": "Ctrl+Plus",
+        "ctrl+-": "Ctrl+Minus",
+        "esc": "Escape",
+        "pgup": "PageUp",
+        "pgdn": "PageDown",
+        "del": "Delete",
+    }
+    lowered = k.lower()
+    if lowered in aliases:
+        return aliases[lowered]
+    parts = [part for part in k.split("+") if part]
+    if len(parts) <= 1:
+        return aliases.get(lowered, k[:1].upper() + k[1:] if len(k) == 1 else k)
+    modifier_order = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "meta": "Meta", "cmd": "Meta", "command": "Meta"}
+    mods = []
+    key_part = parts[-1]
+    for part in parts[:-1]:
+        canonical = modifier_order.get(part.lower(), part)
+        if canonical not in mods:
+            mods.append(canonical)
+    mods.sort(key=lambda x: ["Ctrl", "Alt", "Shift", "Meta"].index(x) if x in ["Ctrl", "Alt", "Shift", "Meta"] else 99)
+    key_lower = key_part.lower()
+    key_part = aliases.get(key_lower, key_part[:1].upper() + key_part[1:] if len(key_part) == 1 else key_part)
+    return "+".join(mods + [key_part])
+
+
 def get_default_shortcuts() -> Dict[str, str]:
     """Return a dict action_id -> default key sequence string."""
     return {item[0]: item[1] for item in SHORTCUT_SCHEMA}
@@ -98,7 +144,7 @@ def find_shortcut_conflicts(shortcuts_map: Dict[str, str]) -> Dict[str, List[str
     """Return key -> [action_ids] for duplicate non-empty shortcuts."""
     key_to_actions: Dict[str, List[str]] = {}
     for action_id, key in (shortcuts_map or {}).items():
-        k = (key or "").strip()
+        k = normalize_shortcut_key(key)
         if not k:
             continue
         key_to_actions.setdefault(k, []).append(action_id)
@@ -144,8 +190,33 @@ def shortcut_should_ignore_text_input(focus_widget) -> bool:
 
 
 def is_single_key_sequence(key: str) -> bool:
-    k = (key or "").strip()
+    k = normalize_shortcut_key(key)
     if not k:
         return False
     lowered = k.lower()
     return "+" not in k and lowered not in {"pageup", "pagedown", "escape", "space", "delete", "backspace", "tab", "enter", "return"}
+
+
+def shortcut_safety_warnings(shortcuts_map: Dict[str, str]) -> List[Dict[str, str]]:
+    """Return non-blocking warnings for shortcuts that need text-input guards.
+
+    Single-key drawing/navigation/tool shortcuts are useful, but they must be
+    owned by MainWindow-level QShortcuts and ignored while a text widget has
+    focus.  The dialog/API can show these warnings so users understand why a
+    key may not fire while typing.
+    """
+    warnings: List[Dict[str, str]] = []
+    for action_id, key in (shortcuts_map or {}).items():
+        normalized = normalize_shortcut_key(key)
+        if not normalized or not is_single_key_sequence(normalized):
+            continue
+        if not action_id.startswith(_SINGLE_KEY_TEXT_GUARDED_PREFIXES):
+            continue
+        if normalized.lower() in _TEXT_SAFE_SINGLE_KEYS:
+            continue
+        warnings.append({
+            "action_id": action_id,
+            "key": normalized,
+            "warning": "single_key_suppressed_while_typing",
+        })
+    return warnings

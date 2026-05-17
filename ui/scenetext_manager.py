@@ -41,6 +41,8 @@ from utils.text_rendering import (
     resolve_writing_mode,
     smart_fit_text_to_box,
     plan_typography_cleanup,
+    plan_atomic_bubble_fit,
+    normalize_atomic_fit_mode,
 )
 from utils.line_breaking import split_long_token_with_hyphenation
 from utils.text_masking import masked_text_warnings, recommended_padding_for_mask, mask_effective_box
@@ -632,6 +634,10 @@ class SceneTextManager(QObject):
         self.canvas.auto_fit_font_signal.connect(self.onAutoFitFontToBox)
         if hasattr(self.canvas, "smart_auto_fit_signal"):
             self.canvas.smart_auto_fit_signal.connect(self.onSmartAutoFitTextToBox)
+        if hasattr(self.canvas, "atomic_bubble_fit_signal"):
+            self.canvas.atomic_bubble_fit_signal.connect(self.onAtomicBubbleFitText)
+        if hasattr(self.canvas, "atomic_bubble_fit_profile_signal"):
+            self.canvas.atomic_bubble_fit_profile_signal.connect(self.onAtomicBubbleFitProfileText)
         if hasattr(self.canvas, "polish_typography_signal"):
             self.canvas.polish_typography_signal.connect(self.onPolishTypography)
         self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
@@ -820,6 +826,9 @@ class SceneTextManager(QObject):
             if blk.fontformat.stroke_width == 0 and getattr(pcfg.global_fontformat, 'stroke_width', 0) > 0:
                 blk.fontformat.stroke_width = pcfg.global_fontformat.stroke_width
                 blk.fontformat.srgb = list(getattr(pcfg.global_fontformat, 'srgb', [0, 0, 0]))
+            if getattr(blk.fontformat, 'secondary_stroke_width', 0.0) == 0 and getattr(pcfg.global_fontformat, 'secondary_stroke_width', 0) > 0:
+                blk.fontformat.secondary_stroke_width = pcfg.global_fontformat.secondary_stroke_width
+                blk.fontformat.secondary_srgb = list(getattr(pcfg.global_fontformat, 'secondary_srgb', [255, 255, 255]))
             # Apply global text box corner radius default (shape) when present: 0 = rectangle, >0 = rounded / circle-like.
             gb_radius = float(getattr(pcfg.global_fontformat, "text_box_corner_radius", 0.0) or 0.0)
             if gb_radius > 0 and getattr(blk.fontformat, "text_box_corner_radius", 0.0) == 0.0:
@@ -1472,6 +1481,7 @@ class SceneTextManager(QObject):
             letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
             padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
             stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            secondary_stroke_width=float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
             line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
             shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
             shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
@@ -1504,6 +1514,105 @@ class SceneTextManager(QObject):
             if blkitem.blk is not None:
                 blkitem.blk.fontformat = ff.deepcopy()
         return changed
+
+    def _apply_atomic_bubble_fit_to_item(self, blkitem: TextBlkItem, profile: str = None) -> bool:
+        rect = blkitem.absBoundingRect(qrect=True)
+        ff = blkitem.fontformat
+        text = blkitem.toPlainText()
+        mask = getattr(getattr(blkitem, 'blk', None), 'text_mask', None)
+        effective = mask_effective_box(mask, (rect.width(), rect.height()), getattr(ff, 'text_padding', 0.0))
+        style_min, style_max = resolve_fit_font_size_bounds(
+            getattr(ff, 'fit_font_size_min', 0.0),
+            getattr(ff, 'fit_font_size_max', 0.0),
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0),
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0),
+        )
+        result = plan_atomic_bubble_fit(
+            text,
+            float(getattr(ff, 'font_size', 24.0) or 24.0),
+            (rect.width(), rect.height()),
+            getattr(ff, 'writing_mode', 'auto'),
+            getattr(ff, 'fit_mode', 'shrink'),
+            getattr(ff, 'line_break_strategy', 'auto'),
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            secondary_stroke_width=float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
+            shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+            shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
+            min_font_size=style_min,
+            max_font_size=style_max,
+            bubble_box_size=(float(effective.get('width', rect.width())), float(effective.get('height', rect.height()))) if effective.get('uses_mask') else (rect.width(), rect.height()),
+            target_fill=float(getattr(pcfg, 'render_atomic_fit_target_fill', 0.78) or 0.78),
+            max_expand_ratio=float(getattr(pcfg, 'render_atomic_fit_max_expand', 1.22) or 1.22),
+            profile=normalize_atomic_fit_mode(profile or getattr(pcfg, 'render_atomic_fit_profile', 'balanced')),
+        )
+        changed = False
+        if result.text and result.text != text:
+            blkitem.setPlainText(result.text)
+            if blkitem.blk is not None:
+                blkitem.blk.translation = result.text
+            changed = True
+        for attr, value in [
+            ('font_size', result.font_size),
+            ('line_spacing', result.line_spacing),
+            ('letter_spacing', result.letter_spacing),
+            ('text_padding', result.text_padding),
+            ('writing_mode', result.writing_mode),
+            ('fit_mode', result.fit_mode),
+            ('line_break_strategy', result.line_break_strategy),
+            ('alignment', result.alignment),
+        ]:
+            if hasattr(ff, attr) and value is not None and getattr(ff, attr) != value:
+                setattr(ff, attr, value)
+                changed = True
+        vertical = result.resolved_writing_mode == 'vertical_rl'
+        if getattr(ff, 'vertical', False) != vertical:
+            ff.vertical = vertical
+            changed = True
+        if changed:
+            blkitem.set_fontformat(ff)
+            if result.alignment in (0, 1, 2):
+                blkitem.setAlignment(int(result.alignment), restore_cursor=False)
+            if blkitem.blk is not None:
+                blkitem.blk.fontformat = ff.deepcopy()
+                blkitem.blk.vertical = vertical
+            try:
+                blkitem.repaint_background()
+            except Exception:
+                pass
+        return changed
+
+    def atomic_bubble_fit_textboxes(self, indices: List[int] = None, push_undo: bool = True, profile: str = None) -> int:
+        if indices is None:
+            target_blks = self.canvas.selected_text_items()
+        else:
+            wanted = set(int(i) for i in indices)
+            target_blks = [blk for blk in self.textblk_item_list if blk.idx in wanted]
+        if not target_blks:
+            return 0
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        changed = 0
+        for blkitem in target_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            if self._apply_atomic_bubble_fit_to_item(blkitem, profile=profile):
+                changed += 1
+        if changed:
+            if push_undo:
+                self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+            self.canvas.setProjSaveState(True)
+            if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
+                self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Atomically fit {0} text box(es) inside bubbles').format(changed))
+        return changed
+
+    def onAtomicBubbleFitText(self):
+        self.atomic_bubble_fit_textboxes(indices=None, push_undo=True)
+
+    def onAtomicBubbleFitProfileText(self, profile: str):
+        self.atomic_bubble_fit_textboxes(indices=None, push_undo=True, profile=profile)
 
     def smart_fit_textboxes(self, indices: List[int] = None, push_undo: bool = True) -> int:
         if indices is None:
@@ -1552,6 +1661,7 @@ class SceneTextManager(QObject):
                 getattr(ff, 'writing_mode', 'auto'),
                 padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
                 line_spacing=float(getattr(ff, 'line_spacing', 1.2) or 1.2),
                 letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
                 line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
@@ -1592,6 +1702,7 @@ class SceneTextManager(QObject):
             letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
             padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
             stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0),
+            secondary_stroke_width=float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
             line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
             shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
             shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
@@ -1630,6 +1741,8 @@ class SceneTextManager(QObject):
             'fallback_chain': ', '.join(merge_font_fallback_chain(getattr(ff, 'font_family', ''), text, pcfg, getattr(ff, 'fallback_font_chain', ''))),
             'fit_mode': getattr(ff, 'fit_mode', 'shrink'),
             'stroke_width': getattr(ff, 'stroke_width', 0.0),
+            'secondary_stroke_width': getattr(ff, 'secondary_stroke_width', 0.0),
+            'secondary_srgb': getattr(ff, 'secondary_srgb', [255, 255, 255]),
             'text_padding': getattr(ff, 'text_padding', 0.0),
             'line_spacing': getattr(ff, 'line_spacing', 1.2),
             'letter_spacing': getattr(ff, 'letter_spacing', 1.0),
@@ -1640,6 +1753,7 @@ class SceneTextManager(QObject):
             'ink_clip_risk': fit_dict.get('ink_clip_risk', False),
             'preset_suggestion': fit_dict.get('preset_suggestion', ''),
             'safe_inner_bounds': fit_dict.get('safe_inner_bounds', []),
+            'line_break_quality': fit_dict.get('line_break_quality', {}),
             'mask_coverage': mask_diag.get('coverage', 1.0),
             'mask_safe_insets': mask_diag.get('safe_insets', []),
             'mask_warning': mask_diag.get('warning', ''),
@@ -2050,6 +2164,19 @@ class SceneTextManager(QObject):
                 if blkitem.blk is not None:
                     blkitem.blk.fontformat.stroke_width = blkitem.fontformat.stroke_width
                 blkitem.set_fontformat(blkitem.fontformat)
+            for action in grouped.get("apply_double_outline", []):
+                blkitem = selected_by_idx.get(action.block_index)
+                if blkitem is None:
+                    continue
+                back_width = max(0.0, float(action.args.get("secondary_stroke_width", 0.20) or 0.20))
+                back_color = action.args.get("secondary_srgb", [255, 255, 255]) or [255, 255, 255]
+                blkitem.fontformat.secondary_stroke_width = max(float(getattr(blkitem.fontformat, "secondary_stroke_width", 0.0) or 0.0), back_width)
+                blkitem.fontformat.secondary_srgb = list(back_color)[:3]
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat.secondary_stroke_width = blkitem.fontformat.secondary_stroke_width
+                    blkitem.blk.fontformat.secondary_srgb = blkitem.fontformat.secondary_srgb
+                blkitem.set_fontformat(blkitem.fontformat)
+                blkitem.repaint_background()
             for action in grouped.get("polish_typography", []):
                 blkitem = selected_by_idx.get(action.block_index)
                 if blkitem is None:
@@ -2734,6 +2861,7 @@ class SceneTextManager(QObject):
                 letter_spacing=float(getattr(fmt, 'letter_spacing', 1.0) or 1.0),
                 padding=float(getattr(fmt, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(fmt, 'secondary_stroke_width', 0.0) or 0.0),
                 line_break_strategy=getattr(fmt, 'line_break_strategy', 'auto'),
             )
             if fit_mode in ('shrink', 'expand') and abs(fitted_size - blk_font.pointSizeF()) > 0.2:

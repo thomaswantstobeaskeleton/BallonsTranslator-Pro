@@ -13,8 +13,10 @@ from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
     QCheckBox,
+    QLineEdit,
 )
 from qtpy.QtCore import Qt
+from utils.config import pcfg
 
 
 EXPORT_FORMATS = [
@@ -95,6 +97,13 @@ class ExportFormatDialog(QDialog):
             self.include_unrendered_check.setChecked(False)
         self.include_unrendered_check.toggled.connect(self._on_include_unrendered_toggled)
         form.addRow('', self.include_unrendered_check)
+
+        self.filename_template_edit = QLineEdit(self)
+        self.filename_template_edit.setText(str(getattr(pcfg, 'export_filename_template', '{index:03d}') or '{index:03d}'))
+        self.filename_template_edit.setPlaceholderText('{index:03d}, {stem}_{index:03d}, {source}_{index:03d}')
+        self.filename_template_edit.setToolTip(self.tr('Tokens: {index}, {index:03d}, {page}, {stem}, {source}, {ext}. Extension is added automatically.'))
+        self.filename_template_edit.textChanged.connect(self._on_filename_template_changed)
+        form.addRow(self.tr('Filename template:'), self.filename_template_edit)
 
         self.open_folder_after_export_check = QCheckBox(self.tr('Open output folder when done'))
         self.open_folder_after_export_check.setToolTip(self.tr('Use the persisted Settings default for this export.'))
@@ -177,6 +186,16 @@ class ExportFormatDialog(QDialog):
             pcfg.export_include_unrendered_pages = bool(checked)
         except Exception:
             pass
+
+    def _on_filename_template_changed(self, text: str):
+        try:
+            pcfg.export_filename_template = (text or '').strip() or '{index:03d}'
+        except Exception:
+            pass
+
+    def get_filename_template(self) -> str:
+        return (self.filename_template_edit.text() or '').strip() or '{index:03d}'
+
     def get_include_intermediate(self) -> bool:
         return self.include_intermediate_check.isChecked()
 

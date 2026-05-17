@@ -421,3 +421,76 @@ def test_precise_text_bounds_degrades_and_proof_exposes_precise_bounds():
     metrics = lettering_proof_metrics("Hello", 18, (120, 60), "horizontal_ltr")
     assert "precise_measured_bounds" in metrics
     assert metrics["precise_measured_bounds"][0] > 0
+
+
+def test_secondary_stroke_increases_safe_margin_and_preset_roundtrip():
+    from utils.text_rendering import effect_margin_px, fit_font_size_to_box, FIT_MODE_PRESERVE, manga_presets
+    base = effect_margin_px(36, stroke_width=0.05, padding=0)
+    double = effect_margin_px(36, stroke_width=0.05, secondary_stroke_width=0.20, padding=0)
+    assert double > base
+    _size, _text, diag = fit_font_size_to_box(
+        "ドン!!", 36, (90, 50), FIT_MODE_PRESERVE,
+        stroke_width=0.05, secondary_stroke_width=0.20, padding=0,
+    )
+    assert diag.effect_margin >= double - 0.01
+    assert manga_presets()["sfx_bold"]["secondary_stroke_width"] > 0
+
+
+def test_line_break_quality_flags_widow_and_fit_suggests_balance():
+    from utils.text_rendering import FIT_MODE_PRESERVE, line_break_quality
+    quality = line_break_quality("one two three four five", 7, LINE_BREAK_BALANCED)
+    assert "lines" in quality.to_dict()
+    _size, _text, diag = fit_font_size_to_box("one two three four five", 18, (92, 80), FIT_MODE_PRESERVE, line_break_strategy=LINE_BREAK_BALANCED)
+    assert "line_break_quality" in diag.to_dict()
+    assert "balance_lines" in diag.recommended_actions or diag.to_dict()["line_break_quality"]["needs_balance"] in {True, False}
+
+
+def test_rtl_expand_is_capped_for_arabic_auto_fit():
+    expanded, _text, diag = fit_font_size_to_box("مرحبا بالعالم", 20, (500, 160), FIT_MODE_EXPAND, max_font_size=96)
+    assert diag.resolved_writing_mode == WRITING_MODE_RTL
+    assert expanded <= 27.1
+
+
+def test_atomic_bubble_fit_balances_lines_and_uses_readable_fill():
+    from utils.text_rendering import plan_atomic_bubble_fit
+    result = plan_atomic_bubble_fit(
+        "This is a compact speech bubble with uneven wording",
+        18,
+        (180, 100),
+        line_spacing=1.35,
+        letter_spacing=1.12,
+        padding=0,
+        target_fill=0.76,
+        max_expand_ratio=1.15,
+    )
+    assert result.font_size <= 18 * 1.15 + 0.1
+    assert result.text_padding >= 1.5
+    assert result.alignment == 1
+    assert "\n" in result.text
+    assert 0.2 < result.fill_ratio < 0.95
+    assert "line_break_quality" in result.to_dict()
+
+
+def test_atomic_bubble_fit_respects_vertical_cjk_and_punctuation():
+    from utils.text_rendering import plan_atomic_bubble_fit
+    result = plan_atomic_bubble_fit("第12話!?", 18, (60, 180), writing_mode="auto")
+    assert result.resolved_writing_mode == WRITING_MODE_VERTICAL_RL
+    assert "⁉" in result.text or "⁈" in result.text
+    assert result.text_padding >= 1.0
+
+
+def test_atomic_bubble_fit_profiles_change_density_and_export_profile():
+    from utils.text_rendering import plan_atomic_bubble_fit
+
+    text = "A short line should breathe in one bubble but grow louder in SFX"
+    comfortable = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="roomy")
+    dense = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="dense")
+    sfx = plan_atomic_bubble_fit(text, 16, (180, 95), target_fill=0.76, max_expand_ratio=1.2, profile="sound-effect")
+
+    assert comfortable.profile == "comfortable"
+    assert dense.profile == "dense"
+    assert sfx.profile == "sfx"
+    assert dense.text_padding <= comfortable.text_padding
+    assert dense.diagnostics["target_fill"] > comfortable.diagnostics["target_fill"]
+    assert sfx.line_break_strategy == "loose"
+    assert sfx.to_dict()["profile"] == "sfx"

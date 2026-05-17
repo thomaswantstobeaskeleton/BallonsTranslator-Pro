@@ -565,6 +565,28 @@ class FontFormatPanel(Widget):
         stroke_hlayout.addWidget(self.strokeColorPicker)
         stroke_hlayout.setSpacing(shared.WIDGET_SPACING_CLOSE)
 
+        self.secondaryStrokeWidthBox = SizeComboBox([0, 10], 'secondary_stroke_width', self)
+        self.secondaryStrokeWidthBox.addItems(["0.0", "0.12", "0.18", "0.25"])
+        self.secondaryStrokeWidthBox.setToolTip(self.tr("Back/second outline width for manga SFX and high-contrast lettering"))
+        self.secondaryStrokeWidthBox.param_changed.connect(self.on_param_changed)
+        self.secondaryStrokeLabel = SizeControlLabel(self, 0, self.tr("Back stroke"))
+        self.secondaryStrokeLabel.setObjectName("secondaryStrokeLabel")
+        font = self.secondaryStrokeLabel.font()
+        font.setPointSizeF(max(1.0, shared.CONFIG_FONTSIZE_CONTENT * 0.95))
+        self.secondaryStrokeLabel.setFont(font)
+        self.secondaryStrokeLabel.size_ctrl_changed.connect(self.secondaryStrokeWidthBox.changeByDelta)
+        self.secondaryStrokeLabel.btn_released.connect(lambda : self.on_param_changed('secondary_stroke_width', self.secondaryStrokeWidthBox.value()))
+        self.secondaryStrokeColorPicker = ColorPickerLabel(self, param_name='secondary_srgb')
+        self.secondaryStrokeColorPicker.setToolTip(self.tr("Change back/second outline color"))
+        self.secondaryStrokeColorPicker.changingColor.connect(self.changingColor)
+        self.secondaryStrokeColorPicker.colorChanged.connect(self.onColorLabelChanged)
+        self.secondaryStrokeColorPicker.apply_color.connect(self.on_apply_color)
+        secondary_stroke_hlayout = QHBoxLayout()
+        secondary_stroke_hlayout.addWidget(self.secondaryStrokeLabel)
+        secondary_stroke_hlayout.addWidget(self.secondaryStrokeWidthBox)
+        secondary_stroke_hlayout.addWidget(self.secondaryStrokeColorPicker)
+        secondary_stroke_hlayout.setSpacing(shared.WIDGET_SPACING_CLOSE)
+
         self.letterSpacingBox = SizeComboBox([0, 10], "letter_spacing", self)
         self.letterSpacingBox.addItems(["0.0"])
         self.letterSpacingBox.setToolTip(self.tr("Change letter spacing"))
@@ -712,6 +734,7 @@ class FontFormatPanel(Widget):
         hl3 = QHBoxLayout()
         hl3.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl3.addLayout(stroke_hlayout)
+        hl3.addLayout(secondary_stroke_hlayout)
         hl3.addLayout(lettersp_hlayout)
         hl3.addLayout(opacity_hlayout)
         hl3.addWidget(self.fontFallbackWarningLabel)
@@ -957,6 +980,10 @@ class FontFormatPanel(Widget):
             ('fit_mode', normalize_fit_mode(getattr(pcfg, 'render_default_fit_mode', 'shrink'))),
             ('line_break_strategy', normalize_line_break_strategy(getattr(pcfg, 'render_default_line_break_strategy', 'auto'))),
             ('text_padding', float(getattr(pcfg, 'render_default_text_padding', 0.0) or 0.0)),
+            ('stroke_width', float(getattr(pcfg, 'render_default_stroke_width', 0.0) or 0.0)),
+            ('secondary_stroke_width', float(getattr(pcfg, 'render_default_secondary_stroke_width', 0.0) or 0.0)),
+            ('secondary_srgb', getattr(pcfg, 'render_default_secondary_stroke_color', [255, 255, 255]) or [255, 255, 255]),
+            ('shadow_radius', float(getattr(pcfg, 'render_default_shadow_radius', 0.0) or 0.0)),
             ('fallback_font_chain', ''),
         ])
 
@@ -1027,6 +1054,7 @@ class FontFormatPanel(Widget):
                 letter_spacing=cleanup.letter_spacing,
                 padding=cleanup.text_padding,
                 stroke_width=float(getattr(fmt, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(fmt, 'secondary_stroke_width', 0.0) or 0.0),
                 line_break_strategy=cleanup.line_break_strategy,
                 shadow_radius=float(getattr(fmt, 'shadow_radius', 0.0) or 0.0),
                 shadow_offset=getattr(fmt, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
@@ -1114,6 +1142,7 @@ class FontFormatPanel(Widget):
                 letter_spacing=float(getattr(font_format, 'letter_spacing', 1.0) or 1.0),
                 padding=float(getattr(font_format, 'text_padding', 0.0) or 0.0),
                 stroke_width=float(getattr(font_format, 'stroke_width', 0.0) or 0.0),
+                secondary_stroke_width=float(getattr(font_format, 'secondary_stroke_width', 0.0) or 0.0),
                 line_break_strategy=getattr(font_format, 'line_break_strategy', 'auto'),
             )
             missing = missing_glyphs_after_fallback(getattr(font_format, 'font_family', ''), text, pcfg, getattr(font_format, 'fallback_font_chain', ''))
@@ -1136,6 +1165,12 @@ class FontFormatPanel(Widget):
                 balance=False,
             )
             cleanup_note = ','.join(cleanup.actions[:3]) if cleanup.actions else self.tr('none')
+            line_quality = (diag.to_dict().get('line_break_quality') or {}) if hasattr(diag, 'to_dict') else {}
+            line_note = self.tr('balanced')
+            if line_quality.get('needs_balance'):
+                line_note = self.tr('rebalance')
+            elif line_quality.get('raggedness') is not None:
+                line_note = self.tr('ragged {0:.2f}').format(float(line_quality.get('raggedness', 0.0) or 0.0))
             mask_note = self.tr('mask none')
             if mask_diag.get('warning'):
                 mask_note = self.tr('mask {coverage:.0%}, safe {w:.0f}×{h:.0f}').format(
@@ -1145,11 +1180,12 @@ class FontFormatPanel(Widget):
                 )
             status = self.tr("OK") if not diag.overflow and not missing and 'safe' not in mask_note else self.tr("Needs review")
             self.letteringDiagnosticsLabel.setText(
-                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · polish {polish} · missing {missing} · {mask}").format(
+                self.tr("Lettering diagnostics: {status} · mode {mode} · fit {fit:.1f}px · quality {quality:.2f} · lines {lines} · polish {polish} · missing {missing} · {mask}").format(
                     status=status,
                     mode=diag.resolved_writing_mode,
                     fit=fitted_size,
                     quality=getattr(diag, 'quality_score', 1.0),
+                    lines=line_note,
                     polish=cleanup_note,
                     missing=''.join(missing) if missing else self.tr('none'),
                     mask=mask_note,

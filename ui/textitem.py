@@ -157,7 +157,7 @@ class TextBlkItem(QGraphicsTextItem):
                     self.repaint_background()
             self.update()
 
-    def paint_stroke(self, painter: QPainter):
+    def paint_stroke(self, painter: QPainter, stroke_width: float = None, stroke_color=None):
         doc = QTextDocument()
         doc.setUndoRedoEnabled(False)
         doc.setDocumentMargin(self.document().documentMargin())
@@ -177,14 +177,15 @@ class TextBlkItem(QGraphicsTextItem):
         doc.setDefaultTextOption(self.document().defaultTextOption())
         cursor = QTextCursor(doc)
         block = doc.firstBlock()
-        stroke_pen = QPen(self.stroke_qcolor, 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        stroke_qcolor = QColor(*(stroke_color or self.fontformat.stroke_color())) if stroke_color is not None else self.stroke_qcolor
+        stroke_pen = QPen(stroke_qcolor, 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         letter_spacing = self.fontformat.letter_spacing * 100
         while block.isValid():
             it = block.begin()
             while not it.atEnd():
                 fragment = it.fragment()
                 cfmt = fragment.charFormat()
-                sw = pt2px(cfmt.fontPointSize()) * self.fontformat.stroke_width
+                sw = pt2px(cfmt.fontPointSize()) * (self.fontformat.stroke_width if stroke_width is None else float(stroke_width or 0.0))
                 if getattr(self.fontformat, 'stroke_outline_outside_only', False):
                     sw = sw * 2  # fill drawn on top covers inner half → stroke only outside (EasyScanlate-style)
                 stroke_pen.setWidthF(sw)
@@ -210,7 +211,7 @@ class TextBlkItem(QGraphicsTextItem):
         layout.relayout_on_changed = False
         doc.drawContents(painter)
 
-    def _paint_text_on_path(self, painter: QPainter, draw_stroke: bool = False, draw_fill: bool = True) -> None:
+    def _paint_text_on_path(self, painter: QPainter, draw_stroke: bool = False, draw_fill: bool = True, stroke_width: float = None, stroke_color=None) -> None:
         """Draw text along a circular or arc path (for text_on_path fontformat)."""
         ff = self.fontformat
         if ff.text_on_path == 0:
@@ -229,8 +230,9 @@ class TextBlkItem(QGraphicsTextItem):
         if font.pointSizeF() <= 0:
             font.setPointSizeF(max(1.0, pt2px(ff.font_size)))
         fg = QColor(*ff.foreground_color())
-        stroke_pen = QPen(QColor(*ff.stroke_color()), 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-        stroke_px = pt2px(font.pointSizeF()) * ff.stroke_width if draw_stroke and ff.stroke_width > 0 else 0
+        stroke_pen = QPen(QColor(*(stroke_color or ff.stroke_color())), 0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        active_width = ff.stroke_width if stroke_width is None else float(stroke_width or 0.0)
+        stroke_px = pt2px(font.pointSizeF()) * active_width if draw_stroke and active_width > 0 else 0
         if stroke_px > 0 and getattr(ff, 'stroke_outline_outside_only', False):
             stroke_px = stroke_px * 2  # fill drawn on top → stroke only outside (EasyScanlate-style)
         if stroke_px > 0:
@@ -280,11 +282,13 @@ class TextBlkItem(QGraphicsTextItem):
             return
 
         use_path = getattr(self.fontformat, 'text_on_path', 0) != 0
+        secondary_stroke_width = max(0.0, float(getattr(self.fontformat, "secondary_stroke_width", 0.0) or 0.0))
+        paint_secondary_stroke = secondary_stroke_width > 0
         paint_stroke = self.fontformat.stroke_width > 0
         paint_shadow = self.fontformat.shadow_radius > 0 and self.fontformat.shadow_strength > 0
         warp_style = getattr(self.fontformat, 'warp_style', 0)
 
-        if (not use_path and not paint_shadow and not paint_stroke and not warp_style) or empty:
+        if (not use_path and not paint_shadow and not paint_stroke and not paint_secondary_stroke and not warp_style) or empty:
             self.background_pixmap = None
             return
 
@@ -328,6 +332,14 @@ class TextBlkItem(QGraphicsTextItem):
                     # Text-on-path is not drawn by the base QGraphicsTextItem
                     # paint path, so keep both fill and effects in this cached
                     # layer for path text only.
+                    if paint_secondary_stroke:
+                        self._paint_text_on_path(
+                            effect_painter,
+                            draw_stroke=True,
+                            draw_fill=False,
+                            stroke_width=secondary_stroke_width,
+                            stroke_color=getattr(self.fontformat, "secondary_srgb", [255, 255, 255]),
+                        )
                     self._paint_text_on_path(
                         effect_painter,
                         draw_stroke=paint_stroke,
@@ -335,10 +347,14 @@ class TextBlkItem(QGraphicsTextItem):
                     )
                     self._paint_text_on_path(
                         silhouette_painter,
-                        draw_stroke=paint_stroke,
+                        draw_stroke=paint_stroke or paint_secondary_stroke,
                         draw_fill=True,
+                        stroke_width=max(float(getattr(self.fontformat, "stroke_width", 0.0) or 0.0), secondary_stroke_width),
                     )
                 else:
+                    if paint_secondary_stroke:
+                        self.paint_stroke(effect_painter, stroke_width=secondary_stroke_width, stroke_color=getattr(self.fontformat, "secondary_srgb", [255, 255, 255]))
+                        self.paint_stroke(silhouette_painter, stroke_width=secondary_stroke_width)
                     if paint_stroke:
                         self.paint_stroke(effect_painter)
                         self.paint_stroke(silhouette_painter)

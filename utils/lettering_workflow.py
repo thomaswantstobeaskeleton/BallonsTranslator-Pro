@@ -8,6 +8,7 @@ from .rendering_qa import build_project_rendering_qa, flatten_rendering_qa_rows,
 CORE_FIX_ACTIONS = {
     "polish_typography",
     "smart_fit",
+    "atomic_bubble_fit",
     "shrink_to_fit",
     "shrink_to_mask_safe_area",
     "switch_writing_mode",
@@ -101,13 +102,13 @@ def build_lettering_workflow_plan(
             "reason": "Resolve writing mode, vertical punctuation, line-break policy, padding, and fallback chains before fitting.",
             "affected_textboxes": max(core_actions.get("polish_typography", 0), core_actions.get("normalize_vertical_punctuation", 0), core_actions.get("set_line_break_strategy", 0)),
         })
-    if core_actions.get("smart_fit") or core_actions.get("shrink_to_fit") or core_actions.get("tighten_letter_spacing") or core_actions.get("resize_to_recommended_box"):
+    if core_actions.get("atomic_bubble_fit") or core_actions.get("smart_fit") or core_actions.get("shrink_to_fit") or core_actions.get("tighten_letter_spacing") or core_actions.get("resize_to_recommended_box"):
         steps.append({
             "id": "smart_fit",
-            "label": "Smart fit textboxes",
+            "label": "Atomic/smart fit textboxes",
             "apply_order": 20,
-            "reason": "Apply balanced wrapping, tracking/leading tightening, and fit-to-box sizing.",
-            "affected_textboxes": max(core_actions.get("smart_fit", 0), core_actions.get("shrink_to_fit", 0), core_actions.get("resize_to_recommended_box", 0)),
+            "reason": "Apply atomic bubble fitting, balanced wrapping, tracking/leading tightening, and fit-to-box sizing.",
+            "affected_textboxes": max(core_actions.get("atomic_bubble_fit", 0), core_actions.get("smart_fit", 0), core_actions.get("shrink_to_fit", 0), core_actions.get("resize_to_recommended_box", 0)),
         })
     if needs_layout_review:
         steps.append({

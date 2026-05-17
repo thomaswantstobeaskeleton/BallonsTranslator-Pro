@@ -17,12 +17,15 @@ from .text_rendering import (
     safe_inner_bounds,
     fit_font_size_to_box,
     smart_fit_text_to_box,
+    plan_atomic_bubble_fit,
     plan_typography_cleanup,
     lettering_proof_metrics,
     line_break_opportunities,
     normalize_vertical_punctuation,
+    optimal_kinsoku_wrap,
     resolve_fit_font_size_bounds,
     suggest_manga_effects_for_background,
+    suggested_back_outline_rgb,
     vertical_layout_plan,
     merge_font_fallback_chain,
     missing_glyphs_after_fallback,
@@ -99,10 +102,11 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         box_h,
         float(getattr(fmt, "line_spacing", 1.15) or 1.15),
         float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
-        float(getattr(fmt, "text_padding", 0.0) or 0.0),
-        float(getattr(fmt, "stroke_width", 0.0) or 0.0),
-        float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
-        getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+        stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
     )
 
@@ -136,6 +140,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
         shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
         shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
@@ -146,6 +151,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         (box_w, box_h),
         float(getattr(fmt, "font_size", 24.0) or 24.0),
         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
         shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
         shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
@@ -358,6 +364,25 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
             }
         )
 
+    preset_suggestion = getattr(fit_diag, "preset_suggestion", "")
+    if (
+        preset_suggestion == "sfx_bold"
+        and float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0) <= 0
+    ):
+        back_rgb = suggested_back_outline_rgb(
+            getattr(fmt, "frgb", [0, 0, 0]) or [0, 0, 0],
+            getattr(fmt, "srgb", [0, 0, 0]) or [0, 0, 0],
+        )
+        warnings.append("sfx_missing_back_outline")
+        suggestions.append(
+            {
+                "action": "apply_double_outline",
+                "secondary_stroke_width": 0.20,
+                "secondary_srgb": back_rgb,
+                "reason": "SFX-style lettering is more readable with a wider back outline.",
+            }
+        )
+
     recommended_box = list(getattr(fit_diag, "recommended_box_size", (box_w, box_h)))
     if overflow and (
         recommended_box[0] > box_w * 1.02 or recommended_box[1] > box_h * 1.02
@@ -472,11 +497,28 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
         shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
         shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
         sample_limit=64,
     )
+    line_quality = proof_metrics.get("line_break_quality", {}) or {}
+    if line_quality.get("needs_balance") and mode != "vertical_rl":
+        if line_quality.get("has_widow"):
+            warnings.append("line_break_widow")
+        elif line_quality.get("has_kinsoku_violation"):
+            warnings.append("line_break_kinsoku_violation")
+        else:
+            warnings.append("ragged_line_breaks")
+        suggestions.append(
+            {
+                "action": "balance_lines",
+                "line_break_quality": line_quality,
+                "recommended_strategy": line_quality.get("recommended_strategy", "balanced"),
+                "reason": "Wrapped lettering has a widow, kinsoku violation, or uneven line lengths; rebalance before final render.",
+            }
+        )
     if proof_metrics.get("density", 0) > 0.94 or any(
         float(v) > 0 for v in proof_metrics.get("overflow_pixels", [0, 0])
     ):
@@ -500,6 +542,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
         shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
         shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
@@ -522,6 +565,48 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
                 "reason": "Apply balanced wrapping, tracking/leading tightening, writing-mode correction, and font fitting in a safe order.",
             }
         )
+
+    atomic_fit = plan_atomic_bubble_fit(
+        text,
+        float(getattr(fmt, "font_size", 24.0) or 24.0),
+        (box_w, box_h),
+        getattr(fmt, "writing_mode", "auto"),
+        getattr(fmt, "fit_mode", FIT_MODE_SHRINK),
+        getattr(fmt, "line_break_strategy", "auto"),
+        line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
+        letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
+        padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
+        stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
+        shadow_radius=float(getattr(fmt, "shadow_radius", 0.0) or 0.0),
+        shadow_offset=getattr(fmt, "shadow_offset", [0.0, 0.0]) or [0.0, 0.0],
+        min_font_size=style_min,
+        max_font_size=style_max,
+        bubble_box_size=(
+            float(effective_box.get("width", box_w)),
+            float(effective_box.get("height", box_h)),
+        ) if effective_box.get("uses_mask") else (box_w, box_h),
+        target_fill=float(getattr(config_obj, "render_atomic_fit_target_fill", 0.78) or 0.78),
+        max_expand_ratio=float(getattr(config_obj, "render_atomic_fit_max_expand", 1.22) or 1.22),
+        profile=getattr(config_obj, "render_atomic_fit_profile", "balanced"),
+    )
+    atomic_actions = set(atomic_fit.actions or [])
+    if atomic_fit.fill_ratio < 0.48:
+        warnings.append("underfilled_bubble_text")
+    elif atomic_fit.fill_ratio > 0.92:
+        warnings.append("overfilled_bubble_text")
+    if atomic_actions and (
+        overflow
+        or mask_overflow
+        or bool(line_quality.get("needs_balance"))
+        or atomic_fit.fill_ratio < 0.48
+        or atomic_fit.fill_ratio > 0.92
+    ):
+        suggestions.append({
+            "action": "atomic_bubble_fit",
+            "atomic_bubble_fit": atomic_fit.to_dict(),
+            "reason": "Apply an all-at-once bubble-safe lettering fit: balanced line spread, comfortable padding, centered alignment, and readable font size.",
+        })
 
     return {
         "page": page,
@@ -554,6 +639,7 @@ def analyze_text_block(blk, page: str, index: int, config_obj=None) -> Dict:
         "quality_score": quality_score,
         "suggested_font_size": fitted_size,
         "smart_fit": smart_fit.to_dict(),
+        "atomic_bubble_fit": atomic_fit.to_dict(),
         "recommended_box_size": recommended_box,
         "box_scale_hint": getattr(fit_diag, "box_scale_hint", 1.0),
         "ink_clip_risk": bool(getattr(fit_diag, "ink_clip_risk", False)),
@@ -856,6 +942,18 @@ def apply_project_rendering_fixes(
                 )
                 changed.append("vertical_punctuation")
 
+            if (
+                any(w in diag["warnings"] for w in ("line_break_widow", "line_break_kinsoku_violation", "ragged_line_breaks"))
+                and wants("balance_lines")
+            ):
+                avg = max(1.0, float(getattr(fmt, "font_size", 24.0) or 24.0) * 0.56 * max(0.1, float(getattr(fmt, "letter_spacing", 1.0) or 1.0)))
+                max_chars = max(2, int(max(1.0, box_w - 2 * float(getattr(fmt, "text_padding", 0.0) or 0.0)) / avg))
+                balanced = "\n".join(optimal_kinsoku_wrap(text.replace("\n", ""), max_chars, getattr(fmt, "line_break_strategy", "balanced")))
+                if balanced and balanced != text:
+                    blk.translation = balanced
+                    fmt.line_break_strategy = "balanced"
+                    changed.append("balance_lines")
+
             if "low_contrast_no_effect" in diag["warnings"] and wants(
                 "apply_contrast_stroke"
             ):
@@ -867,6 +965,15 @@ def apply_project_rendering_fixes(
                 if hasattr(fmt, "srgb"):
                     fmt.srgb = list(eff.get("recommended_stroke_rgb", [255, 255, 255]))
                 changed.append("contrast_stroke")
+
+            if "sfx_missing_back_outline" in diag["warnings"] and wants("apply_double_outline"):
+                suggestion = next((s for s in diag.get("suggestions", []) if s.get("action") == "apply_double_outline"), {})
+                fmt.secondary_stroke_width = max(
+                    float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
+                    float(suggestion.get("secondary_stroke_width", 0.20) or 0.20),
+                )
+                fmt.secondary_srgb = list(suggestion.get("secondary_srgb", [255, 255, 255]) or [255, 255, 255])[:3]
+                changed.append("double_outline")
 
             if (
                 "missing_glyphs" in diag["warnings"]
@@ -912,6 +1019,39 @@ def apply_project_rendering_fixes(
                     if new_spacing < float(getattr(fmt, "letter_spacing", 1.0) or 1.0):
                         fmt.letter_spacing = new_spacing
                         changed.append("letter_spacing")
+
+            if wants("atomic_bubble_fit"):
+                atomic = diag.get("atomic_bubble_fit", {}) or {}
+                atomic_actions = set(atomic.get("actions", []) or [])
+                if atomic_actions:
+                    new_text = str(atomic.get("text", "") or "")
+                    if new_text and new_text != text:
+                        blk.translation = new_text
+                        text = new_text
+                        changed.append("atomic_text")
+                    for attr, key in [
+                        ("font_size", "font_size"),
+                        ("line_spacing", "line_spacing"),
+                        ("letter_spacing", "letter_spacing"),
+                        ("text_padding", "text_padding"),
+                        ("writing_mode", "writing_mode"),
+                        ("fit_mode", "fit_mode"),
+                        ("line_break_strategy", "line_break_strategy"),
+                        ("alignment", "alignment"),
+                    ]:
+                        if hasattr(fmt, attr) and key in atomic:
+                            try:
+                                value = atomic.get(key)
+                                if attr == "alignment":
+                                    value = int(value)
+                                elif attr not in {"writing_mode", "fit_mode", "line_break_strategy"}:
+                                    value = float(value)
+                                if getattr(fmt, attr) != value:
+                                    setattr(fmt, attr, value)
+                                    changed.append("atomic_" + attr)
+                            except Exception:
+                                pass
+                    fmt.vertical = str(getattr(fmt, "writing_mode", "auto")) == "vertical_rl"
 
             if wants("smart_fit"):
                 smart = diag.get("smart_fit", {}) or {}
@@ -1048,6 +1188,7 @@ def apply_project_rendering_fixes(
                     getattr(fmt, "writing_mode", "auto"),
                     padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
                     stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+                    secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
                     line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
                     letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
                     line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),
@@ -1075,6 +1216,7 @@ def apply_project_rendering_fixes(
                         getattr(fmt, "writing_mode", "auto"),
                         padding=float(getattr(fmt, "text_padding", 0.0) or 0.0),
                         stroke_width=float(getattr(fmt, "stroke_width", 0.0) or 0.0),
+                        secondary_stroke_width=float(getattr(fmt, "secondary_stroke_width", 0.0) or 0.0),
                         line_spacing=float(getattr(fmt, "line_spacing", 1.15) or 1.15),
                         letter_spacing=float(getattr(fmt, "letter_spacing", 1.0) or 1.0),
                         line_break_strategy=getattr(fmt, "line_break_strategy", "auto"),

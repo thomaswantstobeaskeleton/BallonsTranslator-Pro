@@ -12,6 +12,7 @@ from .custom_widget.focus_ring import FocusRingFrame
 from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils.data_path_manager import resolve_data_path, free_space_gb, ensure_data_path
+from utils.text_rendering import ATOMIC_FIT_BALANCED, ATOMIC_FIT_COMFORTABLE, ATOMIC_FIT_DENSE, ATOMIC_FIT_CAPTION, ATOMIC_FIT_SFX, normalize_atomic_fit_mode
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .glossary_map_dialog import GlossaryMapDialog
@@ -914,6 +915,23 @@ class ConfigPanel(Widget):
         self.render_default_stroke_width_spin.setDecimals(3)
         self.render_default_stroke_width_spin.valueChanged.connect(self.on_render_default_stroke_width_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_stroke_width_spin, self.tr('Default stroke width'), discription=self.tr('Relative manga outline width for presets/new styles.')))
+        self.render_default_secondary_stroke_width_spin = QDoubleSpinBox(self)
+        self.render_default_secondary_stroke_width_spin.setRange(0.0, 1.0)
+        self.render_default_secondary_stroke_width_spin.setSingleStep(0.01)
+        self.render_default_secondary_stroke_width_spin.setDecimals(3)
+        self.render_default_secondary_stroke_width_spin.valueChanged.connect(self.on_render_default_secondary_stroke_width_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_secondary_stroke_width_spin,
+            self.tr('Default back/second outline width'),
+            discription=self.tr('Relative back outline for double-outline SFX presets. 0 disables the second outline by default.')
+        ))
+        self.render_default_secondary_stroke_color_btn = QPushButton(self.tr('Choose...'), self)
+        self.render_default_secondary_stroke_color_btn.clicked.connect(self.on_render_default_secondary_stroke_color_clicked)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_default_secondary_stroke_color_btn,
+            self.tr('Default back/second outline color'),
+            discription=self.tr('Color used when project text defaults or SFX presets apply a second/back outline.')
+        ))
         self.render_default_shadow_radius_spin = QDoubleSpinBox(self)
         self.render_default_shadow_radius_spin.setRange(0.0, 1.0)
         self.render_default_shadow_radius_spin.setSingleStep(0.01)
@@ -926,6 +944,34 @@ class ConfigPanel(Widget):
         self.render_default_text_padding_spin.setDecimals(1)
         self.render_default_text_padding_spin.valueChanged.connect(self.on_render_default_text_padding_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(self.render_default_text_padding_spin, self.tr('Default text padding'), discription=self.tr('Inset in image pixels to avoid clipped strokes/punctuation.')))
+        self.render_atomic_fit_profile_combo = QComboBox(self)
+        for label, value in [
+            (self.tr('Balanced speech'), ATOMIC_FIT_BALANCED),
+            (self.tr('Comfortable / roomy'), ATOMIC_FIT_COMFORTABLE),
+            (self.tr('Dense / compact'), ATOMIC_FIT_DENSE),
+            (self.tr('Caption / narration'), ATOMIC_FIT_CAPTION),
+            (self.tr('SFX / loud'), ATOMIC_FIT_SFX),
+        ]:
+            self.render_atomic_fit_profile_combo.addItem(label, value)
+        self.render_atomic_fit_profile_combo.currentIndexChanged.connect(self.on_render_atomic_fit_profile_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.render_atomic_fit_profile_combo,
+            self.tr('Atomic bubble fit default profile'),
+            discription=self.tr('Controls the one-click bubble formatter density: roomy dialogue, compact dialogue, captions, or SFX-style loose wrapping.')
+        ))
+        self.render_atomic_fit_target_fill_spin = QDoubleSpinBox(self)
+        self.render_atomic_fit_target_fill_spin.setRange(0.55, 0.94)
+        self.render_atomic_fit_target_fill_spin.setSingleStep(0.01)
+        self.render_atomic_fit_target_fill_spin.setDecimals(2)
+        self.render_atomic_fit_target_fill_spin.valueChanged.connect(self.on_render_atomic_fit_target_fill_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_atomic_fit_target_fill_spin, self.tr('Atomic bubble fit fill target'), discription=self.tr('How much of the bubble-safe area atomic fit should occupy. Lower values leave more breathing room.')))
+        self.render_atomic_fit_max_expand_spin = QDoubleSpinBox(self)
+        self.render_atomic_fit_max_expand_spin.setRange(1.0, 1.8)
+        self.render_atomic_fit_max_expand_spin.setSingleStep(0.02)
+        self.render_atomic_fit_max_expand_spin.setDecimals(2)
+        self.render_atomic_fit_max_expand_spin.valueChanged.connect(self.on_render_atomic_fit_max_expand_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(self.render_atomic_fit_max_expand_spin, self.tr('Atomic bubble fit max font expansion'), discription=self.tr('Maximum one-click font size growth relative to the current textbox style.')))
+
         self.render_overflow_warnings_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Enable renderer overflow warnings'),
             discription=self.tr('Layout review and diagnostics flag text whose measured bounds exceed the box.')
@@ -984,6 +1030,14 @@ class ConfigPanel(Widget):
             discription=self.tr('When a page has no rendered result, export the inpainted/clean page if available, otherwise the original, and record the fallback in the manifest.')
         )
         self.export_include_unrendered_pages_checker.stateChanged.connect(self.on_export_include_unrendered_pages_changed)
+        self.export_filename_template_edit = QLineEdit(self)
+        self.export_filename_template_edit.setPlaceholderText('{index:03d} or {stem}_{index:03d}')
+        self.export_filename_template_edit.textChanged.connect(self.on_export_filename_template_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.export_filename_template_edit,
+            self.tr('Batch export filename template'),
+            discription=self.tr('Tokens: {index}, {index:03d}, {page}, {stem}, {source}, {ext}. The extension is added automatically.')
+        ))
         self.auto_region_merge_combobox = QComboBox()
         self.auto_region_merge_combobox.addItem(self.tr('Never'), 'never')
         self.auto_region_merge_combobox.addItem(self.tr('After run: on all pages'), 'all_pages')
@@ -1909,10 +1963,36 @@ class ConfigPanel(Widget):
         pcfg.render_default_reading_order = str(self.render_default_reading_order_combo.currentData() or 'auto')
     def on_render_default_stroke_width_changed(self):
         pcfg.render_default_stroke_width = float(self.render_default_stroke_width_spin.value())
+    def _set_render_secondary_stroke_color_button(self):
+        if not hasattr(self, 'render_default_secondary_stroke_color_btn'):
+            return
+        color = list(getattr(pcfg, 'render_default_secondary_stroke_color', [255, 255, 255]) or [255, 255, 255])[:3]
+        while len(color) < 3:
+            color.append(255)
+        color = [max(0, min(255, int(c))) for c in color]
+        self.render_default_secondary_stroke_color_btn.setText(f"RGB {color[0]}, {color[1]}, {color[2]}")
+        self.render_default_secondary_stroke_color_btn.setStyleSheet(f"background-color: rgb({color[0]}, {color[1]}, {color[2]});")
+
+    def on_render_default_secondary_stroke_width_changed(self):
+        pcfg.render_default_secondary_stroke_width = float(self.render_default_secondary_stroke_width_spin.value())
+    def on_render_default_secondary_stroke_color_clicked(self):
+        color = list(getattr(pcfg, 'render_default_secondary_stroke_color', [255, 255, 255]) or [255, 255, 255])[:3]
+        while len(color) < 3:
+            color.append(255)
+        qcolor = QColorDialog.getColor(QColor(int(color[0]), int(color[1]), int(color[2])), self, self.tr('Default back/second outline color'))
+        if qcolor.isValid():
+            pcfg.render_default_secondary_stroke_color = [qcolor.red(), qcolor.green(), qcolor.blue()]
+            self._set_render_secondary_stroke_color_button()
     def on_render_default_shadow_radius_changed(self):
         pcfg.render_default_shadow_radius = float(self.render_default_shadow_radius_spin.value())
     def on_render_default_text_padding_changed(self):
         pcfg.render_default_text_padding = float(self.render_default_text_padding_spin.value())
+    def on_render_atomic_fit_profile_changed(self):
+        pcfg.render_atomic_fit_profile = normalize_atomic_fit_mode(self.render_atomic_fit_profile_combo.currentData())
+    def on_render_atomic_fit_target_fill_changed(self):
+        pcfg.render_atomic_fit_target_fill = float(self.render_atomic_fit_target_fill_spin.value())
+    def on_render_atomic_fit_max_expand_changed(self):
+        pcfg.render_atomic_fit_max_expand = float(self.render_atomic_fit_max_expand_spin.value())
     def on_render_overflow_warnings_changed(self):
         pcfg.render_overflow_warnings = self.render_overflow_warnings_checker.isChecked()
     def on_render_diagnostics_overlay_changed(self):
@@ -1930,6 +2010,9 @@ class ConfigPanel(Widget):
 
     def on_export_include_unrendered_pages_changed(self):
         pcfg.export_include_unrendered_pages = self.export_include_unrendered_pages_checker.isChecked()
+
+    def on_export_filename_template_changed(self, text: str):
+        pcfg.export_filename_template = (text or '').strip() or '{index:03d}'
 
     def on_text_editor_top_padding_changed(self):
         pcfg.text_editor_top_padding = int(self.text_editor_top_padding_spin.value())
@@ -2161,8 +2244,18 @@ class ConfigPanel(Widget):
                 idx = self.render_default_reading_order_combo.findData(getattr(pcfg, 'render_default_reading_order', 'auto'))
                 self.render_default_reading_order_combo.setCurrentIndex(max(0, idx))
             self.render_default_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_stroke_width', 0.08)))
+            if hasattr(self, 'render_default_secondary_stroke_width_spin'):
+                self.render_default_secondary_stroke_width_spin.setValue(float(getattr(pcfg, 'render_default_secondary_stroke_width', 0.0)))
+                self._set_render_secondary_stroke_color_button()
             self.render_default_shadow_radius_spin.setValue(float(getattr(pcfg, 'render_default_shadow_radius', 0.0)))
             self.render_default_text_padding_spin.setValue(float(getattr(pcfg, 'render_default_text_padding', 2.0)))
+            if hasattr(self, 'render_atomic_fit_profile_combo'):
+                idx = self.render_atomic_fit_profile_combo.findData(normalize_atomic_fit_mode(getattr(pcfg, 'render_atomic_fit_profile', 'balanced')))
+                self.render_atomic_fit_profile_combo.setCurrentIndex(max(0, idx))
+            if hasattr(self, 'render_atomic_fit_target_fill_spin'):
+                self.render_atomic_fit_target_fill_spin.setValue(float(getattr(pcfg, 'render_atomic_fit_target_fill', 0.78)))
+            if hasattr(self, 'render_atomic_fit_max_expand_spin'):
+                self.render_atomic_fit_max_expand_spin.setValue(float(getattr(pcfg, 'render_atomic_fit_max_expand', 1.22)))
             self.render_overflow_warnings_checker.setChecked(bool(getattr(pcfg, 'render_overflow_warnings', True)))
             self.render_diagnostics_overlay_checker.setChecked(bool(getattr(pcfg, 'render_diagnostics_overlay', False)))
             if hasattr(self, 'render_auto_polish_checker'):
@@ -2180,6 +2273,8 @@ class ConfigPanel(Widget):
                 self.export_open_folder_after_batch_checker.setChecked(bool(getattr(pcfg, 'export_open_folder_after_batch', False)))
             if hasattr(self, 'export_include_unrendered_pages_checker'):
                 self.export_include_unrendered_pages_checker.setChecked(bool(getattr(pcfg, 'export_include_unrendered_pages', False)))
+            if hasattr(self, 'export_filename_template_edit'):
+                self.export_filename_template_edit.setText(str(getattr(pcfg, 'export_filename_template', '{index:03d}') or '{index:03d}'))
         self.selectext_minimenu_checker.setChecked(pcfg.textselect_mini_menu)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)
