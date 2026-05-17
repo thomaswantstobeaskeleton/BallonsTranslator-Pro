@@ -9,6 +9,11 @@ import shlex
 import warnings
 import json
 from platform import platform
+from utils.gpu_runtime import (
+    GPU_PROFILE_AUTO, GPU_PROFILE_CPU, GPU_PROFILE_NVIDIA_CUDA, GPU_PROFILE_AMD_DIRECTML,
+    GPU_PROFILE_AMD_ROCM_PREVIEW, build_gpu_install_plan, format_gpu_install_plan,
+    has_amd_gpu, has_nvidia_gpu, classify_amd_gpu, detect_physical_gpus,
+)
 
 # Suppress requests' urllib3/chardet version mismatch warning (harmless for typical use)
 warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*")
@@ -89,8 +94,14 @@ parser.add_argument("--export-source-txt", action='store_true', help='save sourc
 parser.add_argument("--frozen", action='store_true', help='run without checking requirements')
 parser.add_argument("--update", action='store_true', help="Update the repository before launching") # Add argument --update
 parser.add_argument("--config_path", default=shared.CONFIG_PATH, help='Config file to use for translation') # Named config_path to avoid conflict with existing name config
-parser.add_argument('--nightly', action='store_true', help="Enable AMD Nightly ROCm")
+parser.add_argument('--nightly', action='store_true', help="Compatibility alias for --gpu-profile amd-rocm-preview")
+parser.add_argument('--gpu-profile', default=os.environ.get('BT_GPU_PROFILE', GPU_PROFILE_AUTO), choices=[GPU_PROFILE_AUTO, GPU_PROFILE_CPU, GPU_PROFILE_NVIDIA_CUDA, GPU_PROFILE_AMD_DIRECTML, GPU_PROFILE_AMD_ROCM_PREVIEW], help='GPU runtime profile: auto, cpu, nvidia-cuda, amd-directml, or amd-rocm-preview')
+parser.add_argument('--gpu-report', action='store_true', help='Print GPU runtime detection/install plan and exit')
 args, _ = parser.parse_known_args()
+
+if args.gpu_report:
+    print(format_gpu_install_plan(build_gpu_install_plan(args.gpu_profile, nightly=args.nightly)))
+    sys.exit(0)
 
 
 def is_installed(package):
@@ -588,72 +599,18 @@ def main():
     sys.exit(app.exec())
 
 def is_amd_gpu():
-    try:
-        if sys.platform == 'win32':
-            # Windows: use wmic
-            cmd = ['wmic', 'path', 'win32_VideoController', 'get', 'name']
-            output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-            return any(keyword in output for keyword in ["AMD", "Radeon"])
+    return has_amd_gpu(detect_physical_gpus())
 
-        else:
-            return False
-
-    except Exception:
-        return False
 
 def supported_amd_nightly_gpu():
-    try:
-        if sys.platform == 'win32':
-            # Windows: use wmic
-            cmd = ['wmic', 'path', 'win32_VideoController', 'get', 'name']
-            output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-
-            if any(keyword in output for keyword in
-                   ["RX 7900", "RX 7800", "RX 7700", "RX 7600", "PRO W7900", "PRO W7800", "PRO W7700"]):
-                return "RDNA3"
-            if any(keyword in output for keyword in
-                   ["RX 9070", "RX 9060"]):
-                return "RDNA4"
-        else:
-            return "None"
-
-    except Exception:
-        return "None"
+    return classify_amd_gpu(detect_physical_gpus()) or "None"
 
 
 def is_nvidia_gpu_present():
-    """Best-effort physical NVIDIA GPU probe before importing PyTorch.
-
-    GitHub ZIP installs often already have a CPU-only torch in the Python
-    environment. In that case torch imports successfully, but CUDA device
-    selectors never show up in the app. Probe the host GPU separately so the
-    launcher can replace CPU-only torch with the CUDA wheel.
-    """
+    """Best-effort physical NVIDIA GPU probe before importing PyTorch."""
     if os.environ.get("CUDA_VISIBLE_DEVICES", None) == "":
         return False
-    try:
-        output = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=8,
-        )
-        if output.strip():
-            return True
-    except Exception:
-        pass
-    try:
-        if sys.platform == 'win32':
-            output = subprocess.check_output(
-                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=8,
-            )
-            return any(keyword in output.lower() for keyword in ("nvidia", "geforce", "rtx", "gtx", "quadro"))
-    except Exception:
-        pass
-    return False
+    return has_nvidia_gpu(detect_physical_gpus())
 
 
 def _probe_installed_torch():
@@ -673,6 +630,7 @@ payload = {
     'ok': True,
     'version': getattr(torch, '__version__', None),
     'cuda': getattr(getattr(torch, 'version', None), 'cuda', None),
+    'hip': getattr(getattr(torch, 'version', None), 'hip', None),
     'cuda_available': bool(torch.cuda.is_available()),
 }
 print(json.dumps(payload))
@@ -701,12 +659,12 @@ print(json.dumps(payload))
 
 
 def installed_torch_is_cpu_only():
-    """Return True when installed torch cannot expose CUDA devices."""
+    """Return True when installed torch cannot expose CUDA/HIP-style devices."""
     info = _probe_installed_torch()
     if not info.get("ok"):
         print(f"Unable to inspect installed PyTorch without importing it: {info.get('error')}")
         return True
-    return info.get("cuda") is None or not bool(info.get("cuda_available"))
+    return not bool(info.get("cuda_available"))
 
 
 def prepare_environment():
@@ -732,40 +690,37 @@ def prepare_environment():
                 run_pip(f"install {req}", req)
                 req_updated = True
 
-    if is_amd_gpu():
-        print('AMD GPU: Yes')
-        if args.nightly:
-            amd_nightly_gpu = supported_amd_nightly_gpu()
-            if amd_nightly_gpu == "None":
-                Exception("No AMD Nightly GPU supported")
-            if amd_nightly_gpu == "RDNA3":
-                torch_command = os.environ.get('TORCH_COMMAND',
-                                               "pip install https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torch-2.8.0a0%2Bgitfc14c65-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchvision-0.24.0a0%2Bc85f008-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchaudio-2.6.0a0%2B1a8f621-cp312-cp312-win_amd64.whl")
-            if amd_nightly_gpu == "RDNA4":
-                torch_command = os.environ.get('TORCH_COMMAND',
-                                               "pip install https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torch-2.8.0a0%2Bgitfc14c65-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchvision-0.24.0a0%2Bc85f008-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-6.4.4/torchaudio-2.6.0a0%2B1a8f621-cp312-cp312-win_amd64.whl")
-        else:
-            # AMD GPU: Cuda 11.8, Pytorch 2.2.2
-            torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
-    else:
-        torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118 --disable-pip-version-check")
+    gpu_plan = build_gpu_install_plan(args.gpu_profile, nightly=args.nightly)
+    print(format_gpu_install_plan(gpu_plan))
+    torch_command = gpu_plan.torch_command
     cuda_torch_reinstall_needed = (
         not os.environ.get("BT_SKIP_CUDA_TORCH_REINSTALL")
         and os.environ.get("BT_CUDA_TORCH_REINSTALL_ATTEMPTED") != "1"
-        and not is_amd_gpu()
+        and gpu_plan.resolved_profile == GPU_PROFILE_NVIDIA_CUDA
         and is_nvidia_gpu_present()
+        and is_installed("torch")
+        and installed_torch_is_cpu_only()
+    )
+    rocm_torch_reinstall_needed = (
+        not os.environ.get("BT_SKIP_AMD_ROCM_TORCH_REINSTALL")
+        and os.environ.get("BT_AMD_ROCM_TORCH_REINSTALL_ATTEMPTED") != "1"
+        and gpu_plan.resolved_profile == GPU_PROFILE_AMD_ROCM_PREVIEW
         and is_installed("torch")
         and installed_torch_is_cpu_only()
     )
     if cuda_torch_reinstall_needed:
         print("NVIDIA GPU detected but installed PyTorch is CPU-only or cannot use CUDA; installing CUDA-enabled PyTorch.")
         os.environ["BT_CUDA_TORCH_REINSTALL_ATTEMPTED"] = "1"
+    if rocm_torch_reinstall_needed:
+        print("AMD ROCm preview profile selected but installed PyTorch cannot use a HIP/CUDA-style device; installing AMD ROCm preview PyTorch.")
+        os.environ["BT_AMD_ROCM_TORCH_REINSTALL_ATTEMPTED"] = "1"
 
-    if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision") or cuda_torch_reinstall_needed:
+    required_missing = any(not is_installed(pkg) for pkg in gpu_plan.required_packages)
+    if args.reinstall_torch or required_missing or cuda_torch_reinstall_needed or rocm_torch_reinstall_needed:
         install_torch_command = torch_command
-        if cuda_torch_reinstall_needed and "TORCH_COMMAND" not in os.environ and "--force-reinstall" not in install_torch_command:
+        if (cuda_torch_reinstall_needed or rocm_torch_reinstall_needed) and "TORCH_COMMAND" not in os.environ and "--force-reinstall" not in install_torch_command:
             install_torch_command = f"{install_torch_command} --force-reinstall"
-        run(f'"{python}" -m {install_torch_command}', "Installing torch and torchvision", "Couldn't install torch", live=True)
+        run(f'"{python}" -m {install_torch_command}', "Installing GPU runtime packages", "Couldn't install GPU runtime packages", live=True)
         req_updated = True
 
     if not check_req_file(args.requirements):

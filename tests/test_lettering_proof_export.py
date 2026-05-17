@@ -28,4 +28,7 @@ def test_lettering_proof_pack_writes_manifest_and_qa(tmp_path):
     assert manifest["typography_qa_json"].endswith("typography_qa.json")
     assert manifest["html_index"].endswith("lettering_proof_index.html")
     assert (tmp_path / "proof" / "page_lettering_proof" / "lettering_proof_index.html").exists()
+    assert manifest["archive_path"].endswith("_lettering_proof.zip")
+    assert (tmp_path / "proof" / "page_lettering_proof.zip").exists()
+    assert "Portable ZIP archive" in (tmp_path / "proof" / "page_lettering_proof" / "lettering_proof_index.html").read_text(encoding="utf-8")
     assert "polish_typography" in manifest["next_actions"]

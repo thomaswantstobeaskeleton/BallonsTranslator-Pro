@@ -23,10 +23,10 @@ BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/B
 
 克隆/下载并打开项目目录后：
 
-- **Windows（推荐）：** 双击 `launch_win.bat`
-- **Windows（夜版更新 + 启动）：** 双击 `launch_win_amd_nightly.bat`
-- **Windows（启动 + 自动更新）：** 双击 `launch_win_with_autoupdate.bat`
-- **跨平台（手动）：** 终端运行 `python launch.py`
+- **Windows（推荐）：** 双击 `launcher.bat`，使用一个菜单完成启动、设置、自动更新、AMD/NVIDIA/CPU GPU 模式。
+- **Windows 快速启动：** 双击 `launch_win.bat`，使用自动 GPU 检测立即启动。
+- **跨平台（手动）：** 终端运行 `python launch.py`。
+- **GPU 帮助：** 查看 [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md)，尤其是 AMD Radeon RX 9070/9060/7900 用户。
 
 如果 Windows SmartScreen 阻止 `.bat`，可右键批处理文件 → **以管理员身份运行**（或选择“更多信息 → 仍要运行”）。
 

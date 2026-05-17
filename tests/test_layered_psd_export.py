@@ -29,4 +29,6 @@ def test_layered_psd_handoff_preserves_secondary_outline_metadata(tmp_path):
     assert layer["secondary_stroke_width"] == 0.22
     assert layer["secondary_stroke_rgb"] == [255, 240, 120]
     assert layer["proof_metrics"]["effect_margin"] > 0
+    assert layer["font_runs"]
+    assert "fallback_runs" in layer
     assert "secondary_stroke_width" in (tmp_path / "out" / "p_rebuild_psd.jsx").read_text()

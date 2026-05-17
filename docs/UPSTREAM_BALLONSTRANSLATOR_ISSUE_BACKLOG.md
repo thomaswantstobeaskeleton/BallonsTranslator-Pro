@@ -4,6 +4,20 @@ _Refreshed: 2026-05-17. Source: GitHub REST API because `gh` is unavailable; sca
 
 ## Implemented or advanced in this pass (2026-05-17)
 
+
+### Current pass addendum (2026-05-17: export fidelity + dependency compatibility)
+
+- [#1134](https://github.com/dmMaze/BallonsTranslator/issues/1134), [#1169](https://github.com/dmMaze/BallonsTranslator/issues/1169), [#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077), [#1128](https://github.com/dmMaze/BallonsTranslator/issues/1128), and [#995](https://github.com/dmMaze/BallonsTranslator/issues/995) advanced through export/proof parity: SVG and PSD-helper exports now preserve vertical layout plans, punctuation classes, tate-chu-yoko groups, and font-run metadata used by QA/fit logic.
+- [#1179](https://github.com/dmMaze/BallonsTranslator/issues/1179) / dev commit `c80eb81` was adapted by raising Pro's `transformers` minimum to `>=4.57.6` instead of pinning exactly, preserving Pro's broader GLM/OCR/HF module compatibility while incorporating the upstream PaddleOCRVLManga compatibility floor.
+- [#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020) and [#1052](https://github.com/dmMaze/BallonsTranslator/issues/1052) remain deferred for a full batch queue, but proof packs now create portable ZIP archives that make per-page review/export artifacts easier to attach to batch logs and issue reports.
+
+| Issue | Title | Category | Labels | Maps to Pro | Implemented in Pro | Priority | Notes / deferred reason |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [#1179](https://github.com/dmMaze/BallonsTranslator/issues/1179) | PaddleOCRVLManga execution error | Compatibility/dependency/platform issues | bug, dependency | Yes | Yes/advanced this pass | High | Adapted upstream `c80eb81` by requiring `transformers>=4.57.6` while avoiding an exact pin that could conflict with Pro modules. |
+| [#1134](https://github.com/dmMaze/BallonsTranslator/issues/1134) | Export/save image as JPG or PNG without translation | PSD/export/layers | feature request, export | Yes | Partial/advanced | Medium | Existing export paths and proof pack artifacts now include richer final-composite/proof metadata; direct no-translation export already exists through current-page download modes. |
+| [#1128](https://github.com/dmMaze/BallonsTranslator/issues/1128) | Vertical Text not working | Vertical CJK / RTL / punctuation | bug, renderer | Yes | Partial/advanced this pass | High | Export/proof paths now serialize explicit vertical glyph placement, punctuation, and tate-chu-yoko metadata. Live renderer work remains ongoing. |
+| [#995](https://github.com/dmMaze/BallonsTranslator/issues/995) | Full-width converted to half-width characters | Vertical CJK / RTL / punctuation | bug, text | Yes | Partial/advanced this pass | Medium | Vertical punctuation normalization is preserved in SVG/PSD handoff metadata; broader OCR normalization policy remains deferred. |
+
 - [#1178](https://github.com/dmMaze/BallonsTranslator/issues/1178) / upstream dev `6649de1` review — fixed a Pro workflow regression in the selected-page **Detect only** helper: `_run_stages_restore` is now always the expected four-stage tuple, preventing pipeline-finished restore crashes after detector-only batch actions.
 - [#1077](https://github.com/dmMaze/BallonsTranslator/issues/1077), [#1138](https://github.com/dmMaze/BallonsTranslator/issues/1138), [#35](https://github.com/dmMaze/BallonsTranslator/issues/35) — advanced text fitting/effects by adding persisted double-outline/back-stroke support, effect-aware fit margins, text-panel controls, and layout-review actions.
 - [#1094](https://github.com/dmMaze/BallonsTranslator/issues/1094), [#1020](https://github.com/dmMaze/BallonsTranslator/issues/1020), [#841](https://github.com/dmMaze/BallonsTranslator/issues/841) — extended automation/page listing to include rendering QA so batch/headless tools can inspect textboxes and warnings before running exports or review.

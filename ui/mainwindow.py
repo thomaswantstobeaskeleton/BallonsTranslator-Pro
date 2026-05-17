@@ -3583,6 +3583,7 @@ class MainWindow(mainwindow_cls):
             f"Python executable: {sys.executable}",
             f"Platform: {sys.platform}",
             f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}",
+            f"BT_GPU_PROFILE: {os.environ.get('BT_GPU_PROFILE', '<unset>')}",
             f"Detector: {getattr(pcfg.module, 'textdetector', '')}",
             f"OCR: {getattr(pcfg.module, 'ocr', '')}",
             f"Inpainter: {getattr(pcfg.module, 'inpainter', '')}",
@@ -3609,6 +3610,13 @@ class MainWindow(mainwindow_cls):
             lines.append("Startup stages:")
             for item in stages:
                 lines.append(f"  - {item.get('stage', '?')}: {item.get('status', 'ok')} ({item.get('details', '')})")
+        try:
+            from utils.gpu_runtime import build_gpu_install_plan, format_gpu_install_plan
+            lines.append("")
+            lines.append("GPU install plan:")
+            lines.append(format_gpu_install_plan(build_gpu_install_plan(os.environ.get('BT_GPU_PROFILE', 'auto'))))
+        except Exception as exc:
+            lines.append(f"GPU install plan unavailable: {exc}")
         return "\n".join(lines)
 
     def _show_startup_health_overlay(self):

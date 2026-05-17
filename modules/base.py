@@ -475,6 +475,7 @@ def _get_device_selector_description(options: List[str]) -> str:
         f"Detected backend: {DEFAULT_DEVICE.split(':', 1)[0] if DEFAULT_DEVICE != 'cpu' else 'cpu'}",
         f"Available devices: {', '.join(options) if options else 'cpu'}",
         f"PyTorch CUDA build: {d.get('torch_cuda')}",
+        f"DirectML available/count: {d.get('directml_available')} / {d.get('directml_count')}",
     ]
     if d.get('cuda_devices'):
         lines.append(f"CUDA GPU names: {', '.join(d['cuda_devices'])}")

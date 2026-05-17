@@ -99,8 +99,27 @@ The app will retry using the local HuggingFace cache only. If the model was neve
 | **Optional modules** | See **[docs/OPTIONAL_DEPENDENCIES.md](OPTIONAL_DEPENDENCIES.md)** for known conflicts (e.g. **craft_det** with opencv, **simple_lama** with Pillow). Use the suggested alternatives or a separate venv. |
 | **Don’t install everything** | Install only the dependencies for the modules you use. Extra pip packages (e.g. `craft-text-detector`, `simple-lama-inpainting`) can conflict with main `requirements.txt`. |
 | **Fresh venv** | `python -m venv venv`, activate, then `pip install -r requirements.txt` and `python launch.py`. Reduces conflicts from other projects. |
-| **Torch version** | `launch.py` installs PyTorch (CUDA or ROCm) automatically. To force a version, set **TORCH_COMMAND** (e.g. `pip install torch==... torchvision==... --index-url ...`) before running. See README or "Portable setup" for platform notes. |
+| **Torch/GPU runtime** | `launch.py` now chooses a GPU profile: NVIDIA CUDA, AMD ROCm preview for supported RX 7000/9000 + Python 3.12, AMD DirectML fallback, or CPU. Force one with `launch_win.bat --gpu-profile amd-directml` / `amd-rocm-preview` / `nvidia-cuda` / `cpu`, or set **TORCH_COMMAND** for a custom install. See [GPU_ACCELERATION.md](GPU_ACCELERATION.md). |
 
+
+
+### Windows AMD Radeon GPU is detected but BallonsTranslator still uses CPU
+
+**Symptoms:** Radeon RX 9070 XT / RX 7900 / other AMD card is installed, but module device selectors only show CPU or runs are very slow.
+
+**Fix:** Use the unified launcher. Double-click `launcher.bat` and choose **Start (auto GPU)** first. For RX 9070/9060/7900 on Windows + Python 3.12, auto mode uses AMD ROCm preview. If the ROCm wheel does not match your Python, choose **Force AMD DirectML** or run:
+
+```bat
+launch_win.bat --gpu-profile amd-directml
+```
+
+To print the detected GPU plan without starting the app:
+
+```bat
+launch_win.bat --gpu-report
+```
+
+In the app, use **Tools → Diagnostics → Runtime resource summary**. DirectML appears as `privateuseone:0`; NVIDIA/CUDA-style runtimes appear as `cuda`. Some modules are CPU-only, so also check the selected module's **device** setting.
 
 ### Windows NVIDIA: torch/torchvision entry-point errors after auto-install
 

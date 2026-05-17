@@ -7,7 +7,7 @@ import shutil
 from typing import Dict, List, Tuple
 from types import SimpleNamespace
 
-from utils.text_rendering import lettering_proof_metrics, resolve_writing_mode
+from utils.text_rendering import lettering_proof_metrics, resolve_writing_mode, vertical_layout_plan, font_fallback_runs, merge_font_fallback_chain
 
 
 def _safe_copy(src: str, dst: str) -> bool:
@@ -80,16 +80,31 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
         box_w = max(1.0, float((xyxy[2] - xyxy[0]) if len(xyxy) >= 4 else 1.0))
         box_h = max(1.0, float((xyxy[3] - xyxy[1]) if len(xyxy) >= 4 else 1.0))
         resolved_mode = resolve_writing_mode(getattr(ff, "writing_mode", "auto") if ff else "auto", text_value, (box_w, box_h))
+        font_size_px = float(getattr(ff, "font_size", 24.0) if ff else 24.0 or 24.0)
+        line_spacing = float(getattr(ff, "line_spacing", 1.2) if ff else 1.2 or 1.2)
+        letter_spacing = float(getattr(ff, "letter_spacing", 1.0) if ff else 1.0 or 1.0)
+        line_break_strategy = getattr(ff, "line_break_strategy", "auto") if ff else "auto"
+        max_vertical_chars = max(1, int(box_h / max(1.0, font_size_px * max(0.1, letter_spacing))))
+        vertical_plan = vertical_layout_plan(text_value, max_vertical_chars, font_size=font_size_px, line_spacing=line_spacing, letter_spacing=letter_spacing, strategy=line_break_strategy) if resolved_mode == "vertical_rl" else {}
+        fallback_runs = [
+            {"start": start, "end": end, "family": family, "text": text_value[start:end]}
+            for start, end, family in font_fallback_runs(text_value, getattr(ff, "font_family", "") if ff else "", qa_config, getattr(ff, "fallback_font_chain", "") if ff else "")
+            if end > start
+        ]
+        primary_family = (merge_font_fallback_chain(getattr(ff, "font_family", "") if ff else "", text_value, qa_config, getattr(ff, "fallback_font_chain", "") if ff else "") or [getattr(ff, "font_family", "") if ff else ""])[0]
+        font_runs = [{"start": 0, "end": len(text_value), "family": primary_family, "text": text_value, "fallback": False}]
+        for run in fallback_runs:
+            run["fallback"] = True
         proof_metrics = lettering_proof_metrics(
-            text_value, getattr(ff, "font_size", 24.0) if ff else 24.0, (box_w, box_h), resolved_mode,
-            line_spacing=getattr(ff, "line_spacing", 1.2) if ff else 1.2,
-            letter_spacing=getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
+            text_value, font_size_px, (box_w, box_h), resolved_mode,
+            line_spacing=line_spacing,
+            letter_spacing=letter_spacing,
             padding=getattr(ff, "text_padding", 0.0) if ff else 0.0,
             stroke_width=getattr(ff, "stroke_width", 0.0) if ff else 0.0,
             secondary_stroke_width=getattr(ff, "secondary_stroke_width", 0.0) if ff else 0.0,
             shadow_radius=getattr(ff, "shadow_radius", 0.0) if ff else 0.0,
             shadow_offset=getattr(ff, "shadow_offset", [0.0, 0.0]) if ff else [0.0, 0.0],
-            line_break_strategy=getattr(ff, "line_break_strategy", "auto") if ff else "auto",
+            line_break_strategy=line_break_strategy,
             sample_limit=64,
         )
         text_layers.append({
@@ -97,7 +112,7 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "text": text_value,
             "xyxy": xyxy,
             "font_family": getattr(ff, "font_family", "") if ff else "",
-            "font_size_px": getattr(ff, "font_size", 24.0) if ff else 24.0,
+            "font_size_px": font_size_px,
             "fit_font_size_min": getattr(ff, "fit_font_size_min", 0.0) if ff else 0.0,
             "fit_font_size_max": getattr(ff, "fit_font_size_max", 0.0) if ff else 0.0,
             "fill_rgb": getattr(ff, "frgb", [0, 0, 0]) if ff else [0, 0, 0],
@@ -108,16 +123,19 @@ def build_layered_psd_handoff(project, page_name: str, out_dir: str, final_image
             "writing_mode": getattr(ff, "writing_mode", "auto") if ff else "auto",
             "resolved_writing_mode": resolved_mode,
             "alignment": getattr(ff, "alignment", 0) if ff else 0,
-            "line_spacing": getattr(ff, "line_spacing", 1.2) if ff else 1.2,
-            "letter_spacing": getattr(ff, "letter_spacing", 1.0) if ff else 1.0,
+            "line_spacing": line_spacing,
+            "letter_spacing": letter_spacing,
             "opacity": getattr(ff, "opacity", 1.0) if ff else 1.0,
             "fit_mode": getattr(ff, "fit_mode", "shrink") if ff else "shrink",
-            "line_break_strategy": getattr(ff, "line_break_strategy", "auto") if ff else "auto",
+            "line_break_strategy": line_break_strategy,
             "text_padding": getattr(ff, "text_padding", 0.0) if ff else 0.0,
             "fallback_font_chain": getattr(ff, "fallback_font_chain", "") if ff else "",
             "lettering_quality_score": diagnostics.get("quality_score", 1.0) if isinstance(diagnostics, dict) else 1.0,
             "safe_inner_bounds": diagnostics.get("safe_inner_bounds", []) if isinstance(diagnostics, dict) else [],
             "proof_metrics": proof_metrics,
+            "fallback_runs": fallback_runs,
+            "font_runs": font_runs,
+            "vertical_layout_plan": vertical_plan,
             "psd_editability_warning": "Native PSD text writing is not available; use the JSX/manifest to recreate editable text layers in Photoshop/GIMP.",
             "rendering_diagnostics": diagnostics,
         })

@@ -5,6 +5,7 @@ import json
 import os
 import os.path as osp
 import shutil
+import zipfile
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -54,7 +55,7 @@ def _write_html_index(path: str, manifest: Dict, report: Dict, page_dir: str) ->
 <style>body{{font-family:system-ui,sans-serif;margin:24px;line-height:1.45}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccc;padding:6px;vertical-align:top}}code{{background:#f5f5f5;padding:1px 4px}}</style></head>
 <body><h1>Lettering proof: {html.escape(str(manifest.get('page', '')))}</h1>
 <p>Next actions: <code>{html.escape(', '.join(manifest.get('next_actions', []) or []) or 'none')}</code></p>
-<h2>Files</h2><ul>{link('Typography QA JSON', 'typography_qa_json')}{link('Typography QA Markdown', 'typography_qa_markdown')}{link('Editable SVG handoff', 'svg_path')}{link('PSD helper manifest', 'psd_handoff_manifest')}{link('Final composite', 'final_composite')}</ul>
+<h2>Files</h2><ul>{link('Typography QA JSON', 'typography_qa_json')}{link('Typography QA Markdown', 'typography_qa_markdown')}{link('Editable SVG handoff', 'svg_path')}{link('PSD helper manifest', 'psd_handoff_manifest')}{link('Final composite', 'final_composite')}{link('Portable ZIP archive', 'archive_path')}</ul>
 <h2>Warnings</h2><ul>{''.join('<li>'+html.escape(str(w))+'</li>' for w in (manifest.get('warnings', []) or ['none']))}</ul>
 <h2>Text blocks</h2><table><thead><tr><th>#</th><th>Mode</th><th>Warnings</th><th>Suggestions</th><th>Density</th><th>Overflow px</th></tr></thead><tbody>{''.join(blocks) or '<tr><td colspan="6">No text blocks</td></tr>'}</tbody></table>
 </body></html>"""
@@ -105,7 +106,7 @@ def build_lettering_proof_pack(project, page_name: str, out_dir: str, final_imag
     with open(qa_md_path, "w", encoding="utf-8") as f:
         f.write(rendering_qa_to_markdown(report))
 
-    svg_manifest = build_svg_text_handoff(project, page_name, osp.join(page_dir, "svg"), final_image_path=final_ref or None)
+    svg_manifest = build_svg_text_handoff(project, page_name, osp.join(page_dir, "svg"), final_image_path=final_ref or None, config_obj=config_obj)
     try:
         psd_manifest = build_layered_psd_handoff(project, page_name, osp.join(page_dir, "psd_handoff"), final_image=final_image)
     except Exception as exc:
@@ -136,4 +137,22 @@ def build_lettering_proof_pack(project, page_name: str, out_dir: str, final_imag
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     manifest["manifest_path"] = manifest_path
+
+    archive_path = osp.join(out_dir, base + "_lettering_proof.zip")
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(page_dir):
+                for filename in files:
+                    path = osp.join(root, filename)
+                    zf.write(path, osp.relpath(path, page_dir))
+        manifest["archive_path"] = archive_path
+        # Re-write manifest and HTML now that the portable archive link exists.
+        _write_html_index(html_index_path, manifest, report, page_dir)
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        warnings.append(f"Could not create portable ZIP archive: {exc}")
+        manifest["warnings"] = warnings
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
     return manifest
