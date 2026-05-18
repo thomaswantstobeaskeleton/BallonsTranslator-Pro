@@ -77,7 +77,7 @@ python launch.py
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10.2+ (Python 3.10.0/3.10.1 can crash PyInstaller builds with `IndexError: tuple index out of range`)
 - Internet for first-time setup/model downloads
 - Enough disk space for selected models
 
