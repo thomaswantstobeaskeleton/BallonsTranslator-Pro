@@ -158,10 +158,16 @@ class ModuleConfig(Config):
     # Font scaling to fit bubble (2.1): min/max font size (pt) for auto layout; fit step clamps to this range.
     layout_font_size_min: float = 8.0
     layout_font_size_max: float = 72.0
+    # User-facing automatic lettering profile: balanced | fit | readable.
+    layout_auto_preset: str = "balanced"
     # When True, scale font so laid-out text fits inside bubble (ratio-based, then clamp to min/max). When False, only apply LAYOUT_* scale factors.
     layout_font_fit_bubble: bool = True
     # When True, use binary search to find the largest font size in [min,max] that fits the bubble (re-runs layout per trial; more accurate, slower).
-    layout_font_binary_search: bool = False
+    layout_font_binary_search: bool = True
+    # Final automatic safety pass: after line breaking and box placement, shrink font only if rendered document still exceeds the textbox.
+    layout_auto_final_fit_pass: bool = True
+    # Automatically choose a mask-safe inner text rectangle for curved/pointed bubbles instead of using the full contour bounding box.
+    layout_use_mask_safe_area: bool = True
     # Balloon shape for Diamond-Text style layout: "auto" (detect from aspect ratio), "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point". Affects insets and line-length scoring.
     layout_balloon_shape: str = "auto"
     # When "auto": which method(s) to use and in what order. model_contour = try model first, then contour (recommended when using a model).

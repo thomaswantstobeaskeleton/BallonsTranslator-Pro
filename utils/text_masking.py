@@ -90,6 +90,104 @@ def mask_safe_rect(mask: np.ndarray | None, threshold: int = 8) -> MaskSafetyDia
     )
 
 
+def bubble_safe_text_rect(
+    mask: np.ndarray | None,
+    region_rect: Sequence[float] | None = None,
+    threshold: int = 220,
+    min_coverage: float = 0.88,
+    min_edge_coverage: float = 0.70,
+) -> Dict[str, object]:
+    """Find a conservative mask-local rectangle for lettering inside a bubble.
+
+    `extract_ballon_region()` gives a bounding rectangle for the bubble contour,
+    but a bounding rectangle still includes unsafe corners for ovals, diamonds,
+    and pointed balloons.  This helper searches shrink variants of that rectangle
+    and returns the largest candidate whose filled-pixel coverage and edge
+    coverage are high enough for text placement.  It is intentionally NumPy-only
+    so layout tests and headless environments do not depend on OpenCV/libGL.
+    """
+    arr = _as_uint8_mask(mask)
+    if arr is None:
+        return {
+            "rect": list(region_rect or [0.0, 0.0, 0.0, 0.0]),
+            "coverage": 1.0,
+            "edge_coverage": 1.0,
+            "used_mask": False,
+        }
+    h, w = arr.shape[:2]
+    if w <= 0 or h <= 0:
+        return {
+            "rect": [0.0, 0.0, 0.0, 0.0],
+            "coverage": 0.0,
+            "edge_coverage": 0.0,
+            "used_mask": False,
+        }
+    if region_rect and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0:
+        rx, ry, rw, rh = [float(v) for v in region_rect[:4]]
+    else:
+        visible = arr > int(threshold)
+        if not np.any(visible):
+            return {
+                "rect": [0.0, 0.0, float(w), float(h)],
+                "coverage": 0.0,
+                "edge_coverage": 0.0,
+                "used_mask": False,
+            }
+        ys, xs = np.where(visible)
+        rx, ry = float(xs.min()), float(ys.min())
+        rw, rh = float(xs.max() + 1 - xs.min()), float(ys.max() + 1 - ys.min())
+
+    x1 = max(0.0, min(float(w - 1), rx))
+    y1 = max(0.0, min(float(h - 1), ry))
+    x2 = max(x1 + 1.0, min(float(w), rx + rw))
+    y2 = max(y1 + 1.0, min(float(h), ry + rh))
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    base_w, base_h = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    visible = arr > int(threshold)
+
+    best = None
+    # Prefer larger rectangles but include non-uniform shrink candidates for
+    # pointed and diamond balloons where horizontal/vertical safe space differs.
+    width_fracs = (1.0, 0.96, 0.92, 0.88, 0.84, 0.78, 0.72, 0.66, 0.58)
+    height_fracs = (1.0, 0.96, 0.92, 0.88, 0.84, 0.78, 0.72, 0.66, 0.58)
+    for wf in width_fracs:
+        for hf in height_fracs:
+            cw = max(1.0, base_w * wf)
+            ch = max(1.0, base_h * hf)
+            lx = int(round(cx - cw / 2.0))
+            ty = int(round(cy - ch / 2.0))
+            rx2 = int(round(cx + cw / 2.0))
+            by = int(round(cy + ch / 2.0))
+            lx = max(0, min(w - 1, lx))
+            ty = max(0, min(h - 1, ty))
+            rx2 = max(lx + 1, min(w, rx2))
+            by = max(ty + 1, min(h, by))
+            roi = visible[ty:by, lx:rx2]
+            if roi.size <= 0:
+                continue
+            coverage = float(np.mean(roi))
+            edge = np.concatenate([roi[0, :], roi[-1, :], roi[:, 0], roi[:, -1]])
+            edge_coverage = float(np.mean(edge)) if edge.size else coverage
+            area = float((rx2 - lx) * (by - ty))
+            if coverage >= float(min_coverage) and edge_coverage >= float(min_edge_coverage):
+                score = area * (0.75 + 0.25 * coverage) * (0.85 + 0.15 * edge_coverage)
+                if best is None or score > best[0]:
+                    best = (score, [float(lx), float(ty), float(rx2 - lx), float(by - ty)], coverage, edge_coverage)
+    if best is None:
+        return {
+            "rect": [float(x1), float(y1), float(base_w), float(base_h)],
+            "coverage": 0.0,
+            "edge_coverage": 0.0,
+            "used_mask": False,
+        }
+    return {
+        "rect": best[1],
+        "coverage": round(best[2], 4),
+        "edge_coverage": round(best[3], 4),
+        "used_mask": True,
+    }
+
+
 def recommended_padding_for_mask(mask: np.ndarray | None, current_padding: float = 0.0, min_padding: float = 2.0) -> float:
     """Suggest padding that keeps rendered ink away from mask edges/holes."""
     diag = mask_safe_rect(mask)

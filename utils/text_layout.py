@@ -1,9 +1,20 @@
-from typing import List, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List, Tuple
 import numpy as np
 
-from .imgproc_utils import rotate_image
-from .textblock import TextBlock, TextAlignment
-from utils.config import pcfg
+from .auto_text_layout import candidate_layout_widths
+from .fontformat import TextAlignment
+
+if TYPE_CHECKING:
+    from .textblock import TextBlock
+
+
+def _layout_cfg():
+    """Return module config lazily so pure layout helpers import in headless tests."""
+    from utils.config import pcfg
+    return pcfg.module
+
 
 class Line:
 
@@ -209,6 +220,8 @@ def _merge_stub_lines_in_string(text: str) -> str:
     return text
 
 
+
+
 def _score_layout(lines: List[Line], target_width: float, line_height: int, balloon_shape: str = "auto") -> float:
     """
     Score a layout: lower is better. (2.2 Optimal line breaking, 2.3 Stub avoidance.)
@@ -224,7 +237,7 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int, ball
     # Penalty for too many lines (stronger when optimize_line_breaks is on)
     base_line_penalty = 72.0
     try:
-        if getattr(pcfg.module, 'optimize_line_breaks', False):
+        if getattr(_layout_cfg(), 'optimize_line_breaks', False):
             base_line_penalty = 105.0
     except Exception:
         pass
@@ -237,7 +250,7 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int, ball
     last_line_stub_penalty = 0.0
     if n > 1:
         w = lines[-1].num_words
-        stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 1200.0))
+        stub_1word = float(getattr(_layout_cfg(), 'layout_stub_penalty_1word', 1200.0))
         if w <= 1:
             last_line_stub_penalty = stub_1word
         elif w <= 2:
@@ -264,12 +277,12 @@ def _score_layout(lines: List[Line], target_width: float, line_height: int, ball
     # Extra penalty when earlier lines are very short compared to the rest
     short_line_penalty = 0.0
     if n > 1 and avg_len > 0:
-        pen = float(getattr(pcfg.module, 'layout_short_line_penalty', 80.0))
+        pen = float(getattr(_layout_cfg(), 'layout_short_line_penalty', 80.0))
         for i, L in enumerate(lengths[:-1]):
             if L < avg_len * 0.78:
                 short_line_penalty += pen
     # 2.3 Strong penalty for stub lines; 1-word lines get extra-high penalty from config.
-    stub_1word = float(getattr(pcfg.module, 'layout_stub_penalty_1word', 2000.0))
+    stub_1word = float(getattr(_layout_cfg(), 'layout_stub_penalty_1word', 2000.0))
     stub_line_penalty = 0.0
     if n > 1:
         for i, ln in enumerate(lines[:-1]):
@@ -706,6 +719,7 @@ def layout_text(
         old_origin = (old_w // 2, old_h // 2)
         rel_cx, rel_cy = centroid[0] - old_origin[0], centroid[1] - old_origin[1]
         
+        from .imgproc_utils import rotate_image
         mask = rotate_image(mask, angle)
         rad = np.deg2rad(angle)
         r_sin, r_cos = np.sin(rad), np.cos(rad)
@@ -803,8 +817,6 @@ def layout_text(
     if maxw == np.inf:
         maxw = mask.shape[1]
     retries = max(1, int(collision_max_retries) if collision_max_retries is not None else 1)
-    num_width_attempts = max(retries, 20)  # more candidates for better optimal line breaking
-    shrink_per_retry = 0.96 if optimize_for_fewer_lines else 0.97
     # layout_lines_alignside consumes words/wl_list; keep copies for retries
     words_orig = list(words)
     wl_list_orig = list(wl_list)
@@ -813,11 +825,25 @@ def layout_text(
     best_adjust_xy = (0, 0)
     best_score = 1e18
 
-    min_line_width = max(16, int(float(getattr(pcfg.module, "layout_min_line_width_px", 80.0) or 80.0)))
-    for attempt in range(num_width_attempts):
+    min_line_width = max(16, int(float(getattr(_layout_cfg(), "layout_min_line_width_px", 80.0) or 80.0)))
+    width_candidates = candidate_layout_widths(
+        float(maxw),
+        float(min_line_width),
+        float(sum(wl_list_orig)),
+        float(delimiter_len * max(len(wl_list_orig) - 1, 0)),
+        int(line_height),
+        target_box_height=target_box_height,
+        balloon_shape=balloon_shape,
+        optimize_for_fewer_lines=optimize_for_fewer_lines,
+    )
+    if retries > len(width_candidates):
+        width_candidates.extend(
+            max(min_line_width, int(maxw * (0.97 ** attempt)))
+            for attempt in range(len(width_candidates), retries)
+        )
+    for cur_maxw in width_candidates:
         words[:] = words_orig[:]
         wl_list[:] = wl_list_orig[:]
-        cur_maxw = max(min_line_width, int(maxw * (shrink_per_retry ** attempt)))
         lines, adjust_xy = _layout_once(cur_maxw)
         if not lines:
             continue
@@ -852,7 +878,7 @@ def layout_text(
             if total_h > target_box_height:
                 overflow = (total_h - target_box_height) / float(target_box_height)
                 # Base factor comes from config; reduce it for longer texts (5+ lines) so line quality wins more often.
-                height_factor = float(getattr(pcfg.module, 'layout_height_overflow_penalty', 360.0))
+                height_factor = float(getattr(_layout_cfg(), 'layout_height_overflow_penalty', 360.0))
                 n_lines = len(lines)
                 if n_lines >= 7:
                     height_factor *= 0.55
