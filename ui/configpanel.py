@@ -13,6 +13,7 @@ from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils.data_path_manager import resolve_data_path, free_space_gb, ensure_data_path
 from utils.text_rendering import ATOMIC_FIT_BALANCED, ATOMIC_FIT_COMFORTABLE, ATOMIC_FIT_DENSE, ATOMIC_FIT_CAPTION, ATOMIC_FIT_SFX, normalize_atomic_fit_mode
+from utils.auto_text_layout import normalize_auto_layout_preset
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .glossary_map_dialog import GlossaryMapDialog
@@ -1252,6 +1253,17 @@ class ConfigPanel(Widget):
 
         self.let_autolayout_checker.stateChanged.connect(self.on_autolayout_changed)
 
+        self.layout_auto_preset_combo, _ = generalConfigPanel.addCombobox(
+            [
+                self.tr('Balanced (recommended)'),
+                self.tr('Fit inside bubble'),
+                self.tr('Larger readable text'),
+            ],
+            self.tr('Auto lettering preset'),
+            discription=self.tr('One control for automatic lettering behavior. Balanced is the default; Fit inside bubble uses stricter margins and smaller text; Larger readable text allows wider lines and larger font when safe.')
+        )
+        self.layout_auto_preset_combo.activated.connect(self._on_layout_auto_preset_changed)
+
         self.layout_constrain_to_bubble_checker, layout_sublock = generalConfigPanel.addCheckBox(
             self.tr('Constrain text box to bubble'),
             discription=self.tr('Keep the text box size within the detected bubble and do not move it. When on, the box will not grow past the bubble or shift position after layout.')
@@ -1280,6 +1292,11 @@ class ConfigPanel(Widget):
             discription=self.tr('After layout, check if the text box or lines extend outside the bubble. Shrink box to bubble and/or scale font down to fix (no model).')
         )
         self.layout_check_overflow_after_layout_checker.stateChanged.connect(self._on_layout_check_overflow_after_layout_changed)
+        self.layout_use_mask_safe_area_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Use mask-safe inner bubble area'),
+            discription=self.tr('Automatically fit text to the largest safe inner rectangle from the detected bubble mask, avoiding oval/diamond/pointer corners instead of using the full bounding box.')
+        )
+        self.layout_use_mask_safe_area_checker.stateChanged.connect(self._on_layout_use_mask_safe_area_changed)
         self.layout_box_size_check_model_id_edit = QLineEdit()
         self.layout_box_size_check_model_id_edit.setPlaceholderText(self.tr('Use "builtin" for zero-shot CLIP, or a Hugging Face model ID. Leave empty to skip.'))
         self.layout_box_size_check_model_id_edit.textChanged.connect(self._on_layout_box_size_check_model_id_changed)
@@ -1364,9 +1381,14 @@ class ConfigPanel(Widget):
         self.layout_font_fit_bubble_checker.stateChanged.connect(self._on_layout_font_fit_bubble_changed)
         self.layout_font_binary_search_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Binary search font size'),
-            discription=self.tr('Find the largest font size that fits the bubble by trying multiple sizes (more accurate, slower). Only when "Scale font to fit bubble" is on and non-CJK.')
+            discription=self.tr('Find the largest font size that fits the bubble by trying multiple sizes (more automatic and accurate, slower). Only when "Scale font to fit bubble" is on and non-CJK.')
         )
         self.layout_font_binary_search_checker.stateChanged.connect(self._on_layout_font_binary_search_changed)
+        self.layout_auto_final_fit_pass_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Final overflow safety pass'),
+            discription=self.tr('After automatic line breaking and box placement, shrink the font only if the rendered text still exceeds its text box. Reduces manual fixes for clipped or overflowing translations.')
+        )
+        self.layout_auto_final_fit_pass_checker.stateChanged.connect(self._on_layout_auto_final_fit_pass_changed)
         # Diamond-Text: balloon shape (auto, round, elongated, narrow, diamond, square, bevel, pentagon, point)
         self.layout_balloon_shape_combo, _ = generalConfigPanel.addCombobox(
             [
@@ -1772,6 +1794,10 @@ class ConfigPanel(Widget):
     def on_autolayout_changed(self):
         pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
 
+    def _on_layout_auto_preset_changed(self, index: int):
+        pcfg.module.layout_auto_preset = ("balanced", "fit", "readable")[max(0, min(index, 2))]
+        self.save_config.emit()
+
     def _on_layout_constrain_to_bubble_changed(self):
         pcfg.module.layout_constrain_to_bubble = self.layout_constrain_to_bubble_checker.isChecked()
         self.save_config.emit()
@@ -1786,6 +1812,10 @@ class ConfigPanel(Widget):
 
     def _on_layout_check_overflow_after_layout_changed(self):
         pcfg.module.layout_check_overflow_after_layout = self.layout_check_overflow_after_layout_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_use_mask_safe_area_changed(self):
+        pcfg.module.layout_use_mask_safe_area = self.layout_use_mask_safe_area_checker.isChecked()
         self.save_config.emit()
 
     def _on_layout_box_size_check_model_id_changed(self, text: str):
@@ -1821,6 +1851,9 @@ class ConfigPanel(Widget):
 
     def _on_layout_font_binary_search_changed(self):
         pcfg.module.layout_font_binary_search = self.layout_font_binary_search_checker.isChecked()
+
+    def _on_layout_auto_final_fit_pass_changed(self):
+        pcfg.module.layout_auto_final_fit_pass = self.layout_auto_final_fit_pass_checker.isChecked()
 
     def _on_layout_balloon_shape_changed(self, index: int):
         pcfg.module.layout_balloon_shape = ("auto", "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point")[index]
@@ -2126,6 +2159,12 @@ class ConfigPanel(Widget):
         self.let_family_combox.setCurrentIndex(pcfg.let_family_flag)
         self.let_writing_mode_combox.setCurrentIndex(pcfg.let_writing_mode_flag)
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
+        if hasattr(self, 'layout_auto_preset_combo'):
+            preset = normalize_auto_layout_preset(getattr(pcfg.module, 'layout_auto_preset', 'balanced'))
+            idx = {'balanced': 0, 'fit': 1, 'readable': 2}.get(preset, 0)
+            self.layout_auto_preset_combo.blockSignals(True)
+            self.layout_auto_preset_combo.setCurrentIndex(idx)
+            self.layout_auto_preset_combo.blockSignals(False)
         if hasattr(self, 'layout_constrain_to_bubble_checker'):
             self.layout_constrain_to_bubble_checker.setChecked(getattr(pcfg.module, 'layout_constrain_to_bubble', True))
         if hasattr(self, 'layout_center_in_bubble_after_autolayout_checker'):
@@ -2136,6 +2175,8 @@ class ConfigPanel(Widget):
             self.layout_center_in_bubble_min_gap_spin.blockSignals(False)
         if hasattr(self, 'layout_check_overflow_after_layout_checker'):
             self.layout_check_overflow_after_layout_checker.setChecked(getattr(pcfg.module, 'layout_check_overflow_after_layout', True))
+        if hasattr(self, 'layout_use_mask_safe_area_checker'):
+            self.layout_use_mask_safe_area_checker.setChecked(getattr(pcfg.module, 'layout_use_mask_safe_area', True))
         if hasattr(self, 'layout_box_size_check_model_id_edit'):
             self.layout_box_size_check_model_id_edit.blockSignals(True)
             self.layout_box_size_check_model_id_edit.setText(getattr(pcfg.module, 'layout_box_size_check_model_id', '') or '')
@@ -2165,7 +2206,9 @@ class ConfigPanel(Widget):
         if hasattr(self, 'layout_font_fit_bubble_checker'):
             self.layout_font_fit_bubble_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_fit_bubble', True)))
         if hasattr(self, 'layout_font_binary_search_checker'):
-            self.layout_font_binary_search_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_binary_search', False)))
+            self.layout_font_binary_search_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_binary_search', True)))
+        if hasattr(self, 'layout_auto_final_fit_pass_checker'):
+            self.layout_auto_final_fit_pass_checker.setChecked(bool(getattr(pcfg.module, 'layout_auto_final_fit_pass', True)))
         if hasattr(self, 'layout_balloon_shape_combo'):
             shape = (getattr(pcfg.module, 'layout_balloon_shape', 'auto') or 'auto').lower()
             idx = {"auto": 0, "round": 1, "elongated": 2, "narrow": 3, "diamond": 4, "square": 5, "bevel": 6, "pentagon": 7, "point": 8}.get(shape, 0)
