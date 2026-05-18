@@ -142,8 +142,8 @@ class ModuleConfig(Config):
     layout_constrain_to_bubble: bool = True
     # After layout: check if box or text lines extend outside the bubble; shrink box or scale font to fix (no model).
     layout_check_overflow_after_layout: bool = True
-    # Optional HF image-classification model to check if detection box is too large/small for bubble. "builtin" = zero-shot CLIP. Custom: labels too_large, too_small, ok. Empty = skip.
-    layout_box_size_check_model_id: str = "builtin"
+    # Optional HF image-classification model to check if detection box is too large/small for bubble. Empty = fast geometric checks only. "builtin" = zero-shot CLIP.
+    layout_box_size_check_model_id: str = ""
     # After auto layout, center each text box in its bubble (centroid). Skip boxes that are close to another (combined/overlapping bubbles).
     layout_center_in_bubble_after_autolayout: bool = True
     layout_center_in_bubble_min_gap_px: float = 40.0  # skip centering if another block is within this many pixels (edge-to-edge)
@@ -170,9 +170,9 @@ class ModuleConfig(Config):
     layout_use_mask_safe_area: bool = True
     # Balloon shape for Diamond-Text style layout: "auto" (detect from aspect ratio), "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point". Affects insets and line-length scoring.
     layout_balloon_shape: str = "auto"
-    # When "auto": which method(s) to use and in what order. model_contour = try model first, then contour (recommended when using a model).
-    layout_balloon_shape_auto_method: str = "model_contour"
-    layout_balloon_shape_model_id: str = "prithivMLmods/Geometric-Shapes-Classification"  # SigLIP2-base 92.9M, 8 shapes, 99% acc. Lighter: 0-ma/vit-geometric-shapes-tiny (5.5M, 6 shapes)
+    # When "auto": which method(s) to use and in what order. Default is model-free contour/aspect-ratio detection; set a model ID to opt into model-based shape classification.
+    layout_balloon_shape_auto_method: str = "contour_ratio"
+    layout_balloon_shape_model_id: str = ""  # Optional. Heavier: prithivMLmods/Geometric-Shapes-Classification. Lighter: 0-ma/vit-geometric-shapes-tiny.
     # Minimum line width (px) so short text (e.g. "pluck!") is not forced into 2–3 char lines; layout never uses a narrower width.
     layout_min_line_width_px: float = 80.0
     # Max line width as fraction of box width for free-standing text (no bubble). Lower = more lines, shorter lines. Only used when region_rect is None.
@@ -684,7 +684,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_fit_to_mask_safe_box': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_smart_auto_fit': True, 'format_atomic_bubble_fit': True, 'format_polish_typography': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_fit_to_mask_safe_box': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
     'format_layout_review_selected': True, 'format_layout_review_page': True, 'format_layout_review_config': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,

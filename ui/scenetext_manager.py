@@ -1577,6 +1577,7 @@ class SceneTextManager(QObject):
             ('letter_spacing', result.letter_spacing),
             ('writing_mode', result.writing_mode),
             ('fit_mode', result.fit_mode),
+            ('line_break_strategy', (result.diagnostics or {}).get('line_break_strategy', getattr(ff, 'line_break_strategy', 'auto'))),
         ]:
             if hasattr(ff, attr) and getattr(ff, attr) != value:
                 setattr(ff, attr, value)
@@ -1589,8 +1590,61 @@ class SceneTextManager(QObject):
             changed = True
         if changed:
             blkitem.set_fontformat(ff)
+            fit_diag = (result.diagnostics or {}).get('fit', {})
+            changed = self._postprocess_auto_lettering_item(blkitem, fit_diag=fit_diag) or changed
             if blkitem.blk is not None:
                 blkitem.blk.fontformat = ff.deepcopy()
+        return changed
+
+    def _postprocess_auto_lettering_item(self, blkitem: TextBlkItem, fit_diag: dict = None) -> bool:
+        """Final automatic safety pass after smart/atomic formatting.
+
+        Grows a too-small box from renderer diagnostics, runs the rendered-size
+        safety loop, and recenters in the detected bubble when available.  This
+        keeps one-click formatting from leaving text clipped or visibly off-center.
+        """
+        changed = False
+        rect = blkitem.absBoundingRect(qrect=True)
+        diag = fit_diag or {}
+        rec = diag.get('recommended_box_size') or []
+        overflow = bool(diag.get('overflow'))
+        if overflow and len(rec) >= 2:
+            try:
+                new_w = max(rect.width(), float(rec[0]))
+                new_h = max(rect.height(), float(rec[1]))
+                # Avoid runaway boxes from bad diagnostics; fitting should prefer
+                # font/line changes before modest centered growth.
+                new_w = min(new_w, rect.width() * 1.65)
+                new_h = min(new_h, rect.height() * 1.65)
+                img = getattr(self.imgtrans_proj, 'img_array', None)
+                if img is not None:
+                    im_h, im_w = img.shape[:2]
+                    new_w = min(new_w, float(im_w))
+                    new_h = min(new_h, float(im_h))
+                if new_w > rect.width() + 0.5 or new_h > rect.height() + 0.5:
+                    x1, y1, x2, y2 = centered_resize_xyxy([rect.x(), rect.y(), rect.x() + rect.width(), rect.y() + rect.height()], [new_w, new_h])
+                    blkitem.setRect([x1, y1, x2 - x1, y2 - y1], repaint=True)
+                    changed = True
+            except Exception:
+                pass
+        try:
+            before_size = float(getattr(blkitem.fontformat, 'font_size', 0.0) or 0.0)
+            self._auto_refine_rendered_fit(blkitem)
+            after_size = float(blkitem.minFontSize())
+            if after_size > 0 and abs(after_size - before_size) > 0.05:
+                blkitem.fontformat.font_size = after_size
+                changed = True
+        except Exception:
+            pass
+        img = getattr(self.imgtrans_proj, 'img_array', None)
+        if img is not None and getattr(getattr(pcfg, 'module', None), 'layout_center_in_bubble_after_autolayout', True):
+            try:
+                im_h, im_w = img.shape[:2]
+                changed = self._center_blkitem_in_bubble(blkitem, img, im_w, im_h) or changed
+            except Exception:
+                pass
+        if changed and blkitem.blk is not None:
+            blkitem.blk._bounding_rect = blkitem.absBoundingRect()
         return changed
 
     def _apply_atomic_bubble_fit_to_item(self, blkitem: TextBlkItem, profile: str = None) -> bool:
@@ -1653,6 +1707,8 @@ class SceneTextManager(QObject):
             blkitem.set_fontformat(ff)
             if result.alignment in (0, 1, 2):
                 blkitem.setAlignment(int(result.alignment), restore_cursor=False)
+            fit_diag = (result.diagnostics or {}).get('fit', {})
+            changed = self._postprocess_auto_lettering_item(blkitem, fit_diag=fit_diag) or changed
             if blkitem.blk is not None:
                 blkitem.blk.fontformat = ff.deepcopy()
                 blkitem.blk.vertical = vertical

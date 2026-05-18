@@ -1068,6 +1068,66 @@ def split_long_word(word: str, max_chars: int, marker: str = "‐") -> List[str]
     return [p for p in pieces if p]
 
 
+
+def optimal_latin_wrap(text: str, max_chars: int, split_long_words: bool = True) -> List[str]:
+    """Balanced Latin/space-delimited wrapper that preserves spaces.
+
+    The CJK kinsoku wrappers intentionally discard ASCII whitespace because
+    manga CJK text is commonly set without spaces.  Latin translations need the
+    opposite: keep word spacing while avoiding one-word/widow final lines and
+    very ragged rows in narrow bubbles.
+    """
+    max_chars = max(2, int(max_chars or 2))
+    paragraphs = (text or "").splitlines() or [text or ""]
+    wrapped: List[str] = []
+    for para in paragraphs:
+        words: List[str] = []
+        for raw in para.split():
+            if split_long_words and len(raw) > max_chars:
+                words.extend(split_long_word(raw, max_chars))
+            else:
+                words.append(raw)
+        if not words:
+            continue
+        n = len(words)
+        lengths = [len(w) for w in words]
+        prefix = [0]
+        for ln in lengths:
+            prefix.append(prefix[-1] + ln)
+
+        def line_len(i: int, j: int) -> int:
+            # Spaces between words in [i, j).
+            return prefix[j] - prefix[i] + max(0, j - i - 1)
+
+        total = line_len(0, n)
+        target_lines = max(1, int(math.ceil(total / max_chars)))
+        target = max(1.0, total / target_lines)
+        dp = [float("inf")] * (n + 1)
+        nxt = [-1] * (n + 1)
+        dp[n] = 0.0
+        for i in range(n - 1, -1, -1):
+            for j in range(i + 1, n + 1):
+                ln = line_len(i, j)
+                if ln > max_chars and j > i + 1:
+                    break
+                overflow_penalty = 100.0 * max(0, ln - max_chars)
+                ragged_penalty = (target - min(target, float(ln))) ** 2
+                widow_penalty = 18.0 if (j == n and i > 0 and (j - i == 1 or ln <= max(3, target * 0.38))) else 0.0
+                single_word_penalty = 3.0 if (j - i == 1 and n > 2 and ln < target * 0.65) else 0.0
+                score = ragged_penalty + overflow_penalty + widow_penalty + single_word_penalty + dp[j]
+                if score < dp[i]:
+                    dp[i] = score
+                    nxt[i] = j
+        if nxt[0] < 0:
+            wrapped.extend(wrap_latin_text(para, max_chars, split_long_words=split_long_words))
+            continue
+        i = 0
+        while i < n and nxt[i] > i:
+            j = nxt[i]
+            wrapped.append(" ".join(words[i:j]))
+            i = j
+    return [ln for ln in wrapped if ln]
+
 def wrap_latin_text(text: str, max_chars: int, split_long_words: bool = True) -> List[str]:
     lines: List[str] = []
     for para in (text or "").splitlines() or [text or ""]:
@@ -1097,15 +1157,19 @@ def resolve_fit_font_size_bounds(style_min: float = 0.0, style_max: float = 0.0,
 
 def balance_lines(text: str, max_chars: int, strategy: str = LINE_BREAK_BALANCED) -> str:
     strategy = normalize_line_break_strategy(strategy)
+    raw = text or ""
+    if not (contains_cjk(raw) or contains_rtl(raw)):
+        lines = optimal_latin_wrap(raw.replace("\n", " "), max_chars, split_long_words=True)
+        return "\n".join(lines) if lines else raw
     if strategy == LINE_BREAK_BALANCED:
-        lines = optimal_kinsoku_wrap(text, max_chars, strategy)
+        lines = optimal_kinsoku_wrap(raw, max_chars, strategy)
     else:
-        lines = kinsoku_wrap(text, max_chars, strategy)
+        lines = kinsoku_wrap(raw, max_chars, strategy)
     if len(lines) <= 2:
-        return "\n".join(lines) if lines else (text or "")
+        return "\n".join(lines) if lines else raw
     total = sum(len(ln) for ln in lines)
     target = max(1, int(math.ceil(total / len(lines))))
-    return "\n".join(optimal_kinsoku_wrap(text, min(max_chars, max(target, max_chars // 2)), strategy))
+    return "\n".join(optimal_kinsoku_wrap(raw, min(max_chars, max(target, max_chars // 2)), strategy))
 
 
 def vertical_columns(text: str, max_chars_per_column: int, strategy: str = LINE_BREAK_CJK_STRICT) -> List[str]:
@@ -1394,7 +1458,7 @@ def fit_font_size_to_box(
     text_out = text or ""
     if fit_mode == FIT_MODE_BALANCE and resolved != WRITING_MODE_VERTICAL_RL:
         avg = max(1.0, max(1.0, font_size) * 0.56 * max(0.1, letter_spacing))
-        text_out = balance_lines(text_out.replace("\n", ""), max(2, int(max(1.0, box_w - 2 * padding) / avg)), line_break_strategy)
+        text_out = balance_lines(text_out.replace("\n", " "), max(2, int(max(1.0, box_w - 2 * padding) / avg)), line_break_strategy)
     if resolved == WRITING_MODE_VERTICAL_RL:
         text_out = normalize_vertical_punctuation(text_out)
     lo = max(1.0, float(min_font_size or 1.0))
@@ -1545,7 +1609,7 @@ def smart_fit_text_to_box(
 
     if allow_balance and resolved != WRITING_MODE_VERTICAL_RL:
         avg = max(1.0, max(1.0, float(font_size or 1.0)) * 0.56 * active_spacing)
-        balanced = balance_lines(active_text.replace("\n", ""), max(2, int(max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / avg)), active_break)
+        balanced = balance_lines(active_text.replace("\n", " "), max(2, int(max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / avg)), active_break)
         if balanced and balanced != active_text:
             active_text = balanced
             actions.append("balance_lines")
@@ -1622,7 +1686,7 @@ def _candidate_atomic_lines(text: str, max_chars: int, strategy: str, mode: str)
         return vertical_columns(text or "", max(1, int(max_chars or 1)), strategy)
     if contains_cjk(text or "") or mode == WRITING_MODE_RTL:
         return optimal_kinsoku_wrap((text or "").replace("\n", ""), max(1, int(max_chars or 1)), strategy)
-    return wrap_latin_text((text or "").replace("\n", " "), max(1, int(max_chars or 1)), split_long_words=True)
+    return optimal_latin_wrap((text or "").replace("\n", " "), max(2, int(max_chars or 1)), split_long_words=True)
 
 
 def plan_atomic_bubble_fit(
@@ -1854,8 +1918,11 @@ def plan_typography_cleanup(
         width = max(1.0, float((box_size or (0.0, 0.0))[0] or 1.0) - 2 * float(text_padding or 0.0))
         avg = max(1.0, max(1.0, float(font_size or 1.0)) * 0.54 * max(0.1, float(letter_spacing or 1.0)))
         max_chars = max(2, int(width / avg))
-        balanced_lines = optimal_kinsoku_wrap(active_text.replace("\n", ""), max_chars, active_break)
-        balanced_text = "\n".join(balanced_lines) if balanced_lines else active_text
+        if contains_cjk(active_text) or contains_rtl(active_text):
+            balanced_lines = optimal_kinsoku_wrap(active_text.replace("\n", ""), max_chars, active_break)
+            balanced_text = "\n".join(balanced_lines) if balanced_lines else active_text
+        else:
+            balanced_text = balance_lines(active_text.replace("\n", " "), max_chars, active_break)
         if balanced_text and balanced_text != active_text:
             active_text = balanced_text
             actions.append("balance_lines")
