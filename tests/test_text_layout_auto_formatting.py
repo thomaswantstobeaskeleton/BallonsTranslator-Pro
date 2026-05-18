@@ -3,6 +3,11 @@ import numpy as np
 from utils.auto_text_layout import (
     auto_layout_effective_preset,
     auto_layout_preset_settings,
+    auto_layout_profile_defaults,
+    apply_auto_layout_profile,
+    auto_layout_profile_summary,
+    auto_layout_setting_hints,
+    auto_layout_advanced_summary,
     auto_rendered_fit_scale,
     candidate_layout_widths,
     estimate_target_line_count,
@@ -59,6 +64,85 @@ def test_text_layout_module_imports_without_image_runtime_side_effects():
     import utils.text_layout as text_layout
 
     assert hasattr(text_layout, "layout_text")
+
+
+def test_auto_layout_profile_defaults_cover_advanced_knobs():
+    balanced = auto_layout_profile_defaults("balanced")
+    fit = auto_layout_profile_defaults("fit")
+    readable = auto_layout_profile_defaults("readable")
+
+    expected = {
+        "layout_constrain_to_bubble",
+        "layout_center_in_bubble_after_autolayout",
+        "layout_center_in_bubble_min_gap_px",
+        "layout_check_overflow_after_layout",
+        "layout_use_mask_safe_area",
+        "layout_box_size_check_model_id",
+        "layout_optimal_breaks",
+        "layout_hyphenation",
+        "optimize_line_breaks",
+        "layout_short_line_penalty",
+        "layout_height_overflow_penalty",
+        "layout_font_size_min",
+        "layout_font_size_max",
+        "layout_font_fit_bubble",
+        "layout_font_binary_search",
+        "layout_auto_final_fit_pass",
+        "layout_balloon_shape",
+        "layout_balloon_shape_auto_method",
+        "layout_balloon_shape_model_id",
+        "layout_min_line_width_px",
+        "layout_max_line_width_frac_no_bubble",
+        "layout_stub_penalty_1word",
+    }
+    assert expected <= set(balanced)
+    assert balanced["layout_balloon_shape_auto_method"] == "contour_ratio"
+    assert balanced["layout_balloon_shape_model_id"] == ""
+    assert fit["layout_height_overflow_penalty"] > balanced["layout_height_overflow_penalty"]
+    assert readable["layout_font_size_min"] > balanced["layout_font_size_min"]
+    assert "Balanced" in auto_layout_profile_summary("balanced")
+
+
+def test_apply_auto_layout_profile_updates_config_like_object():
+    class Cfg:
+        layout_auto_preset = "balanced"
+        layout_font_size_min = 1.0
+        layout_balloon_shape_model_id = "old/model"
+
+    cfg = Cfg()
+    applied = apply_auto_layout_profile(cfg, "fit inside")
+    assert cfg.layout_auto_preset == "fit"
+    assert cfg.layout_font_size_min == applied["layout_font_size_min"] == 6.0
+    assert cfg.layout_balloon_shape_model_id == ""
+    assert cfg.layout_constrain_to_bubble is True
+
+
+def test_auto_layout_setting_hints_explain_numeric_values():
+    hints = auto_layout_setting_hints({
+        "layout_font_size_min": 6,
+        "layout_font_size_max": 64,
+        "layout_short_line_penalty": 130,
+        "layout_height_overflow_penalty": 950,
+        "layout_stub_penalty_1word": 2700,
+        "layout_min_line_width_px": 70,
+        "layout_max_line_width_frac_no_bubble": 0.9,
+        "layout_center_in_bubble_min_gap_px": 0,
+        "layout_box_size_check_model_id": "builtin",
+        "layout_balloon_shape_auto_method": "model_contour",
+        "layout_balloon_shape_model_id": "shape/model",
+    })
+
+    assert hints["font_range"].startswith("6–64 pt")
+    assert hints["short_line_penalty"] == "strict"
+    assert hints["height_overflow_penalty"] == "strict fit"
+    assert hints["stub_penalty"] == "maximum"
+    assert hints["center_gap"] == "never skip centering"
+    assert hints["box_model"] == "built-in CLIP"
+    assert hints["shape_detection"] == "model-assisted"
+    assert "Font 6–64 pt" in auto_layout_advanced_summary({
+        "layout_font_size_min": 6,
+        "layout_font_size_max": 64,
+    })
 
 
 def test_auto_layout_presets_normalize_and_shift_behavior():

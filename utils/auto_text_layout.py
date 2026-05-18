@@ -15,6 +15,175 @@ AUTO_LAYOUT_PRESETS = (
 )
 
 
+AUTO_LAYOUT_PROFILE_DEFAULTS = {
+    AUTO_LAYOUT_PRESET_BALANCED: {
+        "layout_constrain_to_bubble": True,
+        "layout_center_in_bubble_after_autolayout": True,
+        "layout_center_in_bubble_min_gap_px": 40.0,
+        "layout_check_overflow_after_layout": True,
+        "layout_use_mask_safe_area": True,
+        "layout_box_size_check_model_id": "",
+        "layout_optimal_breaks": True,
+        "layout_hyphenation": True,
+        "optimize_line_breaks": False,
+        "layout_short_line_penalty": 80.0,
+        "layout_height_overflow_penalty": 360.0,
+        "layout_font_size_min": 8.0,
+        "layout_font_size_max": 72.0,
+        "layout_font_fit_bubble": True,
+        "layout_font_binary_search": True,
+        "layout_auto_final_fit_pass": True,
+        "layout_balloon_shape": "auto",
+        "layout_balloon_shape_auto_method": "contour_ratio",
+        "layout_balloon_shape_model_id": "",
+        "layout_min_line_width_px": 80.0,
+        "layout_max_line_width_frac_no_bubble": 0.78,
+        "layout_stub_penalty_1word": 2000.0,
+    },
+    AUTO_LAYOUT_PRESET_FIT: {
+        "layout_constrain_to_bubble": True,
+        "layout_center_in_bubble_after_autolayout": True,
+        "layout_center_in_bubble_min_gap_px": 30.0,
+        "layout_check_overflow_after_layout": True,
+        "layout_use_mask_safe_area": True,
+        "layout_box_size_check_model_id": "",
+        "layout_optimal_breaks": True,
+        "layout_hyphenation": True,
+        "optimize_line_breaks": False,
+        "layout_short_line_penalty": 120.0,
+        "layout_height_overflow_penalty": 900.0,
+        "layout_font_size_min": 6.0,
+        "layout_font_size_max": 64.0,
+        "layout_font_fit_bubble": True,
+        "layout_font_binary_search": True,
+        "layout_auto_final_fit_pass": True,
+        "layout_balloon_shape": "auto",
+        "layout_balloon_shape_auto_method": "contour_ratio",
+        "layout_balloon_shape_model_id": "",
+        "layout_min_line_width_px": 70.0,
+        "layout_max_line_width_frac_no_bubble": 0.72,
+        "layout_stub_penalty_1word": 2600.0,
+    },
+    AUTO_LAYOUT_PRESET_READABLE: {
+        "layout_constrain_to_bubble": False,
+        "layout_center_in_bubble_after_autolayout": True,
+        "layout_center_in_bubble_min_gap_px": 50.0,
+        "layout_check_overflow_after_layout": True,
+        "layout_use_mask_safe_area": True,
+        "layout_box_size_check_model_id": "",
+        "layout_optimal_breaks": True,
+        "layout_hyphenation": True,
+        "optimize_line_breaks": True,
+        "layout_short_line_penalty": 60.0,
+        "layout_height_overflow_penalty": 240.0,
+        "layout_font_size_min": 10.0,
+        "layout_font_size_max": 84.0,
+        "layout_font_fit_bubble": True,
+        "layout_font_binary_search": True,
+        "layout_auto_final_fit_pass": True,
+        "layout_balloon_shape": "auto",
+        "layout_balloon_shape_auto_method": "contour_ratio",
+        "layout_balloon_shape_model_id": "",
+        "layout_min_line_width_px": 92.0,
+        "layout_max_line_width_frac_no_bubble": 0.86,
+        "layout_stub_penalty_1word": 1600.0,
+    },
+}
+
+
+def auto_layout_profile_defaults(value: str | None) -> dict:
+    """Return user-facing preset defaults for all advanced auto-layout knobs.
+
+    This keeps the many legacy tuning values behind one stable profile while
+    still allowing expert users to override individual fields after applying it.
+    Model-backed checks are intentionally off in these defaults so automatic
+    layout remains local, fast, and predictable unless the user opts into a
+    model ID explicitly.
+    """
+    preset = normalize_auto_layout_preset(value)
+    return dict(AUTO_LAYOUT_PROFILE_DEFAULTS[preset])
+
+
+def apply_auto_layout_profile(config_obj, value: str | None) -> dict:
+    """Apply a preset's advanced defaults to a module config-like object."""
+    preset = normalize_auto_layout_preset(value)
+    defaults = auto_layout_profile_defaults(preset)
+    if config_obj is not None:
+        setattr(config_obj, "layout_auto_preset", preset)
+        for key, val in defaults.items():
+            setattr(config_obj, key, val)
+    return defaults
+
+
+def auto_layout_profile_summary(value: str | None) -> str:
+    preset = normalize_auto_layout_preset(value)
+    if preset == AUTO_LAYOUT_PRESET_FIT:
+        return "Strict fit: smaller min font, strong overflow penalties, compact line widths, mask-safe area, no model checks by default."
+    if preset == AUTO_LAYOUT_PRESET_READABLE:
+        return "Readable: allows roomier boxes/fewer lines and larger font while keeping final overflow checks and bubble centering on."
+    return "Balanced: mask-safe geometry, centered bubbles, optimal line breaks, binary font fitting, and model-free shape detection by default."
+
+
+def _band(value: float, bands: tuple[tuple[float, str], ...], fallback: str) -> str:
+    try:
+        val = float(value)
+    except Exception:
+        return fallback
+    for limit, label in bands:
+        if val <= limit:
+            return label
+    return fallback
+
+
+def auto_layout_setting_hints(values: dict | object | None = None) -> dict:
+    """Translate advanced numeric auto-layout values into editor-friendly labels.
+
+    The raw values are still used by the layout engine, but the UI can show these
+    labels so users understand whether a number currently means strict, balanced,
+    or roomy behavior.  `values` may be a dict, dataclass/config object, or None.
+    """
+    def get(name: str, default):
+        if values is None:
+            return default
+        if isinstance(values, dict):
+            return values.get(name, default)
+        return getattr(values, name, default)
+
+    min_pt = float(get("layout_font_size_min", 8.0) or 8.0)
+    max_pt = float(get("layout_font_size_max", 72.0) or 72.0)
+    short_pen = float(get("layout_short_line_penalty", 80.0) or 0.0)
+    height_pen = float(get("layout_height_overflow_penalty", 360.0) or 0.0)
+    stub_pen = float(get("layout_stub_penalty_1word", 2000.0) or 0.0)
+    min_width = float(get("layout_min_line_width_px", 80.0) or 80.0)
+    no_bubble = float(get("layout_max_line_width_frac_no_bubble", 0.78) or 0.78)
+    center_gap = float(get("layout_center_in_bubble_min_gap_px", 40.0) or 0.0)
+    box_model = str(get("layout_box_size_check_model_id", "") or "").strip()
+    shape_model = str(get("layout_balloon_shape_model_id", "") or "").strip()
+    shape_method = str(get("layout_balloon_shape_auto_method", "contour_ratio") or "contour_ratio")
+
+    return {
+        "font_range": f"{min_pt:g}–{max_pt:g} pt (" + _band(min_pt, ((6.5, "tiny text allowed"), (9.5, "normal manga range")), "large/readable minimum") + ")",
+        "short_line_penalty": _band(short_pen, ((40, "very loose"), (90, "balanced"), (150, "strict")), "very strict"),
+        "height_overflow_penalty": _band(height_pen, ((250, "roomy / may grow taller"), (550, "balanced"), (950, "strict fit")), "very strict fit"),
+        "stub_penalty": _band(stub_pen, ((900, "loose"), (1800, "balanced"), (2600, "strong")), "maximum"),
+        "minimum_line_width": _band(min_width, ((72, "compact/narrow"), (95, "balanced"), (125, "roomy")), "very roomy"),
+        "no_bubble_width": _band(no_bubble, ((0.70, "compact"), (0.82, "balanced"), (0.92, "wide/readable")), "very wide"),
+        "center_gap": "never skip centering" if center_gap <= 0 else f"skip combined bubbles within {center_gap:g}px",
+        "box_model": "geometry only" if not box_model else ("built-in CLIP" if box_model == "builtin" else "custom model"),
+        "shape_detection": ("model-assisted" if shape_model or shape_method.startswith("model") else "model-free contour/aspect"),
+    }
+
+
+def auto_layout_advanced_summary(values: dict | object | None = None) -> str:
+    hints = auto_layout_setting_hints(values)
+    return (
+        f"Font {hints['font_range']}; lines: {hints['short_line_penalty']} short-line, "
+        f"{hints['stub_penalty']} one-word, {hints['height_overflow_penalty']} height; "
+        f"widths: {hints['minimum_line_width']} in bubbles / {hints['no_bubble_width']} outside; "
+        f"centering: {hints['center_gap']}; checks: {hints['box_model']}, {hints['shape_detection']}."
+    )
+
+
 @dataclass(frozen=True)
 class AutoLayoutPresetSettings:
     """Small set of user-facing automatic lettering behaviors.

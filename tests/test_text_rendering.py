@@ -15,6 +15,9 @@ from utils.text_rendering import (
     normalize_line_break_strategy,
     normalize_vertical_punctuation,
     optimal_kinsoku_wrap,
+    optimal_latin_wrap,
+    balance_lines,
+    smart_fit_text_to_box,
     resolve_writing_mode,
     vertical_columns,
     vertical_layout_plan,
@@ -28,6 +31,34 @@ from utils.text_rendering import (
     vertical_bracket_pair_hints,
     vertical_punctuation_adjustment,
 )
+
+
+def test_balanced_latin_wrap_preserves_spaces_and_reduces_widows():
+    text = "This translated sentence should keep spaces while forming even comic lettering lines"
+    lines = optimal_latin_wrap(text, 18)
+    assert " ".join(lines).replace("‐ ", "") == text
+    assert all("  " not in line for line in lines)
+    assert len(lines) >= 3
+    assert len(lines[-1]) > 6
+
+
+def test_balance_lines_latin_does_not_concatenate_words():
+    balanced = balance_lines("Hello world from a narrow bubble", 12)
+    assert "Hello world" in balanced or "world from" in balanced
+    assert "Helloworld" not in balanced
+
+
+def test_smart_fit_applies_balanced_latin_text_without_losing_spaces():
+    result = smart_fit_text_to_box(
+        "A very long translated line should become readable inside this bubble",
+        28,
+        (140, 72),
+        fit_mode="balance",
+        line_break_strategy="balanced",
+    )
+    assert "A very" in result.text or "very long" in result.text
+    assert "Avery" not in result.text
+    assert not result.overflow
 
 
 def test_resolve_writing_mode_auto_cjk_tall_box_vertical():

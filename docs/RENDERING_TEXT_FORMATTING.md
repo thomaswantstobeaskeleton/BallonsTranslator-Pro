@@ -18,19 +18,21 @@ The everyday lettering controls are grouped by ownership:
 - **Selection defaults / reset**: **Use project text defaults** applies Settings → Project text rendering defaults for writing mode, fit mode, line breaks, padding, and clears fallback overrides. It does not change font family, size, colors, or stroke.
 - **Live lettering diagnostics**: the panel estimates resolved writing mode, fit size, overflow/fallback status, and a quality score for the selected textbox so likely final-lettering issues are visible before exporting.
 
-Right-click selected text boxes and use **Format → Writing mode** or **Format → Recenter text in box** for quick lettering fixes.
+Right-click selected text boxes and use **Format → Smart auto fit lettering** for the recommended one-click pass: it balances preserved-space Latin lines, resolves script/writing mode, applies fit sizing, grows the text box if diagnostics still predict clipping, runs a rendered overflow safety pass, and recenters in the detected bubble when a mask is available. **Format → Atomic bubble fit** is stricter for making a phrase behave like one visual block inside a bubble. **Format → Writing mode** and **Format → Recenter text in box** remain available for narrow manual fixes.
 
 ## Renderer diagnostics
 
 Config → General → **Rendering / Text Formatting** includes:
 
+- an **Auto lettering preset** that synchronizes constrain-to-bubble, center-in-bubble, overflow, optimal-break, font-size, binary-fit, and balloon-shape defaults so most users do not need to tune the individual numeric controls;
+- a live **What the advanced values mean** readout that translates numeric penalties, widths, font ranges, skip distances, and model fields into plain-language labels such as balanced, strict fit, roomy, geometry only, or model-assisted;
 - default writing and fit modes,
 - default render font and manga effect defaults,
 - per-script fallback font chains for Latin, CJK, Korean, Arabic/Hebrew, and emoji/symbols,
 - overflow warnings,
 - an optional diagnostics overlay.
 
-The diagnostics overlay draws the text box, estimated rendered bounds, overflow status, writing mode, and missing-glyph warnings directly on the canvas. It is intended for QA and should be disabled for normal export.
+The diagnostics overlay draws the text box, estimated rendered bounds, overflow status, writing mode, and missing-glyph warnings directly on the canvas. Optional box-size and shape model IDs are now opt-in; leaving them blank uses faster geometry/mask detection, which is the recommended default. It is intended for QA and should be disabled for normal export.
 
 ## Layout review integration
 

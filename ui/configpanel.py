@@ -13,7 +13,7 @@ from .context_menu_config_dialog import ContextMenuConfigDialog
 from utils.config import pcfg
 from utils.data_path_manager import resolve_data_path, free_space_gb, ensure_data_path
 from utils.text_rendering import ATOMIC_FIT_BALANCED, ATOMIC_FIT_COMFORTABLE, ATOMIC_FIT_DENSE, ATOMIC_FIT_CAPTION, ATOMIC_FIT_SFX, normalize_atomic_fit_mode
-from utils.auto_text_layout import normalize_auto_layout_preset
+from utils.auto_text_layout import apply_auto_layout_profile, auto_layout_advanced_summary, auto_layout_profile_summary, auto_layout_setting_hints, normalize_auto_layout_preset
 from utils import shared as C
 from utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_HEADER, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, DISPLAY_LANGUAGE_MAP
 from .glossary_map_dialog import GlossaryMapDialog
@@ -1263,6 +1263,20 @@ class ConfigPanel(Widget):
             discription=self.tr('One control for automatic lettering behavior. Balanced is the default; Fit inside bubble uses stricter margins and smaller text; Larger readable text allows wider lines and larger font when safe.')
         )
         self.layout_auto_preset_combo.activated.connect(self._on_layout_auto_preset_changed)
+        self.layout_profile_summary_label = QLabel(self)
+        self.layout_profile_summary_label.setWordWrap(True)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_profile_summary_label,
+            self.tr('Selected preset summary'),
+            discription=self.tr('Shows what the high-level automatic lettering preset controls. Advanced values below can still be edited after applying a preset.')
+        ))
+        self.layout_apply_profile_btn = QPushButton(self.tr('✨ Reset advanced values to selected preset'))
+        self.layout_apply_profile_btn.clicked.connect(self._on_apply_auto_layout_profile_clicked)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_apply_profile_btn,
+            self.tr('Apply auto-layout preset'),
+            discription=self.tr('Synchronizes constrain/center/overflow/line-break/font-size/shape settings below to the selected preset. Use this when old projects have confusing manual values.')
+        ))
 
         self.layout_constrain_to_bubble_checker, layout_sublock = generalConfigPanel.addCheckBox(
             self.tr('Constrain text box to bubble'),
@@ -1298,12 +1312,12 @@ class ConfigPanel(Widget):
         )
         self.layout_use_mask_safe_area_checker.stateChanged.connect(self._on_layout_use_mask_safe_area_changed)
         self.layout_box_size_check_model_id_edit = QLineEdit()
-        self.layout_box_size_check_model_id_edit.setPlaceholderText(self.tr('Use "builtin" for zero-shot CLIP, or a Hugging Face model ID. Leave empty to skip.'))
+        self.layout_box_size_check_model_id_edit.setPlaceholderText(self.tr('Leave empty for fast geometry. Optional: "builtin" for CLIP or a Hugging Face model ID.'))
         self.layout_box_size_check_model_id_edit.textChanged.connect(self._on_layout_box_size_check_model_id_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.layout_box_size_check_model_id_edit,
-            self.tr('Box size check model ID (secondary)'),
-            discription=self.tr('Built-in: use "builtin" (zero-shot CLIP). Custom: image-classification model with labels too_large, too_small, ok. Empty = geometric checks only.')
+            self.tr('Optional box size model ID'),
+            discription=self.tr('Recommended: leave empty. Geometry and mask-safe checks handle most pages. Use "builtin" or a custom too_large/too_small/ok classifier only if geometric checks miss your scans.')
         ))
 
         self.layout_optimal_breaks_checker, _ = generalConfigPanel.addCheckBox(
@@ -1411,16 +1425,16 @@ class ConfigPanel(Widget):
                 self.tr('Model, then contour, then aspect ratio'),
             ],
             self.tr('Auto shape method'),
-            discription=self.tr('When balloon shape is Auto, which method(s) to use. Contour = mask-based (OpenCV). Model = HF image-classification (set model ID below).')
+            discription=self.tr('When balloon shape is Auto, choose model-free contour/aspect-ratio detection by default. Model options require the optional model ID below.')
         )
         self.layout_balloon_shape_auto_method_combo.activated.connect(self._on_layout_balloon_shape_auto_method_changed)
         self.layout_balloon_shape_model_id_edit = QLineEdit()
-        self.layout_balloon_shape_model_id_edit.setPlaceholderText(self.tr('Default: prithivMLmods/Geometric-Shapes-Classification (92.9M). Lighter: 0-ma/vit-geometric-shapes-tiny'))
+        self.layout_balloon_shape_model_id_edit.setPlaceholderText(self.tr('Optional. Leave empty for contour/aspect-ratio detection.'))
         self.layout_balloon_shape_model_id_edit.textChanged.connect(self._on_layout_balloon_shape_model_id_changed)
         generalConfigPanel.addSublock(ConfigSubBlock(
             self.layout_balloon_shape_model_id_edit,
-            self.tr('Balloon shape model ID'),
-            discription=self.tr('Default is prithivMLmods/Geometric-Shapes-Classification (SigLIP2-base, 92.9M params, 8 shapes, ~99% accuracy). Use 0-ma/vit-geometric-shapes-tiny for a lighter 5.5M model. Wide bubbles are forced to oval when the model says square.')
+            self.tr('Optional balloon shape model ID'),
+            discription=self.tr('Recommended: leave empty. If you choose a model-based auto shape method, set a Hugging Face image-classification model here. Example heavy model: prithivMLmods/Geometric-Shapes-Classification; lighter: 0-ma/vit-geometric-shapes-tiny.')
         ))
         # Minimum line width so short text (e.g. "pluck!") is not broken into 2–3 char lines
         self.layout_min_line_width_spin = QSpinBox()
@@ -1457,6 +1471,23 @@ class ConfigPanel(Widget):
             self.tr('1-word line penalty'),
             discription=self.tr('Penalty for a single word on its own line in layout scoring (higher = strongly avoid e.g. "the" alone).')
         ))
+
+        self.layout_advanced_interpretation_label = QLabel(self)
+        self.layout_advanced_interpretation_label.setWordWrap(True)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_advanced_interpretation_label,
+            self.tr('What the advanced values mean'),
+            discription=self.tr('Plain-language interpretation of the numeric auto-layout controls above. Use this to understand whether the current values are strict, balanced, or roomy.')
+        ))
+        self.layout_advanced_interpretation_label.setStyleSheet('color: gray;')
+        self.layout_reset_balanced_btn = QPushButton(self.tr('↩ Restore balanced automatic defaults'))
+        self.layout_reset_balanced_btn.clicked.connect(lambda: self._apply_auto_layout_profile_to_config('balanced', save=True))
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_reset_balanced_btn,
+            self.tr('Safe reset for confusing values'),
+            discription=self.tr('Returns every advanced auto-layout value to the recommended Balanced defaults without changing unrelated rendering/font settings.')
+        ))
+
         self.layout_panel_preserve_line_breaks_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Translation panel: preserve line breaks'),
             discription=self.tr('When on, the translation panel does not wrap by width so line breaks match the canvas bubble (rendering parity).')
@@ -1794,9 +1825,104 @@ class ConfigPanel(Widget):
     def on_autolayout_changed(self):
         pcfg.let_autolayout_flag = self.let_autolayout_checker.isChecked()
 
+
+    def _sync_auto_layout_controls_from_config(self):
+        """Refresh advanced auto-layout widgets after a preset rewrites their config values."""
+        pairs = [
+            ('layout_constrain_to_bubble_checker', 'layout_constrain_to_bubble', 'checked'),
+            ('layout_center_in_bubble_after_autolayout_checker', 'layout_center_in_bubble_after_autolayout', 'checked'),
+            ('layout_check_overflow_after_layout_checker', 'layout_check_overflow_after_layout', 'checked'),
+            ('layout_use_mask_safe_area_checker', 'layout_use_mask_safe_area', 'checked'),
+            ('layout_optimal_breaks_checker', 'layout_optimal_breaks', 'checked'),
+            ('layout_hyphenation_checker', 'layout_hyphenation', 'checked'),
+            ('optimize_line_breaks_checker', 'optimize_line_breaks', 'checked'),
+            ('layout_font_fit_bubble_checker', 'layout_font_fit_bubble', 'checked'),
+            ('layout_font_binary_search_checker', 'layout_font_binary_search', 'checked'),
+            ('layout_auto_final_fit_pass_checker', 'layout_auto_final_fit_pass', 'checked'),
+            ('layout_center_in_bubble_min_gap_spin', 'layout_center_in_bubble_min_gap_px', 'value'),
+            ('layout_short_line_penalty_spin', 'layout_short_line_penalty', 'value'),
+            ('layout_height_overflow_penalty_spin', 'layout_height_overflow_penalty', 'value'),
+            ('layout_font_size_min_spin', 'layout_font_size_min', 'value'),
+            ('layout_font_size_max_spin', 'layout_font_size_max', 'value'),
+            ('layout_min_line_width_spin', 'layout_min_line_width_px', 'int_value'),
+            ('layout_max_line_width_frac_no_bubble_spin', 'layout_max_line_width_frac_no_bubble', 'value'),
+            ('layout_stub_penalty_1word_spin', 'layout_stub_penalty_1word', 'value'),
+            ('layout_box_size_check_model_id_edit', 'layout_box_size_check_model_id', 'text'),
+            ('layout_balloon_shape_model_id_edit', 'layout_balloon_shape_model_id', 'text'),
+        ]
+        for widget_name, cfg_key, kind in pairs:
+            if not hasattr(self, widget_name):
+                continue
+            widget = getattr(self, widget_name)
+            widget.blockSignals(True)
+            try:
+                val = getattr(pcfg.module, cfg_key)
+                if kind == 'checked':
+                    widget.setChecked(bool(val))
+                elif kind == 'int_value':
+                    widget.setValue(int(float(val)))
+                elif kind == 'value':
+                    widget.setValue(float(val))
+                elif kind == 'text':
+                    widget.setText(str(val or ''))
+            finally:
+                widget.blockSignals(False)
+        if hasattr(self, 'layout_balloon_shape_combo'):
+            shape = (getattr(pcfg.module, 'layout_balloon_shape', 'auto') or 'auto').lower()
+            idx = {"auto": 0, "round": 1, "elongated": 2, "narrow": 3, "diamond": 4, "square": 5, "bevel": 6, "pentagon": 7, "point": 8}.get(shape, 0)
+            self.layout_balloon_shape_combo.blockSignals(True)
+            self.layout_balloon_shape_combo.setCurrentIndex(idx)
+            self.layout_balloon_shape_combo.blockSignals(False)
+        if hasattr(self, 'layout_balloon_shape_auto_method_combo'):
+            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'contour_ratio') or 'contour_ratio').lower()
+            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 5)
+            self.layout_balloon_shape_auto_method_combo.blockSignals(True)
+            self.layout_balloon_shape_auto_method_combo.setCurrentIndex(idx)
+            self.layout_balloon_shape_auto_method_combo.blockSignals(False)
+        self._update_auto_layout_interpretation()
+
+    def _update_auto_layout_interpretation(self):
+        if hasattr(self, 'layout_profile_summary_label'):
+            preset = normalize_auto_layout_preset(getattr(pcfg.module, 'layout_auto_preset', 'balanced'))
+            self.layout_profile_summary_label.setText(auto_layout_profile_summary(preset))
+        if hasattr(self, 'layout_advanced_interpretation_label'):
+            self.layout_advanced_interpretation_label.setText(auto_layout_advanced_summary(pcfg.module))
+        hints = auto_layout_setting_hints(pcfg.module)
+        tooltip_map = {
+            'layout_short_line_penalty_spin': 'short_line_penalty',
+            'layout_height_overflow_penalty_spin': 'height_overflow_penalty',
+            'layout_stub_penalty_1word_spin': 'stub_penalty',
+            'layout_min_line_width_spin': 'minimum_line_width',
+            'layout_max_line_width_frac_no_bubble_spin': 'no_bubble_width',
+            'layout_font_size_min_spin': 'font_range',
+            'layout_font_size_max_spin': 'font_range',
+            'layout_center_in_bubble_min_gap_spin': 'center_gap',
+            'layout_box_size_check_model_id_edit': 'box_model',
+            'layout_balloon_shape_model_id_edit': 'shape_detection',
+        }
+        for widget_name, hint_key in tooltip_map.items():
+            if hasattr(self, widget_name):
+                widget = getattr(self, widget_name)
+                base = widget.property('base_tooltip')
+                if base is None:
+                    base = widget.toolTip() or ''
+                    widget.setProperty('base_tooltip', base)
+                meaning = hints.get(hint_key, '')
+                widget.setToolTip(f"{base}\nCurrent meaning: {meaning}".strip())
+
+    def _apply_auto_layout_profile_to_config(self, preset: str, save: bool = True):
+        apply_auto_layout_profile(pcfg.module, preset)
+        self._sync_auto_layout_controls_from_config()
+        if save:
+            self.save_config.emit()
+
+    def _on_apply_auto_layout_profile_clicked(self):
+        preset = normalize_auto_layout_preset(getattr(pcfg.module, 'layout_auto_preset', 'balanced'))
+        self._apply_auto_layout_profile_to_config(preset, save=True)
+
     def _on_layout_auto_preset_changed(self, index: int):
-        pcfg.module.layout_auto_preset = ("balanced", "fit", "readable")[max(0, min(index, 2))]
-        self.save_config.emit()
+        preset = ("balanced", "fit", "readable")[max(0, min(index, 2))]
+        self._apply_auto_layout_profile_to_config(preset, save=True)
 
     def _on_layout_constrain_to_bubble_changed(self):
         pcfg.module.layout_constrain_to_bubble = self.layout_constrain_to_bubble_checker.isChecked()
@@ -1808,6 +1934,7 @@ class ConfigPanel(Widget):
 
     def _on_layout_center_in_bubble_min_gap_px_changed(self, value: float):
         pcfg.module.layout_center_in_bubble_min_gap_px = float(value)
+        self._update_auto_layout_interpretation()
         self.save_config.emit()
 
     def _on_layout_check_overflow_after_layout_changed(self):
@@ -1820,6 +1947,8 @@ class ConfigPanel(Widget):
 
     def _on_layout_box_size_check_model_id_changed(self, text: str):
         pcfg.module.layout_box_size_check_model_id = (text or "").strip()
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_optimal_breaks_changed(self):
         pcfg.module.layout_optimal_breaks = self.layout_optimal_breaks_checker.isChecked()
@@ -1831,49 +1960,71 @@ class ConfigPanel(Widget):
 
     def _on_optimize_line_breaks_changed(self):
         pcfg.module.optimize_line_breaks = self.optimize_line_breaks_checker.isChecked()
+        self._update_auto_layout_interpretation()
         self.save_config.emit()
 
     def _on_layout_short_line_penalty_changed(self, value: float):
         pcfg.module.layout_short_line_penalty = float(value)
+        self._update_auto_layout_interpretation()
         self.save_config.emit()
 
     def _on_layout_height_overflow_penalty_changed(self, value: float):
         pcfg.module.layout_height_overflow_penalty = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_font_size_min_changed(self, value: float):
         pcfg.module.layout_font_size_min = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_font_size_max_changed(self, value: float):
         pcfg.module.layout_font_size_max = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_font_fit_bubble_changed(self):
         pcfg.module.layout_font_fit_bubble = self.layout_font_fit_bubble_checker.isChecked()
+        self.save_config.emit()
 
     def _on_layout_font_binary_search_changed(self):
         pcfg.module.layout_font_binary_search = self.layout_font_binary_search_checker.isChecked()
+        self.save_config.emit()
 
     def _on_layout_auto_final_fit_pass_changed(self):
         pcfg.module.layout_auto_final_fit_pass = self.layout_auto_final_fit_pass_checker.isChecked()
+        self.save_config.emit()
 
     def _on_layout_balloon_shape_changed(self, index: int):
         pcfg.module.layout_balloon_shape = ("auto", "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point")[index]
+        self.save_config.emit()
 
     def _on_layout_balloon_shape_auto_method_changed(self, index: int):
         pcfg.module.layout_balloon_shape_auto_method = (
             "aspect_ratio", "contour", "model", "model_contour", "model_ratio", "contour_ratio", "model_contour_ratio"
         )[index]
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_balloon_shape_model_id_changed(self, text: str):
         pcfg.module.layout_balloon_shape_model_id = (text or "").strip()
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_min_line_width_changed(self, value: int):
         pcfg.module.layout_min_line_width_px = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_max_line_width_frac_no_bubble_changed(self, value: float):
         pcfg.module.layout_max_line_width_frac_no_bubble = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_stub_penalty_1word_changed(self, value: float):
         pcfg.module.layout_stub_penalty_1word = float(value)
+        self._update_auto_layout_interpretation()
+        self.save_config.emit()
 
     def _on_layout_panel_preserve_line_breaks_changed(self):
         pcfg.module.layout_panel_preserve_line_breaks = self.layout_panel_preserve_line_breaks_checker.isChecked()
@@ -2165,6 +2316,8 @@ class ConfigPanel(Widget):
             self.layout_auto_preset_combo.blockSignals(True)
             self.layout_auto_preset_combo.setCurrentIndex(idx)
             self.layout_auto_preset_combo.blockSignals(False)
+            if hasattr(self, 'layout_profile_summary_label'):
+                self.layout_profile_summary_label.setText(auto_layout_profile_summary(preset))
         if hasattr(self, 'layout_constrain_to_bubble_checker'):
             self.layout_constrain_to_bubble_checker.setChecked(getattr(pcfg.module, 'layout_constrain_to_bubble', True))
         if hasattr(self, 'layout_center_in_bubble_after_autolayout_checker'):
@@ -2216,8 +2369,8 @@ class ConfigPanel(Widget):
             self.layout_balloon_shape_combo.setCurrentIndex(idx)
             self.layout_balloon_shape_combo.blockSignals(False)
         if hasattr(self, 'layout_balloon_shape_auto_method_combo'):
-            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'model_contour') or 'model_contour').lower()
-            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 3)
+            method = (getattr(pcfg.module, 'layout_balloon_shape_auto_method', 'contour_ratio') or 'contour_ratio').lower()
+            idx = {"aspect_ratio": 0, "contour": 1, "model": 2, "model_contour": 3, "model_ratio": 4, "contour_ratio": 5, "model_contour_ratio": 6}.get(method, 5)
             self.layout_balloon_shape_auto_method_combo.blockSignals(True)
             self.layout_balloon_shape_auto_method_combo.setCurrentIndex(idx)
             self.layout_balloon_shape_auto_method_combo.blockSignals(False)
