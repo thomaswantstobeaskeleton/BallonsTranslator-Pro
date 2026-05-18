@@ -96,6 +96,7 @@ python --version
 - More automatic bubble lettering with shape-aware safe areas, balanced line breaks, density-aware font scaling, and final overflow safety checks (see [Automatic text formatting](doc/AUTOMATIC_TEXT_FORMATTING.md))
 - LLM-aided review chain for quality/consistency
 - Strong defaults for fast onboarding
+- Local automation/API documentation for headless and MCP-style workflows (see [Local Automation API](docs/LOCAL_AUTOMATION_API.md))
 
 ---
 

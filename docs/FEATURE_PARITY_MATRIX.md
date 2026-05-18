@@ -12,8 +12,8 @@ This matrix tracks BallonsTranslator-Pro parity progress against major alternati
 - **Phase 1 (Automation/headless/MCP):** 🟨 **actively in progress**
   - Added typed edit-op validation and batch scene-edit surface.
   - Added job lifecycle routes (`job_start/status/cancel/logs/result/list`).
-  - Added MCP-friendly aliases and deterministic route discovery tests.
-  - Remaining: deeper task cancellation hooks, CLI/headless runner contract, SSE/WS stream.
+  - Added MCP-friendly aliases, deterministic route discovery tests, and an SSE-compatible `/events` job snapshot endpoint.
+  - Remaining: deeper task cancellation hooks, CLI/headless runner contract, live SSE/WS streaming loop.
 - **Phase 2+ (Secure providers, interchange, CAT, OCR UX, renderer fidelity, cleanup, batch parity):** ❌ **not started in implementation yet**
 
 ## Relative parity (high-level)

@@ -44,7 +44,7 @@ def test_local_automation_api_health_lists_routes():
     assert out['status'] == 'ok'
     assert out['count'] == 1
     assert 'ping' in out['routes']
-    assert out['methods']['GET'] == ['health', 'routes']
+    assert out['methods']['GET'] == ['events', 'health', 'routes']
     assert out['methods']['POST'] == ['ping']
 
 
@@ -62,7 +62,7 @@ def test_local_automation_api_routes_endpoint_shape():
     assert out['ok'] is True
     assert out['count'] == 2
     assert out['routes'] == ['open_project', 'project_status']
-    assert out['methods']['GET'] == ['health', 'routes']
+    assert out['methods']['GET'] == ['events', 'health', 'routes']
     assert out['methods']['POST'] == ['open_project', 'project_status']
 
 
@@ -80,3 +80,29 @@ def test_local_automation_api_routes_are_sorted_for_stability():
     server.stop()
     assert out['routes'] == ['alpha', 'mid', 'zeta']
     assert out['methods']['POST'] == ['alpha', 'mid', 'zeta']
+
+
+def test_local_automation_api_event_stream_job_snapshot():
+    jobs = {
+        "job_1": {"job_id": "job_1", "status": "running", "warnings": [], "logs": ["started"]}
+    }
+
+    def status(body):
+        job = jobs[body["job_id"]]
+        return {"job_id": job["job_id"], "status": job["status"], "warnings": job["warnings"]}
+
+    def logs(body):
+        job = jobs[body["job_id"]]
+        return {"job_id": job["job_id"], "logs": job["logs"], "warnings": job["warnings"]}
+
+    server = LocalAutomationApiServer('127.0.0.1', 39604, {'job_status': status, 'job_logs': logs})
+    server.start()
+    req = urllib.request.Request('http://127.0.0.1:39604/events?job_id=job_1', method='GET')
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        body = resp.read().decode('utf-8')
+        content_type = resp.headers.get('Content-Type')
+    server.stop()
+    assert content_type == 'text/event-stream'
+    assert body.startswith('event: job\n')
+    assert '"status": "running"' in body
+    assert 'started' in body

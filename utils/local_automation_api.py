@@ -3,6 +3,9 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, Any
+from urllib.parse import parse_qs, urlparse
+
+from utils.automation_api_contract import build_route_discovery
 
 
 class LocalAutomationApiServer:
@@ -20,16 +23,7 @@ class LocalAutomationApiServer:
         handlers = self.handlers
 
         def _routes_payload():
-            routes = sorted(handlers.keys())
-            return {
-                'ok': True,
-                'routes': routes,
-                'count': len(routes),
-                'methods': {
-                    'GET': ['health', 'routes'],
-                    'POST': routes,
-                },
-            }
+            return build_route_discovery(handlers)
 
         class H(BaseHTTPRequestHandler):
             def _auth_ok(self):
@@ -41,7 +35,8 @@ class LocalAutomationApiServer:
                 return True
 
             def do_GET(self):
-                route = self.path.strip('/')
+                parsed = urlparse(self.path)
+                route = parsed.path.strip('/')
                 if route in {'', 'health'}:
                     if not self._auth_ok():
                         return
@@ -51,6 +46,11 @@ class LocalAutomationApiServer:
                     if not self._auth_ok():
                         return
                     self._send(200, _routes_payload())
+                    return
+                if route == 'events':
+                    if not self._auth_ok():
+                        return
+                    self._send_events(parsed.query)
                     return
                 self._send(404, {'ok': False, 'error': f'unknown route: {route}'})
 
@@ -81,6 +81,31 @@ class LocalAutomationApiServer:
                 data = json.dumps(obj).encode('utf-8')
                 self.send_response(code)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def _send_events(self, query: str):
+                qs = parse_qs(query or '')
+                job_id = (qs.get('job_id') or [''])[0]
+                payload: Dict[str, Any] = {'ok': True, 'job_id': job_id}
+                status_fn = handlers.get('job_status')
+                logs_fn = handlers.get('job_logs')
+                if job_id and status_fn is not None:
+                    try:
+                        payload['status'] = status_fn({'job_id': job_id}) or {}
+                    except Exception as e:
+                        self._send(404, {'ok': False, 'error': str(e)})
+                        return
+                if job_id and logs_fn is not None:
+                    try:
+                        payload['logs'] = logs_fn({'job_id': job_id}) or {}
+                    except Exception as e:
+                        payload['warnings'] = [str(e)]
+                data = ('event: job\n' + 'data: ' + json.dumps(payload) + '\n\n').encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Cache-Control', 'no-cache')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
