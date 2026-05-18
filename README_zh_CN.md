@@ -14,7 +14,6 @@ BallonsTranslator-Pro 是 [dmMaze/BallonsTranslator](https://github.com/dmMaze/B
 4. 修复原图文字区域（inpaint）
 5. 编辑并导出页面
 
-- English README（与本页同结构）: [README.md](README.md)
 - 完整更新历史: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
