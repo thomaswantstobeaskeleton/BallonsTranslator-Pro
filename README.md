@@ -18,6 +18,15 @@ At a high level, BallonsTranslator-Pro helps you:
 5. Edit and export pages
 
 - 中文文档（与本页同结构）: [README_zh_CN.md](README_zh_CN.md)
+- Other localized guides:
+  - Español: [doc/README_ES.md](doc/README_ES.md)
+  - Français: [doc/README_FR.md](doc/README_FR.md)
+  - Português (Brasil): [doc/README_PT-BR.md](doc/README_PT-BR.md)
+  - Русский: [doc/README_RU.md](doc/README_RU.md)
+  - 한국어: [doc/README_KO.md](doc/README_KO.md)
+  - 日本語: [doc/README_JA.md](doc/README_JA.md)
+  - Bahasa Indonesia: [doc/README_ID.md](doc/README_ID.md)
+  - Tiếng Việt: [doc/README_VI.md](doc/README_VI.md)
 - Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
