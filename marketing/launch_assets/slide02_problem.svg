@@ -1,8 +1,0 @@
-<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0C2D48"/><stop offset="100%" stop-color="#1E93E5"/></linearGradient></defs>
-<rect width="1920" height="1080" fill="url(#g)"/>
-<rect x="140" y="130" width="1640" height="820" rx="48" fill="#ffffff" fill-opacity="0.1" stroke="#ffffff" stroke-opacity="0.25"/>
-<text x="220" y="360" font-family="Arial, Helvetica, sans-serif" font-size="88" font-weight="700" fill="#ffffff">OCR is not the bottleneck</text>
-<text x="220" y="470" font-family="Arial, Helvetica, sans-serif" font-size="48" fill="#DDEFFF">Review consistency is.</text>
-<text x="220" y="860" font-family="Arial, Helvetica, sans-serif" font-size="34" fill="#BEE2FF">BallonsTranslator Pro</text>
-</svg>
