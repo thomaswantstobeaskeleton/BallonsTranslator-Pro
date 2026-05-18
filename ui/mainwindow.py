@@ -78,6 +78,7 @@ from utils.svg_text_export import build_svg_text_handoff
 from utils.lettering_proof_export import build_lettering_proof_pack
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
+from utils.automation_api_contract import normalize_job_task
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
@@ -882,7 +883,10 @@ class MainWindow(mainwindow_cls):
             'undo': self._api_undo,
             'redo': self._api_redo,
             'export': self._api_export,
+            'batch_export': self._api_batch_export,
+            'proof_pack': self._api_export_lettering_proof,
             'render': self._api_render_current_page,  # MCP alias
+            'render_page': self._api_render_current_page,
             'layout_review': self._api_layout_review,
             'page_state': self._api_page_state,
             'list_pages': self._api_list_pages,
@@ -948,10 +952,8 @@ class MainWindow(mainwindow_cls):
         return {'opened': path}
 
     def _api_job_start(self, body: dict):
-        task = str((body or {}).get('task', '') or '').strip().lower()
+        task = normalize_job_task(str((body or {}).get('task', '') or ''))
         payload = dict((body or {}).get('payload') or {})
-        if task not in {'run_pipeline', 'render_current_page', 'export', 'export_lettering_proof'}:
-            raise ValueError('task must be one of: run_pipeline, render_current_page, export, export_lettering_proof')
         job_id = f"job_{int(time.time() * 1000)}_{threading.get_ident()}"
         job = {
             'job_id': job_id, 'task': task, 'status': 'queued',
@@ -979,10 +981,12 @@ class MainWindow(mainwindow_cls):
             try:
                 if task == 'run_pipeline':
                     rst = self._api_run_pipeline(payload)
-                elif task == 'render_current_page':
+                elif task == 'render_page':
                     rst = self._api_render_current_page(payload)
                 elif task == 'export':
                     rst = self._api_export(payload)
+                elif task == 'batch_export':
+                    rst = self._api_batch_export(payload)
                 else:
                     rst = self._api_export_lettering_proof(payload)
                 with self._api_jobs_lock:
@@ -1291,6 +1295,11 @@ class MainWindow(mainwindow_cls):
         if kind in {'lettering_proof', 'proof_pack', 'typography_proof'}:
             return self._api_export_lettering_proof_ui(body)
         raise ValueError(f'unknown export kind: {kind}')
+
+    def _api_batch_export(self, body: dict):
+        payload = dict(body or {})
+        payload.setdefault('kind', 'batch')
+        return self._api_export(payload)
 
     def _api_layout_review(self, body: dict):
         return self._api_call_ui(self._api_layout_review_ui, body)
