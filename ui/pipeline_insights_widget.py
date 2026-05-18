@@ -1,5 +1,8 @@
 from qtpy.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
+from qtpy.QtGui import QIcon
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QListWidget, QListWidgetItem, QFrame, QProgressBar, QGraphicsOpacityEffect, QGridLayout, QComboBox
+import os.path as osp
+from utils import shared
 
 
 class PipelineInsightsWidget(QWidget):
@@ -12,6 +15,8 @@ class PipelineInsightsWidget(QWidget):
     run_layout_review_requested = Signal()
     open_batch_style_requested = Signal()
     open_typography_qa_requested = Signal()
+    run_auto_lettering_assist_requested = Signal()
+    run_production_auto_pass_requested = Signal()
     apply_workflow_preset_requested = Signal(str)
     run_workflow_preset_requested = Signal(str)
 
@@ -77,9 +82,11 @@ class PipelineInsightsWidget(QWidget):
             btn_row.addWidget(b)
         lay.addLayout(btn_row)
         self.apply_profile_btn = QPushButton(self.tr('Apply Regex Profile'), self)
+        self._set_button_icon(self.apply_profile_btn, 'menu_regex_profile.svg')
         self.apply_profile_btn.clicked.connect(self.apply_regex_profile_requested.emit)
         lay.addWidget(self.apply_profile_btn)
         self.mask_diag_btn = QPushButton(self.tr('Mask Diagnostics'), self)
+        self._set_button_icon(self.mask_diag_btn, 'menu_mask_diagnostics.svg')
         self.mask_diag_btn.clicked.connect(self.open_mask_diagnostics_requested.emit)
         lay.addWidget(self.mask_diag_btn)
         self.ops_btn = QPushButton(self.tr('Apply Project Ops'), self)
@@ -89,19 +96,33 @@ class PipelineInsightsWidget(QWidget):
         self.ocr_inspector_btn.clicked.connect(self.open_ocr_crop_inspector_requested.emit)
         lay.addWidget(self.ocr_inspector_btn)
         self.reading_order_btn = QPushButton(self.tr('Reading Order Editor'), self)
+        self._set_button_icon(self.reading_order_btn, 'menu_reading_order.svg')
         self.reading_order_btn.clicked.connect(self.open_reading_order_editor_requested.emit)
         lay.addWidget(self.reading_order_btn)
         self.layout_review_btn = QPushButton(self.tr('Layout Review Agent'), self)
+        self._set_button_icon(self.layout_review_btn, 'menu_layout_review.svg')
         self.layout_review_btn.setObjectName('PipelinePrimaryAction')
         self.layout_review_btn.clicked.connect(self.run_layout_review_requested.emit)
         lay.addWidget(self.layout_review_btn)
         self.batch_style_btn = QPushButton(self.tr('Batch Text Style Override'), self)
+        self._set_button_icon(self.batch_style_btn, 'menu_text_style.svg')
         self.batch_style_btn.clicked.connect(self.open_batch_style_requested.emit)
         lay.addWidget(self.batch_style_btn)
         self.typography_qa_btn = QPushButton(self.tr('Typography QA Report'), self)
+        self._set_button_icon(self.typography_qa_btn, 'menu_typography_qa.svg')
         self.typography_qa_btn.clicked.connect(self.open_typography_qa_requested.emit)
         self.typography_qa_btn.setToolTip(self.tr('Export or apply project-wide rendering QA fixes for overflow, fallback fonts, RTL, and vertical CJK.'))
         lay.addWidget(self.typography_qa_btn)
+        self.auto_lettering_btn = QPushButton(self.tr('Auto Lettering Assist'), self)
+        self._set_button_icon(self.auto_lettering_btn, 'menu_layout_review.svg')
+        self.auto_lettering_btn.setToolTip(self.tr('Detect likely font, auto-resolve writing orientation, and fit lines/size to bubble-safe area.'))
+        self.auto_lettering_btn.clicked.connect(self.run_auto_lettering_assist_requested.emit)
+        lay.addWidget(self.auto_lettering_btn)
+        self.production_pass_btn = QPushButton(self.tr('Production Auto Pass'), self)
+        self._set_button_icon(self.production_pass_btn, 'menu_text_style.svg')
+        self.production_pass_btn.setToolTip(self.tr('Photoshop-like one-click pass: auto lettering assist + atomic fit + layout review on current page.'))
+        self.production_pass_btn.clicked.connect(self.run_production_auto_pass_requested.emit)
+        lay.addWidget(self.production_pass_btn)
         self.api_status_label = QLabel(self.tr('Automation API: off'), self)
         self.api_status_label.setObjectName('PipelineApiStatus')
         lay.addWidget(self.api_status_label)
@@ -151,6 +172,12 @@ class PipelineInsightsWidget(QWidget):
         self._progress_pulse.setDuration(180)
         self._progress_pulse.setStartValue(0.75)
         self._progress_pulse.setEndValue(1.0)
+
+
+    def _set_button_icon(self, btn: QPushButton, icon_name: str):
+        icon_path = osp.join(shared.PROGRAM_PATH, 'icons', icon_name)
+        if osp.isfile(icon_path):
+            btn.setIcon(QIcon(icon_path))
 
     def _current_workflow_preset_id(self) -> str:
         return str(self.workflow_preset_combo.currentData() or self.workflow_preset_combo.currentText() or '')

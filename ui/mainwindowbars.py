@@ -742,11 +742,11 @@ class TitleBar(Widget):
         saveRunProfileAction.setToolTip(self.tr('Save current module selections as a project-local run profile.'))
         self.save_run_profile_trigger = saveRunProfileAction.triggered
 
-        layoutReviewSelectedAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignc.svg')), self.tr('Layout review selected textboxes'), self)
+        layoutReviewSelectedAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'menu_layout_review.svg')), self.tr('Layout review selected textboxes'), self)
         layoutReviewSelectedAction.setToolTip(self.tr('Review/fix layout for selected text boxes on current page.'))
         self.layout_review_selected_trigger = layoutReviewSelectedAction.triggered
 
-        layoutReviewPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignl.svg')), self.tr('Layout review entire page'), self)
+        layoutReviewPageAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'menu_layout_review.svg')), self.tr('Layout review entire page'), self)
         layoutReviewPageAction.setToolTip(self.tr('Review/fix layout for all non-vertical text boxes on current page.'))
         self.layout_review_page_trigger = layoutReviewPageAction.triggered
 
@@ -754,7 +754,7 @@ class TitleBar(Widget):
         layoutReviewConfigAction.setToolTip(self.tr('Configure provider/model/prompt for page review agent.'))
         self.layout_review_config_trigger = layoutReviewConfigAction.triggered
 
-        letteringWorkflowAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'fontfmt_alignc.svg')), self.tr('Lettering workflow...'), self)
+        letteringWorkflowAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'menu_text_style.svg')), self.tr('Lettering workflow...'), self)
         letteringWorkflowAction.setToolTip(self.tr('Plan/apply typography polish, smart fit, layout review, proof export, and render steps for current, selected, or all pages.'))
         self.lettering_workflow_trigger = letteringWorkflowAction.triggered
 

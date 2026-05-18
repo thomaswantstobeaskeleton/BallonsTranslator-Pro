@@ -321,3 +321,10 @@ SVG text handoff now uses the same renderer-neutral `vertical_layout_plan()` dat
 Layered PSD handoff manifests now include the same `font_runs`, `fallback_runs`, and `vertical_layout_plan` metadata for each translated text layer. Native editable PSD text writing is still deferred, but the manifest/JSX path no longer loses the layout information needed to rebuild vertical or mixed-script text layers faithfully in Photoshop/GIMP-oriented workflows.
 
 Lettering proof packs now write a portable `*_lettering_proof.zip` next to the per-page proof folder. The archive includes the QA JSON/Markdown, editable SVG handoff, PSD helper manifest/JSX, copied helper layers when available, HTML index, and final composite reference when available. This reduces batch/export review friction because a single file can be attached to issue reports or sent to a letterer without manually collecting several subfolders.
+
+Automation API now also supports long-task job controls via POST routes: `job_start`, `job_status`, `job_cancel`, `job_logs` (for pipeline/render/export/proof tasks), while keeping existing direct routes intact for backward compatibility.
+
+
+MCP-friendly aliases are also available on POST routes to reduce client glue code: `project_open` → `open_project`, `pipeline_run` → `run_pipeline`, `scene_edit` → `apply_edit`, `render` → `render_current_page`.
+
+Job lifecycle routes also include `jobs_list` and `job_result`, and job retention/log limits are configurable in Settings for long-running automation sessions.

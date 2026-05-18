@@ -57,3 +57,18 @@ Advanced numeric controls now show a live **What the advanced values mean** summ
 - model fields say whether layout is using geometry only, built-in CLIP, a custom model, or model-assisted shape detection.
 
 If the settings feel confusing, use **Restore balanced automatic defaults**. It resets only the advanced auto-layout values and leaves unrelated text style, font, color, and rendering defaults alone.
+
+## Layout Review Agent quick setup (new)
+
+- Open **Tools → Layout review settings...** and pick **Quick setup**:
+  - **Heuristic (no API key needed)** for fully local deterministic fixes.
+  - **Cloud API quick setup** to auto-fill OpenAI-style endpoint and enable screenshot analysis.
+  - **Local API quick setup** to auto-fill Ollama endpoint (`http://localhost:11434/v1`) and starter model.
+- The preset only pre-fills configuration; you can still customize provider, prompt, model, and extra params after selecting it.
+- Pipeline Insights now ships action-specific icons so layout, reading order, diagnostics, and typography tools are easier to discover.
+
+
+- **Auto Lettering Assist (Pipeline Insights)**: one-click pass for selected boxes (or current page when none selected) that attempts font-family detection, writing-mode orientation automation, and smart bubble-safe fitting to reduce manual resize/reflow loops.
+- **Resolution-aware auto lettering**: Smart/atomic fit can now scale font fitting bounds by page megapixels so formatting stays more consistent across small pages and ultra-high-res scans.
+- **Production Auto Pass**: one-click team workflow in Pipeline Insights that runs Auto Lettering Assist, Atomic Bubble Fit, and Layout Review sequentially for current-page production polish.
+- Production Auto Pass can optionally apply safe rendering QA fixes (overflow/mask/glyph spacing) after layout review for stronger one-click finalization.

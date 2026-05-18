@@ -62,6 +62,7 @@ from utils.layout_review_agent import (
 )
 from utils.logger import logger as LOGGER
 from modules.textdetector.outside_text_processor import OSB_LABELS
+from utils.font_detect import detect_font_from_block
 
 # Layout tuning: keep text inside bubbles and avoid overflow/tiny text (see layout_textblk)
 # Defaults favor more lines and smaller base size so text fits without overflowing wide boxes.
@@ -88,6 +89,30 @@ CONCRETE_BALLOON_SHAPES = frozenset(("round", "elongated", "narrow", "diamond", 
 
 def _auto_layout_preset():
     return normalize_auto_layout_preset(getattr(pcfg.module, "layout_auto_preset", "balanced"))
+
+
+def _auto_lettering_page_scale(img, box_size: Tuple[float, float] = None) -> float:
+    mod = getattr(pcfg, "module", None)
+    if img is None or mod is None or not bool(getattr(mod, "layout_scale_font_by_page_size", True)):
+        return 1.0
+    try:
+        h, w = img.shape[:2]
+        area_mp = max(0.01, (float(w) * float(h)) / 1_000_000.0)
+        ref_mp = max(0.25, float(getattr(mod, "layout_scale_reference_megapixels", 1.0) or 1.0))
+        raw = (area_mp / ref_mp) ** 0.5
+        min_factor = float(getattr(mod, "layout_scale_factor_min", 0.72) or 0.72)
+        max_factor = float(getattr(mod, "layout_scale_factor_max", 1.58) or 1.58)
+        scale = max(min_factor, min(max_factor, raw))
+        if bool(getattr(mod, "layout_scale_use_box_area", True)) and box_size is not None:
+            bw = max(1.0, float(box_size[0] if len(box_size) > 0 else 1.0))
+            bh = max(1.0, float(box_size[1] if len(box_size) > 1 else 1.0))
+            box_ratio = (bw * bh) / max(1.0, float(w) * float(h))
+            ref_ratio = max(0.001, float(getattr(mod, "layout_scale_box_area_reference", 0.020) or 0.020))
+            box_scale = (box_ratio / ref_ratio) ** 0.22
+            scale *= max(0.85, min(1.18, box_scale))
+        return scale
+    except Exception:
+        return 1.0
 
 
 def _auto_layout_settings_for(text: str, box_w: float, box_h: float, balloon_shape: str = "auto", line_count: int = None):
@@ -1547,6 +1572,9 @@ class SceneTextManager(QObject):
             getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0),
             getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0),
         )
+        page_scale = _auto_lettering_page_scale(getattr(self.imgtrans_proj, 'img_array', None), (rect.width(), rect.height()))
+        style_min = max(4.0, style_min * page_scale)
+        style_max = max(style_min + 1.0, style_max * page_scale)
         result = smart_fit_text_to_box(
             text,
             float(getattr(ff, 'font_size', 24.0) or 24.0),
@@ -1659,6 +1687,9 @@ class SceneTextManager(QObject):
             getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0),
             getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0),
         )
+        page_scale = _auto_lettering_page_scale(getattr(self.imgtrans_proj, 'img_array', None), (rect.width(), rect.height()))
+        style_min = max(4.0, style_min * page_scale)
+        style_max = max(style_min + 1.0, style_max * page_scale)
         result = plan_atomic_bubble_fit(
             text,
             float(getattr(ff, 'font_size', 24.0) or 24.0),
@@ -1774,6 +1805,72 @@ class SceneTextManager(QObject):
 
     def onSmartAutoFitTextToBox(self):
         self.smart_fit_textboxes(indices=None, push_undo=True)
+
+    def auto_lettering_assist_textboxes(self, indices: List[int] = None, push_undo: bool = True) -> int:
+        """
+        One-click lettering assist for production teams:
+        - auto detect likely font from source region (when detector/model available),
+        - switch writing mode heuristically from content/geometry,
+        - run smart fit + postprocess to keep text inside bubble.
+        """
+        if indices is None:
+            target_blks = self.canvas.selected_text_items()
+            if not target_blks:
+                target_blks = [b for b in self.textblk_item_list if b is not None]
+        else:
+            wanted = set(int(i) for i in indices)
+            target_blks = [blk for blk in self.textblk_item_list if blk.idx in wanted]
+        if not target_blks:
+            return 0
+
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        changed = 0
+        img = getattr(getattr(self.imgtrans_proj, "img_array", None), "copy", lambda: None)()
+        for blkitem in target_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            ff = blkitem.fontformat
+            item_changed = False
+
+            text_for_mode = blkitem.toPlainText()
+            rect = blkitem.absBoundingRect(qrect=True)
+            auto_mode = resolve_writing_mode("auto", text_for_mode, (rect.width(), rect.height()))
+            if getattr(ff, "writing_mode", "auto") != auto_mode:
+                ff.writing_mode = auto_mode
+                ff.vertical = auto_mode == "vertical_rl"
+                item_changed = True
+
+            if img is not None and getattr(blkitem, "blk", None) is not None:
+                try:
+                    font_name, conf = detect_font_from_block(img, blkitem.blk)
+                    if conf >= 0.66 and font_name and font_name != "UNKNOWN":
+                        if getattr(ff, "font_family", "") != font_name:
+                            ff.font_family = str(font_name)
+                            item_changed = True
+                except Exception as e:
+                    LOGGER.debug("auto lettering assist: font detection failed for idx=%s: %s", blkitem.idx, e)
+
+            if item_changed:
+                blkitem.set_fontformat(ff)
+                if blkitem.blk is not None:
+                    blkitem.blk.fontformat = ff.deepcopy()
+
+            if self._apply_smart_fit_to_item(blkitem):
+                changed += 1
+            elif item_changed:
+                changed += 1
+
+        if changed:
+            if push_undo:
+                self.canvas.push_undo_command(AutoLayoutCommand(target_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+            self.canvas.setProjSaveState(True)
+            if hasattr(self.mainwindow, 'pipelineInsightsPanel'):
+                self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Auto lettering assist updated {0} text box(es)').format(changed))
+        return changed
+
+    def onAutoLetteringAssist(self):
+        self.auto_lettering_assist_textboxes(indices=None, push_undo=True)
 
     def _layout_review_snapshot_for_item(self, blk: TextBlkItem) -> BlockSnapshot:
         """Build a renderer-aware snapshot for the layout review agent."""
