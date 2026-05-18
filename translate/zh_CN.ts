@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE TS>
+<?xml version='1.0' encoding='utf-8'?>
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
     <name>BatchQueueDialog</name>
@@ -470,12 +469,12 @@
     <message>
         <location filename="../ui/canvas.py" line="1205" />
         <source>Add selected to triage worklist</source>
-        <translation type="unfinished" />
+        <translation>Add selected to triage worklist</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1206" />
         <source>Mark selected as reviewed</source>
-        <translation type="unfinished" />
+        <translation>Mark selected as reviewed</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1218" />
@@ -769,7 +768,7 @@
     <message>
         <location filename="../ui/canvas.py" line="1397" />
         <source>Pin quick actions</source>
-        <translation type="unfinished" />
+        <translation>Pin quick actions</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1426" />
@@ -781,7 +780,7 @@
     <message>
         <location filename="../ui/custom_widget/label.py" line="64" />
         <source>Apply Color</source>
-        <translation type="unfinished" />
+        <translation>Apply Color</translation>
     </message>
 </context><context>
     <name>ConfigPanel</name>
@@ -1175,22 +1174,22 @@
     <message>
         <location filename="../ui/configpanel.py" line="651" />
         <source>Show model download result popup on startup</source>
-        <translation type="unfinished" />
+        <translation>Show model download result popup on startup</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="652" />
         <source>When enabled, show the model package download summary dialog after startup downloads. Disable to suppress this popup.</source>
-        <translation type="unfinished" />
+        <translation>When enabled, show the model package download summary dialog after startup downloads. Disable to suppress this popup.</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="657" />
         <source>Show startup health popup on startup</source>
-        <translation type="unfinished" />
+        <translation>Show startup health popup on startup</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="658" />
         <source>When enabled, show startup stages/diagnostics popup on launch. Disable to suppress this popup.</source>
-        <translation type="unfinished" />
+        <translation>When enabled, show startup stages/diagnostics popup on launch. Disable to suppress this popup.</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="664" />
@@ -1943,22 +1942,22 @@
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="154" />
         <source>Quick profiles:</source>
-        <translation type="unfinished" />
+        <translation>Quick profiles:</translation>
     </message>
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="155" />
         <source>Editing-focused</source>
-        <translation type="unfinished" />
+        <translation>Editing-focused</translation>
     </message>
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="158" />
         <source>Pipeline-focused</source>
-        <translation type="unfinished" />
+        <translation>Pipeline-focused</translation>
     </message>
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="161" />
         <source>Layout-focused</source>
-        <translation type="unfinished" />
+        <translation>Layout-focused</translation>
     </message>
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="185" />
@@ -1968,7 +1967,7 @@
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="197" />
         <source>Run macros (JSON list)</source>
-        <translation type="unfinished" />
+        <translation>Run macros (JSON list)</translation>
     </message>
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="212" />
@@ -1993,19 +1992,19 @@
     <message>
         <location filename="../ui/context_menu_config_dialog.py" line="291" />
         <source>Invalid run macros JSON</source>
-        <translation type="unfinished" />
+        <translation>Invalid run macros JSON</translation>
     </message>
 </context><context>
     <name>DangoSwitch</name>
     <message>
         <location filename="../ui/custom_widget/dango_switch.py" line="155" />
         <source>On</source>
-        <translation type="unfinished" />
+        <translation>On</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/dango_switch.py" line="163" />
         <source>Off</source>
-        <translation type="unfinished">离开</translation>
+        <translation>Off</translation>
     </message>
 </context><context>
     <name>DrawingPanel</name>
@@ -2458,17 +2457,17 @@
         <location filename="../ui/custom_widget/message.py" line="248" />
         <location filename="../ui/custom_widget/message.py" line="195" />
         <source>Stop</source>
-        <translation type="unfinished" />
+        <translation>Stop</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/message.py" line="199" />
         <source>Force stop</source>
-        <translation type="unfinished" />
+        <translation>Force stop</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/message.py" line="222" />
         <source>trying to stop...</source>
-        <translation type="unfinished" />
+        <translation>trying to stop...</translation>
     </message>
 </context><context>
     <name>ImgtransThread</name>
@@ -3457,167 +3456,167 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/mainwindow.py" line="4414" />
         <source>Environment doctor report</source>
-        <translation type="unfinished" />
+        <translation>Environment doctor report</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4513" />
         <location filename="../ui/mainwindow.py" line="4486" />
         <location filename="../ui/mainwindow.py" line="4418" />
         <source>No page loaded</source>
-        <translation type="unfinished" />
+        <translation>No page loaded</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4513" />
         <location filename="../ui/mainwindow.py" line="4486" />
         <location filename="../ui/mainwindow.py" line="4418" />
         <source>Open a project/page first.</source>
-        <translation type="unfinished" />
+        <translation>Open a project/page first.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4432" />
         <source>Page: </source>
-        <translation type="unfinished" />
+        <translation>Page: </translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4432" />
         <source>Blocks: </source>
-        <translation type="unfinished" />
+        <translation>Blocks: </translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4433" />
         <source>Likely OCR triage (empty source): </source>
-        <translation type="unfinished" />
+        <translation>Likely OCR triage (empty source): </translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4433" />
         <source>none</source>
-        <translation type="unfinished" />
+        <translation>none</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4434" />
         <source>Guardrail issues: </source>
-        <translation type="unfinished" />
+        <translation>Guardrail issues: </translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4437" />
         <source>Glossary candidates (source -&gt; target):</source>
-        <translation type="unfinished" />
+        <translation>Glossary candidates (source -&gt; target):</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4439" />
         <source>Translation QA report</source>
-        <translation type="unfinished" />
+        <translation>Translation QA report</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4445" />
         <source>Save run profile</source>
-        <translation type="unfinished" />
+        <translation>Save run profile</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4445" />
         <source>Profile name:</source>
-        <translation type="unfinished" />
+        <translation>Profile name:</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4459" />
         <source>Saved</source>
-        <translation type="unfinished" />
+        <translation>Saved</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4459" />
         <source>Run profile saved to project.</source>
-        <translation type="unfinished" />
+        <translation>Run profile saved to project.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4466" />
         <source>No profiles</source>
-        <translation type="unfinished" />
+        <translation>No profiles</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4466" />
         <source>No run profiles found in this project.</source>
-        <translation type="unfinished" />
+        <translation>No run profiles found in this project.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4470" />
         <source>Apply run profile</source>
-        <translation type="unfinished" />
+        <translation>Apply run profile</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4470" />
         <source>Select profile:</source>
-        <translation type="unfinished" />
+        <translation>Select profile:</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4482" />
         <source>Applied</source>
-        <translation type="unfinished" />
+        <translation>Applied</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4482" />
         <source>Run profile applied.</source>
-        <translation type="unfinished" />
+        <translation>Run profile applied.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4500" />
         <source>Triage state: </source>
-        <translation type="unfinished" />
+        <translation>Triage state: </translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4502" />
         <source>Empty OCR source text</source>
-        <translation type="unfinished" />
+        <translation>Empty OCR source text</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4506" />
         <source>OCR triage worklist</source>
-        <translation type="unfinished" />
+        <translation>OCR triage worklist</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4506" />
         <source>No triage issues found on current page.</source>
-        <translation type="unfinished" />
+        <translation>No triage issues found on current page.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4521" />
         <source>Auto-extract glossary</source>
-        <translation type="unfinished" />
+        <translation>Auto-extract glossary</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4521" />
         <source>No glossary candidates found on current page.</source>
-        <translation type="unfinished" />
+        <translation>No glossary candidates found on current page.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4535" />
         <source>None (all candidates already existed).</source>
-        <translation type="unfinished" />
+        <translation>None (all candidates already existed).</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4536" />
         <source>Auto-extract glossary complete</source>
-        <translation type="unfinished" />
+        <translation>Auto-extract glossary complete</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4536" />
         <source>Added terms: {0}</source>
-        <translation type="unfinished" />
+        <translation>Added terms: {0}</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4552" />
         <location filename="../ui/mainwindow.py" line="4544" />
         <source>Triage updated</source>
-        <translation type="unfinished" />
+        <translation>Triage updated</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4544" />
         <source>Selected blocks added to triage worklist.</source>
-        <translation type="unfinished" />
+        <translation>Selected blocks added to triage worklist.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4552" />
         <source>Selected blocks marked as reviewed.</source>
-        <translation type="unfinished" />
+        <translation>Selected blocks marked as reviewed.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="4583" />
@@ -4629,7 +4628,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/module_manager.py" line="2155" />
         <source>Detection in region failed.</source>
-        <translation type="unfinished">区域检测失败。</translation>
+        <translation>Detection in region failed.</translation>
     </message>
     <message>
         <location filename="../ui/module_manager.py" line="2183" />
@@ -4757,32 +4756,32 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="7" />
         <source>OCR triage worklist</source>
-        <translation type="unfinished" />
+        <translation>OCR triage worklist</translation>
     </message>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="12" />
         <source>Block</source>
-        <translation type="unfinished">块</translation>
+        <translation>Block</translation>
     </message>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="12" />
         <source>Source</source>
-        <translation type="unfinished">源语言</translation>
+        <translation>Source</translation>
     </message>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="12" />
         <source>Translation</source>
-        <translation type="unfinished">翻译</translation>
+        <translation>Translation</translation>
     </message>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="12" />
         <source>Issue</source>
-        <translation type="unfinished" />
+        <translation>Issue</translation>
     </message>
     <message>
         <location filename="../ui/ocr_triage_dialog.py" line="23" />
         <source>Close</source>
-        <translation type="unfinished">关闭</translation>
+        <translation>Close</translation>
     </message>
 </context><context>
     <name>PageListView</name>
@@ -4924,12 +4923,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/custom_widget/combobox.py" line="77" />
         <source>Flush</source>
-        <translation type="unfinished" />
+        <translation>Flush</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/combobox.py" line="80" />
         <source>Select Path</source>
-        <translation type="unfinished" />
+        <translation>Select Path</translation>
     </message>
 </context><context>
     <name>ParamWidget</name>
@@ -5127,7 +5126,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="66" />
         <source>Find by key:</source>
-        <translation type="unfinished" />
+        <translation>Find by key:</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="76" />
@@ -5152,12 +5151,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="97" />
         <source>Export JSON</source>
-        <translation type="unfinished" />
+        <translation>Export JSON</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="100" />
         <source>Import JSON</source>
-        <translation type="unfinished" />
+        <translation>Import JSON</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="103" />
@@ -5177,48 +5176,48 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="198" />
         <source>Export shortcuts</source>
-        <translation type="unfinished" />
+        <translation>Export shortcuts</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="206" />
         <location filename="../ui/shortcuts_dialog.py" line="198" />
         <source>JSON files (*.json)</source>
-        <translation type="unfinished" />
+        <translation>JSON files (*.json)</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="206" />
         <source>Import shortcuts</source>
-        <translation type="unfinished" />
+        <translation>Import shortcuts</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="222" />
         <source>Import failed</source>
-        <translation type="unfinished" />
+        <translation>Import failed</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="239" />
         <source>Shortcut conflicts found:</source>
-        <translation type="unfinished" />
+        <translation>Shortcut conflicts found:</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="241" />
         <source>Hard conflicts:</source>
-        <translation type="unfinished" />
+        <translation>Hard conflicts:</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="246" />
         <source>Alias conflicts (alternate variants):</source>
-        <translation type="unfinished" />
+        <translation>Alias conflicts (alternate variants):</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="251" />
         <source>Auto-resolve can keep first action and clear duplicates. Apply auto-resolve?</source>
-        <translation type="unfinished" />
+        <translation>Auto-resolve can keep first action and clear duplicates. Apply auto-resolve?</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="252" />
         <source>Shortcut conflicts</source>
-        <translation type="unfinished" />
+        <translation>Shortcut conflicts</translation>
     </message>
 </context><context>
     <name>SpellCheckPanel</name>
@@ -6365,62 +6364,62 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="676" />
         <source>Environment doctor...</source>
-        <translation type="unfinished" />
+        <translation>Environment doctor...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="677" />
         <source>Run dependency and auth checks and show a report.</source>
-        <translation type="unfinished" />
+        <translation>Run dependency and auth checks and show a report.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="680" />
         <source>OCR triage worklist (current page)...</source>
-        <translation type="unfinished" />
+        <translation>OCR triage worklist (current page)...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="681" />
         <source>Show blocks that likely need OCR/translation review and triage.</source>
-        <translation type="unfinished" />
+        <translation>Show blocks that likely need OCR/translation review and triage.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="684" />
         <source>Auto-extract glossary (current page)...</source>
-        <translation type="unfinished" />
+        <translation>Auto-extract glossary (current page)...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="685" />
         <source>Extract frequent source terms and append to project glossary.</source>
-        <translation type="unfinished" />
+        <translation>Extract frequent source terms and append to project glossary.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="688" />
         <source>Translation QA report (current page)...</source>
-        <translation type="unfinished" />
+        <translation>Translation QA report (current page)...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="689" />
         <source>Run glossary candidate extraction and guardrail checks on current page.</source>
-        <translation type="unfinished" />
+        <translation>Run glossary candidate extraction and guardrail checks on current page.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="692" />
         <source>Save run profile snapshot...</source>
-        <translation type="unfinished" />
+        <translation>Save run profile snapshot...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="693" />
         <source>Save current module selections as a project-local run profile.</source>
-        <translation type="unfinished" />
+        <translation>Save current module selections as a project-local run profile.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="696" />
         <source>Apply run profile snapshot...</source>
-        <translation type="unfinished" />
+        <translation>Apply run profile snapshot...</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="697" />
         <source>Apply a previously saved project-local run profile.</source>
-        <translation type="unfinished" />
+        <translation>Apply a previously saved project-local run profile.</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="700" />
