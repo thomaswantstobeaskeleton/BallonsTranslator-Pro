@@ -839,6 +839,24 @@ class ConfigPanel(Widget):
             self.tr('Automation API key (optional)'),
             discription=self.tr('When set, callers must send matching X-API-Key header.')
         ))
+        self.automation_api_job_history_limit_spin = QSpinBox()
+        self.automation_api_job_history_limit_spin.setRange(20, 5000)
+        self.automation_api_job_history_limit_spin.setValue(int(getattr(pcfg, 'automation_api_job_history_limit', 200)))
+        self.automation_api_job_history_limit_spin.valueChanged.connect(self.on_automation_api_job_history_limit_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.automation_api_job_history_limit_spin,
+            self.tr('Automation API job history limit'),
+            discription=self.tr('Maximum number of finished automation jobs retained for status/log queries.')
+        ))
+        self.automation_api_job_log_limit_spin = QSpinBox()
+        self.automation_api_job_log_limit_spin.setRange(20, 5000)
+        self.automation_api_job_log_limit_spin.setValue(int(getattr(pcfg, 'automation_api_job_log_limit', 200)))
+        self.automation_api_job_log_limit_spin.valueChanged.connect(self.on_automation_api_job_log_limit_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.automation_api_job_log_limit_spin,
+            self.tr('Automation API per-job log limit'),
+            discription=self.tr('Maximum log entries retained per automation job.')
+        ))
         self.data_path_btn = QPushButton(self.tr('Set data path...'))
         self.data_path_btn.clicked.connect(self.on_pick_data_path)
         generalConfigPanel.addSublock(ConfigSubBlock(
@@ -1403,6 +1421,32 @@ class ConfigPanel(Widget):
             discription=self.tr('After automatic line breaking and box placement, shrink the font only if the rendered text still exceeds its text box. Reduces manual fixes for clipped or overflowing translations.')
         )
         self.layout_auto_final_fit_pass_checker.stateChanged.connect(self._on_layout_auto_final_fit_pass_changed)
+        self.layout_scale_font_by_page_size_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Scale lettering by page size'),
+            discription=self.tr('Normalize auto letter sizing across low/high resolution pages so the same script does not become tiny on huge scans or oversized on small pages.')
+        )
+        self.layout_scale_font_by_page_size_checker.stateChanged.connect(self._on_layout_scale_font_by_page_size_changed)
+        self.layout_scale_reference_mp_spin = QDoubleSpinBox()
+        self.layout_scale_reference_mp_spin.setRange(0.25, 12.0)
+        self.layout_scale_reference_mp_spin.setSingleStep(0.25)
+        self.layout_scale_reference_mp_spin.setDecimals(2)
+        self.layout_scale_reference_mp_spin.setValue(float(getattr(pcfg.module, 'layout_scale_reference_megapixels', 1.0)))
+        self.layout_scale_reference_mp_spin.valueChanged.connect(self._on_layout_scale_reference_mp_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.layout_scale_reference_mp_spin,
+            self.tr('Page-size reference (MP)'),
+            discription=self.tr('Reference image area in megapixels used as neutral auto-lettering scale.')
+        ))
+        self.layout_scale_use_box_area_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Normalize by bubble/textbox area'),
+            discription=self.tr('Further stabilize auto text size when bubbles are much larger/smaller than typical on a page.')
+        )
+        self.layout_scale_use_box_area_checker.stateChanged.connect(self._on_layout_scale_use_box_area_changed)
+        self.production_auto_pass_enable_qa_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Production Auto Pass: apply rendering QA auto-fixes'),
+            discription=self.tr('When enabled, Production Auto Pass also applies safe overflow/mask/glyph QA fixes after auto lettering and layout review.')
+        )
+        self.production_auto_pass_enable_qa_checker.stateChanged.connect(self._on_production_auto_pass_enable_qa_changed)
         # Diamond-Text: balloon shape (auto, round, elongated, narrow, diamond, square, bevel, pentagon, point)
         self.layout_balloon_shape_combo, _ = generalConfigPanel.addCombobox(
             [
@@ -1994,6 +2038,18 @@ class ConfigPanel(Widget):
     def _on_layout_auto_final_fit_pass_changed(self):
         pcfg.module.layout_auto_final_fit_pass = self.layout_auto_final_fit_pass_checker.isChecked()
         self.save_config.emit()
+    def _on_layout_scale_font_by_page_size_changed(self):
+        pcfg.module.layout_scale_font_by_page_size = self.layout_scale_font_by_page_size_checker.isChecked()
+        self.save_config.emit()
+    def _on_layout_scale_reference_mp_changed(self, value: float):
+        pcfg.module.layout_scale_reference_megapixels = float(max(0.25, value))
+        self.save_config.emit()
+    def _on_layout_scale_use_box_area_changed(self):
+        pcfg.module.layout_scale_use_box_area = self.layout_scale_use_box_area_checker.isChecked()
+        self.save_config.emit()
+    def _on_production_auto_pass_enable_qa_changed(self):
+        pcfg.module.production_auto_pass_enable_qa_fixes = self.production_auto_pass_enable_qa_checker.isChecked()
+        self.save_config.emit()
 
     def _on_layout_balloon_shape_changed(self, index: int):
         pcfg.module.layout_balloon_shape = ("auto", "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point")[index]
@@ -2113,6 +2169,10 @@ class ConfigPanel(Widget):
         pcfg.automation_api_port = int(self.automation_api_port_spin.value())
     def on_automation_api_key_changed(self):
         pcfg.automation_api_key = (self.automation_api_key_edit.text() or '').strip()
+    def on_automation_api_job_history_limit_changed(self):
+        pcfg.automation_api_job_history_limit = int(self.automation_api_job_history_limit_spin.value())
+    def on_automation_api_job_log_limit_changed(self):
+        pcfg.automation_api_job_log_limit = int(self.automation_api_job_log_limit_spin.value())
     def on_pick_data_path(self):
         current = resolve_data_path(getattr(pcfg, 'data_path_override', ''))
         path = QFileDialog.getExistingDirectory(self, self.tr('Choose data path'), current)
@@ -2362,6 +2422,16 @@ class ConfigPanel(Widget):
             self.layout_font_binary_search_checker.setChecked(bool(getattr(pcfg.module, 'layout_font_binary_search', True)))
         if hasattr(self, 'layout_auto_final_fit_pass_checker'):
             self.layout_auto_final_fit_pass_checker.setChecked(bool(getattr(pcfg.module, 'layout_auto_final_fit_pass', True)))
+        if hasattr(self, 'layout_scale_font_by_page_size_checker'):
+            self.layout_scale_font_by_page_size_checker.setChecked(bool(getattr(pcfg.module, 'layout_scale_font_by_page_size', True)))
+        if hasattr(self, 'layout_scale_reference_mp_spin'):
+            self.layout_scale_reference_mp_spin.blockSignals(True)
+            self.layout_scale_reference_mp_spin.setValue(float(getattr(pcfg.module, 'layout_scale_reference_megapixels', 1.0)))
+            self.layout_scale_reference_mp_spin.blockSignals(False)
+        if hasattr(self, 'layout_scale_use_box_area_checker'):
+            self.layout_scale_use_box_area_checker.setChecked(bool(getattr(pcfg.module, 'layout_scale_use_box_area', True)))
+        if hasattr(self, 'production_auto_pass_enable_qa_checker'):
+            self.production_auto_pass_enable_qa_checker.setChecked(bool(getattr(pcfg.module, 'production_auto_pass_enable_qa_fixes', True)))
         if hasattr(self, 'layout_balloon_shape_combo'):
             shape = (getattr(pcfg.module, 'layout_balloon_shape', 'auto') or 'auto').lower()
             idx = {"auto": 0, "round": 1, "elongated": 2, "narrow": 3, "diamond": 4, "square": 5, "bevel": 6, "pentagon": 7, "point": 8}.get(shape, 0)
@@ -2421,6 +2491,10 @@ class ConfigPanel(Widget):
             self.automation_api_port_spin.setValue(int(getattr(pcfg, 'automation_api_port', 39542)))
         if hasattr(self, 'automation_api_key_edit'):
             self.automation_api_key_edit.setText(str(getattr(pcfg, 'automation_api_key', '') or ''))
+        if hasattr(self, 'automation_api_job_history_limit_spin'):
+            self.automation_api_job_history_limit_spin.setValue(int(getattr(pcfg, 'automation_api_job_history_limit', 200)))
+        if hasattr(self, 'automation_api_job_log_limit_spin'):
+            self.automation_api_job_log_limit_spin.setValue(int(getattr(pcfg, 'automation_api_job_log_limit', 200)))
         if hasattr(self, 'data_path_status_label'):
             self.refresh_data_path_health()
         if hasattr(self, 'vertical_cjk_rotate_latin_checker'):

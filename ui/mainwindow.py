@@ -571,6 +571,8 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.run_layout_review_requested.connect(self.on_run_layout_review_requested)
         self.pipelineInsightsPanel.open_batch_style_requested.connect(self.on_open_batch_style_override)
         self.pipelineInsightsPanel.open_typography_qa_requested.connect(self.on_open_typography_qa_report)
+        self.pipelineInsightsPanel.run_auto_lettering_assist_requested.connect(self.on_run_auto_lettering_assist_requested)
+        self.pipelineInsightsPanel.run_production_auto_pass_requested.connect(self.on_run_production_auto_pass_requested)
         if hasattr(self.pipelineInsightsPanel, 'apply_workflow_preset_requested'):
             self.pipelineInsightsPanel.apply_workflow_preset_requested.connect(self.on_apply_workflow_preset_requested)
             self.pipelineInsightsPanel.run_workflow_preset_requested.connect(lambda preset_id: self.on_apply_workflow_preset_requested(preset_id, run_after=True))
@@ -754,6 +756,8 @@ class MainWindow(mainwindow_cls):
         self.pipelineInsightsPanel.set_engine_registry(module_manager.get_engine_registry_snapshot())
         self._refresh_pipeline_provider_health()
         self._api_cmd_queue = queue.Queue()
+        self._api_jobs = {}
+        self._api_jobs_lock = threading.Lock()
         self._api_cmd_timer = QTimer(self)
         self._api_cmd_timer.timeout.connect(self._drain_api_cmd_queue)
         self._api_cmd_timer.start(40)
@@ -870,11 +874,15 @@ class MainWindow(mainwindow_cls):
             return
         handlers = {
             'open_project': self._api_open_project,
+            'project_open': self._api_open_project,  # MCP alias
             'run_pipeline': self._api_run_pipeline,
+            'pipeline_run': self._api_run_pipeline,  # MCP alias
             'apply_edit': self._api_apply_edit,
+            'scene_edit': self._api_apply_edit,  # MCP alias
             'undo': self._api_undo,
             'redo': self._api_redo,
             'export': self._api_export,
+            'render': self._api_render_current_page,  # MCP alias
             'layout_review': self._api_layout_review,
             'page_state': self._api_page_state,
             'list_pages': self._api_list_pages,
@@ -896,6 +904,12 @@ class MainWindow(mainwindow_cls):
             'apply_text_style_batch': self._api_apply_text_style_batch,
             'lettering_workflow': self._api_lettering_workflow,
             'next_rendering_issue': self._api_next_rendering_issue,
+            'job_start': self._api_job_start,
+            'job_status': self._api_job_status,
+            'job_cancel': self._api_job_cancel,
+            'job_logs': self._api_job_logs,
+            'job_result': self._api_job_result,
+            'jobs_list': self._api_jobs_list,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -932,6 +946,158 @@ class MainWindow(mainwindow_cls):
             raise ValueError('path is required')
         self.OpenProj(path)
         return {'opened': path}
+
+    def _api_job_start(self, body: dict):
+        task = str((body or {}).get('task', '') or '').strip().lower()
+        payload = dict((body or {}).get('payload') or {})
+        if task not in {'run_pipeline', 'render_current_page', 'export', 'export_lettering_proof'}:
+            raise ValueError('task must be one of: run_pipeline, render_current_page, export, export_lettering_proof')
+        job_id = f"job_{int(time.time() * 1000)}_{threading.get_ident()}"
+        job = {
+            'job_id': job_id, 'task': task, 'status': 'queued',
+            'warnings': [], 'logs': [f'created task={task}'],
+            'created_at': time.time(), 'updated_at': time.time(),
+            'result': None, 'cancel_requested': False,
+        }
+        with self._api_jobs_lock:
+            self._api_jobs[job_id] = job
+            self._trim_api_jobs_locked()
+
+        def _runner():
+            with self._api_jobs_lock:
+                j = self._api_jobs.get(job_id)
+                if j is None:
+                    return
+                if j.get('cancel_requested'):
+                    j['status'] = 'cancelled'
+                    j['updated_at'] = time.time()
+                    self._append_api_job_log_locked(j, 'cancelled before start')
+                    return
+                j['status'] = 'running'
+                j['updated_at'] = time.time()
+                self._append_api_job_log_locked(j, 'started')
+            try:
+                if task == 'run_pipeline':
+                    rst = self._api_run_pipeline(payload)
+                elif task == 'render_current_page':
+                    rst = self._api_render_current_page(payload)
+                elif task == 'export':
+                    rst = self._api_export(payload)
+                else:
+                    rst = self._api_export_lettering_proof(payload)
+                with self._api_jobs_lock:
+                    j = self._api_jobs.get(job_id)
+                    if j is None:
+                        return
+                    self._append_api_job_log_locked(j, 'finished')
+                    j['result'] = rst
+                    j['status'] = 'cancelled' if j.get('cancel_requested') else 'succeeded'
+                    j['updated_at'] = time.time()
+            except Exception as e:
+                with self._api_jobs_lock:
+                    j = self._api_jobs.get(job_id)
+                    if j is None:
+                        return
+                    j['status'] = 'failed'
+                    j['warnings'].append(str(e))
+                    j['updated_at'] = time.time()
+                    self._append_api_job_log_locked(j, f'failed: {e}')
+
+        threading.Thread(target=_runner, daemon=True).start()
+        return {'ok': True, 'job_id': job_id, 'status': 'queued', 'task': task}
+
+    def _api_job_status(self, body: dict):
+        job_id = str((body or {}).get('job_id', '') or '').strip()
+        if not job_id:
+            raise ValueError('job_id is required')
+        with self._api_jobs_lock:
+            job = self._api_jobs.get(job_id)
+            if job is None:
+                raise ValueError('unknown job_id')
+            return {
+                'job_id': job['job_id'],
+                'task': job['task'],
+                'status': job['status'],
+                'warnings': list(job.get('warnings', [])),
+                'cancel_requested': bool(job.get('cancel_requested', False)),
+                'created_at': float(job.get('created_at', 0.0)),
+                'updated_at': float(job.get('updated_at', 0.0)),
+                'has_result': job.get('result') is not None,
+            }
+
+    def _api_job_cancel(self, body: dict):
+        job_id = str((body or {}).get('job_id', '') or '').strip()
+        if not job_id:
+            raise ValueError('job_id is required')
+        with self._api_jobs_lock:
+            job = self._api_jobs.get(job_id)
+            if job is None:
+                raise ValueError('unknown job_id')
+            if job['status'] in {'succeeded', 'failed', 'cancelled'}:
+                return {'ok': True, 'job_id': job_id, 'status': job['status'], 'cancel_requested': False}
+            job['cancel_requested'] = True
+            if job['status'] == 'queued':
+                job['status'] = 'cancelled'
+            job['updated_at'] = time.time()
+            self._append_api_job_log_locked(job, 'cancel requested')
+            return {'ok': True, 'job_id': job_id, 'status': job['status'], 'cancel_requested': True}
+
+    def _api_job_logs(self, body: dict):
+        job_id = str((body or {}).get('job_id', '') or '').strip()
+        if not job_id:
+            raise ValueError('job_id is required')
+        with self._api_jobs_lock:
+            job = self._api_jobs.get(job_id)
+            if job is None:
+                raise ValueError('unknown job_id')
+            return {
+                'job_id': job_id,
+                'logs': list(job.get('logs', [])),
+                'warnings': list(job.get('warnings', [])),
+            }
+
+    def _api_job_result(self, body: dict):
+        job_id = str((body or {}).get('job_id', '') or '').strip()
+        if not job_id:
+            raise ValueError('job_id is required')
+        with self._api_jobs_lock:
+            job = self._api_jobs.get(job_id)
+            if job is None:
+                raise ValueError('unknown job_id')
+            return {'job_id': job_id, 'status': job['status'], 'result': job.get('result')}
+
+    def _api_jobs_list(self, body: dict):
+        limit = int((body or {}).get('limit', 50) or 50)
+        limit = max(1, min(500, limit))
+        with self._api_jobs_lock:
+            jobs = sorted(self._api_jobs.values(), key=lambda r: float(r.get('created_at', 0.0)), reverse=True)
+            out = []
+            for j in jobs[:limit]:
+                out.append({
+                    'job_id': j.get('job_id', ''),
+                    'task': j.get('task', ''),
+                    'status': j.get('status', ''),
+                    'created_at': float(j.get('created_at', 0.0)),
+                    'updated_at': float(j.get('updated_at', 0.0)),
+                    'cancel_requested': bool(j.get('cancel_requested', False)),
+                })
+            return {'jobs': out, 'count': len(out)}
+
+    def _append_api_job_log_locked(self, job: dict, text: str):
+        logs = job.setdefault('logs', [])
+        logs.append(str(text))
+        lim = int(getattr(pcfg, 'automation_api_job_log_limit', 200) or 200)
+        if lim > 0 and len(logs) > lim:
+            del logs[0:len(logs)-lim]
+
+    def _trim_api_jobs_locked(self):
+        lim = int(getattr(pcfg, 'automation_api_job_history_limit', 200) or 200)
+        if lim <= 0:
+            return
+        jobs = sorted(self._api_jobs.items(), key=lambda kv: float((kv[1] or {}).get('created_at', 0.0)), reverse=True)
+        for idx, (job_id, _job) in enumerate(jobs):
+            if idx >= lim:
+                self._api_jobs.pop(job_id, None)
 
     def _api_recent_projects(self, body: dict):
         return self._api_call_ui(self._api_recent_projects_ui, body)
@@ -984,15 +1150,48 @@ class MainWindow(mainwindow_cls):
         return self._api_call_ui(self._api_apply_edit_ui, body)
 
     def _api_apply_edit_ui(self, body: dict):
-        page = self.imgtrans_proj.current_img
-        blks = self.imgtrans_proj.pages.get(page, []) if page else []
-        idx = int((body or {}).get('index', -1))
-        text = str((body or {}).get('text', ''))
-        if idx < 0 or idx >= len(blks):
-            raise ValueError('invalid index')
-        blks[idx].translation = text
+        from utils.api_edit_ops import validate_batch_payload, EditValidationError
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        try:
+            ops = validate_batch_payload(body if isinstance(body, dict) and "ops" in body else {"ops": [body or {}]})
+        except EditValidationError as e:
+            raise ValueError(f'edit_validation_failed: {e.to_payload()}')
+        applied = []
+        for op in ops:
+            if op.op == "undo":
+                self.on_undo()
+                applied.append({"op": "undo", "ok": True})
+                continue
+            if op.op == "redo":
+                self.on_redo()
+                applied.append({"op": "redo", "ok": True})
+                continue
+            page = op.page or self.imgtrans_proj.current_img
+            blks = self.imgtrans_proj.pages.get(page, []) if page else []
+            if op.op == "update_textbox":
+                idx = int(op.index if op.index is not None else -1)
+                if idx < 0 or idx >= len(blks):
+                    raise ValueError(f'invalid index {idx} for page {page}')
+                blks[idx].translation = str(op.text or "")
+                applied.append({"op": "update_textbox", "page": page, "index": idx})
+            elif op.op == "delete_textbox":
+                idx = int(op.index if op.index is not None else -1)
+                if idx < 0 or idx >= len(blks):
+                    raise ValueError(f'invalid index {idx} for page {page}')
+                del blks[idx]
+                applied.append({"op": "delete_textbox", "page": page, "index": idx})
+            elif op.op == "add_textbox":
+                self.imgtrans_proj.current_img = page
+                self.shortcutCreateTextbox()
+                new_index = len(self.imgtrans_proj.pages.get(page, []) or []) - 1
+                if new_index >= 0:
+                    nb = self.imgtrans_proj.pages[page][new_index]
+                    nb.translation = str(op.text or "")
+                applied.append({"op": "add_textbox", "page": page, "index": new_index})
         self.canvas.updateTextBlkList()
-        return {'page': page, 'index': idx}
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'applied': applied, 'count': len(applied)}
 
     def _api_undo(self, body: dict):
         return self._api_call_ui(self._api_undo_ui, body)
@@ -1709,6 +1908,47 @@ class MainWindow(mainwindow_cls):
     def on_run_layout_review_requested(self):
         self.shortcutLayoutReviewPage()
         self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review agent run on current page'))
+
+    def on_run_auto_lettering_assist_requested(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('Open a project before running Auto Lettering Assist.'))
+            return
+        changed = self.st_manager.auto_lettering_assist_textboxes(indices=None, push_undo=True)
+        if changed <= 0:
+            self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('Auto Lettering Assist found no eligible text boxes.'))
+        else:
+            self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Auto Lettering Assist updated {0} text box(es).').format(changed))
+
+    def on_run_production_auto_pass_requested(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('Open a project before running Production Auto Pass.'))
+            return
+        changed_a = self.st_manager.auto_lettering_assist_textboxes(indices=None, push_undo=True)
+        changed_b = self.st_manager.atomic_bubble_fit_textboxes(indices=None, push_undo=True, profile='balanced')
+        self.shortcutLayoutReviewPage()
+        qa_applied = 0
+        if bool(getattr(pcfg.module, 'production_auto_pass_enable_qa_fixes', True)):
+            try:
+                from utils.rendering_qa import apply_project_rendering_fixes
+                qa_result = apply_project_rendering_fixes(
+                    self.imgtrans_proj,
+                    pages=[self.imgtrans_proj.current_img],
+                    config_obj=pcfg,
+                    selected_fixes=[
+                        "resize_to_recommended_box",
+                        "switch_writing_mode",
+                        "set_mask_safe_padding",
+                        "tighten_letter_spacing",
+                        "decrease_line_spacing",
+                    ],
+                )
+                qa_applied = int((qa_result or {}).get('applied_count', 0) or 0)
+            except Exception as e:
+                self.pipelineInsightsPanel.add_warning('TYPO_QA', self.tr('Production Auto Pass QA auto-fixes failed: {0}').format(e))
+        self.pipelineInsightsPanel.add_event(
+            'TYPO_QA',
+            self.tr('Production Auto Pass: auto-lettering {0}, atomic-fit {1}, layout review, QA fixes {2}.').format(changed_a, changed_b, qa_applied),
+        )
 
     def on_open_batch_style_override(self):
         """Apply Koharu-inspired fixed font/alignment options across a page/project."""
@@ -3090,6 +3330,13 @@ class MainWindow(mainwindow_cls):
         provider.addItems(["heuristic", "local_api", "cloud_api"])
         provider.setCurrentText(getattr(pcfg.module, "layout_review_provider", "heuristic"))
 
+        quick_profile = QComboBox(dlg)
+        quick_profile.addItem(self.tr("Manual / existing settings"), "manual")
+        quick_profile.addItem(self.tr("Heuristic (no API key needed)"), "heuristic_easy")
+        quick_profile.addItem(self.tr("Cloud API quick setup"), "cloud_easy")
+        quick_profile.addItem(self.tr("Local API quick setup (Ollama/LLM Studio)"), "local_easy")
+        quick_profile.setToolTip(self.tr("Choose a starter profile to reduce setup steps for the layout review agent."))
+
         use_translator = QCheckBox(
             self.tr("Reuse current LLM_API_Translator API settings when possible"),
             dlg,
@@ -3146,6 +3393,7 @@ class MainWindow(mainwindow_cls):
         extra_params.setMinimumHeight(80)
         extra_params.setPlaceholderText(self.tr('Optional JSON, e.g. {"reasoning_effort": "low"}'))
 
+        form.addRow(self.tr("Quick setup"), quick_profile)
         form.addRow(self.tr("Provider"), provider)
         form.addRow("", use_translator)
         form.addRow(self.tr("API provider"), api_provider)
@@ -3172,6 +3420,31 @@ class MainWindow(mainwindow_cls):
         exec_fn = getattr(dlg, "exec", None) or dlg.exec_
         if int(exec_fn()) != int(QDialog.Accepted):
             return
+
+        profile_id = str(quick_profile.currentData() or "manual")
+        if profile_id == "heuristic_easy":
+            provider.setCurrentText("heuristic")
+            use_translator.setChecked(False)
+            include_screenshot.setChecked(False)
+            temperature.setValue(0.0)
+            top_p.setValue(1.0)
+        elif profile_id == "cloud_easy":
+            provider.setCurrentText("cloud_api")
+            use_translator.setChecked(True)
+            include_screenshot.setChecked(True)
+            if not endpoint.text().strip():
+                endpoint.setText("https://api.openai.com/v1")
+            if not api_provider.currentText().strip():
+                api_provider.setCurrentText("OpenAI")
+        elif profile_id == "local_easy":
+            provider.setCurrentText("local_api")
+            use_translator.setChecked(False)
+            include_screenshot.setChecked(True)
+            if not endpoint.text().strip():
+                endpoint.setText("http://localhost:11434/v1")
+            api_provider.setCurrentText("Ollama")
+            if not model_name.text().strip():
+                model_name.setText("qwen2.5vl:latest")
 
         pcfg.module.layout_review_provider = provider.currentText()
         pcfg.module.layout_review_use_translator_settings = use_translator.isChecked()

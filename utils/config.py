@@ -166,6 +166,19 @@ class ModuleConfig(Config):
     layout_font_binary_search: bool = True
     # Final automatic safety pass: after line breaking and box placement, shrink font only if rendered document still exceeds the textbox.
     layout_auto_final_fit_pass: bool = True
+    # Make auto-lettering font fit more resolution-independent across small and huge pages.
+    layout_scale_font_by_page_size: bool = True
+    # Reference page area in megapixels used as neutral scale (1.0 = 1000x1000 page baseline).
+    layout_scale_reference_megapixels: float = 1.0
+    # Clamp auto page scale factor to avoid over/under-scaling on extreme resolutions.
+    layout_scale_factor_min: float = 0.72
+    layout_scale_factor_max: float = 1.58
+    # Additional normalization using the current textbox area relative to page area,
+    # so auto lettering stays consistent when bubbles are unusually tiny/huge.
+    layout_scale_use_box_area: bool = True
+    layout_scale_box_area_reference: float = 0.020
+    # Production auto pass runs a final rendering-QA auto-fix stage for these issues.
+    production_auto_pass_enable_qa_fixes: bool = True
     # Automatically choose a mask-safe inner text rectangle for curved/pointed bubbles instead of using the full contour bounding box.
     layout_use_mask_safe_area: bool = True
     # Balloon shape for Diamond-Text style layout: "auto" (detect from aspect ratio), "round", "elongated", "narrow", "diamond", "square", "bevel", "pentagon", "point". Affects insets and line-length scoring.
@@ -328,6 +341,8 @@ class ModuleConfig(Config):
     automation_api_enabled: bool = False
     automation_api_port: int = 39542
     automation_api_key: str = ""
+    automation_api_job_history_limit: int = 200
+    automation_api_job_log_limit: int = 200
     user_replace_profiles: Dict = field(default_factory=dict)
     vertical_cjk_rotate_latin: bool = True
     vertical_cjk_punctuation_hang: bool = True
@@ -707,7 +722,7 @@ CONFIG_KEY_ORDER = (
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
     "enable_glossary_enforcement", "llm_glossary_map", "enable_back_translation_qa", "back_translation_drift_threshold", "llm_token_budget",
     "enable_text_normalization", "text_normalization_profile",
-    "runtime_http_timeout_sec", "runtime_http_retries", "data_path_override", "automation_api_enabled", "automation_api_port", "automation_api_key",
+    "runtime_http_timeout_sec", "runtime_http_retries", "data_path_override", "automation_api_enabled", "automation_api_port", "automation_api_key", "automation_api_job_history_limit", "automation_api_job_log_limit",
     "user_replace_profiles",
     "vertical_cjk_rotate_latin", "vertical_cjk_punctuation_hang",
     "pipeline_retry_detect", "pipeline_retry_ocr", "pipeline_retry_translate", "pipeline_retry_inpaint",
