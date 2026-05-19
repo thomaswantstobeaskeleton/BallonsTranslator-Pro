@@ -18,6 +18,7 @@ class Block:
     label = "speech"
     confidence = 0.75
     fontformat = FontFormat(font_family="Arial", font_size=24, alignment=1)
+    api_block_id = "tbx_abc123"
 
     def get_text(self):
         return "こんにちは"
@@ -46,6 +47,8 @@ def test_structured_ocr_export_contains_page_block_geometry_and_font():
     assert page["blocks"][0]["source_text"] == "こんにちは"
     assert page["blocks"][0]["font"]["alignment"] == 1
     assert page["blocks"][0]["xyxy"] == [1.0, 2.0, 30.0, 40.0]
+    assert page["blocks"][0]["block_id"] == "tbx_abc123"
+    assert page["blocks"][0]["order_label"] == "1.1"
 
 
 def test_structured_ocr_export_can_sort_blocks_by_reading_order():

@@ -761,6 +761,9 @@ class TitleBar(Widget):
         letteringWorkflowAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'menu_text_style.svg')), self.tr('Lettering workflow...'), self)
         letteringWorkflowAction.setToolTip(self.tr('Plan/apply typography polish, smart fit, layout review, proof export, and render steps for current, selected, or all pages.'))
         self.lettering_workflow_trigger = letteringWorkflowAction.triggered
+        autoFormatQaAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Auto-format QA (before/after)...'), self)
+        autoFormatQaAction.setToolTip(self.tr('Live preview per-block auto-format score before and after applying bubble-aware formatting.'))
+        self.auto_format_qa_trigger = autoFormatQaAction.triggered
 
         nextRenderingIssueAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search-stop.svg')), self.tr('Next rendering issue'), self)
         nextRenderingIssueAction.setToolTip(self.tr('Select the next textbox with overflow, glyph, mask, or writing-mode warnings on the current page.'))
@@ -793,6 +796,7 @@ class TitleBar(Widget):
         projectMenu.addAction(layoutReviewPageAction)
         projectMenu.addAction(layoutReviewConfigAction)
         projectMenu.addAction(letteringWorkflowAction)
+        projectMenu.addAction(autoFormatQaAction)
         projectMenu.addAction(nextRenderingIssueAction)
         projectMenu.addSeparator()
         projectMenu.addAction(translationQaAction)
@@ -2068,4 +2072,3 @@ class BottomBar(Widget):
         self._run_btn_pulse_up.setEndValue(up_sz)
         self._run_btn_pulse_down.setStartValue(up_sz)
         self._run_btn_pulse_down.setEndValue(icon_sz)
-

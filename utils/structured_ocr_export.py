@@ -79,10 +79,13 @@ def build_structured_ocr_export(project, pages: Optional[Iterable[str]] = None, 
         out_blocks = []
         for block_index, block in enumerate(blocks):
             text = block.get_text() if hasattr(block, "get_text") else getattr(block, "text", "")
+            block_id = str(getattr(block, "api_block_id", "") or "")
             out_blocks.append(
                 {
                     "index": block_index,
+                    "order_label": f"{page_index + 1}.{block_index + 1}",
                     "source_index": original_index.get(id(block), block_index),
+                    "block_id": block_id,
                     "reading_order": resolved_reading_order,
                     "xyxy": _as_list(getattr(block, "xyxy", None)),
                     "lines": _as_list(getattr(block, "lines", None)),

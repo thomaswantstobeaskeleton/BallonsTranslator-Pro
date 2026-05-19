@@ -1869,6 +1869,13 @@ class SceneTextManager(QObject):
                 self.mainwindow.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Auto lettering assist updated {0} text box(es)').format(changed))
         return changed
 
+    def auto_format_textboxes(self, indices: List[int] = None, push_undo: bool = True, profile: str = "balanced") -> int:
+        """High-level auto formatter: smart-fit first, then atomic bubble-fit rescue for difficult boxes."""
+        changed = self.smart_fit_textboxes(indices=indices, push_undo=push_undo)
+        # Follow up with atomic fit to smooth uneven lines / reduce overflow where smart-fit still struggles.
+        rescued = self.atomic_bubble_fit_textboxes(indices=indices, push_undo=False, profile=profile)
+        return int(changed) + int(rescued)
+
     def onAutoLetteringAssist(self):
         self.auto_lettering_assist_textboxes(indices=None, push_undo=True)
 

@@ -25,6 +25,8 @@ def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *
     warnings: List[str] = []
     processed = 0
     failed = 0
+    halo_flags: List[str] = []
+    halo_stats: List[Dict[str, object]] = []
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     for page in pages:
@@ -34,6 +36,17 @@ def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *
             rect_mask = _build_rect_mask(blks or [], img.shape[1], img.shape[0])
             mask = merge_masks_with_confidence(rect_mask, det_mask, confidence=detector_confidence)
             mask = adaptive_mask_expand(mask, inside_radius=inside_radius, outside_radius=outside_radius)
+            try:
+                from modules.mask_diagnostics import build_mask_diagnostics
+                diag = build_mask_diagnostics(mask, threshold=127, dilate_iter=1) or {}
+                stats = (diag.get("stats") or {})
+            except Exception:
+                stats = {}
+            halo_ratio = float(stats.get("edge_halo_ratio", 0.0) or 0.0)
+            halo_stats.append({"page": page, "edge_halo_ratio": halo_ratio, "mask_fill_ratio": float(stats.get("mask_fill_ratio", 0.0) or 0.0)})
+            if halo_ratio >= float(halo_threshold):
+                halo_flags.append(page)
+                warnings.append(f"{page}: edge halo ratio {halo_ratio:.3f} >= threshold {float(halo_threshold):.3f}")
             clean = inpainter.inpaint(img, mask)
             project.save_inpainted(page, clean)
             if out_dir:
@@ -51,5 +64,7 @@ def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *
         'failed': failed,
         'warnings': warnings,
         'exported': exported,
+        'halo_flags': halo_flags,
+        'halo_stats': halo_stats,
         'mask_policy': {'inside_radius': int(inside_radius), 'outside_radius': int(outside_radius), 'detector_confidence': float(detector_confidence)},
     }

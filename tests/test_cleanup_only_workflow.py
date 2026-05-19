@@ -42,3 +42,5 @@ def test_cleanup_only_returns_mask_policy(tmp_path):
     proj = P(tmp_path)
     rst = run_cleanup_only_pages(proj, D(), I(), ['001.png'], out_dir=str(tmp_path / 'out2'))
     assert rst['mask_policy']['outside_radius'] >= rst['mask_policy']['inside_radius']
+    assert isinstance(rst['halo_stats'], list)
+    assert rst['halo_stats'][0]['page'] == '001.png'

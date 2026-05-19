@@ -1608,10 +1608,29 @@ def smart_fit_text_to_box(
     active_line_spacing = max(0.6, float(line_spacing or 1.0))
 
     if allow_balance and resolved != WRITING_MODE_VERTICAL_RL:
+        # Try multiple candidate line targets and keep the best wrap quality, not just a single width guess.
+        compact = active_text.replace("\n", " ").strip()
         avg = max(1.0, max(1.0, float(font_size or 1.0)) * 0.56 * active_spacing)
-        balanced = balance_lines(active_text.replace("\n", " "), max(2, int(max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / avg)), active_break)
-        if balanced and balanced != active_text:
-            active_text = balanced
+        base_chars = max(2, int(max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / avg))
+        candidate_line_counts = []
+        est_lines = int(max(1.0, eff_size[1]) / max(1.0, float(font_size or 1.0) * active_line_spacing))
+        for delta in (-1, 0, 1, 2):
+            candidate_line_counts.append(max(1, est_lines + delta))
+        best_text = active_text
+        best_score = float("inf")
+        for line_count in sorted(set(candidate_line_counts)):
+            chars = max(2, int(max(2.0, glyph_advance_units(compact, resolved) / max(1.0, line_count) / 0.56)))
+            chars = max(2, min(base_chars * 2, chars))
+            cand = balance_lines(compact, chars, active_break)
+            if not cand:
+                continue
+            quality = line_break_quality(cand, chars, active_break, resolved)
+            score = float(quality.raggedness) + (0.9 if quality.has_widow else 0.0) + (1.1 if quality.has_kinsoku_violation else 0.0) + abs(len((cand or "").splitlines()) - line_count) * 0.2
+            if score < best_score:
+                best_score = score
+                best_text = cand
+        if best_text and best_text != active_text:
+            active_text = best_text
             actions.append("balance_lines")
 
     size, fitted_text, diag = fit_font_size_to_box(
@@ -1645,7 +1664,22 @@ def smart_fit_text_to_box(
             line_spacing=active_line_spacing, letter_spacing=active_spacing,
             padding=padding, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, line_break_strategy=active_break,
             shadow_radius=shadow_radius, shadow_offset=shadow_offset,
-        )
+            )
+
+    # Second-pass rebalancing for stubborn overflow: rebalance with measured width constraints and refit.
+    if allow_balance and diag.overflow and resolved != WRITING_MODE_VERTICAL_RL:
+        overflow_ratio_x = max(1.0, float(diag.measured_bounds[0] or 1.0) / max(1.0, eff_size[0]))
+        tighter_chars = max(2, int(max(2.0, (max(1.0, eff_size[0] - 2 * float(padding or 0.0)) / max(1.0, float(font_size or 1.0) * 0.56 * active_spacing)) / overflow_ratio_x)))
+        tightened = balance_lines(fitted_text.replace("\n", " "), tighter_chars, active_break)
+        if tightened and tightened != fitted_text:
+            actions.append("rebalance_for_overflow")
+            size, fitted_text, diag = fit_font_size_to_box(
+                tightened, font_size, eff_size, active_fit, active_mode,
+                min_font_size=min_font_size, max_font_size=max_font_size,
+                line_spacing=active_line_spacing, letter_spacing=active_spacing,
+                padding=padding, stroke_width=stroke_width, secondary_stroke_width=secondary_stroke_width, line_break_strategy=active_break,
+                shadow_radius=shadow_radius, shadow_offset=shadow_offset,
+            )
 
     if size < float(font_size or size) - 0.2:
         actions.append("shrink_to_fit")

@@ -22,3 +22,19 @@ def test_qa_report_retry_candidates_by_issue_count():
     blocks = [B('alpha beta', 'alpha beta alpha beta alpha beta alpha beta')]
     report = build_translation_qa_report(blocks, glossary=[{'source': 'alpha', 'target': '阿尔法'}], profile='dialogue', retry_issue_threshold=2)
     assert report['retry_candidates'] == [0]
+
+
+def test_qa_report_detects_repetition_and_carryover_ratios():
+    blocks = [B('hero attacks now', 'hero hero hero hero hero')]
+    report = build_translation_qa_report(
+        blocks,
+        glossary=[],
+        profile='dialogue',
+        retry_issue_threshold=1,
+        repetition_threshold=0.4,
+        untranslated_ratio_threshold=0.6,
+    )
+    row = report['rows'][0]
+    assert row['repetition_ratio'] >= 0.4
+    assert row['source_carry_ratio'] >= 0.6
+    assert report['retry_candidates'] == [0]

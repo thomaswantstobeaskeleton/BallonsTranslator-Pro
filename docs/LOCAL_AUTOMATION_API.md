@@ -77,6 +77,9 @@ curl -X POST http://127.0.0.1:39542/job_start \
 curl http://127.0.0.1:39542/events?job_id=job_123
 ```
 
+- Archive export (`kind: archive|zip|cbz`) now includes `archive_stream` metadata with `total_files`, `written_files`, and per-file `progress_events` for headless progress reporting.
+- When archive export runs under `job_start`, `job_cancel` now cooperatively cancels archive streaming and returns `archive_stream.cancelled=true` (response may return `ok:false` with a cancellation warning).
+
 ## Current limitations
 
 - The event stream currently returns a status/log snapshot rather than an infinite stream.
@@ -205,7 +208,7 @@ TM entries are persisted in project JSON as `translation_memory` and include `so
 Phase 4 now exposes profile-aware translation QA endpoints:
 
 - `POST /translation_prompt_profiles` → available profile IDs + current default
-- `POST /translation_qa_report` with optional `page`, `profile`, `retry_issue_threshold`
+- `POST /translation_qa_report` with optional `page`, `profile`, `retry_issue_threshold`, `repetition_threshold`, `untranslated_ratio_threshold` (adds repetition/source-carry QA signals and retry candidates).
 
 The QA report returns per-block issues and `retry_candidates` so automation can optionally re-run poor-quality blocks.
 
@@ -216,6 +219,8 @@ Phase 5 editor UX now includes previewable batch find/replace routes:
 
 - `POST /batch_find_replace_preview` with `pattern`, `replacement`, optional `pages`, `use_regex`, `case_sensitive`
 - `POST /batch_find_replace_apply` with either the same fields or a prior `preview` payload
+- `POST /auto_format_textboxes` with optional `{mode:"page"|"selected", indices, profile:"balanced"|"comfortable"|"dense"|"caption"|"sfx"}` to run smart-fit plus atomic bubble-fit rescue for uneven/overflowing text.
+- `POST /auto_format_qa_preview` with optional `{mode:"page"|"selected", profile, only_risky}` returns per-block before/after auto-format scores and summary metrics for live QA tooling.
 
 `preview` returns match samples without mutating the project; `apply` mutates translations and returns changed rows.
 
@@ -256,6 +261,7 @@ Phase 5 editor UX now includes previewable batch find/replace routes:
 
 - `POST /data_path_status` with optional `{path, min_free_gb}` returns resolved path, existence, free space, and threshold check.
 - `POST /data_path_migrate` with `{source, dest, dry_run=true}` previews or performs data-path migration for top-level entries.
+- `POST /batch_parent_summary` with `{state_path}` returns status counts and next pending child for resumable parent queues.
 
 
 ## Docker / server mode quickstart
@@ -280,3 +286,16 @@ Typical container mount hints from the payload:
 ## Import translated image alignment API
 
 - `POST /import_translated_image_align` with `{page, translated_image, min_iou?}` detects/OCRs the translated image and maps translations back to raw blocks by IoU.
+
+## SFX dictionary and glossary extraction API
+
+Phase 4 now also exposes SFX dictionary and glossary-candidate extraction routes:
+
+- `POST /sfx_dictionary_query` with `{query, limit=50, include_defaults=true}`
+- `POST /sfx_dictionary_import` with `{path}` (JSON/CSV)
+- `POST /sfx_dictionary_export` with optional `{format:"json"|"csv", path}`
+- `POST /glossary_extract_candidates` with optional `{min_freq=2}`
+- `POST /glossary_extract_apply` with `{candidates:[{source,target,approved}]}`
+- `POST /renderer_backend_probe` returns optional shaping backend capability, install hints, and platform diagnostics (alias of `renderer_diagnostics`).
+
+`glossary_extract_apply` is non-destructive: only approved, non-duplicate terms are merged into `translation_glossary`.
