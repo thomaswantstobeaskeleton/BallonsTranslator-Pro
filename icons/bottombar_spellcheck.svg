@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg class="icon" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" width="128" height="128">
-  <g fill="none" stroke="#96a4cd" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <g fill="none" stroke="#697186" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M27 36h52"/>
     <path d="M27 58h47"/>
     <path d="M27 80h34"/>

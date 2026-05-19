@@ -1914,11 +1914,11 @@ class BottomBar(Widget):
         # QToolButton style metrics can shift this icon differently in the
         # settings stack vs the normal canvas stack.
         self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.spellCheckChecker.setFixedSize(44, 34)
+        self.spellCheckChecker.setFixedSize(44, 40)
         self.spellCheckChecker.setIconSize(QSize(28, 28))
+        self.spellCheckChecker.setStyleSheet("QToolButton { padding: 0px; margin: 0px; }")
         self.spellCheckChecker.setCheckable(True)
         self.spellCheckChecker.setAutoRaise(True)
-        self.spellCheckChecker.setFixedSize(44, 40)
         self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.spellCheckChecker.setToolTip(self.tr('Spell check panel: review OCR/translation spelling issues'))
         self.spellCheckChecker.setAccessibleName(self.tr('Spell check panel'))
@@ -1984,6 +1984,7 @@ class BottomBar(Widget):
         self.hlayout.addWidget(self.paintChecker)
         self.hlayout.addWidget(self.texteditChecker)
         self.hlayout.addWidget(self.spellCheckChecker)
+        self.hlayout.addSpacing(6)
         self.hlayout.addWidget(self.textblockChecker)
         self.hlayout.setContentsMargins(0, 0, 10, WINDOW_BORDER_WIDTH)
         self.hlayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
