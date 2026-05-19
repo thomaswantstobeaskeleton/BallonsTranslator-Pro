@@ -80,6 +80,14 @@ from utils.translation_json_interchange import export_translation_json, import_t
 from utils.translation_csv_interchange import export_translation_csv_text, import_translation_csv_text
 from utils.translation_memory import query_tm, add_tm_entry, build_tm_from_project, export_tm_payload, import_tm_payload
 from utils.translation_qa_profiles import build_translation_qa_report, PROMPT_PROFILES
+from utils.translation_concordance import build_concordance_from_project, query_concordance
+from utils.renderer_diagnostics import collect_renderer_diagnostics
+from utils.cleanup_only_workflow import run_cleanup_only_pages
+from utils.data_path_manager import describe_data_path, migrate_data_path
+from utils.server_mode_info import build_server_mode_info
+from utils.translated_image_alignment import align_translations_by_iou
+from utils.batch_parent_queue import enumerate_child_projects, save_parent_batch_state, load_parent_batch_state, update_parent_batch_status, next_pending_child
+from utils.glossary_io import export_glossary_csv, import_glossary_csv, preview_glossary_merge
 from utils.batch_find_replace import preview_batch_find_replace, apply_batch_find_replace
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
@@ -915,6 +923,24 @@ class MainWindow(mainwindow_cls):
             'tm_import': self._api_tm_import,
             'translation_qa_report': self._api_translation_qa_report,
             'translation_prompt_profiles': self._api_translation_prompt_profiles,
+            'concordance_query': self._api_concordance_query,
+            'glossary_export': self._api_glossary_export,
+            'glossary_import': self._api_glossary_import,
+            'glossary_import_preview': self._api_glossary_import_preview,
+            'ocr_rerun_block': self._api_ocr_rerun_block,
+            'ocr_compare_block': self._api_ocr_compare_block,
+            'ocr_apply_compare_choice': self._api_ocr_apply_compare_choice,
+            'renderer_diagnostics': self._api_renderer_diagnostics,
+            'cleanup_only': self._api_cleanup_only,
+            'batch_parent_enumerate': self._api_batch_parent_enumerate,
+            'batch_parent_save_state': self._api_batch_parent_save_state,
+            'batch_parent_load_state': self._api_batch_parent_load_state,
+            'batch_parent_update_status': self._api_batch_parent_update_status,
+            'batch_parent_next_pending': self._api_batch_parent_next_pending,
+            'data_path_status': self._api_data_path_status,
+            'data_path_migrate': self._api_data_path_migrate,
+            'server_mode_info': self._api_server_mode_info,
+            'import_translated_image_align': self._api_import_translated_image_align,
             'batch_find_replace_preview': self._api_batch_find_replace_preview,
             'batch_find_replace_apply': self._api_batch_find_replace_apply,
             'render_current_page': self._api_render_current_page,
@@ -992,8 +1018,7 @@ class MainWindow(mainwindow_cls):
                     set_status(j, 'cancelled', stage='cancelled:before_start', progress=0.0)
                     append_log(j, 'cancelled before start')
                     return
-                set_status(j, 'running', stage='starting', progress=0.02)
-                append_log(j, 'started')
+                mark_started(j, task)
             try:
                 with self._api_jobs_lock:
                     j = self._api_jobs.get(job_id)
@@ -1001,25 +1026,32 @@ class MainWindow(mainwindow_cls):
                         return
                     if checkpoint_or_cancel(j, 'dispatch', 0.08):
                         return
+                if checkpoint_or_cancel(j, 'task_dispatch', 0.12):
+                    return
                 if task == 'run_pipeline':
+                    set_status(j, 'running', stage='pipeline', progress=0.2)
                     rst = self._api_run_pipeline(payload)
                 elif task == 'render_page':
+                    set_status(j, 'running', stage='render_page', progress=0.35)
                     rst = self._api_render_current_page(payload)
                 elif task == 'export':
+                    set_status(j, 'running', stage='export', progress=0.45)
                     rst = self._api_export(payload)
                 elif task == 'batch_export':
+                    set_status(j, 'running', stage='batch_export', progress=0.45)
                     rst = self._api_batch_export(payload)
                 else:
+                    set_status(j, 'running', stage='proof_pack', progress=0.45)
                     rst = self._api_export_lettering_proof(payload)
                 with self._api_jobs_lock:
                     j = self._api_jobs.get(job_id)
                     if j is None:
                         return
+                    update_from_task_result(j, rst)
                     if j.get('cancel_requested'):
-                        set_status(j, 'cancelled', stage='cancelled:completed_with_cancel_request', progress=1.0)
+                        mark_finished(j, task, cancelled=True)
                     else:
-                        set_status(j, 'succeeded', stage='completed', progress=1.0)
-                    append_log(j, 'finished')
+                        mark_finished(j, task, cancelled=False)
                     j['result'] = rst
             except Exception as e:
                 with self._api_jobs_lock:
@@ -1136,6 +1168,160 @@ class MainWindow(mainwindow_cls):
             })
         return {'recent_projects': entries, 'count': len(entries)}
 
+
+    def _api_renderer_diagnostics(self, body: dict):
+        return self._api_call_ui(self._api_renderer_diagnostics_ui, body)
+
+    def _api_renderer_diagnostics_ui(self, body: dict):
+        return {'ok': True, **collect_renderer_diagnostics()}
+
+    def _api_cleanup_only(self, body: dict):
+        return self._api_call_ui(self._api_cleanup_only_ui, body)
+
+    def _api_cleanup_only_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = list((body or {}).get('pages') or [])
+        if not pages:
+            pages = list(getattr(self.imgtrans_proj, 'pages', {}).keys())
+        out_dir = str((body or {}).get('out_dir', '') or '').strip()
+        detector = getattr(self.module_manager, 'textdetector', None)
+        inpainter = getattr(self.module_manager, 'inpainter', None)
+        if detector is None or inpainter is None:
+            raise ValueError('detector and inpainter must be loaded')
+        rst = run_cleanup_only_pages(self.imgtrans_proj, detector, inpainter, pages, out_dir=out_dir)
+        if rst.get('processed'):
+            self.canvas.setProjSaveState(True)
+        return {'ok': True, **rst}
+
+    def _api_batch_parent_enumerate(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_enumerate_ui, body)
+
+    def _api_batch_parent_enumerate_ui(self, body: dict):
+        parent_path = str((body or {}).get('parent_path', '') or '').strip()
+        if not parent_path:
+            raise ValueError('parent_path is required')
+        children = enumerate_child_projects(parent_path)
+        return {
+            'ok': True,
+            'parent_path': parent_path,
+            'count': len(children),
+            'children': [
+                {'kind': c.kind, 'input_path': c.input_path, 'display_name': c.display_name}
+                for c in children
+            ],
+        }
+
+    def _api_batch_parent_save_state(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_save_state_ui, body)
+
+    def _api_batch_parent_save_state_ui(self, body: dict):
+        parent_path = str((body or {}).get('parent_path', '') or '').strip()
+        state_path = str((body or {}).get('state_path', '') or '').strip()
+        if not parent_path or not state_path:
+            raise ValueError('parent_path and state_path are required')
+        children = enumerate_child_projects(parent_path)
+        statuses = dict((body or {}).get('statuses') or {})
+        payload = save_parent_batch_state(state_path, parent_path, children, statuses=statuses)
+        return {'ok': True, 'state_path': state_path, 'count': len(payload.get('children', [])), 'format': payload.get('format', '')}
+
+    def _api_data_path_status(self, body: dict):
+        return self._api_call_ui(self._api_data_path_status_ui, body)
+
+    def _api_data_path_status_ui(self, body: dict):
+        override_path = str((body or {}).get('path', '') or '')
+        min_free_gb = float((body or {}).get('min_free_gb', 0.0) or 0.0)
+        info = describe_data_path(override_path)
+        info['ok'] = True
+        info['enough_space'] = float(info.get('free_gb', 0.0)) >= min_free_gb
+        info['min_free_gb'] = min_free_gb
+        return info
+
+    def _api_data_path_migrate(self, body: dict):
+        return self._api_call_ui(self._api_data_path_migrate_ui, body)
+
+    def _api_data_path_migrate_ui(self, body: dict):
+        src = str((body or {}).get('source', '') or '')
+        dst = str((body or {}).get('dest', '') or '')
+        dry_run = bool((body or {}).get('dry_run', True))
+        if not src or not dst:
+            raise ValueError('source and dest are required')
+        rst = migrate_data_path(src, dst, dry_run=dry_run)
+        if not rst.get('ok'):
+            raise ValueError(str(rst.get('error', 'migrate_failed')))
+        rst['ok'] = True
+        return rst
+
+    def _api_batch_parent_load_state(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_load_state_ui, body)
+
+    def _api_batch_parent_load_state_ui(self, body: dict):
+        state_path = str((body or {}).get('state_path', '') or '').strip()
+        if not state_path:
+            raise ValueError('state_path is required')
+        payload = load_parent_batch_state(state_path)
+        return {'ok': True, 'state_path': state_path, 'state': payload}
+
+    def _api_batch_parent_update_status(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_update_status_ui, body)
+
+    def _api_batch_parent_update_status_ui(self, body: dict):
+        state_path = str((body or {}).get('state_path', '') or '').strip()
+        input_path = str((body or {}).get('input_path', '') or '').strip()
+        status = str((body or {}).get('status', '') or '').strip()
+        if not state_path or not input_path or not status:
+            raise ValueError('state_path, input_path, status are required')
+        payload = update_parent_batch_status(state_path, input_path, status)
+        return {'ok': True, 'state_path': state_path, 'updated': input_path, 'status': status, 'count': len(payload.get('children', []))}
+
+    def _api_batch_parent_next_pending(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_next_pending_ui, body)
+
+    def _api_batch_parent_next_pending_ui(self, body: dict):
+        state_path = str((body or {}).get('state_path', '') or '').strip()
+        if not state_path:
+            raise ValueError('state_path is required')
+        payload = load_parent_batch_state(state_path)
+        nxt = next_pending_child(payload)
+        return {'ok': True, 'state_path': state_path, 'next_pending': nxt, 'has_pending': nxt is not None}
+
+    def _api_server_mode_info(self, body: dict):
+        return self._api_call_ui(self._api_server_mode_info_ui, body)
+
+    def _api_server_mode_info_ui(self, body: dict):
+        host = '127.0.0.1'
+        port = int(getattr(pcfg, 'automation_api_port', 39542) or 39542)
+        return {'ok': True, **build_server_mode_info(host=host, port=port)}
+
+    def _api_import_translated_image_align(self, body: dict):
+        return self._api_call_ui(self._api_import_translated_image_align_ui, body)
+
+    def _api_import_translated_image_align_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        page = str((body or {}).get('page', '') or '').strip() or str(getattr(self.imgtrans_proj, 'current_img', '') or '')
+        translated_image = str((body or {}).get('translated_image', '') or '').strip()
+        min_iou = float((body or {}).get('min_iou', 0.2) or 0.2)
+        if not page or not translated_image:
+            raise ValueError('page and translated_image are required')
+        raw_blocks = self.imgtrans_proj.pages.get(page, []) or []
+        if not raw_blocks:
+            raise ValueError('no raw blocks for page')
+        if not osp.isfile(translated_image):
+            raise ValueError('translated image not found')
+        img_trans = imread(translated_image)
+        if img_trans is None:
+            raise ValueError('failed to read translated image')
+        detector = getattr(self.module_manager, 'textdetector', None)
+        ocr_runner = getattr(self.module_manager, 'ocr', None)
+        if detector is None or ocr_runner is None:
+            raise ValueError('detector and ocr must be loaded')
+        _mask, tr_blocks = detector.detect(img_trans, self.imgtrans_proj)
+        ocr_runner.run_ocr(img_trans, tr_blocks)
+        rst = align_translations_by_iou(raw_blocks, tr_blocks or [], min_iou=min_iou)
+        self.imgtrans_proj.pages[page] = raw_blocks
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'page': page, 'translated_image': translated_image, **rst}
 
     def _api_project_status(self, body: dict):
         return self._api_call_ui(self._api_project_status_ui, body)
@@ -1988,6 +2174,98 @@ class MainWindow(mainwindow_cls):
         return {'ok': True, 'entries': len(self.imgtrans_proj.translation_memory)}
 
 
+    def _api_concordance_query(self, body: dict):
+        return self._api_call_ui(self._api_concordance_query_ui, body)
+
+    def _api_concordance_query_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        query = str((body or {}).get('query', '') or '').strip()
+        if not query:
+            raise ValueError('query is required')
+        limit = int((body or {}).get('limit', 50) or 50)
+        in_target = bool((body or {}).get('in_target', True))
+        rows = build_concordance_from_project(self.imgtrans_proj)
+        hits = query_concordance(rows, query, in_target=in_target, limit=limit)
+        return {'ok': True, 'query': query, 'hits': hits, 'count': len(hits)}
+
+    def _api_glossary_export(self, body: dict):
+        return self._api_call_ui(self._api_glossary_export_ui, body)
+
+    def _api_glossary_export_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        fmt = str((body or {}).get('format', 'json') or 'json').strip().lower()
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            base = self.imgtrans_proj.directory
+            out_path = osp.join(base, 'translation_glossary.csv' if fmt == 'csv' else 'translation_glossary.json')
+        entries = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+        if fmt == 'csv':
+            count = export_glossary_csv(entries, out_path)
+        else:
+            import json
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump({'entries': entries}, f, ensure_ascii=False, indent=2)
+            count = len(entries)
+        return {'ok': True, 'path': out_path, 'format': fmt, 'entries': count}
+
+    def _api_glossary_import_preview(self, body: dict):
+        return self._api_call_ui(self._api_glossary_import_preview_ui, body)
+
+    def _api_glossary_import_preview_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        import_mode = str((body or {}).get('mode', 'merge') or 'merge').strip().lower()
+        in_path = str((body or {}).get('path', '') or '').strip()
+        if not in_path:
+            raise ValueError('path is required')
+        if in_path.lower().endswith('.csv'):
+            entries = import_glossary_csv(in_path)
+        else:
+            import json
+            with open(in_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            entries = list((payload or {}).get('entries', []) or [])
+        store = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+        preview = preview_glossary_merge(store, entries, mode=import_mode)
+        return {'ok': True, **preview}
+
+    def _api_glossary_import(self, body: dict):
+        return self._api_call_ui(self._api_glossary_import_ui, body)
+
+    def _api_glossary_import_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        import_mode = str((body or {}).get('mode', 'merge') or 'merge').strip().lower()
+        in_path = str((body or {}).get('path', '') or '').strip()
+        if not in_path:
+            raise ValueError('path is required')
+        entries = []
+        if in_path.lower().endswith('.csv'):
+            entries = import_glossary_csv(in_path)
+        else:
+            import json
+            with open(in_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            entries = list((payload or {}).get('entries', []) or [])
+        store = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+        if import_mode == 'replace':
+            store = []
+        seen = {str((r or {}).get('source', '') or '').strip() for r in store}
+        added = 0
+        for row in entries:
+            src = str((row or {}).get('source', '') or '').strip()
+            tgt = str((row or {}).get('target', '') or '').strip()
+            if not src or src in seen:
+                continue
+            store.append({'source': src, 'target': tgt})
+            seen.add(src)
+            added += 1
+        self.imgtrans_proj.translation_glossary = store
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'mode': import_mode, 'added': added, 'entries': len(store)}
+
     def _api_translation_prompt_profiles(self, body: dict):
         return {'ok': True, 'profiles': sorted(PROMPT_PROFILES.keys()), 'default': getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue')}
 
@@ -2153,8 +2431,128 @@ class MainWindow(mainwindow_cls):
         if img is None or not blks:
             self.pipelineInsightsPanel.add_warning('OCR_INSPECT', self.tr('Missing image or OCR blocks on current page.'))
             return
-        self.ocrCropInspectorPanel.set_page(img, blks)
+        ocr_engines = sorted(list(getattr(OCR, 'module_dict', {}).keys()))
+        current_engine = str(getattr(pcfg.module, 'ocr', '') or '')
+        self.ocrCropInspectorPanel.set_page(
+            img,
+            blks,
+            ocr_engines=ocr_engines,
+            current_engine=current_engine,
+            on_rerun=self._on_ocr_crop_inspector_rerun,
+            on_compare=self._on_ocr_crop_inspector_compare,
+        )
         self.rightComicTransStackPanel.setCurrentWidget(self.ocrCropInspectorPanel)
+
+
+    def _on_ocr_crop_inspector_rerun(self, block_index: int, engine_name: str):
+        try:
+            rst = self._api_ocr_rerun_block_ui({'index': int(block_index), 'engine': str(engine_name or '')})
+            self.canvas.updateTextBlkList()
+            page = str((rst or {}).get('page', '') or '')
+            idx = int((rst or {}).get('index', -1) or -1)
+            txt = str((rst or {}).get('text', '') or '')
+            conf = (rst or {}).get('confidence', None)
+            self.pipelineInsightsPanel.add_event('OCR_INSPECT', self.tr('Re-ran OCR on {0} block #{1}.').format(page, idx + 1))
+            if hasattr(self.ocrCropInspectorPanel, 'text_lbl') and idx >= 0:
+                self.ocrCropInspectorPanel.text_lbl.setText(f"OCR: {txt}\nConfidence: {conf if conf is not None else '-'}")
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to rerun OCR for selected block'))
+
+    def _api_ocr_rerun_block(self, body: dict):
+        return self._api_call_ui(self._api_ocr_rerun_block_ui, body)
+
+    def _api_ocr_rerun_block_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        page = str((body or {}).get('page', '') or '').strip() or str(getattr(self.imgtrans_proj, 'current_img', '') or '')
+        if not page:
+            raise ValueError('page is required')
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        index = int((body or {}).get('index', -1) or -1)
+        if index < 0 or index >= len(blks):
+            raise ValueError('invalid index')
+        engine = str((body or {}).get('engine', '') or '').strip()
+        if engine:
+            self.module_manager.setOCR(engine)
+        img = self.imgtrans_proj.read_img(page)
+        self.module_manager.ocr_thread.run_ocr(img, [blks[index]])
+        self.canvas.setProjSaveState(True)
+        return {
+            'ok': True,
+            'page': page,
+            'index': index,
+            'engine': str(getattr(pcfg.module, 'ocr', '') or ''),
+            'text': str(getattr(blks[index], 'text', '') or ''),
+            'translation': str(getattr(blks[index], 'translation', '') or ''),
+            'confidence': getattr(blks[index], 'confidence', None),
+        }
+
+
+    def _on_ocr_crop_inspector_compare(self, block_index: int, engine_name: str):
+        try:
+            rst = self._api_ocr_compare_block_ui({'index': int(block_index), 'secondary_engine': str(engine_name or '')})
+            primary = str((rst or {}).get('primary_text', '') or '')
+            secondary = str((rst or {}).get('secondary_text', '') or '')
+            chosen = QMessageBox.question(
+                self,
+                self.tr('OCR compare result'),
+                self.tr('Primary ({0}):\n{1}\n\nSecondary ({2}):\n{3}\n\nApply secondary text?').format(
+                    rst.get('primary_engine', ''), primary, rst.get('secondary_engine', ''), secondary,
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if chosen == QMessageBox.StandardButton.Yes:
+                self._api_ocr_apply_compare_choice_ui({'page': rst.get('page'), 'index': rst.get('index'), 'text': secondary, 'engine': rst.get('secondary_engine')})
+                self.canvas.updateTextBlkList()
+                self.pipelineInsightsPanel.add_event('OCR_INSPECT', self.tr('Applied secondary OCR text to selected block.'))
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to compare OCR engines'))
+
+    def _api_ocr_compare_block(self, body: dict):
+        return self._api_call_ui(self._api_ocr_compare_block_ui, body)
+
+    def _api_ocr_compare_block_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        page = str((body or {}).get('page', '') or '').strip() or str(getattr(self.imgtrans_proj, 'current_img', '') or '')
+        index = int((body or {}).get('index', -1) or -1)
+        secondary = str((body or {}).get('secondary_engine', '') or '').strip()
+        if not page or index < 0:
+            raise ValueError('page and valid index are required')
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        if index >= len(blks):
+            raise ValueError('invalid index')
+        primary_engine = str(getattr(pcfg.module, 'ocr', '') or '')
+        img = self.imgtrans_proj.read_img(page)
+        blk = blks[index]
+        primary_text = str(getattr(blk, 'text', '') or '')
+        if secondary:
+            self.module_manager.setOCR(secondary)
+            self.module_manager.ocr_thread.run_ocr(img, [blk])
+            secondary_text = str(getattr(blk, 'text', '') or '')
+            self.module_manager.setOCR(primary_engine)
+            # restore primary result
+            blk.text = primary_text
+        else:
+            secondary_text = primary_text
+        return {'ok': True, 'page': page, 'index': index, 'primary_engine': primary_engine, 'secondary_engine': secondary or primary_engine, 'primary_text': primary_text, 'secondary_text': secondary_text}
+
+    def _api_ocr_apply_compare_choice(self, body: dict):
+        return self._api_call_ui(self._api_ocr_apply_compare_choice_ui, body)
+
+    def _api_ocr_apply_compare_choice_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        page = str((body or {}).get('page', '') or '').strip() or str(getattr(self.imgtrans_proj, 'current_img', '') or '')
+        index = int((body or {}).get('index', -1) or -1)
+        text = str((body or {}).get('text', '') or '')
+        blks = self.imgtrans_proj.pages.get(page, []) or []
+        if index < 0 or index >= len(blks):
+            raise ValueError('invalid index')
+        blks[index].text = text
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'page': page, 'index': index, 'text': text, 'engine': str((body or {}).get('engine', '') or '')}
 
     def on_open_reading_order_editor_requested(self):
         page = self.imgtrans_proj.current_img
@@ -2886,6 +3284,10 @@ class MainWindow(mainwindow_cls):
             self.titleBar.batch_find_replace_trigger.connect(self.on_batch_find_replace_current_project)
         self.titleBar.ocr_triage_trigger.connect(self.on_open_ocr_triage_current_page)
         self.titleBar.auto_extract_glossary_trigger.connect(self.on_auto_extract_glossary_current_page)
+        if hasattr(self.titleBar, 'concordance_search_trigger'):
+            self.titleBar.concordance_search_trigger.connect(self.on_concordance_search_current_project)
+        if hasattr(self.titleBar, 'import_glossary_preview_trigger'):
+            self.titleBar.import_glossary_preview_trigger.connect(self.on_import_glossary_with_preview)
         self.titleBar.save_run_profile_trigger.connect(self.on_save_run_profile_snapshot)
         self.titleBar.apply_run_profile_trigger.connect(self.on_apply_run_profile_snapshot)
         self.titleBar.layout_review_selected_trigger.connect(self.shortcutLayoutReviewSelected)
@@ -4994,7 +5396,7 @@ class MainWindow(mainwindow_cls):
                 exported_paths,
                 missing,
                 export_kind='rendered_images',
-                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'include_unrendered': bool(include_unrendered), 'filename_template': filename_template or getattr(pcfg, 'export_filename_template', '{index:03d}'), 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'export_sources': export_sources},
+                options={'ext': ext or '', 'also_pdf': bool(also_pdf), 'clean_after_export': bool(clean_after_export), 'include_intermediate': bool(include_intermediate), 'include_unrendered': bool(include_unrendered), 'filename_template': filename_template or getattr(pcfg, 'export_filename_template', '{index:03d}'), 'helper_paths': helper_paths, 'fallback_paths': fallback_paths, 'export_sources': export_sources, 'renderer': collect_renderer_diagnostics()},
             )
             msg += '\n' + self.tr('Export manifest: {0}').format(manifest.get('manifest_path', ''))
             if marked_exported:
@@ -7476,3 +7878,51 @@ class MainWindow(mainwindow_cls):
             self.textPanel.formatpanel.showGlobalFontFormatBtn.setVisible(True)
         if cfg_name == 'text_advanced_format_panel' and hasattr(self, 'textPanel'):
             self.textPanel.formatpanel.showAdvancedFontFormatBtn.setVisible(True)
+
+
+    def on_concordance_search_current_project(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            create_info_dialog({'title': self.tr('Concordance search'), 'text': self.tr('Open a project first.')})
+            return
+        text, ok = QInputDialog.getText(self, self.tr('Concordance search'), self.tr('Find in source/target:'))
+        if not ok or not str(text).strip():
+            return
+        rows = build_concordance_from_project(self.imgtrans_proj)
+        hits = query_concordance(rows, text, in_target=True, limit=200)
+        if not hits:
+            create_info_dialog({'title': self.tr('Concordance search'), 'text': self.tr('No matches found.')})
+            return
+        lines = [self.tr('Matches: {0}').format(len(hits))]
+        for h in hits[:50]:
+            lines.append(f"[{h.get('page','')}] {h.get('source','')} -> {h.get('target','')}")
+        if len(hits) > 50:
+            lines.append(self.tr('...and {0} more').format(len(hits)-50))
+        create_info_dialog({'title': self.tr('Concordance search'), 'text': '\n'.join(lines)})
+
+
+    def on_import_glossary_with_preview(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Import'), self.tr('Open a project first.'))
+            return
+        in_path, _ = QFileDialog.getOpenFileName(self, self.tr('Import glossary'), self.imgtrans_proj.directory, self.tr('Glossary (*.json *.csv)'))
+        if not in_path:
+            return
+        mode, ok = QInputDialog.getItem(self, self.tr('Import mode'), self.tr('Mode'), [self.tr('merge'), self.tr('replace')], 0, False)
+        if not ok:
+            return
+        mode_v = 'replace' if str(mode).lower().startswith('replace') else 'merge'
+        try:
+            preview = self._api_glossary_import_preview_ui({'path': in_path, 'mode': mode_v})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to preview glossary import'))
+            return
+        text = self.tr('Incoming: {0}\nWill add: {1}\nSkipped: {2}\nResult total: {3}').format(preview.get('incoming_count', 0), preview.get('added_count', 0), preview.get('skipped_count', 0), preview.get('result_count', 0))
+        yn = QMessageBox.question(self, self.tr('Glossary import preview'), text + '\n\n' + self.tr('Apply now?'), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if yn != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            rst = self._api_glossary_import_ui({'path': in_path, 'mode': mode_v})
+            create_info_dialog({'title': self.tr('Glossary import'), 'text': self.tr('Added entries: {0} (total: {1})').format(rst.get('added', 0), rst.get('entries', 0))})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to import glossary'))
+

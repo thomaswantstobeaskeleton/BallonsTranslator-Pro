@@ -88,7 +88,7 @@ class LocalAutomationApiServer:
             def _send_events(self, query: str):
                 qs = parse_qs(query or '')
                 job_id = (qs.get('job_id') or [''])[0]
-                payload: Dict[str, Any] = {'ok': True, 'job_id': job_id}
+                payload: Dict[str, Any] = {'ok': True, 'job_id': job_id, 'event': 'job_snapshot'}
                 status_fn = handlers.get('job_status')
                 logs_fn = handlers.get('job_logs')
                 if job_id and status_fn is not None:
@@ -102,7 +102,15 @@ class LocalAutomationApiServer:
                         payload['logs'] = logs_fn({'job_id': job_id}) or {}
                     except Exception as e:
                         payload['warnings'] = [str(e)]
-                data = ('event: job\n' + 'data: ' + json.dumps(payload) + '\n\n').encode('utf-8')
+                status_name = str(((payload.get('status') or {}).get('status', 'snapshot')) if isinstance(payload.get('status'), dict) else 'snapshot')
+                event_id = str(((payload.get('status') or {}).get('updated_at', '0')) if isinstance(payload.get('status'), dict) else '0')
+                lines = [
+                    f"id: {event_id}",
+                    f"event: {status_name}",
+                    'data: ' + json.dumps(payload),
+                    '',
+                ]
+                data = ('\n'.join(lines) + '\n').encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
                 self.send_header('Cache-Control', 'no-cache')

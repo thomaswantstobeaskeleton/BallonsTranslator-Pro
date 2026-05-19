@@ -32,6 +32,7 @@ def build_export_manifest(
             "used_fallback_source": source_kind != "rendered",
             "completion_state": project.get_page_completion_state(page_name) if project is not None and hasattr(project, "get_page_completion_state") else "",
         })
+    renderer_info = options.get("renderer") or {}
     manifest = {
         "format": "ballonstranslator.export_manifest.v1",
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -45,6 +46,7 @@ def build_export_manifest(
         "missing_pages": missing,
         "options": options,
         "warnings": [],
+        "renderer": renderer_info,
     }
     fallback_count = sum(1 for page in pages if page.get("used_fallback_source"))
     if fallback_count:

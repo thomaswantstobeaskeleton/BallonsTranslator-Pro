@@ -738,6 +738,10 @@ class TitleBar(Widget):
         translationQaAction.setToolTip(self.tr('Run glossary candidate extraction and guardrail checks on current page.'))
         self.translation_qa_report_trigger = translationQaAction.triggered
 
+        concordanceSearchAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'search.svg')), self.tr('Concordance search (project)...'), self)
+        concordanceSearchAction.setToolTip(self.tr('Search previous source/target lines with page provenance.'))
+        self.concordance_search_trigger = concordanceSearchAction.triggered
+
         saveRunProfileAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'save_activate.svg')), self.tr('Save run profile snapshot...'), self)
         saveRunProfileAction.setToolTip(self.tr('Save current module selections as a project-local run profile.'))
         self.save_run_profile_trigger = saveRunProfileAction.triggered
@@ -794,6 +798,7 @@ class TitleBar(Widget):
         projectMenu.addAction(translationQaAction)
         projectMenu.addAction(ocrTriageAction)
         projectMenu.addAction(autoExtractGlossaryAction)
+        projectMenu.addAction(concordanceSearchAction)
         batchFindReplaceAction = QAction(self.tr('Batch find/replace translations...'), self)
         batchFindReplaceAction.setToolTip(self.tr('Preview regex find/replace across project translations before applying.'))
         self.batch_find_replace_trigger = batchFindReplaceAction.triggered
@@ -813,6 +818,9 @@ class TitleBar(Widget):
         svgTextHandoffAction.setToolTip(self.tr('Export current page as an SVG with editable translated text elements for vector editors.'))
         self.export_svg_text_handoff_trigger = svgTextHandoffAction.triggered
         exportMenuTools.addAction(svgTextHandoffAction)
+        importGlossaryPreviewAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr('Import glossary with preview...'), self)
+        importGlossaryPreviewAction.setToolTip(self.tr('Preview merge/replace impact before importing glossary entries.'))
+        self.import_glossary_preview_trigger = importGlossaryPreviewAction.triggered
         exportTransCsvAction = QAction(self.tr('Export translation CSV...'), self)
         exportTransCsvAction.setToolTip(self.tr('Export source/translation rows as CSV for spreadsheet and CAT workflows.'))
         self.export_translation_csv_trigger = exportTransCsvAction.triggered
@@ -821,6 +829,7 @@ class TitleBar(Widget):
         importTransCsvAction.setToolTip(self.tr('Import translation CSV by page + stable block ID with index fallback.'))
         self.import_translation_csv_trigger = importTransCsvAction.triggered
         exportMenuTools.addAction(importTransCsvAction)
+        exportMenuTools.addAction(importGlossaryPreviewAction)
         exportTransJsonAction = QAction(self.tr('Export translation JSON...'), self)
         exportTransJsonAction.setToolTip(self.tr('Export source/translation with stable block IDs for external translation workflows.'))
         self.export_translation_json_trigger = exportTransJsonAction.triggered

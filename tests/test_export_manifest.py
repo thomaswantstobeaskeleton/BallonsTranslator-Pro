@@ -58,3 +58,13 @@ def test_export_manifest_records_unrendered_fallback_sources(tmp_path):
     assert manifest["pages"][0]["source_kind"] == "original_fallback"
     assert manifest["pages"][0]["used_fallback_source"] is True
     assert "fallback" in manifest["warnings"][0]
+
+
+def test_export_manifest_includes_renderer_info(tmp_path):
+    out = tmp_path / "out"
+    page = out / "001.png"
+    out.mkdir()
+    page.write_bytes(b"x")
+    project = Project()
+    manifest = write_export_manifest(project, str(out), [("p1.png", str(page))], [], options={"renderer": {"default_renderer": "qt", "advanced_backend_available": False}})
+    assert manifest["renderer"]["default_renderer"] == "qt"

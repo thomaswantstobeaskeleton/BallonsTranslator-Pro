@@ -74,3 +74,36 @@ def status_payload(job: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": float(job.get("updated_at", 0.0)),
         "has_result": job.get("result") is not None,
     }
+
+
+def normalize_task_result(result: Any) -> Dict[str, Any]:
+    if isinstance(result, dict):
+        return dict(result)
+    return {"value": result}
+
+
+def update_from_task_result(job: Dict[str, Any], result: Any) -> None:
+    payload = normalize_task_result(result)
+    warns = payload.get("warnings")
+    if isinstance(warns, list):
+        for w in warns:
+            if str(w or "").strip():
+                add_warning(job, str(w))
+    stage = payload.get("stage")
+    progress = payload.get("progress")
+    if stage is not None or progress is not None:
+        set_status(job, job.get("status") or "running", stage=str(stage or job.get("stage") or "running"), progress=float(progress if progress is not None else job.get("progress") or 0.0))
+
+
+def mark_started(job: Dict[str, Any], task: str) -> None:
+    set_status(job, "running", stage=f"starting:{task}", progress=0.02)
+    append_log(job, f"started task={task}")
+
+
+def mark_finished(job: Dict[str, Any], task: str, *, cancelled: bool = False) -> None:
+    if cancelled:
+        set_status(job, "cancelled", stage=f"cancelled:{task}", progress=1.0)
+        append_log(job, f"cancelled task={task}")
+    else:
+        set_status(job, "succeeded", stage=f"completed:{task}", progress=1.0)
+        append_log(job, f"finished task={task}")

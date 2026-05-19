@@ -36,6 +36,7 @@ from utils.proj_imgtrans import ProjImgTrans
 from utils.textblock import examine_textblk, remove_contained_boxes, deduplicate_primary_boxes
 from utils.logger import logger as LOGGER
 from utils.headless_contract import HeadlessExitCode, HeadlessRunSummary
+from utils.headless_batch_contract import parse_stage_set
 from modules import (
     init_module_registries,
     TEXTDETECTORS,
@@ -49,6 +50,7 @@ from modules import (
 )
 from modules.base import GPUINTENSIVE_SET, soft_empty_cache
 from modules.inpaint.base import build_mask_with_resolved_overlaps
+from utils.translation_json_interchange import export_translation_json, import_translation_json
 
 try:
     from utils.image_upscale import apply_initial_upscale, downscale_to_size
@@ -56,6 +58,8 @@ except ImportError:
     apply_initial_upscale = None
     def downscale_to_size(img, w, h):
         return img
+
+
 
 def _get_module(module_type: str, name: str):
     if module_type == "textdetector":
@@ -198,6 +202,9 @@ def main() -> int:
     parser.add_argument("--no-inpaint", action="store_true", help="Skip inpainting.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging.")
     parser.add_argument("--summary-json", default="", help="Write headless run summary JSON to this path.")
+    parser.add_argument("--save-text-json", default="", help="Export translation JSON after run. Path or directory.")
+    parser.add_argument("--load-text-json", default="", help="Import translation JSON before run.")
+    parser.add_argument("--stages", default="", help="Comma-separated stages to run: detect,ocr,translate,inpaint. Empty=all enabled by config.")
     args = parser.parse_args()
 
     dirs = list(args.dirs) + list(args.dirs_opt or [])
@@ -215,11 +222,17 @@ def main() -> int:
     load_config(args.config)
     init_module_registries()
 
+    try:
+        selected_stages = parse_stage_set(args.stages)
+    except ValueError as e:
+        LOGGER.error(str(e))
+        return int(HeadlessExitCode.INPUT_ERROR)
+
     cfg = pcfg.module
-    enable_detect = cfg.enable_detect and not args.no_detect
-    enable_ocr = cfg.enable_ocr and not args.no_ocr
-    enable_translate = cfg.enable_translate and not args.no_translate
-    enable_inpaint = cfg.enable_inpaint and not args.no_inpaint
+    enable_detect = cfg.enable_detect and not args.no_detect and "detect" in selected_stages
+    enable_ocr = cfg.enable_ocr and not args.no_ocr and "ocr" in selected_stages
+    enable_translate = cfg.enable_translate and not args.no_translate and "translate" in selected_stages
+    enable_inpaint = cfg.enable_inpaint and not args.no_inpaint and "inpaint" in selected_stages
 
     detector = _get_module("textdetector", cfg.textdetector) if enable_detect else None
     ocr = _get_module("ocr", cfg.ocr) if enable_ocr else None
@@ -241,6 +254,11 @@ def main() -> int:
         LOGGER.info("Processing project: %s", d)
         try:
             proj = ProjImgTrans(d)
+            if args.load_text_json:
+                with open(osp.abspath(args.load_text_json), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                import_translation_json(proj, payload if isinstance(payload, dict) else {})
+                proj.save()
             run_batch_pipeline(
                 proj,
                 detector=detector,
@@ -252,18 +270,37 @@ def main() -> int:
                 enable_translate=enable_translate,
                 enable_inpaint=enable_inpaint,
             )
+            if args.save_text_json:
+                out_target = osp.abspath(args.save_text_json)
+                if osp.isdir(out_target) or out_target.endswith(osp.sep):
+                    os.makedirs(out_target, exist_ok=True)
+                    out_path = osp.join(out_target, f"{osp.basename(d.rstrip(osp.sep))}.translation.json")
+                elif len(dirs) > 1 and out_target.lower().endswith(".json"):
+                    os.makedirs(osp.dirname(out_target) or ".", exist_ok=True)
+                    stem = osp.splitext(osp.basename(out_target))[0]
+                    out_path = osp.join(osp.dirname(out_target), f"{stem}.{osp.basename(d.rstrip(osp.sep))}.json")
+                else:
+                    os.makedirs(osp.dirname(out_target) or ".", exist_ok=True)
+                    out_path = out_target
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(export_translation_json(proj), f, ensure_ascii=False, indent=2)
             processed.append(d)
         except Exception as e:
             LOGGER.error("Project failed: %s (%s)", d, e, exc_info=True)
             failed.append(d)
 
+    warnings = []
+    if not any((enable_detect, enable_ocr, enable_translate, enable_inpaint)):
+        warnings.append("No stages enabled after config/flags filtering.")
     summary = HeadlessRunSummary(
         requested_dirs=[osp.abspath(x) for x in dirs],
         processed_dirs=processed,
         skipped_dirs=skipped,
         failed_dirs=failed,
+        warnings=warnings,
     )
     payload = summary.to_payload()
+    payload["stages"] = sorted(selected_stages)
     payload["exit_code"] = summary.exit_code()
     LOGGER.info("Headless summary: %s", payload)
     if args.summary_json:
