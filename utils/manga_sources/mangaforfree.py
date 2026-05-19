@@ -5,6 +5,8 @@ Optional Playwright for search/feed when site blocks or requires JS.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import re
 import time
 from typing import List, Optional
@@ -35,6 +37,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class MangaForFreeClient:
+    source_id = "mangaforfree"
+    display_name = "MangaForFree"
+    base_url = "https://mangaforfree.com"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for MangaForFree-style sites (WP-Manga with /manga/ path)."""
 
     def __init__(

@@ -6,6 +6,8 @@ Ref: Kotatsu parsers #1522/#1524, FMHY manga sources.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import re
 import time
 from typing import List, Optional
@@ -35,6 +37,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class MangakakalotClient:
+    source_id = "mangakakalot"
+    display_name = "Mangakakalot"
+    base_url = "https://www.mangakakalot.gg"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for Mangakakalot.gg. Search, feed, download via generic chapter URL."""
 
     def __init__(

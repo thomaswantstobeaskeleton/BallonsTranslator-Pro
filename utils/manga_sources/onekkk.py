@@ -5,6 +5,8 @@ Optional Playwright when site requires JS.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import re
 import time
 from typing import List, Optional
@@ -31,6 +33,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class OneKkkClient:
+    source_id = "onekkk"
+    display_name = "1kkk (Chinese manhua)"
+    base_url = "https://www.1kkk.com"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for 1kkk.com (Chinese manhua)."""
 
     def __init__(

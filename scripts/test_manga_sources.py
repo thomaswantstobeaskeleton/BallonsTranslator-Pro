@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import os
+import argparse
 
 # Run from repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,6 +22,7 @@ from utils.manga_sources import (
     OneKkkClient,
     GenericChapterUrlClient,
 )
+from utils.manga_sources.registry import get_provider, list_sources
 
 
 def _safe(s: str, max_len: int = 60) -> str:
@@ -83,9 +85,46 @@ def test_download_generic(name: str, chapter_url: str, use_playwright: bool = Fa
         return False
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Smoke-test manga source clients. Network sites may fail independently of the app.")
+    parser.add_argument("--include-experimental", action="store_true", help="Include experimental registry providers in smoke tests.")
+    parser.add_argument("--stable-registry-only", action="store_true", help="Only run registry-backed stable providers added by the provider architecture.")
+    args = parser.parse_args(argv)
     print("Manga source client tests (HTTP only by default)")
     results = {}
+
+    registry_smoke_sources = [m for m in list_sources(include_disabled=False, include_experimental=args.include_experimental) if m.source_id in {"mangasee", "readmanga", "manganato", "rawkuma", "manhuagui"}]
+    if args.stable_registry_only:
+        # Deterministic parser smoke for registry-backed providers. Network smoke is
+        # covered by the default mode but may fail when upstream sites block HTTP.
+        from pathlib import Path
+
+        fixture_dir = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "manga_sources"
+        fixture_map = {
+            "mangasee": ("mangasee_search.html", "mangasee_feed.html"),
+            "readmanga": ("readmanga_search.html", "readmanga_feed.html"),
+            "manganato": ("manganato_search.html", "manganato_feed.html"),
+            "rawkuma": ("rawkuma_search.html", "rawkuma_feed.html"),
+            "manhuagui": ("manhuagui_search.html", "manhuagui_feed.html"),
+        }
+        for meta in registry_smoke_sources:
+            print(f"\n--- {meta.display_name} registry parser smoke ---")
+            try:
+                client = get_provider(meta.source_id, timeout=15, request_delay=0)
+                search_fixture, feed_fixture = fixture_map[meta.source_id]
+                parsed_search = client.parse_search((fixture_dir / search_fixture).read_text(encoding="utf-8"), limit=5)
+                parsed_feed = client.parse_feed((fixture_dir / feed_fixture).read_text(encoding="utf-8"), manga_id=parsed_search[0].id if parsed_search else "sample", limit=5)
+                ok = bool(parsed_search and parsed_feed)
+                print(f"  Parsed search={len(parsed_search)} feed={len(parsed_feed)}")
+                results[f"{meta.display_name} parser"] = ok
+            except Exception as e:
+                print(f"  {meta.display_name} Error: {e}")
+                results[f"{meta.display_name} parser"] = False
+        failed = sum(1 for v in results.values() if not v)
+        print("\n--- Summary ---")
+        for k, v in results.items():
+            print(f"  {k}: {'OK' if v else 'FAIL'}")
+        return 0 if failed == 0 else 1
 
     # Mangakakalot
     client_kakalot = MangakakalotClient(base_url="https://www.mangakakalot.gg", timeout=15, request_delay=0.5)

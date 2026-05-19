@@ -128,3 +128,24 @@ python --version
 - [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
 - [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
 - [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md)
+
+
+## Manga / Comic Raw Downloader
+
+BallonsTranslator-Pro includes a registry-backed manga/raw source downloader. Existing sources (MangaDex, Comick, GOMANGA, Manhwa Reader, MangaForFree, ToonGod, Mangakakalot, NaruRaw, ManhwaRaw, 1kkk, generic chapter URLs, and local folders) are preserved, and new providers can be added through `utils/manga_sources/provider_base.py` plus `utils/manga_sources/registry.py` without manually rebuilding the UI source list.
+
+Current first-batch registry providers include MangaSee/MangaSee123, ReadManga-style pages, and Manganato/Manganelo compatibility. Providers must use public pages/APIs only, respect request delays, and must not bypass DRM, paywalls, login restrictions, private APIs, CAPTCHA, Cloudflare, or other access controls. Browser rendering remains the explicit user-controlled Playwright option.
+
+Developer docs:
+
+- `docs/RAW_SOURCE_PROVIDER_EXPANSION_PLAN.md` — audit and roadmap.
+- `docs/MANGA_SOURCE_PLUGIN_API.md` — provider interface, registry metadata, legal/ToS expectations, and tests.
+- `docs/EXTERNAL_SOURCE_AUDIT.md` — generated local audit report for optional external downloader repositories.
+
+Smoke tests:
+
+```bash
+python scripts/test_manga_sources.py
+python scripts/test_manga_sources.py --stable-registry-only
+pytest -q tests/test_manga_provider_base.py
+```

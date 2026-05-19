@@ -4,6 +4,8 @@ Uses public API: https://api.mangadex.org/docs/
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import os
 import os.path as osp
 import re
@@ -50,19 +52,38 @@ def _get_chapter_display(attrs: dict) -> str:
 
 
 class MangaDexClient:
-    def __init__(self, timeout: int = 30, request_delay: float = 0.3):
+    source_id = "mangadex"
+    display_name = "MangaDex"
+    base_url = "https://api.mangadex.org"
+    capabilities = MangaSourceCapabilities()
+
+    def __init__(self, timeout: int = 30, request_delay: float = 0.3, max_retries: int = 2):
         self.session = requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.timeout = timeout
         self.request_delay = max(0.0, float(request_delay))
+        self.max_retries = max(0, int(max_retries))
 
     def _throttle(self):
         if self.request_delay > 0:
             time.sleep(self.request_delay)
 
     def _get(self, url: str, **kwargs) -> requests.Response:
-        self._throttle()
-        return self.session.get(url, timeout=self.timeout, **kwargs)
+        last_response = None
+        for attempt in range(self.max_retries + 1):
+            self._throttle()
+            response = self.session.get(url, timeout=self.timeout, **kwargs)
+            last_response = response
+            if response.status_code not in (429, 502, 503, 504) or attempt >= self.max_retries:
+                return response
+            retry_after = response.headers.get("Retry-After")
+            try:
+                wait = float(retry_after) if retry_after else min(4.0, 0.75 * (attempt + 1))
+            except ValueError:
+                wait = min(4.0, 0.75 * (attempt + 1))
+            LOGGER.warning("MangaDex request throttled/temporary failure (%s); retrying in %.1fs", response.status_code, wait)
+            time.sleep(wait)
+        return last_response  # type: ignore[return-value]
 
     def search(
         self,

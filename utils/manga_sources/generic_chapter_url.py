@@ -6,6 +6,8 @@ Optional: use Playwright for JS-heavy/Cloudflare sites (pip install playwright; 
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import ast
 import json
 import os
@@ -267,6 +269,11 @@ def get_chapter_images_playwright(
 
 
 class GenericChapterUrlClient:
+    source_id = "generic_chapter_url"
+    display_name = "Generic (chapter URL)"
+    base_url = ""
+    capabilities = MangaSourceCapabilities()
+
     """
     Fetch a chapter page by URL, extract image URLs from HTML, download with retry/backoff,
     and write manifest.json (manhua-translator compatible).
