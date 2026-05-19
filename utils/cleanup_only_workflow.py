@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Tuple
 
 from PIL import Image
 import numpy as np
+from utils.mask_cleanup_quality import adaptive_mask_expand, merge_masks_with_confidence
 
 
 def _build_rect_mask(blocks, width: int, height: int):
@@ -18,7 +19,7 @@ def _build_rect_mask(blocks, width: int, height: int):
     return mask
 
 
-def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *, out_dir: str = "") -> Dict[str, object]:
+def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *, out_dir: str = "", halo_threshold: float = 0.18, inside_radius: int = 1, outside_radius: int = 2, detector_confidence: float = 1.0) -> Dict[str, object]:
     pages = [str(p) for p in (pages or []) if str(p)]
     exported: List[Tuple[str, str]] = []
     warnings: List[str] = []
@@ -29,8 +30,10 @@ def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *
     for page in pages:
         try:
             img = project.read_img(page)
-            _mask, blks = detector.detect(img, project)
-            mask = _build_rect_mask(blks or [], img.shape[1], img.shape[0])
+            det_mask, blks = detector.detect(img, project)
+            rect_mask = _build_rect_mask(blks or [], img.shape[1], img.shape[0])
+            mask = merge_masks_with_confidence(rect_mask, det_mask, confidence=detector_confidence)
+            mask = adaptive_mask_expand(mask, inside_radius=inside_radius, outside_radius=outside_radius)
             clean = inpainter.inpaint(img, mask)
             project.save_inpainted(page, clean)
             if out_dir:
@@ -48,4 +51,5 @@ def run_cleanup_only_pages(project, detector, inpainter, pages: Iterable[str], *
         'failed': failed,
         'warnings': warnings,
         'exported': exported,
+        'mask_policy': {'inside_radius': int(inside_radius), 'outside_radius': int(outside_radius), 'detector_confidence': float(detector_confidence)},
     }

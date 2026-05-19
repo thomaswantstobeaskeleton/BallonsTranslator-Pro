@@ -32,7 +32,13 @@ class P:
 
 def test_cleanup_only_exports_clean_images(tmp_path):
     proj = P(tmp_path)
-    rst = run_cleanup_only_pages(proj, D(), I(), ['001.png'], out_dir=str(tmp_path / 'out'))
+    rst = run_cleanup_only_pages(proj, D(), I(), ['001.png'], out_dir=str(tmp_path / 'out'), inside_radius=1, outside_radius=2, detector_confidence=0.9)
     assert rst['processed'] == 1
     assert rst['failed'] == 0
     assert (tmp_path / 'out' / '001_clean.png').exists()
+
+
+def test_cleanup_only_returns_mask_policy(tmp_path):
+    proj = P(tmp_path)
+    rst = run_cleanup_only_pages(proj, D(), I(), ['001.png'], out_dir=str(tmp_path / 'out2'))
+    assert rst['mask_policy']['outside_radius'] >= rst['mask_policy']['inside_radius']

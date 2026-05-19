@@ -1185,11 +1185,15 @@ class MainWindow(mainwindow_cls):
         if not pages:
             pages = list(getattr(self.imgtrans_proj, 'pages', {}).keys())
         out_dir = str((body or {}).get('out_dir', '') or '').strip()
+        halo_threshold = float((body or {}).get('halo_threshold', 0.18) or 0.18)
+        inside_radius = int((body or {}).get('inside_radius', 1) or 1)
+        outside_radius = int((body or {}).get('outside_radius', 2) or 2)
+        detector_confidence = float((body or {}).get('detector_confidence', 1.0) or 1.0)
         detector = getattr(self.module_manager, 'textdetector', None)
         inpainter = getattr(self.module_manager, 'inpainter', None)
         if detector is None or inpainter is None:
             raise ValueError('detector and inpainter must be loaded')
-        rst = run_cleanup_only_pages(self.imgtrans_proj, detector, inpainter, pages, out_dir=out_dir)
+        rst = run_cleanup_only_pages(self.imgtrans_proj, detector, inpainter, pages, out_dir=out_dir, halo_threshold=halo_threshold, inside_radius=inside_radius, outside_radius=outside_radius, detector_confidence=detector_confidence)
         if rst.get('processed'):
             self.canvas.setProjSaveState(True)
         return {'ok': True, **rst}

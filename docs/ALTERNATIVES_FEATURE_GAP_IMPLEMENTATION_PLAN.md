@@ -106,7 +106,7 @@ Observed results:
 | Required feature | Status | Existing evidence | Target files | Migration risk | Tests to add/keep |
 |---|---|---|---|---|---|
 | Bubble-aware mask expansion | Partially implemented | mask diagnostics/textbox masking tests | mask generation utilities | Medium | inside/outside dilation fixtures |
-| Edge-halo detector | Partially implemented | `tests/test_mask_diagnostics.py` | diagnostics utility/UI/API | Medium | halo fixtures |
+| Edge-halo detector | Partially implemented → advanced | Cleanup-only workflow now computes mask edge-halo ratio, applies adaptive mask expansion/merge policy, and flags risky pages via API warnings/metadata | `modules/mask_diagnostics.py`, `utils/cleanup_only_workflow.py`, `ui/mainwindow.py` | Medium | halo-threshold cleanup workflow tests |
 | Mask-aware text flow | Partially implemented | auto layout/mask-safe diagnostics | text layout/rendering utilities | High | irregular flow fallback tests |
 | Cleanup-only workflow | Partially implemented → advanced | Added stable cleanup-only API route (`cleanup_only`) that runs detect+inpaint and optional clean export directory output | `utils/cleanup_only_workflow.py`, `ui/mainwindow.py` | Medium | cleanup-only workflow tests + route validation |
 
