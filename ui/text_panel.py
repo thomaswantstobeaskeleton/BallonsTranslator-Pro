@@ -1066,8 +1066,16 @@ class FontFormatPanel(Widget):
                     self.textblk_item.setPlainText(smart.text)
                 if getattr(self.textblk_item, 'blk', None) is not None:
                     self.textblk_item.blk.translation = smart.text
-            if abs(float(smart.font_size or 0.0) - float(getattr(fmt, 'font_size', 0.0) or 0.0)) > 0.2:
-                params.append(('font_size', float(smart.font_size)))
+            cur_font_size = float(getattr(fmt, 'font_size', 24.0) or 24.0)
+            target_font_size = float(smart.font_size or cur_font_size)
+            # Guardrail: diagnostics "quick fix" should not nuke layout by extreme jumps in one click.
+            min_step = max(6.0, cur_font_size * 0.65)
+            max_step = min(120.0, cur_font_size * 1.35)
+            clamped_font_size = max(min_step, min(max_step, target_font_size))
+            if abs(clamped_font_size - cur_font_size) > 0.2:
+                params.append(('font_size', float(clamped_font_size)))
+                if abs(clamped_font_size - target_font_size) > 0.2:
+                    (smart.actions or []).append(self.tr('font-size-clamped'))
             if smart.letter_spacing != getattr(fmt, 'letter_spacing', smart.letter_spacing):
                 params.append(('letter_spacing', float(smart.letter_spacing)))
             if smart.line_spacing != getattr(fmt, 'line_spacing', smart.line_spacing):
@@ -1076,7 +1084,7 @@ class FontFormatPanel(Widget):
             canvas = getattr(SW, 'canvas', None)
             if canvas is not None:
                 canvas.setProjSaveState(True)
-            self.letteringDiagnosticsLabel.setText(self.tr("Applied diagnostics fixes: {0}").format(', '.join((cleanup.actions or []) + (smart.actions or [])) or self.tr('none')))
+            self.letteringDiagnosticsLabel.setText(self.tr("Applied diagnostics fixes: {0} · font {1:.1f}px→{2:.1f}px").format(', '.join((cleanup.actions or []) + (smart.actions or [])) or self.tr('none'), cur_font_size, float(getattr(fmt, 'font_size', cur_font_size) or cur_font_size)))
         except Exception as exc:
             self.letteringDiagnosticsLabel.setText(self.tr("Diagnostics fix failed: {0}").format(exc))
 

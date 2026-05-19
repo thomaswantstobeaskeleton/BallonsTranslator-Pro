@@ -156,7 +156,7 @@ class ModelManagerDialog(QDialog):
         # --- Download section ---
         download_group = QGroupBox(self.tr('Download models'))
         download_layout = QVBoxLayout(download_group)
-        desc = QLabel(self.tr('Select the models you want to download. Only modules with a predefined file list are listed.'))
+        desc = QLabel(self.tr('Select models to prepare. Modules that require first-use/on-load download are listed too (disabled here) so you can see full availability.'))
         desc.setWordWrap(True)
         download_layout.addWidget(desc)
         btn_row = QHBoxLayout()
@@ -203,8 +203,6 @@ class ModelManagerDialog(QDialog):
         row, col = 0, 0
         max_cols = 3
         for mod in self._module_infos:
-            if not mod['can_download']:
-                continue
             cb = QCheckBox(mod['display_name'])
             meta = mod.get('manifest_meta') or {}
             tooltip_bits = []
@@ -218,6 +216,12 @@ class ModelManagerDialog(QDialog):
             if tooltip_bits:
                 cb.setToolTip('\n'.join(tooltip_bits))
             cb.setToolTip(self._build_module_tooltip(mod))
+            if not mod.get('can_download', False):
+                cb.setEnabled(False)
+                reason = self.tr('Managed on first use (no explicit file list)')
+                if mod.get('download_mode') == 'no_download_list':
+                    reason = self.tr('No built-in downloader (install dependencies/model manually)')
+                cb.setToolTip((cb.toolTip() + '\n' if cb.toolTip() else '') + reason)
             cb.setProperty('module_info', mod)
             self.downloadCheckboxLayout.addWidget(cb, row, col)
             self._check_boxes.append(cb)

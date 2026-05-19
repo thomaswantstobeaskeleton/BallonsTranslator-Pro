@@ -699,6 +699,34 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         self.vlayout.addWidget(self.tertiary_params_container)
         self._update_tertiary_params_visibility()
 
+        # Collision-based post-merge (word-level OCR cleanup)
+        self.merge_nearby_blocks_checker = QCheckBox(self.tr('Merge nearby detected blocks (word-level cleanup)'))
+        self.merge_nearby_blocks_checker.setToolTip(self.tr(
+            'When enabled, nearby text boxes can be merged after detection to fix word-level fragmentation. '
+            'Recommended when one bubble is split into many tiny boxes.'))
+        self.merge_nearby_blocks_checker.setChecked(bool(getattr(pcfg.module, 'merge_nearby_blocks_collision', False)))
+        self.merge_nearby_blocks_checker.clicked.connect(self._on_merge_nearby_blocks_changed)
+        merge_hl = QHBoxLayout()
+        merge_hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        merge_hl.addWidget(self.merge_nearby_blocks_checker)
+        merge_hl.addWidget(QLabel(self.tr('Min blocks:')))
+        self.merge_nearby_min_blocks_spinbox = QSpinBox()
+        self.merge_nearby_min_blocks_spinbox.setRange(4, 200)
+        self.merge_nearby_min_blocks_spinbox.setValue(int(getattr(pcfg.module, 'merge_nearby_blocks_min_blocks', 18) or 18))
+        self.merge_nearby_min_blocks_spinbox.setToolTip(self.tr('Only run merge when at least this many boxes are detected on a page.'))
+        self.merge_nearby_min_blocks_spinbox.valueChanged.connect(self._on_merge_nearby_min_blocks_changed)
+        merge_hl.addWidget(self.merge_nearby_min_blocks_spinbox)
+        merge_hl.addWidget(QLabel(self.tr('Gap ratio:')))
+        self.merge_nearby_gap_ratio_spinbox = QDoubleSpinBox()
+        self.merge_nearby_gap_ratio_spinbox.setRange(0.5, 4.0)
+        self.merge_nearby_gap_ratio_spinbox.setSingleStep(0.1)
+        self.merge_nearby_gap_ratio_spinbox.setDecimals(2)
+        self.merge_nearby_gap_ratio_spinbox.setValue(float(getattr(pcfg.module, 'merge_nearby_blocks_gap_ratio', 1.5) or 1.5))
+        self.merge_nearby_gap_ratio_spinbox.setToolTip(self.tr('Higher values merge more aggressively across nearby boxes.'))
+        self.merge_nearby_gap_ratio_spinbox.valueChanged.connect(self._on_merge_nearby_gap_ratio_changed)
+        merge_hl.addWidget(self.merge_nearby_gap_ratio_spinbox)
+        self.vlayout.addLayout(merge_hl)
+
     def _on_dual_detect_changed(self):
         pcfg.module.enable_dual_detect = self.dual_detect_checker.isChecked()
         self._update_secondary_params_visibility()
@@ -723,9 +751,11 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         pcfg.module.enable_tertiary_detect = self.tertiary_detect_checker.isChecked()
         self._update_tertiary_params_visibility()
 
+
     def _on_tertiary_detector_changed(self, name: str):
         pcfg.module.textdetector_tertiary = (name or '').strip()
         self._update_tertiary_params_visibility()
+
 
     def _update_tertiary_params_visibility(self):
         ter_enabled = self.tertiary_detect_checker.isChecked()
@@ -756,6 +786,17 @@ class TextDetectConfigPanel(ModuleConfigParseWidget):
         self.tertiary_params_layout.addWidget(widget)
         widget.show()
         self.tertiary_visible_widget = widget
+
+
+    def _on_merge_nearby_blocks_changed(self):
+        enabled = self.merge_nearby_blocks_checker.isChecked()
+        pcfg.module.merge_nearby_blocks_collision = enabled
+
+    def _on_merge_nearby_min_blocks_changed(self, value: int):
+        pcfg.module.merge_nearby_blocks_min_blocks = int(value)
+
+    def _on_merge_nearby_gap_ratio_changed(self, value: float):
+        pcfg.module.merge_nearby_blocks_gap_ratio = float(value)
 
     def _on_tertiary_param_edited(self, param_key: str, param_content: dict):
         ter_name = (self.tertiary_detector_combobox.currentText() or '').strip()

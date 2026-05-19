@@ -215,6 +215,7 @@ def get_all_downloadable_modules() -> List[Dict[str, Any]]:
                 "description": description,
                 "module_class": module_class,
                 "can_download": can_download,
+                "download_mode": "explicit" if can_download else ("on_load" if on_load else "no_download_list"),
                 "manifest_meta": manifest_meta,
                 "estimated_download_size_bytes": dl_meta["estimated_download_size_bytes"],
                 "target_paths": dl_meta["target_paths"],
