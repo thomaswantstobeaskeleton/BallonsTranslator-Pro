@@ -794,6 +794,10 @@ class TitleBar(Widget):
         projectMenu.addAction(translationQaAction)
         projectMenu.addAction(ocrTriageAction)
         projectMenu.addAction(autoExtractGlossaryAction)
+        batchFindReplaceAction = QAction(self.tr('Batch find/replace translations...'), self)
+        batchFindReplaceAction.setToolTip(self.tr('Preview regex find/replace across project translations before applying.'))
+        self.batch_find_replace_trigger = batchFindReplaceAction.triggered
+        projectMenu.addAction(batchFindReplaceAction)
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)
@@ -809,6 +813,30 @@ class TitleBar(Widget):
         svgTextHandoffAction.setToolTip(self.tr('Export current page as an SVG with editable translated text elements for vector editors.'))
         self.export_svg_text_handoff_trigger = svgTextHandoffAction.triggered
         exportMenuTools.addAction(svgTextHandoffAction)
+        exportTransCsvAction = QAction(self.tr('Export translation CSV...'), self)
+        exportTransCsvAction.setToolTip(self.tr('Export source/translation rows as CSV for spreadsheet and CAT workflows.'))
+        self.export_translation_csv_trigger = exportTransCsvAction.triggered
+        exportMenuTools.addAction(exportTransCsvAction)
+        importTransCsvAction = QAction(self.tr('Import translation CSV...'), self)
+        importTransCsvAction.setToolTip(self.tr('Import translation CSV by page + stable block ID with index fallback.'))
+        self.import_translation_csv_trigger = importTransCsvAction.triggered
+        exportMenuTools.addAction(importTransCsvAction)
+        exportTransJsonAction = QAction(self.tr('Export translation JSON...'), self)
+        exportTransJsonAction.setToolTip(self.tr('Export source/translation with stable block IDs for external translation workflows.'))
+        self.export_translation_json_trigger = exportTransJsonAction.triggered
+        exportMenuTools.addAction(exportTransJsonAction)
+        importTransJsonAction = QAction(self.tr('Import translation JSON...'), self)
+        importTransJsonAction.setToolTip(self.tr('Import translation JSON back by page and stable block ID (with index fallback).'))
+        self.import_translation_json_trigger = importTransJsonAction.triggered
+        exportMenuTools.addAction(importTransJsonAction)
+        exportXliffAction = QAction(self.tr('Export XLIFF...'), self)
+        exportXliffAction.setToolTip(self.tr('Export source/translation blocks in XLIFF 1.2 for CAT-tool workflows.'))
+        self.export_xliff_trigger = exportXliffAction.triggered
+        exportMenuTools.addAction(exportXliffAction)
+        importXliffAction = QAction(self.tr('Import XLIFF...'), self)
+        importXliffAction.setToolTip(self.tr('Import translated XLIFF back into current project by page and block index.'))
+        self.import_xliff_trigger = importXliffAction.triggered
+        exportMenuTools.addAction(importXliffAction)
         structuredOcrExportAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'structured_ocr_export.svg')), self.tr('Export structured OCR JSON...'), self)
         structuredOcrExportAction.setToolTip(self.tr('Export page/block geometry, OCR text, translations, completion state, and font hints as JSON for LLM/tooling workflows.'))
         self.export_structured_ocr_trigger = structuredOcrExportAction.triggered

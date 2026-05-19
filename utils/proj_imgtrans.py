@@ -109,6 +109,7 @@ class ProjImgTrans:
         self.mask_array: np.ndarray = None
         self.inpainted_array: np.ndarray = None
         self.translation_glossary: List[Dict[str, str]] = []  # [{"source": "...", "target": "..."}]
+        self.translation_memory: List[Dict[str, str]] = []  # [{source,target,page,block_id}]
         self.series_context_path: str = ""  # Folder or ID for cross-chapter consistency (e.g. urban_immortal_cultivator)
         self.run_profiles: Dict[str, Dict] = {}  # project-local snapshots of selected run/module settings
         if directory is not None:
@@ -188,6 +189,7 @@ class ProjImgTrans:
             self._image_info = {}
 
         self.translation_glossary = proj_dict.get('translation_glossary') or []
+        self.translation_memory = proj_dict.get('translation_memory') or []
 
         self.series_context_path = (proj_dict.get('series_context_path') or "").strip()
         self.run_profiles = proj_dict.get('run_profiles') or {}
@@ -411,6 +413,8 @@ class ProjImgTrans:
         }
         if getattr(self, 'translation_glossary', None):
             out['translation_glossary'] = self.translation_glossary
+        if getattr(self, 'translation_memory', None):
+            out['translation_memory'] = self.translation_memory
         if getattr(self, 'series_context_path', None):
             out['series_context_path'] = self.series_context_path
         if getattr(self, 'run_profiles', None):

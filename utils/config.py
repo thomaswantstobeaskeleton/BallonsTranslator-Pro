@@ -9,6 +9,8 @@ from . import shared
 from .fontformat import FontFormat
 from .structures import List, Dict, Config, field, nested_dataclass
 from .logger import logger as LOGGER
+from utils.credential_store import has_keyring, set_secret
+from utils.secret_migration import migrate_secrets_to_keyring_if_possible, scrub_plaintext_secrets_for_save
 from .io_utils import json_dump_nested_obj, np, serialize_np
 
 class RunStatus:
@@ -341,6 +343,8 @@ class ModuleConfig(Config):
     automation_api_enabled: bool = False
     automation_api_port: int = 39542
     automation_api_key: str = ""
+    credential_use_plaintext_fallback: bool = False
+    credential_migration_done: bool = False
     automation_api_job_history_limit: int = 200
     automation_api_job_log_limit: int = 200
     user_replace_profiles: Dict = field(default_factory=dict)
@@ -723,9 +727,9 @@ CONFIG_KEY_ORDER = (
     "darkmode", "bubbly_ui", "accent_color_hex", "app_font_family", "app_font_size", "use_custom_cursor", "custom_cursor_path", "textselect_mini_menu", "fold_textarea", "show_source_text", "show_trans_text",
     "saladict_shortcut", "search_url", "ocr_sublist", "restore_ocr_empty", "pre_mt_sublist", "mt_sublist",
     "display_lang", "imgsave_quality", "imgsave_webp_lossless", "imgsave_ext", "intermediate_imgsave_ext",
-    "enable_glossary_enforcement", "llm_glossary_map", "enable_back_translation_qa", "back_translation_drift_threshold", "llm_token_budget",
+    "enable_glossary_enforcement", "llm_glossary_map", "enable_back_translation_qa", "back_translation_drift_threshold", "translation_prompt_profile_default", "translation_qa_retry_issue_threshold", "llm_token_budget",
     "enable_text_normalization", "text_normalization_profile",
-    "runtime_http_timeout_sec", "runtime_http_retries", "data_path_override", "automation_api_enabled", "automation_api_port", "automation_api_key", "automation_api_job_history_limit", "automation_api_job_log_limit",
+    "runtime_http_timeout_sec", "runtime_http_retries", "data_path_override", "automation_api_enabled", "automation_api_port", "automation_api_key", "credential_use_plaintext_fallback", "credential_migration_done", "automation_api_job_history_limit", "automation_api_job_log_limit",
     "user_replace_profiles",
     "vertical_cjk_rotate_latin", "vertical_cjk_punctuation_hang",
     "pipeline_retry_detect", "pipeline_retry_ocr", "pipeline_retry_translate", "pipeline_retry_inpaint",
@@ -851,6 +855,7 @@ def load_config(config_path: str = shared.CONFIG_PATH):
                 op['nemotron_parse'] = op.pop('nemotron_ocr')
             else:
                 op.pop('nemotron_ocr', None)
+    migrate_secrets_to_keyring_if_possible(pcfg, has_keyring=has_keyring, set_secret=set_secret)
     # Section 9: clamp numeric settings
     try:
         from utils.validation import clamp_settings
@@ -999,6 +1004,8 @@ def flush_config_save() -> bool:
     if pending:
         return bool(save_config(force=True))
     return False
+
+
 
 
 def save_config(force: bool = False):

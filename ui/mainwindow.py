@@ -16,7 +16,7 @@ from urllib import request as urlrequest
 from urllib import error as urlerror
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QPushButton
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap, QBrush, QColor
 
@@ -25,6 +25,8 @@ from utils.text_processing import is_cjk, full_len, half_len
 from utils.detect_layout_flags import should_enable_auto_textlayout, should_run_post_detect_autofit
 from utils.text_layout import _merge_stub_lines_in_string
 from utils.textblock import TextBlock, TextAlignment, examine_textblk
+from utils.credential_store import get_secret, set_secret, has_keyring
+from utils.provider_setup import check_provider_connection, provider_endpoint_preset
 from utils.split_text_region import split_textblock
 from utils import shared
 from utils.message import create_error_dialog, create_info_dialog
@@ -73,12 +75,19 @@ from .lettering_workflow_dialog import LetteringWorkflowDialog
 from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
+from utils.xliff_interchange import export_project_xliff, import_project_xliff
+from utils.translation_json_interchange import export_translation_json, import_translation_json
+from utils.translation_csv_interchange import export_translation_csv_text, import_translation_csv_text
+from utils.translation_memory import query_tm, add_tm_entry, build_tm_from_project, export_tm_payload, import_tm_payload
+from utils.translation_qa_profiles import build_translation_qa_report, PROMPT_PROFILES
+from utils.batch_find_replace import preview_batch_find_replace, apply_batch_find_replace
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
 from utils.lettering_proof_export import build_lettering_proof_pack
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.automation_api_contract import normalize_job_task
+from utils.automation_jobs import new_job, append_log, add_warning, set_status, checkpoint_or_cancel, status_payload
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
@@ -894,6 +903,20 @@ class MainWindow(mainwindow_cls):
             'project_status': self._api_project_status,
             'pipeline_presets': self._api_pipeline_presets,
             'export_structured_ocr': self._api_export_structured_ocr,
+            'export_xliff': self._api_export_xliff,
+            'import_xliff': self._api_import_xliff,
+            'export_translation_json': self._api_export_translation_json,
+            'import_translation_json': self._api_import_translation_json,
+            'export_translation_csv': self._api_export_translation_csv,
+            'import_translation_csv': self._api_import_translation_csv,
+            'tm_query': self._api_tm_query,
+            'tm_build_from_project': self._api_tm_build_from_project,
+            'tm_export': self._api_tm_export,
+            'tm_import': self._api_tm_import,
+            'translation_qa_report': self._api_translation_qa_report,
+            'translation_prompt_profiles': self._api_translation_prompt_profiles,
+            'batch_find_replace_preview': self._api_batch_find_replace_preview,
+            'batch_find_replace_apply': self._api_batch_find_replace_apply,
             'render_current_page': self._api_render_current_page,
             'list_rendering_issues': self._api_list_rendering_issues,
             'apply_rendering_preset': self._api_apply_rendering_preset,
@@ -955,12 +978,7 @@ class MainWindow(mainwindow_cls):
         task = normalize_job_task(str((body or {}).get('task', '') or ''))
         payload = dict((body or {}).get('payload') or {})
         job_id = f"job_{int(time.time() * 1000)}_{threading.get_ident()}"
-        job = {
-            'job_id': job_id, 'task': task, 'status': 'queued',
-            'warnings': [], 'logs': [f'created task={task}'],
-            'created_at': time.time(), 'updated_at': time.time(),
-            'result': None, 'cancel_requested': False,
-        }
+        job = new_job(job_id, task)
         with self._api_jobs_lock:
             self._api_jobs[job_id] = job
             self._trim_api_jobs_locked()
@@ -971,14 +989,18 @@ class MainWindow(mainwindow_cls):
                 if j is None:
                     return
                 if j.get('cancel_requested'):
-                    j['status'] = 'cancelled'
-                    j['updated_at'] = time.time()
-                    self._append_api_job_log_locked(j, 'cancelled before start')
+                    set_status(j, 'cancelled', stage='cancelled:before_start', progress=0.0)
+                    append_log(j, 'cancelled before start')
                     return
-                j['status'] = 'running'
-                j['updated_at'] = time.time()
-                self._append_api_job_log_locked(j, 'started')
+                set_status(j, 'running', stage='starting', progress=0.02)
+                append_log(j, 'started')
             try:
+                with self._api_jobs_lock:
+                    j = self._api_jobs.get(job_id)
+                    if j is None:
+                        return
+                    if checkpoint_or_cancel(j, 'dispatch', 0.08):
+                        return
                 if task == 'run_pipeline':
                     rst = self._api_run_pipeline(payload)
                 elif task == 'render_page':
@@ -993,19 +1015,20 @@ class MainWindow(mainwindow_cls):
                     j = self._api_jobs.get(job_id)
                     if j is None:
                         return
-                    self._append_api_job_log_locked(j, 'finished')
+                    if j.get('cancel_requested'):
+                        set_status(j, 'cancelled', stage='cancelled:completed_with_cancel_request', progress=1.0)
+                    else:
+                        set_status(j, 'succeeded', stage='completed', progress=1.0)
+                    append_log(j, 'finished')
                     j['result'] = rst
-                    j['status'] = 'cancelled' if j.get('cancel_requested') else 'succeeded'
-                    j['updated_at'] = time.time()
             except Exception as e:
                 with self._api_jobs_lock:
                     j = self._api_jobs.get(job_id)
                     if j is None:
                         return
-                    j['status'] = 'failed'
-                    j['warnings'].append(str(e))
-                    j['updated_at'] = time.time()
-                    self._append_api_job_log_locked(j, f'failed: {e}')
+                    set_status(j, 'failed', stage='failed')
+                    add_warning(j, str(e))
+                    append_log(j, f'failed: {e}')
 
         threading.Thread(target=_runner, daemon=True).start()
         return {'ok': True, 'job_id': job_id, 'status': 'queued', 'task': task}
@@ -1018,16 +1041,7 @@ class MainWindow(mainwindow_cls):
             job = self._api_jobs.get(job_id)
             if job is None:
                 raise ValueError('unknown job_id')
-            return {
-                'job_id': job['job_id'],
-                'task': job['task'],
-                'status': job['status'],
-                'warnings': list(job.get('warnings', [])),
-                'cancel_requested': bool(job.get('cancel_requested', False)),
-                'created_at': float(job.get('created_at', 0.0)),
-                'updated_at': float(job.get('updated_at', 0.0)),
-                'has_result': job.get('result') is not None,
-            }
+            return status_payload(job)
 
     def _api_job_cancel(self, body: dict):
         job_id = str((body or {}).get('job_id', '') or '').strip()
@@ -1054,9 +1068,14 @@ class MainWindow(mainwindow_cls):
             job = self._api_jobs.get(job_id)
             if job is None:
                 raise ValueError('unknown job_id')
+            offset = int((body or {}).get('offset', 0) or 0)
+            logs = list(job.get('logs', []))
+            offset = max(0, min(offset, len(logs)))
             return {
                 'job_id': job_id,
-                'logs': list(job.get('logs', [])),
+                'offset': offset,
+                'next_offset': len(logs),
+                'logs': logs[offset:],
                 'warnings': list(job.get('warnings', [])),
             }
 
@@ -1088,11 +1107,8 @@ class MainWindow(mainwindow_cls):
             return {'jobs': out, 'count': len(out)}
 
     def _append_api_job_log_locked(self, job: dict, text: str):
-        logs = job.setdefault('logs', [])
-        logs.append(str(text))
         lim = int(getattr(pcfg, 'automation_api_job_log_limit', 200) or 200)
-        if lim > 0 and len(logs) > lim:
-            del logs[0:len(logs)-lim]
+        append_log(job, text, limit=lim)
 
     def _trim_api_jobs_locked(self):
         lim = int(getattr(pcfg, 'automation_api_job_history_limit', 200) or 200)
@@ -1154,48 +1170,76 @@ class MainWindow(mainwindow_cls):
         return self._api_call_ui(self._api_apply_edit_ui, body)
 
     def _api_apply_edit_ui(self, body: dict):
-        from utils.api_edit_ops import validate_batch_payload, EditValidationError
+        from utils.api_edit_ops import (
+            validate_batch_payload,
+            EditValidationError,
+            find_block_index_by_stable_id,
+            describe_block_ref,
+        )
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
             raise ValueError('open a project first')
+        raw_body = body if isinstance(body, dict) else {}
+        strict = bool(raw_body.get('strict', True))
         try:
-            ops = validate_batch_payload(body if isinstance(body, dict) and "ops" in body else {"ops": [body or {}]})
+            ops = validate_batch_payload(raw_body if "ops" in raw_body else {"ops": [body or {}]})
         except EditValidationError as e:
             raise ValueError(f'edit_validation_failed: {e.to_payload()}')
         applied = []
-        for op in ops:
-            if op.op == "undo":
-                self.on_undo()
-                applied.append({"op": "undo", "ok": True})
-                continue
-            if op.op == "redo":
-                self.on_redo()
-                applied.append({"op": "redo", "ok": True})
-                continue
-            page = op.page or self.imgtrans_proj.current_img
-            blks = self.imgtrans_proj.pages.get(page, []) if page else []
-            if op.op == "update_textbox":
-                idx = int(op.index if op.index is not None else -1)
-                if idx < 0 or idx >= len(blks):
-                    raise ValueError(f'invalid index {idx} for page {page}')
-                blks[idx].translation = str(op.text or "")
-                applied.append({"op": "update_textbox", "page": page, "index": idx})
-            elif op.op == "delete_textbox":
-                idx = int(op.index if op.index is not None else -1)
-                if idx < 0 or idx >= len(blks):
-                    raise ValueError(f'invalid index {idx} for page {page}')
-                del blks[idx]
-                applied.append({"op": "delete_textbox", "page": page, "index": idx})
-            elif op.op == "add_textbox":
-                self.imgtrans_proj.current_img = page
-                self.shortcutCreateTextbox()
-                new_index = len(self.imgtrans_proj.pages.get(page, []) or []) - 1
-                if new_index >= 0:
-                    nb = self.imgtrans_proj.pages[page][new_index]
-                    nb.translation = str(op.text or "")
-                applied.append({"op": "add_textbox", "page": page, "index": new_index})
+        errors = []
+        for op_index, op in enumerate(ops):
+            try:
+                if op.op == "undo":
+                    self.on_undo()
+                    applied.append({"op": "undo", "ok": True})
+                    continue
+                if op.op == "redo":
+                    self.on_redo()
+                    applied.append({"op": "redo", "ok": True})
+                    continue
+                page = op.page or self.imgtrans_proj.current_img
+                blks = self.imgtrans_proj.pages.get(page, []) if page else []
+                if op.op == "update_textbox":
+                    if op.block_id:
+                        idx = find_block_index_by_stable_id(blks, op.block_id)
+                    else:
+                        idx = int(op.index if op.index is not None else -1)
+                    if idx < 0 or idx >= len(blks):
+                        raise EditValidationError("index_out_of_range", "invalid textbox index", {"page": page, "index": idx, "count": len(blks)})
+                    blks[idx].translation = str(op.text or "")
+                    applied.append({"op": "update_textbox", **describe_block_ref(page, idx, blks[idx])})
+                elif op.op == "delete_textbox":
+                    if op.block_id:
+                        idx = find_block_index_by_stable_id(blks, op.block_id)
+                    else:
+                        idx = int(op.index if op.index is not None else -1)
+                    if idx < 0 or idx >= len(blks):
+                        raise EditValidationError("index_out_of_range", "invalid textbox index", {"page": page, "index": idx, "count": len(blks)})
+                    removed = blks[idx]
+                    ref = describe_block_ref(page, idx, removed)
+                    del blks[idx]
+                    applied.append({"op": "delete_textbox", **ref})
+                elif op.op == "add_textbox":
+                    self.imgtrans_proj.current_img = page
+                    self.shortcutCreateTextbox()
+                    new_index = len(self.imgtrans_proj.pages.get(page, []) or []) - 1
+                    if new_index >= 0:
+                        nb = self.imgtrans_proj.pages[page][new_index]
+                        nb.translation = str(op.text or "")
+                        applied.append({"op": "add_textbox", **describe_block_ref(page, new_index, nb)})
+                    else:
+                        raise EditValidationError("add_failed", "failed to create textbox", {"page": page})
+            except EditValidationError as e:
+                errors.append({"op_index": op_index, "op": op.op, "error": e.to_payload()})
+                if strict:
+                    raise ValueError(f'edit_apply_failed: {errors[-1]}')
+            except Exception as e:
+                errors.append({"op_index": op_index, "op": op.op, "error": {"code": "apply_exception", "message": str(e)}})
+                if strict:
+                    raise ValueError(f'edit_apply_failed: {errors[-1]}')
         self.canvas.updateTextBlkList()
-        self.canvas.setProjSaveState(True)
-        return {'ok': True, 'applied': applied, 'count': len(applied)}
+        if applied:
+            self.canvas.setProjSaveState(True)
+        return {'ok': len(errors) == 0, 'applied': applied, 'errors': errors, 'count': len(applied)}
 
     def _api_undo(self, body: dict):
         return self._api_call_ui(self._api_undo_ui, body)
@@ -1264,6 +1308,12 @@ class MainWindow(mainwindow_cls):
             return self._api_render_current_page_ui(body)
         if kind in {'structured_ocr', 'ocr_json'}:
             return self._api_export_structured_ocr_ui(body)
+        if kind in {'xliff', 'xlf'}:
+            return self._api_export_xliff_ui(body)
+        if kind in {'translation_json', 'trans_json'}:
+            return self._api_export_translation_json_ui(body)
+        if kind in {'translation_csv', 'trans_csv', 'csv'}:
+            return self._api_export_translation_csv_ui(body)
         if kind in {'svg_handoff', 'svg_text', 'editable_svg'}:
             if not self.imgtrans_proj.current_img:
                 raise ValueError('select a page first')
@@ -1782,6 +1832,216 @@ class MainWindow(mainwindow_cls):
             self.imgtrans_proj.save()
         self.pipelineInsightsPanel.add_event('API', self.tr('Applied rendering preset {0} to {1} text boxes').format(preset_id, applied))
         return {'ok': True, 'page': page, 'preset': preset_id, 'applied': applied}
+
+
+    def _api_export_xliff(self, body: dict):
+        return self._api_call_ui(self._api_export_xliff_ui, body)
+
+    def _api_export_xliff_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            out_path = osp.join(self.imgtrans_proj.directory, 'translation_export.xliff')
+        xml_text = export_project_xliff(self.imgtrans_proj)
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(xml_text)
+        return {'ok': True, 'path': out_path, 'format': 'xliff'}
+
+    def _api_import_xliff(self, body: dict):
+        return self._api_call_ui(self._api_import_xliff_ui, body)
+
+    def _api_import_xliff_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        path = str((body or {}).get('path', '') or '').strip()
+        if not path or not osp.exists(path):
+            raise ValueError('path is required and must exist')
+        with open(path, 'r', encoding='utf-8') as f:
+            xml_text = f.read()
+        all_matched, match_rst = import_project_xliff(self.imgtrans_proj, xml_text)
+        self.canvas.updateTextBlkList()
+        self.canvas.setProjSaveState(True)
+        return {'ok': all_matched, 'match': match_rst, 'path': path}
+
+
+    def _api_export_translation_json(self, body: dict):
+        return self._api_call_ui(self._api_export_translation_json_ui, body)
+
+    def _api_export_translation_json_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            out_path = osp.join(self.imgtrans_proj.directory, 'translation_export.json')
+        payload = export_translation_json(self.imgtrans_proj)
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return {'ok': True, 'path': out_path, 'format': 'translation_json', 'pages': len(payload.get('pages', []))}
+
+    def _api_import_translation_json(self, body: dict):
+        return self._api_call_ui(self._api_import_translation_json_ui, body)
+
+    def _api_import_translation_json_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        path = str((body or {}).get('path', '') or '').strip()
+        if not path or not osp.exists(path):
+            raise ValueError('path is required and must exist')
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        all_matched, match_rst = import_translation_json(self.imgtrans_proj, payload if isinstance(payload, dict) else {})
+        self.canvas.updateTextBlkList()
+        self.canvas.setProjSaveState(True)
+        return {'ok': all_matched, 'path': path, 'match': match_rst}
+
+
+    def _api_export_translation_csv(self, body: dict):
+        return self._api_call_ui(self._api_export_translation_csv_ui, body)
+
+    def _api_export_translation_csv_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            out_path = osp.join(self.imgtrans_proj.directory, 'translation_export.csv')
+        csv_text = export_translation_csv_text(self.imgtrans_proj)
+        with open(out_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(csv_text)
+        return {'ok': True, 'path': out_path, 'format': 'translation_csv'}
+
+    def _api_import_translation_csv(self, body: dict):
+        return self._api_call_ui(self._api_import_translation_csv_ui, body)
+
+    def _api_import_translation_csv_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        path = str((body or {}).get('path', '') or '').strip()
+        if not path or not osp.exists(path):
+            raise ValueError('path is required and must exist')
+        with open(path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        all_matched, match_rst = import_translation_csv_text(self.imgtrans_proj, text)
+        self.canvas.updateTextBlkList()
+        self.canvas.setProjSaveState(True)
+        return {'ok': all_matched, 'path': path, 'match': match_rst}
+
+
+    def _api_tm_query(self, body: dict):
+        return self._api_call_ui(self._api_tm_query_ui, body)
+
+    def _api_tm_query_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        source = str((body or {}).get('source', '') or '')
+        min_score = float((body or {}).get('min_score', 0.65) or 0.65)
+        limit = int((body or {}).get('limit', 5) or 5)
+        store = list(getattr(self.imgtrans_proj, 'translation_memory', []) or [])
+        hits = query_tm(store, source, min_score=min_score, limit=limit)
+        return {'ok': True, 'hits': hits, 'count': len(hits)}
+
+    def _api_tm_build_from_project(self, body: dict):
+        return self._api_call_ui(self._api_tm_build_from_project_ui, body)
+
+    def _api_tm_build_from_project_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        self.imgtrans_proj.translation_memory = build_tm_from_project(self.imgtrans_proj)
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'entries': len(self.imgtrans_proj.translation_memory)}
+
+    def _api_tm_export(self, body: dict):
+        return self._api_call_ui(self._api_tm_export_ui, body)
+
+    def _api_tm_export_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            out_path = osp.join(self.imgtrans_proj.directory, 'translation_memory.json')
+        payload = export_tm_payload(list(getattr(self.imgtrans_proj, 'translation_memory', []) or []))
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return {'ok': True, 'path': out_path, 'entries': len(payload.get('entries', []))}
+
+    def _api_tm_import(self, body: dict):
+        return self._api_call_ui(self._api_tm_import_ui, body)
+
+    def _api_tm_import_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        path = str((body or {}).get('path', '') or '').strip()
+        if not path or not osp.exists(path):
+            raise ValueError('path is required and must exist')
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        imported = import_tm_payload(payload if isinstance(payload, dict) else {})
+        merge = bool((body or {}).get('merge', True))
+        if merge:
+            store = list(getattr(self.imgtrans_proj, 'translation_memory', []) or [])
+            for row in imported:
+                add_tm_entry(store, row.get('source', ''), row.get('target', ''), page=row.get('page', ''), block_id=row.get('block_id', ''))
+            self.imgtrans_proj.translation_memory = store
+        else:
+            self.imgtrans_proj.translation_memory = imported
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'entries': len(self.imgtrans_proj.translation_memory)}
+
+
+    def _api_translation_prompt_profiles(self, body: dict):
+        return {'ok': True, 'profiles': sorted(PROMPT_PROFILES.keys()), 'default': getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue')}
+
+    def _api_translation_qa_report(self, body: dict):
+        return self._api_call_ui(self._api_translation_qa_report_ui, body)
+
+    def _api_translation_qa_report_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        page = str((body or {}).get('page', '') or self.imgtrans_proj.current_img or '')
+        if not page:
+            raise ValueError('page is required')
+        blocks = list((self.imgtrans_proj.pages or {}).get(page, []) or [])
+        profile = str((body or {}).get('profile', '') or getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue') or 'dialogue')
+        retry_threshold = int((body or {}).get('retry_issue_threshold', getattr(pcfg.module, 'translation_qa_retry_issue_threshold', 2)) or 2)
+        glossary = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+        report = build_translation_qa_report(blocks, glossary, profile=profile, retry_issue_threshold=retry_threshold)
+        report['page'] = page
+        return {'ok': True, 'report': report}
+
+
+    def _api_batch_find_replace_preview(self, body: dict):
+        return self._api_call_ui(self._api_batch_find_replace_preview_ui, body)
+
+    def _api_batch_find_replace_preview_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pattern = str((body or {}).get('pattern', '') or '')
+        replacement = str((body or {}).get('replacement', '') or '')
+        use_regex = bool((body or {}).get('use_regex', True))
+        case_sensitive = bool((body or {}).get('case_sensitive', False))
+        pages = (body or {}).get('pages') or None
+        preview = preview_batch_find_replace(
+            self.imgtrans_proj, pattern, replacement,
+            use_regex=use_regex, case_sensitive=case_sensitive, target='translation', pages=pages
+        )
+        preview['pattern'] = pattern
+        preview['replacement'] = replacement
+        return {'ok': True, **preview}
+
+    def _api_batch_find_replace_apply(self, body: dict):
+        return self._api_call_ui(self._api_batch_find_replace_apply_ui, body)
+
+    def _api_batch_find_replace_apply_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        preview = (body or {}).get('preview')
+        if not isinstance(preview, dict):
+            preview = self._api_batch_find_replace_preview_ui(body)
+        changed, applied = apply_batch_find_replace(self.imgtrans_proj, preview)
+        if changed > 0:
+            self.canvas.updateTextBlkList()
+            self.canvas.setProjSaveState(True)
+        return {'ok': True, 'changed': changed, 'applied': applied, 'count': len(applied)}
 
     def _api_export_structured_ocr(self, body: dict):
         return self._api_call_ui(self._api_export_structured_ocr_ui, body)
@@ -2597,6 +2857,18 @@ class MainWindow(mainwindow_cls):
         self.titleBar.batch_export_as_trigger.connect(self.on_batch_export_as)
         self.titleBar.export_lptxt_trigger.connect(self.on_export_lptxt)
         self.titleBar.export_structured_ocr_trigger.connect(self.on_export_structured_ocr_json)
+        if hasattr(self.titleBar, "export_xliff_trigger"):
+            self.titleBar.export_xliff_trigger.connect(self.on_export_xliff)
+        if hasattr(self.titleBar, "import_xliff_trigger"):
+            self.titleBar.import_xliff_trigger.connect(self.on_import_xliff)
+        if hasattr(self.titleBar, "export_translation_json_trigger"):
+            self.titleBar.export_translation_json_trigger.connect(self.on_export_translation_json)
+        if hasattr(self.titleBar, "import_translation_json_trigger"):
+            self.titleBar.import_translation_json_trigger.connect(self.on_import_translation_json)
+        if hasattr(self.titleBar, "export_translation_csv_trigger"):
+            self.titleBar.export_translation_csv_trigger.connect(self.on_export_translation_csv)
+        if hasattr(self.titleBar, "import_translation_csv_trigger"):
+            self.titleBar.import_translation_csv_trigger.connect(self.on_import_translation_csv)
         if hasattr(self.titleBar, "export_layered_psd_handoff_trigger"):
             self.titleBar.export_layered_psd_handoff_trigger.connect(self.on_export_layered_psd_handoff)
         if hasattr(self.titleBar, "export_svg_text_handoff_trigger"):
@@ -2610,6 +2882,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.retry_models_trigger.connect(self.on_retry_model_downloads)
         self.titleBar.environment_doctor_trigger.connect(self.on_environment_doctor)
         self.titleBar.translation_qa_report_trigger.connect(self.on_translation_qa_report_current_page)
+        if hasattr(self.titleBar, "batch_find_replace_trigger"):
+            self.titleBar.batch_find_replace_trigger.connect(self.on_batch_find_replace_current_project)
         self.titleBar.ocr_triage_trigger.connect(self.on_open_ocr_triage_current_page)
         self.titleBar.auto_extract_glossary_trigger.connect(self.on_auto_extract_glossary_current_page)
         self.titleBar.save_run_profile_trigger.connect(self.on_save_run_profile_snapshot)
@@ -3356,7 +3630,19 @@ class MainWindow(mainwindow_cls):
         api_provider.addItems(["OpenAI", "Google", "Grok", "OpenRouter", "LLM Studio", "Ollama"])
         api_provider.setCurrentText(getattr(pcfg.module, "layout_review_api_provider", "OpenAI"))
 
-        api_key = QLineEdit(getattr(pcfg.module, "layout_review_api_key", ""), dlg)
+        endpoint_preset = QComboBox(dlg)
+        endpoint_preset.addItems([
+            self.tr("Auto (provider default)"),
+            self.tr("OpenAI Cloud"),
+            self.tr("OpenRouter"),
+            self.tr("Google Gemini (OpenAI-compatible)"),
+            self.tr("LM Studio (local)"),
+            self.tr("Ollama (local)"),
+        ])
+
+        _api_key_fallback = getattr(pcfg.module, "layout_review_api_key", "")
+        _api_key_loaded = get_secret("layout_review_api_key") or _api_key_fallback
+        api_key = QLineEdit(_api_key_loaded, dlg)
         api_key.setEchoMode(QLineEdit.EchoMode.Password)
 
         endpoint = QLineEdit(getattr(pcfg.module, "layout_review_api_endpoint", ""), dlg)
@@ -3407,6 +3693,8 @@ class MainWindow(mainwindow_cls):
         form.addRow("", use_translator)
         form.addRow(self.tr("API provider"), api_provider)
         form.addRow(self.tr("API key"), api_key)
+        cred_label = QLabel(self.tr("Credential backend: OS keyring") if has_keyring() else self.tr("Credential backend: config fallback"), dlg)
+        form.addRow("", cred_label)
         form.addRow(self.tr("Endpoint"), endpoint)
         form.addRow(self.tr("Override model"), override_model)
         form.addRow(self.tr("Model"), model_name)
@@ -3417,6 +3705,42 @@ class MainWindow(mainwindow_cls):
         form.addRow(self.tr("Screenshot max side"), screenshot_max_side)
         form.addRow(self.tr("Prompt"), prompt)
         form.addRow(self.tr("Extra params JSON"), extra_params)
+        form.addRow(self.tr("Endpoint preset"), endpoint_preset)
+        form.addRow("", btn_test_conn)
+        form.addRow("", conn_status)
+
+        conn_status = QLabel(self.tr("Connection: not tested"), dlg)
+        btn_test_conn = QPushButton(self.tr("Test connection"), dlg)
+
+        def _apply_endpoint_preset(label: str):
+            label = (label or "").strip()
+            provider_map = {
+                self.tr("OpenAI Cloud"): "OpenAI",
+                self.tr("OpenRouter"): "OpenRouter",
+                self.tr("Google Gemini (OpenAI-compatible)"): "Google",
+                self.tr("LM Studio (local)"): "LLM Studio",
+                self.tr("Ollama (local)"): "Ollama",
+            }
+            provider_name = provider_map.get(label, api_provider.currentText())
+            if provider_name and label != self.tr("Auto (provider default)"):
+                api_provider.setCurrentText(provider_name)
+                endpoint.setText(provider_endpoint_preset(provider_name) or endpoint.text())
+
+        endpoint_preset.currentTextChanged.connect(_apply_endpoint_preset)
+
+        def _test_conn():
+            rst = check_provider_connection(
+                provider=api_provider.currentText(),
+                endpoint=endpoint.text().strip(),
+                api_key=api_key.text().strip(),
+                timeout_sec=max(2.0, float(getattr(pcfg, "runtime_http_timeout_sec", 60.0))),
+            )
+            if rst.ok:
+                conn_status.setText(self.tr("Connection: OK ({0})").format(rst.detail or "ok"))
+            else:
+                conn_status.setText(self.tr("Connection: failed ({0})").format(rst.detail or str(rst.status_code)))
+
+        btn_test_conn.clicked.connect(_test_conn)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -3458,7 +3782,12 @@ class MainWindow(mainwindow_cls):
         pcfg.module.layout_review_provider = provider.currentText()
         pcfg.module.layout_review_use_translator_settings = use_translator.isChecked()
         pcfg.module.layout_review_api_provider = api_provider.currentText()
-        pcfg.module.layout_review_api_key = api_key.text().strip()
+        _layout_key = api_key.text().strip()
+        _saved_layout = set_secret("layout_review_api_key", _layout_key) if _layout_key else False
+        if _saved_layout and not bool(getattr(pcfg, "credential_use_plaintext_fallback", False)):
+            pcfg.module.layout_review_api_key = ""
+        else:
+            pcfg.module.layout_review_api_key = _layout_key
         pcfg.module.layout_review_api_endpoint = endpoint.text().strip()
         pcfg.module.layout_review_override_model = override_model.text().strip()
         pcfg.module.layout_review_model_name = model_name.text().strip()
@@ -3549,7 +3878,7 @@ class MainWindow(mainwindow_cls):
             extra.update(
                 {
                     "api_provider": getattr(pcfg.module, "layout_review_api_provider", "OpenAI"),
-                    "api_key": getattr(pcfg.module, "layout_review_api_key", ""),
+                    "api_key": (get_secret("layout_review_api_key") or getattr(pcfg.module, "layout_review_api_key", "")),
                     "api_base_url": getattr(pcfg.module, "layout_review_api_endpoint", ""),
                     "api_path": "/v1/chat/completions",
                     "override_model": getattr(pcfg.module, "layout_review_override_model", ""),
@@ -5868,6 +6197,146 @@ class MainWindow(mainwindow_cls):
             LOGGER.exception(e)
             create_error_dialog(e, self.tr('Layered PSD handoff export failed'))
 
+
+    def on_export_xliff(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        default_path = osp.join(self.imgtrans_proj.directory, 'translation_export.xliff')
+        savep = QFileDialog.getSaveFileName(self, self.tr('Export XLIFF'), default_path, self.tr('XLIFF (*.xliff *.xlf)'))
+        if not isinstance(savep, str):
+            savep = savep[0]
+        if not savep:
+            return
+        try:
+            with open(savep, 'w', encoding='utf-8') as f:
+                f.write(export_project_xliff(self.imgtrans_proj))
+            create_info_dialog(self.tr('XLIFF exported to: ') + savep)
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export XLIFF'))
+
+    def on_import_xliff(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Import'), self.tr('Open a project first.'))
+            return
+        dialog = QFileDialog()
+        selected_file = str(dialog.getOpenFileUrl(self.parent(), self.tr('Import XLIFF'), filter='*.xliff *.xlf')[0].toLocalFile())
+        if not osp.exists(selected_file):
+            return
+        try:
+            with open(selected_file, 'r', encoding='utf-8') as f:
+                xml_text = f.read()
+            all_matched, match_rst = import_project_xliff(self.imgtrans_proj, xml_text)
+            if self.imgtrans_proj.current_img in (match_rst.get('matched_pages') or set()):
+                self.canvas.clear_undostack(update_saved_step=True)
+                self.st_manager.updateSceneTextitems()
+            create_info_dialog(self.tr('XLIFF import done. Matched: {0}, Unmatched: {1}, Missing: {2}').format(len(match_rst.get('matched_pages') or []), len(match_rst.get('unmatched_pages') or []), len(match_rst.get('missing_pages') or [])))
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to import XLIFF'))
+
+
+    def on_export_translation_json(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        default_path = osp.join(self.imgtrans_proj.directory, 'translation_export.json')
+        savep = QFileDialog.getSaveFileName(self, self.tr('Export translation JSON'), default_path, self.tr('JSON (*.json)'))
+        if not isinstance(savep, str):
+            savep = savep[0]
+        if not savep:
+            return
+        try:
+            payload = export_translation_json(self.imgtrans_proj)
+            with open(savep, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            create_info_dialog(self.tr('Translation JSON exported to: ') + savep)
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export translation JSON'))
+
+    def on_import_translation_json(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Import'), self.tr('Open a project first.'))
+            return
+        dialog = QFileDialog()
+        selected_file = str(dialog.getOpenFileUrl(self.parent(), self.tr('Import translation JSON'), filter='*.json')[0].toLocalFile())
+        if not osp.exists(selected_file):
+            return
+        try:
+            with open(selected_file, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            all_matched, match_rst = import_translation_json(self.imgtrans_proj, payload if isinstance(payload, dict) else {})
+            if self.imgtrans_proj.current_img in (match_rst.get('matched_pages') or set()):
+                self.canvas.clear_undostack(update_saved_step=True)
+                self.st_manager.updateSceneTextitems()
+            create_info_dialog(self.tr('Translation JSON import done. Matched: {0}, Unmatched: {1}, Missing: {2}').format(len(match_rst.get('matched_pages') or []), len(match_rst.get('unmatched_pages') or []), len(match_rst.get('missing_pages') or [])))
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to import translation JSON'))
+
+
+    def on_export_translation_csv(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
+            return
+        default_path = osp.join(self.imgtrans_proj.directory, 'translation_export.csv')
+        savep = QFileDialog.getSaveFileName(self, self.tr('Export translation CSV'), default_path, self.tr('CSV (*.csv)'))
+        if not isinstance(savep, str):
+            savep = savep[0]
+        if not savep:
+            return
+        try:
+            with open(savep, 'w', encoding='utf-8', newline='') as f:
+                f.write(export_translation_csv_text(self.imgtrans_proj))
+            create_info_dialog(self.tr('Translation CSV exported to: ') + savep)
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export translation CSV'))
+
+    def on_import_translation_csv(self):
+        if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
+            QMessageBox.information(self, self.tr('Import'), self.tr('Open a project first.'))
+            return
+        dialog = QFileDialog()
+        selected_file = str(dialog.getOpenFileUrl(self.parent(), self.tr('Import translation CSV'), filter='*.csv')[0].toLocalFile())
+        if not osp.exists(selected_file):
+            return
+        try:
+            with open(selected_file, 'r', encoding='utf-8') as f:
+                text = f.read()
+            all_matched, match_rst = import_translation_csv_text(self.imgtrans_proj, text)
+            if self.imgtrans_proj.current_img in (match_rst.get('matched_pages') or set()):
+                self.canvas.clear_undostack(update_saved_step=True)
+                self.st_manager.updateSceneTextitems()
+            create_info_dialog(self.tr('Translation CSV import done. Matched: {0}, Unmatched: {1}, Missing: {2}').format(len(match_rst.get('matched_pages') or []), len(match_rst.get('unmatched_pages') or []), len(match_rst.get('missing_pages') or [])))
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to import translation CSV'))
+
+
+    def on_batch_find_replace_current_project(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            create_info_dialog({'title': self.tr('No project loaded'), 'text': self.tr('Open a project first.')})
+            return
+        pattern, ok = QInputDialog.getText(self, self.tr('Batch find/replace'), self.tr('Find (regex supported):'))
+        if not ok or not str(pattern).strip():
+            return
+        replacement, ok2 = QInputDialog.getText(self, self.tr('Batch find/replace'), self.tr('Replace with:'))
+        if not ok2:
+            return
+        preview = preview_batch_find_replace(self.imgtrans_proj, str(pattern), str(replacement), use_regex=True, case_sensitive=False, target='translation')
+        if preview.get('count', 0) <= 0:
+            create_info_dialog({'title': self.tr('Batch find/replace'), 'text': self.tr('No matches found.')})
+            return
+        sample = []
+        for hit in preview.get('hits', [])[:12]:
+            sample.append(f"{hit['page']}#{hit['index']+1}: {hit['before'][:36]} -> {hit['after'][:36]}")
+        msg = self.tr('Preview matches: {0}\nApply replacements?').format(preview.get('count', 0)) + '\n\n' + '\n'.join(sample)
+        yn = QMessageBox.question(self, self.tr('Batch find/replace preview'), msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if yn != QMessageBox.StandardButton.Yes:
+            return
+        changed, _applied = apply_batch_find_replace(self.imgtrans_proj, preview)
+        if changed > 0:
+            self.canvas.updateTextBlkList()
+            self.canvas.setProjSaveState(True)
+        create_info_dialog({'title': self.tr('Batch find/replace'), 'text': self.tr('Applied changes: {0}').format(changed)})
+
     def on_export_structured_ocr_json(self):
         if not self.imgtrans_proj or self.imgtrans_proj.is_empty:
             QMessageBox.information(self, self.tr('Export'), self.tr('Open a project first.'))
@@ -6778,22 +7247,22 @@ class MainWindow(mainwindow_cls):
         if self.imgtrans_proj is None or not getattr(self.imgtrans_proj, 'current_img', None):
             create_info_dialog({'title': self.tr('No page loaded'), 'text': self.tr('Open a project/page first.')})
             return
-        from utils.translation_review import extract_glossary_candidates, check_translation_guardrails
         page = self.imgtrans_proj.current_img
-        blks = self.imgtrans_proj.pages.get(page, []) or []
-        src_texts = [getattr(b, 'text', '') or '' for b in blks]
-        trans_texts = [getattr(b, 'translation', '') or '' for b in blks]
+        blocks = self.imgtrans_proj.pages.get(page, []) or []
         glossary = getattr(self.imgtrans_proj, 'translation_glossary', None) or []
-        issues = []
-        for i, b in enumerate(blks):
-            for issue in check_translation_guardrails(getattr(b, 'text', ''), getattr(b, 'translation', ''), glossary=glossary):
-                issues.append(f"#{i+1}: {issue}")
+        profile = getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue')
+        retry_threshold = int(getattr(pcfg.module, 'translation_qa_retry_issue_threshold', 2) or 2)
+        report = build_translation_qa_report(blocks, glossary, profile=profile, retry_issue_threshold=retry_threshold)
+        from utils.translation_review import extract_glossary_candidates
+        src_texts = [getattr(b, 'text', '') or '' for b in blocks]
+        trans_texts = [getattr(b, 'translation', '') or '' for b in blocks]
         candidates = extract_glossary_candidates(src_texts, trans_texts, min_freq=2)[:20]
-        empty_ocr = [str(i+1) for i,b in enumerate(blks) if not (getattr(b, 'text', '') or '').strip()]
-        lines = [self.tr('Page: ') + str(page), self.tr('Blocks: ') + str(len(blks))]
-        lines.append(self.tr('Likely OCR triage (empty source): ') + (', '.join(empty_ocr) if empty_ocr else self.tr('none')))
-        lines.append(self.tr('Guardrail issues: ') + str(len(issues)))
-        lines.extend(issues[:50])
+        lines = [self.tr('Page: ') + str(page), self.tr('Profile: ') + str(profile), self.tr('Blocks: ') + str(report['total_blocks'])]
+        lines.append(self.tr('Issue blocks: ') + str(report['issue_blocks']))
+        lines.append(self.tr('Retry candidates (>= issue threshold): ') + ', '.join(str(i+1) for i in report.get('retry_candidates', [])) if report.get('retry_candidates') else self.tr('none'))
+        for row in report.get('rows', [])[:80]:
+            for issue in row.get('issues', []):
+                lines.append(f"#{row['index']+1}: {issue}")
         if candidates:
             lines.append(self.tr('Glossary candidates (source -> target):'))
             lines.extend([f"- {c.get('source','')} -> {c.get('target','')}" for c in candidates])
