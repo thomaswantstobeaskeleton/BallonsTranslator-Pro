@@ -84,6 +84,14 @@ class OcrCropInspectorWidget(QWidget):
         self.text_lbl.setText(f"OCR: {getattr(b, 'text', '')}\nTranslation: {getattr(b, 'translation', '')}")
 
 
+    def _on_rerun_clicked(self):
+        row = self.listw.currentRow()
+        if row < 0 or row >= len(self._blks):
+            return
+        if callable(self._on_rerun):
+            self._on_rerun(row, self.engine_combo.currentText())
+
+
     def _on_compare_clicked(self):
         row = self.listw.currentRow()
         if row < 0 or row >= len(self._blks):
