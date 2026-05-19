@@ -19,6 +19,7 @@ import sys
 import os.path as osp
 from pathlib import Path
 from typing import List, Optional
+import json
 import logging
 
 # Run from project root
@@ -34,6 +35,7 @@ from utils.config import load_config, pcfg, RunStatus
 from utils.proj_imgtrans import ProjImgTrans
 from utils.textblock import examine_textblk, remove_contained_boxes, deduplicate_primary_boxes
 from utils.logger import logger as LOGGER
+from utils.headless_contract import HeadlessExitCode, HeadlessRunSummary
 from modules import (
     init_module_registries,
     TEXTDETECTORS,
@@ -185,7 +187,7 @@ def run_batch_pipeline(
     log.info("Batch finished: %s", proj.directory)
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Batch detect/OCR/translate/inpaint on project folder(s).")
     parser.add_argument("dirs", nargs="*", help="Project directory (folder of images).")
     parser.add_argument("--dir", "-d", action="append", default=[], dest="dirs_opt", help="Add project directory.")
@@ -195,18 +197,20 @@ def main() -> None:
     parser.add_argument("--no-translate", action="store_true", help="Skip translation.")
     parser.add_argument("--no-inpaint", action="store_true", help="Skip inpainting.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging.")
+    parser.add_argument("--summary-json", default="", help="Write headless run summary JSON to this path.")
     args = parser.parse_args()
 
     dirs = list(args.dirs) + list(args.dirs_opt or [])
     if not dirs:
-        parser.error("Provide at least one project directory (positional or --dir).")
+        print("error: Provide at least one project directory (positional or --dir).", file=sys.stderr)
+        return int(HeadlessExitCode.INPUT_ERROR)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
     if not osp.exists(args.config):
         LOGGER.error("Config not found: %s", args.config)
-        sys.exit(1)
+        return int(HeadlessExitCode.CONFIG_ERROR)
 
     load_config(args.config)
     init_module_registries()
@@ -227,25 +231,48 @@ def main() -> None:
             if m and hasattr(m, "load_model"):
                 m.load_model()
 
+    processed, skipped, failed = [], [], []
     for d in dirs:
         d = osp.abspath(d)
         if not osp.isdir(d):
             LOGGER.warning("Not a directory: %s", d)
+            skipped.append(d)
             continue
         LOGGER.info("Processing project: %s", d)
-        proj = ProjImgTrans(d)
-        run_batch_pipeline(
-            proj,
-            detector=detector,
-            ocr=ocr,
-            translator=translator,
-            inpainter=inpainter,
-            enable_detect=enable_detect,
-            enable_ocr=enable_ocr,
-            enable_translate=enable_translate,
-            enable_inpaint=enable_inpaint,
-        )
+        try:
+            proj = ProjImgTrans(d)
+            run_batch_pipeline(
+                proj,
+                detector=detector,
+                ocr=ocr,
+                translator=translator,
+                inpainter=inpainter,
+                enable_detect=enable_detect,
+                enable_ocr=enable_ocr,
+                enable_translate=enable_translate,
+                enable_inpaint=enable_inpaint,
+            )
+            processed.append(d)
+        except Exception as e:
+            LOGGER.error("Project failed: %s (%s)", d, e, exc_info=True)
+            failed.append(d)
+
+    summary = HeadlessRunSummary(
+        requested_dirs=[osp.abspath(x) for x in dirs],
+        processed_dirs=processed,
+        skipped_dirs=skipped,
+        failed_dirs=failed,
+    )
+    payload = summary.to_payload()
+    payload["exit_code"] = summary.exit_code()
+    LOGGER.info("Headless summary: %s", payload)
+    if args.summary_json:
+        out_path = osp.abspath(args.summary_json)
+        os.makedirs(osp.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    return summary.exit_code()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

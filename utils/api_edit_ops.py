@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Mapping
+import uuid
 
 
 @dataclass
@@ -19,6 +20,7 @@ class TextboxOperation:
     text: Optional[str] = None
     rect: Optional[List[float]] = None
     page: Optional[str] = None
+    block_id: Optional[str] = None
 
 
 def _as_int(value: Any, field_name: str) -> int:
@@ -36,9 +38,12 @@ def validate_textbox_operation(raw: Dict[str, Any]) -> TextboxOperation:
         raise EditValidationError("unsupported_operation", "unsupported operation", {"op": op})
     item = TextboxOperation(op=op, page=str(raw.get("page", "") or "").strip() or None)
     if op in {"update_textbox", "delete_textbox"}:
-        if "index" not in raw:
-            raise EditValidationError("missing_field", "index is required", {"field": "index", "op": op})
-        item.index = _as_int(raw.get("index"), "index")
+        if "index" in raw:
+            item.index = _as_int(raw.get("index"), "index")
+        elif "block_id" in raw and str(raw.get("block_id","")).strip():
+            item.block_id = str(raw.get("block_id", "")).strip()
+        else:
+            raise EditValidationError("missing_field", "index or block_id is required", {"field": "index|block_id", "op": op})
     if op == "update_textbox":
         if "text" not in raw:
             raise EditValidationError("missing_field", "text is required for update_textbox", {"field": "text"})
@@ -66,3 +71,43 @@ def validate_batch_payload(body: Dict[str, Any]) -> List[TextboxOperation]:
         except EditValidationError as e:
             raise EditValidationError(e.code, e.message, {**e.details, "op_index": i}) from e
     return out
+
+
+
+def ensure_block_stable_id(block: Any) -> str:
+    """Return a stable automation id for one textbox block.
+
+    IDs are persisted on the block object when possible so subsequent API calls
+    can target the same textbox even if list indexes move.
+    """
+    for key in ("api_block_id", "block_id", "id"):
+        try:
+            value = getattr(block, key, None)
+        except Exception:
+            value = None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    new_id = f"tbx_{uuid.uuid4().hex[:16]}"
+    try:
+        setattr(block, "api_block_id", new_id)
+    except Exception:
+        pass
+    return new_id
+
+
+def find_block_index_by_stable_id(blocks: List[Any], block_id: str) -> int:
+    target = str(block_id or "").strip()
+    if not target:
+        raise EditValidationError("missing_field", "block_id is required", {"field": "block_id"})
+    for idx, block in enumerate(blocks or []):
+        if ensure_block_stable_id(block) == target:
+            return idx
+    raise EditValidationError("not_found", "textbox not found", {"block_id": target})
+
+
+def describe_block_ref(page: str, index: int, block: Any) -> Dict[str, Any]:
+    return {
+        "page": str(page or ""),
+        "index": int(index),
+        "block_id": ensure_block_stable_id(block),
+    }
