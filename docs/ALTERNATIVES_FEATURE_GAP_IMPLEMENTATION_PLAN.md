@@ -1,6 +1,6 @@
 # Alternatives Feature Gap Implementation Plan
 
-Last updated: 2026-05-19 (Phase 0 baseline audit pass 2)
+Last updated: 2026-05-19 (Phase 0 baseline audit pass 3)
 
 This document is the safety baseline for closing gaps versus manga-image-translator, Koharu, ImageTrans, manga-translator-ui, and focused cleanup tools. The rule for every phase is: audit first, extend existing Pro systems, do not duplicate equivalent functionality, and do not remove existing Pro behavior.
 
@@ -33,13 +33,12 @@ Every implementation PR in this roadmap must verify:
 
 Commands executed for baseline verification:
 
-- `pytest -q tests/test_local_automation_api.py tests/test_local_automation_api_routes_contract.py tests/test_lettering_proof_export.py tests/test_export_manifest.py tests/test_project_ops_protocol.py tests/test_model_package_selector_dialog.py`
+- `pytest -q tests/test_local_automation_api.py tests/test_local_automation_api_routes_contract.py tests/test_lettering_proof_export.py tests/test_export_manifest.py tests/test_project_ops_protocol.py tests/test_batch_parent_queue.py tests/test_model_package_selector_dialog.py`
 
 Observed results:
 
-- Route discovery, proof-pack/export manifest, and project-ops protocol tests pass.
-- Model picker dialog tests currently fail in this environment because the qtpy widget stub used by the tests does not expose `QComboBox` during import (`ui/model_package_selector_dialog.py`).
-- No startup scripts or first-run behavior code was changed in this pass; failures are documented for follow-up in the next Phase 0/1 slice.
+- Route discovery, proof-pack/export manifest, project operation protocol, parent-batch save-state, and model-picker dialog tests all pass in this environment (`18 passed`).
+- No startup scripts or first-run behavior code was changed in this pass; verification remains required for future startup/model-manager slices.
 
 ## Phase 1 — Automation, headless, and MCP parity
 

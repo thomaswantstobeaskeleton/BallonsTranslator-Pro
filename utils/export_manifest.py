@@ -22,6 +22,7 @@ def build_export_manifest(
     pages = []
     for idx, (page_name, path) in enumerate(exported_paths or [], start=1):
         source_kind = str(export_sources.get(page_name, "rendered") or "rendered")
+        page_renderer = (options.get("page_renderers", {}) or {}).get(page_name, "")
         pages.append({
             "index": idx,
             "page": page_name,
@@ -31,6 +32,7 @@ def build_export_manifest(
             "source_kind": source_kind,
             "used_fallback_source": source_kind != "rendered",
             "completion_state": project.get_page_completion_state(page_name) if project is not None and hasattr(project, "get_page_completion_state") else "",
+            "renderer_used": str(page_renderer or (options.get("renderer", {}) or {}).get("default_renderer", "qt")),
         })
     renderer_info = options.get("renderer") or {}
     manifest = {
@@ -53,6 +55,8 @@ def build_export_manifest(
         manifest["warnings"].append(f"{fallback_count} page(s) used inpainted/original fallback sources because rendered results were missing.")
     if missing:
         manifest["warnings"].append(f"{len(missing)} page(s) had no rendered result/source at export time.")
+    if bool((options.get("requested_advanced_renderer", False))) and not bool(renderer_info.get("advanced_backend_available", False)):
+        manifest["warnings"].append("Advanced renderer was requested but optional shaping backend is unavailable; Qt fallback renderer was used.")
     return manifest
 
 

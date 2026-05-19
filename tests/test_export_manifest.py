@@ -68,3 +68,20 @@ def test_export_manifest_includes_renderer_info(tmp_path):
     project = Project()
     manifest = write_export_manifest(project, str(out), [("p1.png", str(page))], [], options={"renderer": {"default_renderer": "qt", "advanced_backend_available": False}})
     assert manifest["renderer"]["default_renderer"] == "qt"
+    assert manifest["pages"][0]["renderer_used"] == "qt"
+
+
+def test_export_manifest_warns_when_advanced_requested_but_unavailable(tmp_path):
+    out = tmp_path / "out"
+    page = out / "001.png"
+    out.mkdir()
+    page.write_bytes(b"x")
+    project = Project()
+    manifest = write_export_manifest(
+        project,
+        str(out),
+        [("p1.png", str(page))],
+        [],
+        options={"renderer": {"default_renderer": "qt", "advanced_backend_available": False}, "requested_advanced_renderer": True},
+    )
+    assert any("Advanced renderer was requested" in w for w in manifest["warnings"])

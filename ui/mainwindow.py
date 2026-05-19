@@ -72,6 +72,7 @@ from .project_ops_dialog import ProjectOpsDialog
 from .reading_order_editor_dialog import ReadingOrderEditorDialog
 from .layout_review_report_dialog import LayoutReviewReportDialog
 from .lettering_workflow_dialog import LetteringWorkflowDialog
+from .auto_format_qa_widget import AutoFormatQADialog
 from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
@@ -86,12 +87,16 @@ from utils.cleanup_only_workflow import run_cleanup_only_pages
 from utils.data_path_manager import describe_data_path, migrate_data_path
 from utils.server_mode_info import build_server_mode_info
 from utils.translated_image_alignment import align_translations_by_iou
-from utils.batch_parent_queue import enumerate_child_projects, save_parent_batch_state, load_parent_batch_state, update_parent_batch_status, next_pending_child
+from utils.batch_parent_queue import enumerate_child_projects, save_parent_batch_state, load_parent_batch_state, update_parent_batch_status, next_pending_child, summarize_parent_batch_state
 from utils.glossary_io import export_glossary_csv, import_glossary_csv, preview_glossary_merge
+from utils.sfx_dictionary import default_sfx_dictionary, query_sfx_dictionary, merge_sfx_entries, export_sfx_dictionary, import_sfx_dictionary
+from utils.glossary_extraction import extract_glossary_candidates
 from utils.batch_find_replace import preview_batch_find_replace, apply_batch_find_replace
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
 from utils.lettering_proof_export import build_lettering_proof_pack
+from utils.archive_stream_export import write_archive_streaming
+from utils.auto_format_qa import score_auto_format_candidates, summarize_auto_format_scores
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.automation_api_contract import normalize_job_task
@@ -927,16 +932,23 @@ class MainWindow(mainwindow_cls):
             'glossary_export': self._api_glossary_export,
             'glossary_import': self._api_glossary_import,
             'glossary_import_preview': self._api_glossary_import_preview,
+            'sfx_dictionary_query': self._api_sfx_dictionary_query,
+            'sfx_dictionary_import': self._api_sfx_dictionary_import,
+            'sfx_dictionary_export': self._api_sfx_dictionary_export,
+            'glossary_extract_candidates': self._api_glossary_extract_candidates,
+            'glossary_extract_apply': self._api_glossary_extract_apply,
             'ocr_rerun_block': self._api_ocr_rerun_block,
             'ocr_compare_block': self._api_ocr_compare_block,
             'ocr_apply_compare_choice': self._api_ocr_apply_compare_choice,
             'renderer_diagnostics': self._api_renderer_diagnostics,
+            'renderer_backend_probe': self._api_renderer_diagnostics,
             'cleanup_only': self._api_cleanup_only,
             'batch_parent_enumerate': self._api_batch_parent_enumerate,
             'batch_parent_save_state': self._api_batch_parent_save_state,
             'batch_parent_load_state': self._api_batch_parent_load_state,
             'batch_parent_update_status': self._api_batch_parent_update_status,
             'batch_parent_next_pending': self._api_batch_parent_next_pending,
+            'batch_parent_summary': self._api_batch_parent_summary,
             'data_path_status': self._api_data_path_status,
             'data_path_migrate': self._api_data_path_migrate,
             'server_mode_info': self._api_server_mode_info,
@@ -949,6 +961,8 @@ class MainWindow(mainwindow_cls):
             'rendering_presets': self._api_rendering_presets,
             'fix_rendering_issues': self._api_fix_rendering_issues,
             'smart_fit_textboxes': self._api_smart_fit_textboxes,
+            'auto_format_textboxes': self._api_auto_format_textboxes,
+            'auto_format_qa_preview': self._api_auto_format_qa_preview,
             'atomic_bubble_fit': self._api_atomic_bubble_fit,
             'polish_typography': self._api_polish_typography,
             'export_rendering_qa': self._api_export_rendering_qa,
@@ -1003,7 +1017,7 @@ class MainWindow(mainwindow_cls):
     def _api_job_start(self, body: dict):
         task = normalize_job_task(str((body or {}).get('task', '') or ''))
         payload = dict((body or {}).get('payload') or {})
-        job_id = f"job_{int(time.time() * 1000)}_{threading.get_ident()}"
+        payload['__job_id'] = job_id = f"job_{int(time.time() * 1000)}_{threading.get_ident()}"
         job = new_job(job_id, task)
         with self._api_jobs_lock:
             self._api_jobs[job_id] = job
@@ -1289,6 +1303,16 @@ class MainWindow(mainwindow_cls):
         nxt = next_pending_child(payload)
         return {'ok': True, 'state_path': state_path, 'next_pending': nxt, 'has_pending': nxt is not None}
 
+    def _api_batch_parent_summary(self, body: dict):
+        return self._api_call_ui(self._api_batch_parent_summary_ui, body)
+
+    def _api_batch_parent_summary_ui(self, body: dict):
+        state_path = str((body or {}).get('state_path', '') or '').strip()
+        if not state_path:
+            raise ValueError('state_path is required')
+        payload = load_parent_batch_state(state_path)
+        return {'ok': True, 'state_path': state_path, 'summary': summarize_parent_batch_state(payload)}
+
     def _api_server_mode_info(self, body: dict):
         return self._api_call_ui(self._api_server_mode_info_ui, body)
 
@@ -1468,7 +1492,7 @@ class MainWindow(mainwindow_cls):
             self.pipelineInsightsPanel.add_event('API', self.tr('Batch export via API: {0} page(s)').format(result.get('exported', 0)))
             return {'ok': True, **(result or {})}
         if kind in {'archive', 'zip', 'cbz'}:
-            import tempfile, zipfile
+            import tempfile
             archive_format = 'cbz' if kind == 'cbz' or str((body or {}).get('archive_format', '')).lower() == 'cbz' else 'zip'
             archive_path = str((body or {}).get('archive_path', '') or '').strip()
             out_dir = str((body or {}).get('out_dir', '') or '').strip()
@@ -1487,13 +1511,31 @@ class MainWindow(mainwindow_cls):
             if not archive_path:
                 archive_path = osp.join(self.imgtrans_proj.directory, 'exports', ('exported.cbz' if archive_format == 'cbz' else 'exported.zip'))
             os.makedirs(osp.dirname(archive_path), exist_ok=True)
-            with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for root, _dirs, files in os.walk(out_dir):
-                    for fn in sorted(files):
-                        fp = osp.join(root, fn)
-                        zf.write(fp, osp.relpath(fp, out_dir))
+            job_id = str((body or {}).get('__job_id', '') or '').strip()
+
+            def _cancel_check() -> bool:
+                if not job_id:
+                    return False
+                with self._api_jobs_lock:
+                    j = self._api_jobs.get(job_id)
+                    return bool(j and j.get('cancel_requested'))
+
+            def _progress_hook(ev: dict):
+                if not job_id:
+                    return
+                with self._api_jobs_lock:
+                    j = self._api_jobs.get(job_id)
+                    if not j:
+                        return
+                    p = float((ev or {}).get('progress', 0.0) or 0.0)
+                    set_status(j, 'running', stage='archive_stream', progress=min(0.99, 0.45 + p * 0.5))
+                    append_log(j, f"archive {int((ev or {}).get('index', 0))}/{int((ev or {}).get('total', 0))}: {(ev or {}).get('relative_path', '')}")
+
+            stream_result = write_archive_streaming(out_dir, archive_path, cancel_check=_cancel_check if job_id else None, progress_hook=_progress_hook if job_id else None)
             self.pipelineInsightsPanel.add_event('API', self.tr('Archive export via API: {0}').format(archive_path))
-            return {'ok': True, 'archive_path': archive_path, 'archive_format': archive_format, **(result or {})}
+            if stream_result.get('cancelled'):
+                return {'ok': False, 'archive_path': archive_path, 'archive_format': archive_format, 'archive_stream': stream_result, 'warnings': ['archive export cancelled'], **(result or {})}
+            return {'ok': True, 'archive_path': archive_path, 'archive_format': archive_format, 'archive_stream': stream_result, **(result or {})}
         if kind in {'current_page', 'render_current_page'}:
             return self._api_render_current_page_ui(body)
         if kind in {'structured_ocr', 'ocr_json'}:
@@ -1884,6 +1926,45 @@ class MainWindow(mainwindow_cls):
             self.imgtrans_proj.save()
         return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'changed': changed, 'indices': indices}
 
+    def _api_auto_format_textboxes(self, body: dict):
+        return self._api_call_ui(self._api_auto_format_textboxes_ui, body)
+
+    def _api_auto_format_textboxes_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        mode = str((body or {}).get('mode', 'page') or 'page').strip().lower()
+        if mode == 'selected':
+            indices = [blk.idx for blk in self.canvas.selected_text_items()]
+        else:
+            indices = [blk.idx for blk in getattr(self.st_manager, 'textblk_item_list', [])]
+        explicit = (body or {}).get('indices')
+        if explicit is not None:
+            indices = [int(i) for i in explicit]
+        profile = str((body or {}).get('profile', 'balanced') or 'balanced')
+        changed = self.st_manager.auto_format_textboxes(indices=indices, push_undo=False, profile=profile)
+        if changed and self.imgtrans_proj and self.imgtrans_proj.directory:
+            self.imgtrans_proj.save()
+        self.pipelineInsightsPanel.add_event('API', self.tr('Auto text formatting updated {0} text boxes').format(changed))
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'changed': changed, 'indices': indices, 'profile': profile}
+
+    def _api_auto_format_qa_preview(self, body: dict):
+        return self._api_call_ui(self._api_auto_format_qa_preview_ui, body)
+
+    def _api_auto_format_qa_preview_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            raise ValueError('open a project and select a page first')
+        mode = str((body or {}).get('mode', 'page') or 'page').strip().lower()
+        only_risky = bool((body or {}).get('only_risky', False))
+        if mode == 'selected':
+            block_items = self.canvas.selected_text_items()
+        else:
+            block_items = list(getattr(self.st_manager, 'textblk_item_list', []) or [])
+        profile = str((body or {}).get('profile', 'balanced') or 'balanced')
+        rows = score_auto_format_candidates([getattr(x, 'blk', None) for x in block_items], profile=profile)
+        if only_risky:
+            rows = [r for r in rows if bool(r.get('before_overflow')) or float(r.get('improvement', 0.0) or 0.0) > 0.04]
+        return {'ok': True, 'page': self.imgtrans_proj.current_img, 'mode': mode, 'profile': profile, 'rows': rows, 'summary': summarize_auto_format_scores(rows)}
+
     def _api_fix_rendering_issues(self, body: dict):
         return self._api_call_ui(self._api_fix_rendering_issues_ui, body)
 
@@ -2273,6 +2354,82 @@ class MainWindow(mainwindow_cls):
     def _api_translation_prompt_profiles(self, body: dict):
         return {'ok': True, 'profiles': sorted(PROMPT_PROFILES.keys()), 'default': getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue')}
 
+    def _api_sfx_dictionary_query(self, body: dict):
+        return self._api_call_ui(self._api_sfx_dictionary_query_ui, body)
+
+    def _api_sfx_dictionary_query_ui(self, body: dict):
+        query = str((body or {}).get('query', '') or '')
+        limit = int((body or {}).get('limit', 50) or 50)
+        include_defaults = bool((body or {}).get('include_defaults', True))
+        store = list(getattr(self.imgtrans_proj, 'sfx_dictionary', []) or [])
+        rows = (default_sfx_dictionary() + store) if include_defaults else store
+        hits = query_sfx_dictionary(rows, query, limit=limit)
+        return {'ok': True, 'count': len(hits), 'results': hits}
+
+    def _api_sfx_dictionary_import(self, body: dict):
+        return self._api_call_ui(self._api_sfx_dictionary_import_ui, body)
+
+    def _api_sfx_dictionary_import_ui(self, body: dict):
+        in_path = str((body or {}).get('path', '') or '').strip()
+        if not in_path:
+            raise ValueError('missing_path')
+        incoming = import_sfx_dictionary(in_path)
+        store = list(getattr(self.imgtrans_proj, 'sfx_dictionary', []) or [])
+        merged = merge_sfx_entries(store, incoming)
+        self.imgtrans_proj.sfx_dictionary = merged['entries']
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'added': merged['added'], 'updated': merged['updated'], 'count': merged['count']}
+
+    def _api_sfx_dictionary_export(self, body: dict):
+        return self._api_call_ui(self._api_sfx_dictionary_export_ui, body)
+
+    def _api_sfx_dictionary_export_ui(self, body: dict):
+        fmt = str((body or {}).get('format', 'json') or 'json').strip().lower()
+        out_path = str((body or {}).get('path', '') or '').strip()
+        if not out_path:
+            base = self.imgtrans_proj.directory if self.imgtrans_proj is not None else os.getcwd()
+            out_path = osp.join(base, 'sfx_dictionary.csv' if fmt == 'csv' else 'sfx_dictionary.json')
+        entries = list(getattr(self.imgtrans_proj, 'sfx_dictionary', []) or [])
+        count = export_sfx_dictionary(entries, out_path, fmt=fmt)
+        return {'ok': True, 'path': out_path, 'count': int(count), 'format': fmt}
+
+    def _api_glossary_extract_candidates(self, body: dict):
+        return self._api_call_ui(self._api_glossary_extract_candidates_ui, body)
+
+    def _api_glossary_extract_candidates_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        min_freq = int((body or {}).get('min_freq', 2) or 2)
+        texts = []
+        for _page, blks in (self.imgtrans_proj.pages or {}).items():
+            for blk in blks or []:
+                texts.append((getattr(blk, 'get_text', lambda: '')() or '').strip())
+        rows = extract_glossary_candidates(texts, min_freq=min_freq)
+        return {'ok': True, 'count': len(rows), 'candidates': rows}
+
+    def _api_glossary_extract_apply(self, body: dict):
+        return self._api_call_ui(self._api_glossary_extract_apply_ui, body)
+
+    def _api_glossary_extract_apply_ui(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        candidates = list((body or {}).get('candidates', []) or [])
+        approved = []
+        for row in candidates:
+            if bool((row or {}).get('approved', True)):
+                src = str((row or {}).get('source', '') or '').strip()
+                if src:
+                    approved.append({'source': src, 'target': str((row or {}).get('target', '') or '').strip()})
+        store = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+        seen = {str((r or {}).get('source', '') or '').strip() for r in store}
+        for row in approved:
+            if row['source'] not in seen:
+                store.append(row)
+                seen.add(row['source'])
+        self.imgtrans_proj.translation_glossary = store
+        self.canvas.setProjSaveState(True)
+        return {'ok': True, 'applied': len(approved), 'result_count': len(store)}
+
     def _api_translation_qa_report(self, body: dict):
         return self._api_call_ui(self._api_translation_qa_report_ui, body)
 
@@ -2285,8 +2442,17 @@ class MainWindow(mainwindow_cls):
         blocks = list((self.imgtrans_proj.pages or {}).get(page, []) or [])
         profile = str((body or {}).get('profile', '') or getattr(pcfg.module, 'translation_prompt_profile_default', 'dialogue') or 'dialogue')
         retry_threshold = int((body or {}).get('retry_issue_threshold', getattr(pcfg.module, 'translation_qa_retry_issue_threshold', 2)) or 2)
+        repetition_threshold = float((body or {}).get('repetition_threshold', 0.45) or 0.45)
+        untranslated_ratio_threshold = float((body or {}).get('untranslated_ratio_threshold', 0.85) or 0.85)
         glossary = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
-        report = build_translation_qa_report(blocks, glossary, profile=profile, retry_issue_threshold=retry_threshold)
+        report = build_translation_qa_report(
+            blocks,
+            glossary,
+            profile=profile,
+            retry_issue_threshold=retry_threshold,
+            repetition_threshold=repetition_threshold,
+            untranslated_ratio_threshold=untranslated_ratio_threshold,
+        )
         report['page'] = page
         return {'ok': True, 'report': report}
 
@@ -3298,6 +3464,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.layout_review_page_trigger.connect(self.shortcutLayoutReviewPage)
         self.titleBar.layout_review_config_trigger.connect(self.shortcutLayoutReviewConfig)
         self.titleBar.lettering_workflow_trigger.connect(self.on_lettering_workflow_current_page)
+        if hasattr(self.titleBar, 'auto_format_qa_trigger'):
+            self.titleBar.auto_format_qa_trigger.connect(self.on_open_auto_format_qa)
         self.titleBar.next_rendering_issue_trigger.connect(self.on_next_rendering_issue)
         self.titleBar.show_model_download_diag_trigger.connect(self.on_show_model_download_diagnostics)
         self.titleBar.copy_startup_diag_trigger.connect(self.on_copy_startup_diagnostics)
@@ -6488,6 +6656,25 @@ class MainWindow(mainwindow_cls):
     def on_lettering_workflow_current_page(self):
         self.on_lettering_workflow_pages(self._selected_page_names())
 
+    def on_open_auto_format_qa(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
+            create_info_dialog({'title': self.tr('Auto-format QA'), 'text': self.tr('Open a project and select a page first.')})
+            return
+        selected = self.canvas.selected_text_items()
+        block_items = selected if selected else list(getattr(self.st_manager, 'textblk_item_list', []) or [])
+        if not block_items:
+            create_info_dialog({'title': self.tr('Auto-format QA'), 'text': self.tr('No text boxes on current page.')})
+            return
+
+        def _apply(indices, profile):
+            changed = self.st_manager.auto_format_textboxes(indices=indices, push_undo=True, profile=profile)
+            if changed and self.imgtrans_proj and self.imgtrans_proj.directory:
+                self.imgtrans_proj.save()
+            self.pipelineInsightsPanel.add_event('TYPO_QA', self.tr('Auto-format QA applied changes to {0} text box(es)').format(changed))
+
+        dlg = AutoFormatQADialog(self, block_items, _apply)
+        dlg.exec()
+
     def on_lettering_workflow_pages(self, page_names: List[str] = None):
         if self.imgtrans_proj is None or self.imgtrans_proj.is_empty or not self.imgtrans_proj.current_img:
             create_info_dialog({'title': self.tr('Lettering workflow'), 'text': self.tr('Open a project and select a page first.')})
@@ -7929,4 +8116,3 @@ class MainWindow(mainwindow_cls):
             create_info_dialog({'title': self.tr('Glossary import'), 'text': self.tr('Added entries: {0} (total: {1})').format(rst.get('added', 0), rst.get('entries', 0))})
         except Exception as e:
             create_error_dialog(e, self.tr('Failed to import glossary'))
-

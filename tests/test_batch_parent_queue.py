@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from utils.batch_parent_queue import enumerate_child_projects, save_parent_batch_state, load_parent_batch_state, update_parent_batch_status, next_pending_child
+from utils.batch_parent_queue import enumerate_child_projects, save_parent_batch_state, load_parent_batch_state, update_parent_batch_status, next_pending_child, summarize_parent_batch_state
 
 
 def test_enumerate_child_projects_collects_dirs_and_archives(tmp_path: Path):
@@ -42,3 +42,19 @@ def test_parent_state_load_update_and_next_pending(tmp_path: Path):
         assert nxt is None
     else:
         assert nxt is not None
+
+
+def test_parent_state_summary_counts(tmp_path: Path):
+    root = tmp_path / 'root'
+    (root / 'ch1').mkdir(parents=True)
+    (root / 'ch1' / '001.png').write_bytes(b'x')
+    children = enumerate_child_projects(str(root))
+    state_path = tmp_path / 'state.json'
+    save_parent_batch_state(str(state_path), str(root), children)
+    loaded = load_parent_batch_state(str(state_path))
+    first = loaded['children'][0]['input_path']
+    update_parent_batch_status(str(state_path), first, 'done')
+    loaded2 = load_parent_batch_state(str(state_path))
+    summary = summarize_parent_batch_state(loaded2)
+    assert summary['total'] == len(loaded2['children'])
+    assert summary['counts']['done'] >= 1

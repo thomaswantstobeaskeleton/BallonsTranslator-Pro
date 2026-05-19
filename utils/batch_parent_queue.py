@@ -115,3 +115,18 @@ def next_pending_child(state_payload: dict) -> dict | None:
         if str((row or {}).get('status', 'pending') or 'pending') == 'pending':
             return dict(row)
     return None
+
+
+def summarize_parent_batch_state(state_payload: dict) -> dict:
+    rows = list((state_payload or {}).get('children') or [])
+    by_status: Dict[str, int] = {}
+    for row in rows:
+        st = str((row or {}).get('status', 'pending') or 'pending').strip() or 'pending'
+        by_status[st] = by_status.get(st, 0) + 1
+    return {
+        'format': str((state_payload or {}).get('format', '') or ''),
+        'parent_path': str((state_payload or {}).get('parent_path', '') or ''),
+        'total': len(rows),
+        'counts': by_status,
+        'next_pending': next_pending_child(state_payload),
+    }
