@@ -10,7 +10,7 @@ from utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT
 from utils.config import pcfg
 from utils.module_tiers import format_module_tier_tooltip
 
-from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox, QSpinBox
+from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QMessageBox, QSpinBox, QDoubleSpinBox
 from qtpy.QtCore import Qt, Signal, QTimer
 from qtpy.QtGui import QDoubleValidator
 
