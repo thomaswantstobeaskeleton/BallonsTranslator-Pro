@@ -97,6 +97,7 @@ python --version
 - LLM-aided review chain for quality/consistency
 - Strong defaults for fast onboarding
 - Local automation/API documentation for headless and MCP-style workflows (see [Local Automation API](docs/LOCAL_AUTOMATION_API.md))
+- Docker/server-mode quickstart plus sample curl/Python client snippets are included in the same document.
 
 ---
 

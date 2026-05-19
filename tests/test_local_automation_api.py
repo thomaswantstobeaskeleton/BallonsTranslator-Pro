@@ -103,6 +103,7 @@ def test_local_automation_api_event_stream_job_snapshot():
         content_type = resp.headers.get('Content-Type')
     server.stop()
     assert content_type == 'text/event-stream'
-    assert body.startswith('event: job\n')
+    assert 'event: running' in body
+    assert 'id: ' in body
     assert '"status": "running"' in body
     assert 'started' in body

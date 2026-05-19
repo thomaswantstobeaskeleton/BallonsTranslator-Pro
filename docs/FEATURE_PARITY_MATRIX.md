@@ -1,6 +1,6 @@
 # Feature Parity Matrix (Working Draft)
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
 
 This matrix tracks BallonsTranslator-Pro parity progress against major alternatives.
 
@@ -9,6 +9,7 @@ This matrix tracks BallonsTranslator-Pro parity progress against major alternati
 - **Phase 0 (Audit & safety baseline):** ✅ **in progress / mostly done baseline**
   - Audit plan documented in `docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md`.
   - Route discovery and export/proof/save-state tests are in place and being expanded.
+  - Baseline verification rerun on 2026-05-19; route/export/save-state suites passed, with a known model-picker test import stub failure documented for follow-up.
 - **Phase 1 (Automation/headless/MCP):** 🟨 **actively in progress**
   - Added typed edit-op validation and batch scene-edit surface.
   - Added job lifecycle routes (`job_start/status/cancel/logs/result/list`).

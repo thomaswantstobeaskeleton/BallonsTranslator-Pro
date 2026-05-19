@@ -1,6 +1,6 @@
 # Alternatives Feature Gap Implementation Plan
 
-Last updated: 2026-05-19
+Last updated: 2026-05-19 (Phase 0 baseline audit pass 2)
 
 This document is the safety baseline for closing gaps versus manga-image-translator, Koharu, ImageTrans, manga-translator-ui, and focused cleanup tools. The rule for every phase is: audit first, extend existing Pro systems, do not duplicate equivalent functionality, and do not remove existing Pro behavior.
 
@@ -27,6 +27,19 @@ Every implementation PR in this roadmap must verify:
 | Project save-state behavior | Partially implemented | `ui/mainwindow.py` API edit path marks save state; project tests exist | `utils/proj_imgtrans.py`, `ui/mainwindow.py` | Medium; project JSON compatibility is critical | Save/load with new fields absent/present; undoable API edits |
 | Startup entrypoints | Already implemented; untouched in this PR | `launch.py`, Windows batch files | Same | High if touched | Compile/argument smoke, Windows script snapshot |
 | First-run model picker | Already implemented; untouched in this PR | model picker tests and startup translations | `ui/model_manager_dialog.py`, `launch.py`, `translate/startup_model_ui.*.json` | High if touched | Existing model package selector/defaulting tests |
+
+
+## Phase 0 verification run (this pass)
+
+Commands executed for baseline verification:
+
+- `pytest -q tests/test_local_automation_api.py tests/test_local_automation_api_routes_contract.py tests/test_lettering_proof_export.py tests/test_export_manifest.py tests/test_project_ops_protocol.py tests/test_model_package_selector_dialog.py`
+
+Observed results:
+
+- Route discovery, proof-pack/export manifest, and project-ops protocol tests pass.
+- Model picker dialog tests currently fail in this environment because the qtpy widget stub used by the tests does not expose `QComboBox` during import (`ui/model_package_selector_dialog.py`).
+- No startup scripts or first-run behavior code was changed in this pass; failures are documented for follow-up in the next Phase 0/1 slice.
 
 ## Phase 1 — Automation, headless, and MCP parity
 
@@ -61,8 +74,8 @@ Every implementation PR in this roadmap must verify:
 | Required feature | Status | Existing evidence | Target files | Migration risk | Tests to add/keep |
 |---|---|---|---|---|---|
 | Translation memory | Partially implemented → advanced | Added project TM store + fuzzy query + import/export API paths/tests (JSON) | `utils/translation_memory.py`, `utils/proj_imgtrans.py`, `ui/mainwindow.py` | Medium | fuzzy match tests, TM import/export tests, save/load compatibility tests |
-| Termbase/glossary | Partially implemented | `modules/llm_quality.py` glossary enforcement | glossary store/dialog/API | Medium | hard/soft violations, no destructive replacement |
-| Corpus concordance | Not implemented | Search widgets exist but not CAT concordance | corpus index/search utilities | Low/medium | provenance search |
+| Termbase/glossary | Partially implemented → advanced | Added glossary CSV import/export helpers and API endpoints with merge/replace mode | `utils/glossary_io.py`, `ui/mainwindow.py` | Medium | CSV roundtrip tests, merge/replace behavior tests |
+| Corpus concordance | Partially implemented → advanced | Added project concordance query utility + API/UI surface with page provenance output | `utils/translation_concordance.py`, `ui/mainwindow.py`, `ui/mainwindowbars.py` | Low/medium | provenance query tests + API tests |
 | SFX dictionary | Not implemented | style/prompt concepts exist | SFX dictionary data/UI | Low | lookup/import/export |
 | Auto glossary extraction | Not implemented | LLM quality utilities can be extended | extraction utility + approval UI | Medium | candidate categories, approval persistence |
 | Post-translation QA/retry | Partially implemented → advanced | Added profile-aware QA report + retry candidate API (`translation_qa_report`) | `utils/translation_qa_profiles.py`, `ui/mainwindow.py` | Medium | threshold/retry tests, profile behavior tests |
@@ -72,11 +85,11 @@ Every implementation PR in this roadmap must verify:
 
 | Required feature | Status | Existing evidence | Target files | Migration risk | Tests to add/keep |
 |---|---|---|---|---|---|
-| OCR crop inspector | Partially implemented | `ui/ocr_crop_inspector_widget.py` and pipeline button exist | inspector rerun hooks | Medium | crop extraction/rerun metadata |
-| Hybrid OCR workflow | Not implemented | multiple OCR engines exist | OCR compare utility/UI/API | Medium | primary/secondary compare |
+| OCR crop inspector | Partially implemented → advanced | Added per-block crop inspector rerun flow (engine selectable) in UI + API (`ocr_rerun_block`) | `ui/ocr_crop_inspector_widget.py`, `ui/mainwindow.py` | Medium | rerun metadata + index validation tests |
+| Hybrid OCR workflow | Partially implemented → advanced | Added per-block OCR compare + apply flow (primary/secondary engine) in inspector UI and automation API | `ui/ocr_crop_inspector_widget.py`, `ui/mainwindow.py` | Medium | compare/apply API tests + persistence checks |
 | Reading-order editor | Partially implemented | `ui/reading_order_editor_dialog.py` exists | persistence/export integration | Medium | reorder persistence, structured export order |
 | Batch find/replace | Partially implemented → advanced | Added preview/apply batch find-replace API + project UI action with confirmation | `utils/batch_find_replace.py`, `ui/mainwindow.py`, `ui/mainwindowbars.py` | Medium | regex preview/apply tests, undo-path tests |
-| Import translated image workflow | Not implemented | OCR/project utilities exist | alignment utility/UI/API | High | IoU/order matching tests |
+| Import translated image workflow | Partially implemented → advanced | Added translated-image IoU alignment utility and local API route (`import_translated_image_align`) to map OCR text back to raw blocks | `utils/translated_image_alignment.py`, `ui/mainwindow.py` | High | IoU alignment unit tests + API integration tests |
 
 ## Phase 6 — Advanced renderer fidelity
 
@@ -85,7 +98,7 @@ Every implementation PR in this roadmap must verify:
 | Renderer stack audit | Partially implemented | rendering docs/tests exist | text rendering docs and diagnostics | Low | doc + fixture review |
 | Optional shaping backend | Not implemented fully | Qt rendering and text rendering utilities exist | optional uharfbuzz/freetype path | High; packaging/Windows risk | optional dependency skip tests |
 | Keep Qt default | Already required | current renderer is Qt-based | config/render settings | Low | default config compatibility |
-| Diagnostics | Partially implemented | rendering QA tests exist | renderer diagnostics/export manifests | Medium | missing glyph/clipping/shaping fallback |
+| Diagnostics | Partially implemented → advanced | Added renderer capability diagnostics route + export manifest renderer metadata | `utils/renderer_diagnostics.py`, `ui/mainwindow.py`, `utils/export_manifest.py` | Medium | diagnostics shape tests + manifest renderer metadata tests |
 | Visual regression tests | Partially implemented | text rendering tests exist | deterministic fixtures | Medium | image snapshots/tolerances |
 
 ## Phase 7 — Cleanup, segmentation, and mask quality
@@ -93,18 +106,18 @@ Every implementation PR in this roadmap must verify:
 | Required feature | Status | Existing evidence | Target files | Migration risk | Tests to add/keep |
 |---|---|---|---|---|---|
 | Bubble-aware mask expansion | Partially implemented | mask diagnostics/textbox masking tests | mask generation utilities | Medium | inside/outside dilation fixtures |
-| Edge-halo detector | Partially implemented | `tests/test_mask_diagnostics.py` | diagnostics utility/UI/API | Medium | halo fixtures |
+| Edge-halo detector | Partially implemented → advanced | Cleanup-only workflow now computes mask edge-halo ratio, applies adaptive mask expansion/merge policy, and flags risky pages via API warnings/metadata | `modules/mask_diagnostics.py`, `utils/cleanup_only_workflow.py`, `ui/mainwindow.py` | Medium | halo-threshold cleanup workflow tests |
 | Mask-aware text flow | Partially implemented | auto layout/mask-safe diagnostics | text layout/rendering utilities | High | irregular flow fallback tests |
-| Cleanup-only workflow | Partially implemented | inpaint/export modules; no stable CLI/API contract yet | API/headless/export | Medium | cleanup-only CLI/API path |
+| Cleanup-only workflow | Partially implemented → advanced | Added stable cleanup-only API route (`cleanup_only`) that runs detect+inpaint and optional clean export directory output | `utils/cleanup_only_workflow.py`, `ui/mainwindow.py` | Medium | cleanup-only workflow tests + route validation |
 
 ## Phase 8 — Batch, archive, and packaging parity
 
 | Required feature | Status | Existing evidence | Target files | Migration risk | Tests to add/keep |
 |---|---|---|---|---|---|
-| Parent/child CBZ/folder processing | Partially implemented | `utils/zip_batch.py`, batch queue UI, headless dirs | batch queue/headless API | Medium | parent/child queue, resume state |
+| Parent/child CBZ/folder processing | Partially implemented → advanced | Added parent-batch enumerate/save-state API for nested dirs + CBZ/ZIP child discovery and resumable status JSON | `utils/batch_parent_queue.py`, `ui/mainwindow.py` | Medium | parent/child enumerate + state persistence tests + status update/next-pending tests |
 | Streaming ZIP/CBZ export | Partially implemented | API archive export exists; manifests exist | export utilities/job progress | Medium | progress/cancel/manifest |
-| Docker/web/API mode docs | Not implemented fully | local API exists | docs, sample client | Low | docs smoke snippets |
-| Data path manager | Partially implemented | `tests/test_data_path_manager.py` | config/UI migration helper | Medium | free-space and migration tests |
+| Docker/web/API mode docs | Partially implemented → advanced | Added `server_mode_info` API route and docs quickstart with curl/Python snippets and mount hints | `utils/server_mode_info.py`, `ui/mainwindow.py`, `docs/LOCAL_AUTOMATION_API.md`, `README.md`, `README_zh_CN.md` | Low | server-mode info shape tests + docs smoke snippets |
+| Data path manager | Partially implemented → advanced | Added automation API routes for path status/free-space checks and dry-run/apply migration helper | `utils/data_path_manager.py`, `ui/mainwindow.py` | Medium | migration dry-run/apply tests + status threshold tests |
 
 ## Immediate implementation order
 

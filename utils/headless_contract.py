@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List
 
@@ -19,6 +19,7 @@ class HeadlessRunSummary:
     processed_dirs: List[str]
     skipped_dirs: List[str]
     failed_dirs: List[str]
+    warnings: List[str] = field(default_factory=list)
 
     def to_payload(self) -> Dict[str, object]:
         return {
@@ -29,6 +30,7 @@ class HeadlessRunSummary:
             "processed_dirs": list(self.processed_dirs),
             "skipped_dirs": list(self.skipped_dirs),
             "failed_dirs": list(self.failed_dirs),
+            "warnings": list(self.warnings),
         }
 
     def exit_code(self) -> int:

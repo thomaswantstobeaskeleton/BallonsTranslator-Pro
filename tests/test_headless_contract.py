@@ -18,3 +18,9 @@ def test_headless_summary_payload_counts():
     assert payload['processed'] == 0
     assert payload['skipped'] == 1
     assert payload['failed'] == 1
+
+
+def test_headless_summary_payload_includes_warnings():
+    s = HeadlessRunSummary(requested_dirs=['a'], processed_dirs=['a'], skipped_dirs=[], failed_dirs=[], warnings=['w1'])
+    payload = s.to_payload()
+    assert payload['warnings'] == ['w1']

@@ -8,7 +8,7 @@ BallonsTranslator-Pro exposes a localhost-only automation API when `automation_a
 
 - `GET /health` returns service status plus the same route catalog as `/routes`.
 - `GET /routes` returns stable sorted POST routes, GET routes, MCP-compatible command routes, job routes, and the SSE event-stream template.
-- `GET /events?job_id=<job_id>` returns a Server-Sent Events snapshot for a job. The current implementation sends a bounded status/log snapshot; future work can extend this to a live streaming loop without changing the endpoint.
+- `GET /events?job_id=<job_id>` returns a Server-Sent Events snapshot for a job. Events now include SSE `id` (job `updated_at`) and `event` (current job status such as `running` / `succeeded` / `failed` / `cancelled`) plus a bounded status/log snapshot payload; this keeps clients forward-compatible with future live streaming loops.
 
 If `automation_api_key` is set, send it as `X-API-Key` for every request, including discovery and events.
 
@@ -110,6 +110,20 @@ Notes:
 
 ## Headless batch CLI contract
 
+The `scripts/batch_translate.py` runner now exposes an explicit stage selector for automation callers:
+
+- `--stages detect,ocr,translate,inpaint` to run only a stable subset of stages.
+- `--save-text-json <path|dir>` exports translation JSON after processing.
+- `--load-text-json <path>` imports translation JSON before processing each project.
+- Empty `--stages` keeps default behavior (all enabled pipeline stages from config, subject to `--no-*` flags).
+- Invalid stage names fail fast with `HeadlessExitCode.INPUT_ERROR`.
+
+Summary JSON payloads include:
+
+- `stages`: normalized sorted stage list requested by the caller.
+- `warnings`: non-fatal contract warnings (for example, when no stages remain enabled after config + flag filtering).
+
+
 For non-GUI runs, `scripts/batch_translate.py` now returns stable non-zero exit codes:
 
 - `0`: success
@@ -204,3 +218,65 @@ Phase 5 editor UX now includes previewable batch find/replace routes:
 - `POST /batch_find_replace_apply` with either the same fields or a prior `preview` payload
 
 `preview` returns match samples without mutating the project; `apply` mutates translations and returns changed rows.
+
+
+## Concordance and glossary API
+
+- `POST /concordance_query` with `{query, in_target=true, limit=50}` returns project-wide source/target matches with `page`, `index`, and `block_id` provenance.
+- `POST /glossary_export` with optional `{format: "json"|"csv", path}` exports project glossary.
+- `POST /glossary_import_preview` with `{path, mode: "merge"|"replace"}` returns non-destructive preview counts (`added/skipped/result`).
+- `POST /glossary_import` with `{path, mode: "merge"|"replace"}` imports glossary entries from JSON or CSV.
+
+
+## OCR crop inspector API
+
+- `POST /ocr_rerun_block` with `{page?, index, engine?}` reruns OCR on one textbox only and returns updated OCR text, confidence, and selected engine.
+
+- `POST /ocr_compare_block` with `{page?, index, secondary_engine}` compares current OCR text against a secondary OCR engine for one block (non-destructive).
+- `POST /ocr_apply_compare_choice` with `{page?, index, text, engine?}` applies a chosen OCR text to one block.
+
+- `POST /renderer_diagnostics` returns renderer backend capability diagnostics (Qt default renderer, optional shaping modules, warnings).
+
+
+## Cleanup-only workflow API
+
+- `POST /cleanup_only` with optional `{pages, out_dir}` runs detect + inpaint only (no OCR/translation) and optionally exports clean images.
+
+
+## Parent/child batch planning API
+
+- `POST /batch_parent_enumerate` with `{parent_path}` discovers child projects from nested image folders and `.cbz`/`.zip` archives.
+- `POST /batch_parent_save_state` with `{parent_path, state_path, statuses?}` writes resumable parent-batch state JSON (`pending/done/failed/...`).
+- `POST /batch_parent_load_state` with `{state_path}` loads saved parent-batch state payload.
+- `POST /batch_parent_update_status` with `{state_path, input_path, status}` updates one child status.
+- `POST /batch_parent_next_pending` with `{state_path}` returns next pending child item.
+
+
+## Data path manager API
+
+- `POST /data_path_status` with optional `{path, min_free_gb}` returns resolved path, existence, free space, and threshold check.
+- `POST /data_path_migrate` with `{source, dest, dry_run=true}` previews or performs data-path migration for top-level entries.
+
+
+## Docker / server mode quickstart
+
+For headless/API usage, run Pro with automation API enabled and query the helper route:
+
+- `POST /server_mode_info` returns health/routes URLs, path hints, Docker mount hints, and ready-to-run curl/Python snippets.
+
+Example curl:
+
+```bash
+curl -X POST http://127.0.0.1:39542/server_mode_info -H 'Content-Type: application/json' -d '{}'
+```
+
+Typical container mount hints from the payload:
+
+- `/app/data/models` for model/cache volume
+- `/app/projects` for project input/output volume
+- `/app/config/config.json` for persisted configuration
+
+
+## Import translated image alignment API
+
+- `POST /import_translated_image_align` with `{page, translated_image, min_iou?}` detects/OCRs the translated image and maps translations back to raw blocks by IoU.

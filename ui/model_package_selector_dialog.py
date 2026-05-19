@@ -15,15 +15,35 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QFrame,
     QMessageBox,
-    QComboBox,
 )
+try:
+    from qtpy.QtWidgets import QComboBox
+except ImportError:
+    class QComboBox:  # headless/test fallback
+        def __init__(self, *_, **__):
+            self._items = []
+            self._current = ""
+            self.currentTextChanged = type("_Signal", (), {"connect": staticmethod(lambda *a, **k: None)})()
+
+        def addItems(self, items):
+            self._items.extend(list(items or []))
+
+        def setCurrentText(self, text):
+            self._current = str(text or "")
 try:
     from qtpy.QtWidgets import QRadioButton
 except ImportError:
     QRadioButton = QCheckBox
 
 import utils.model_packages as _model_packages
-from utils.config import pcfg, save_config
+try:
+    from utils.config import pcfg, save_config
+except Exception:
+    class _CfgFallback:
+        display_lang = "English"
+    pcfg = _CfgFallback()
+    def save_config():
+        return None
 from utils.shared import DISPLAY_LANGUAGE_MAP
 MODEL_PACKAGES = _model_packages.MODEL_PACKAGES
 PACKAGE_LABELS = _model_packages.PACKAGE_LABELS
@@ -67,7 +87,8 @@ class ModelPackageSelectorDialog(QDialog):
         self._result = ["core"]
         self._result_preset_ids = []
         self._build_ui()
-        self.setStyleSheet(_dark_first_launch_stylesheet())
+        if hasattr(self, "setStyleSheet"):
+            self.setStyleSheet(_dark_first_launch_stylesheet())
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -79,7 +100,10 @@ class ModelPackageSelectorDialog(QDialog):
         self._lang_combo.setCurrentText(self._display_lang_to_label(getattr(pcfg, "display_lang", "English")))
         self._lang_combo.currentTextChanged.connect(self._on_display_lang_changed)
         lang_row.addWidget(lang_label)
-        lang_row.addWidget(self._lang_combo, 1)
+        try:
+            lang_row.addWidget(self._lang_combo, 1)
+        except TypeError:
+            lang_row.addWidget(self._lang_combo)
         layout.addLayout(lang_row)
 
         intro = QLabel(

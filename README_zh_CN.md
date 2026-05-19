@@ -93,6 +93,7 @@ python --version
 - 基于 LLM 的审校链（质量/一致性）
 - 默认配置更友好，上手更快
 - 提供本地自动化/API 文档，便于无头模式与 MCP 风格工作流（见 [Local Automation API](docs/LOCAL_AUTOMATION_API.md)）
+- Docker/服务器模式快速说明与示例 curl/Python 客户端也在同一文档中。
 
 ---
 
