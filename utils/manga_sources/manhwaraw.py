@@ -5,6 +5,8 @@ Optional Playwright when site requires JS.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import time
 from typing import List, Optional
 from urllib.parse import quote, urljoin, urlparse
@@ -30,6 +32,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class ManhwaRawClient:
+    source_id = "manhwaraw"
+    display_name = "ManhwaRaw (Korean raw)"
+    base_url = "https://manhwaraw.club"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for ManhwaRaw (Korean raw manhwa)."""
 
     def __init__(

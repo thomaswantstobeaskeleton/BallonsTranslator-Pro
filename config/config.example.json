@@ -248,6 +248,11 @@
   "manga_source_download_dir": "",
   "manga_source_request_delay": 0.3,
   "manga_source_open_after_download": false,
+  "manga_source_playwright_headless": true,
+  "manga_source_translate_raw_search": true,
+  "manga_source_show_experimental": true,
+  "manga_source_base_url_overrides": {},
+  "manga_source_filter": "all",
   "model_packages_enabled": [
     "core"
   ],

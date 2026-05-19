@@ -555,6 +555,9 @@ class ProgramConfig(Config):
     manga_source_open_after_download: bool = False
     manga_source_playwright_headless: bool = True
     manga_source_translate_raw_search: bool = True  # For raw sources: translate search query to Japanese/Korean/Chinese
+    manga_source_show_experimental: bool = True
+    manga_source_base_url_overrides: Dict[str, str] = field(default_factory=dict)
+    manga_source_filter: str = "all"
     # Model packages to download at startup (None = legacy "all"; ["core"] = minimal). See utils.model_packages.
     model_packages_enabled: Optional[List[str]] = field(default_factory=lambda: ["core"])
     # True when first-run explicitly chose "Skip all downloads, local-only modules".
@@ -731,7 +734,7 @@ CONFIG_KEY_ORDER = (
     "default_device", "unload_after_idle_minutes", "ocr_spell_check",
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
     "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
-    "manga_source_translate_raw_search",
+    "manga_source_translate_raw_search", "manga_source_show_experimental", "manga_source_base_url_overrides", "manga_source_filter",
     "model_packages_enabled",
     "offline_local_only_mode",
     "show_module_tier_badges_in_tooltips",

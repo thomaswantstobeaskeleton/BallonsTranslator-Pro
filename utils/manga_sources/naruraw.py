@@ -5,6 +5,8 @@ Optional Playwright when site requires JS.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import re
 import time
 from typing import List, Optional
@@ -31,6 +33,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class NaruRawClient:
+    source_id = "naruraw"
+    display_name = "NaruRaw (Japanese raw)"
+    base_url = "https://naruraw.net"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for NaruRaw (Japanese raw manga)."""
 
     def __init__(

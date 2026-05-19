@@ -5,6 +5,8 @@ Optional Playwright for search/feed when site blocks or requires JS.
 """
 from __future__ import annotations
 
+from .provider_base import MangaSourceCapabilities
+
 import time
 from typing import List, Optional
 from urllib.parse import quote, urljoin, urlparse
@@ -34,6 +36,11 @@ def _absolute_url(base: str, href: str) -> str:
 
 
 class ToonGodClient:
+    source_id = "toongod"
+    display_name = "ToonGod"
+    base_url = "https://toongod.org"
+    capabilities = MangaSourceCapabilities()
+
     """Sync client for ToonGod-style sites (WP-Manga with /webtoon/ path)."""
 
     def __init__(
