@@ -154,6 +154,9 @@ def get_merge_group_for_label(label, config):
 
 
 def can_labels_merge(label1, label2, config):
+    include_set = config.get("LABELS_TO_INCLUDE_IN_MERGE", set()) or set()
+    if include_set and (label1 not in include_set or label2 not in include_set):
+        return False
     if label1 in config.get("LABELS_TO_EXCLUDE_FROM_MERGE", set()) or label2 in config.get("LABELS_TO_EXCLUDE_FROM_MERGE", set()):
         return False
 

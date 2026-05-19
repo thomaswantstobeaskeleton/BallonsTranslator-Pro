@@ -242,6 +242,7 @@ Lettering proof packs now include `lettering_proof_index.html`, a browser-friend
 - Tools → Project → **Lettering workflow...** now opens a review dialog instead of immediately applying changes. It supports current page, selected pages from the page list, or the whole project; previews ordered steps; and shows the highest-priority textboxes before running fixes.
 - The page list context menu has **Lettering workflow for selected pages...** for fewer-click multi-page typography QA.
 - The text formatting panel includes **Apply diagnostics fixes** for the selected textbox. It applies the same conservative typography polish and smart-fit logic used by layout review/API workflows.
+- Diagnostics fixes now clamp extreme one-click font-size jumps (roughly 65%–135% of current size) so a single click does not collapse text to tiny sizes or blow it up excessively; repeat if you want a larger step.
 - `POST /lettering_workflow` accepts multiple pages and returns `proof_manifests`, `warnings`, and applied action counts. Batch proof packs are supported; full batch rerender remains explicitly warned/deferred.
 - Vertical CJK rendering now keeps short ASCII tate-chu-yoko runs upright/compact in the Qt vertical layout, and proof metrics include both estimated and `precise_measured_bounds` values for clipping diagnostics.
 
@@ -328,3 +329,12 @@ Automation API now also supports long-task job controls via POST routes: `job_st
 MCP-friendly aliases are also available on POST routes to reduce client glue code: `project_open` → `open_project`, `pipeline_run` → `run_pipeline`, `scene_edit` → `apply_edit`, `render` → `render_current_page`.
 
 Job lifecycle routes also include `jobs_list` and `job_result`, and job retention/log limits are configurable in Settings for long-running automation sessions.
+
+
+## Detection merge tuning
+
+In **Config → Text detector**, enable **Merge nearby detected blocks (word-level cleanup)** when a page is split into many tiny word boxes. Tune:
+- **Min blocks**: only run merge on dense pages (default 18).
+- **Gap ratio**: higher values merge more aggressively.
+
+For normal bubble detection, keep this disabled to avoid accidental merges between nearby bubbles.

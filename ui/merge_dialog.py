@@ -1,4 +1,4 @@
-from qtpy.QtWidgets import QDialog, QVBoxLayout, QGroupBox, QFormLayout, QComboBox, QLineEdit, QPlainTextEdit, QCheckBox, QSpinBox, QLabel, QRadioButton, QButtonGroup, QHBoxLayout, QPushButton
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QGroupBox, QFormLayout, QComboBox, QLineEdit, QPlainTextEdit, QCheckBox, QSpinBox, QLabel, QRadioButton, QButtonGroup, QHBoxLayout, QPushButton, QMessageBox
 from qtpy.QtCore import Signal, Qt
 from qtpy.QtWidgets import QSizePolicy
 from qtpy.QtGui import QShowEvent, QCloseEvent
@@ -9,6 +9,7 @@ class MergeDialog(QDialog):
     # Signals: emitted when user clicks run buttons
     run_current_clicked = Signal()  # Run on current file
     run_all_clicked = Signal()      # Run on all files
+    preview_current_clicked = Signal()  # Preview on current file (no apply)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,7 +51,13 @@ class MergeDialog(QDialog):
         self.merge_mode = QComboBox()
         for text, data in self.merge_mode_map.items():
             self.merge_mode.addItem(text, userData=data)
-        main_layout.addRow(self.tr("Merge mode:"), self.merge_mode)
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItem(self.tr("Custom"), "custom")
+        self.profile_combo.addItem(self.tr("Conservative (safe)"), "conservative")
+        self.profile_combo.addItem(self.tr("Balanced"), "balanced")
+        self.profile_combo.addItem(self.tr("Aggressive (dense text)"), "aggressive")
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
+        main_layout.addRow(self.tr("Quick profile:"), self.profile_combo)
         self.layout.addWidget(main_group)
 
         # --- Text reading order (by label) ---
@@ -82,6 +89,17 @@ class MergeDialog(QDialog):
         for text, data in self.label_strategy_map.items():
             self.label_merge_strategy.addItem(text, userData=data)
         label_layout.addRow(self.tr("Label merge strategy:"), self.label_merge_strategy)
+
+        self.enable_include_labels = QCheckBox(self.tr("Enable include-only labels (whitelist)"))
+        self.enable_include_labels.setChecked(False)
+        label_layout.addRow(self.enable_include_labels)
+
+        self.include_labels = QLineEdit()
+        self.include_labels.setText(self.tr("balloon,qipao,shuqing,changfangtiao,hengxie"))
+        self.include_labels.setPlaceholderText(self.tr("e.g. balloon,qipao"))
+        self.include_labels.setEnabled(False)
+        self.enable_include_labels.toggled.connect(self.include_labels.setEnabled)
+        label_layout.addRow(self.tr("Whitelist labels:"), self.include_labels)
 
         self.enable_exclude_labels = QCheckBox(self.tr("Enable exclude-from-merge labels (blacklist)"))
         self.enable_exclude_labels.setChecked(True)
@@ -180,24 +198,41 @@ class MergeDialog(QDialog):
         result_type_layout.addWidget(self.radio_output_rectangle)
         result_type_layout.addWidget(self.radio_output_rotation)
 
-        self.layout.addWidget(result_type_group)
+        # --- Coordination / interaction summary --- #
+        coordination_group = QGroupBox(self.tr("Merge coordination"))
+        coordination_layout = QVBoxLayout(coordination_group)
+        self.sync_from_detector_btn = QPushButton(self.tr("Import detector collision-merge defaults"))
+        self.sync_from_detector_btn.setToolTip(self.tr("Copy detector collision merge thresholds (Config → Text detector) into this dialog as a starting point."))
+        self.sync_from_detector_btn.clicked.connect(self._import_detector_defaults)
+        coordination_layout.addWidget(self.sync_from_detector_btn)
+        self.interaction_hint = QLabel(self.tr("Region merge (this tool) runs after/independent from detector merge. If both are enabled, detector merge happens first during detection, then region merge can further combine boxes."))
+        self.interaction_hint.setWordWrap(True)
+        self.interaction_hint.setStyleSheet("color: gray; font-size: 0.9em;")
+        coordination_layout.addWidget(self.interaction_hint)
+        self.layout.addWidget(coordination_group)
 
         # --- Buttons --- #
         button_layout = QHBoxLayout()
+        self.preview_current_button = QPushButton(self.tr("Preview current page"))
         self.run_current_button = QPushButton(self.tr("Run on current page"))
         self.run_all_button = QPushButton(self.tr("Run on all pages"))
         self.cancel_button = QPushButton(self.tr("Cancel"))
 
+        button_layout.addWidget(self.preview_current_button)
         button_layout.addWidget(self.run_current_button)
         button_layout.addWidget(self.run_all_button)
         button_layout.addWidget(self.cancel_button)
         button_layout.addStretch()
 
+        self.preview_current_button.clicked.connect(self.on_preview_current)
         self.run_current_button.clicked.connect(self.on_run_current)
         self.run_all_button.clicked.connect(self.on_run_all)
         self.cancel_button.clicked.connect(self.reject)
 
         self.layout.addLayout(button_layout)
+
+    def on_preview_current(self):
+        self.preview_current_clicked.emit()
 
     def on_run_current(self):
         self.run_current_clicked.emit()
@@ -215,6 +250,9 @@ class MergeDialog(QDialog):
             "rtl_labels": self.rtl_labels_edit.text().strip(),
             "ttb_labels": self.ttb_labels_edit.text().strip(),
             "label_merge_strategy": self.label_merge_strategy.currentData(),
+            "profile": self.profile_combo.currentData(),
+            "enable_include_labels": self.enable_include_labels.isChecked(),
+            "include_labels": self.include_labels.text().strip(),
             "enable_exclude_labels": self.enable_exclude_labels.isChecked(),
             "exclude_labels": self.exclude_labels.text().strip(),
             "require_same_label": self.require_same_label.isChecked(),
@@ -247,11 +285,19 @@ class MergeDialog(QDialog):
             self.rtl_labels_edit.setText(d.get("rtl_labels", ""))
         if "ttb_labels" in d:
             self.ttb_labels_edit.setText(d.get("ttb_labels", ""))
+        prof = d.get("profile")
+        if prof is not None:
+            idx = self.profile_combo.findData(prof)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
         strat = d.get("label_merge_strategy")
         if strat is not None:
             idx = self.label_merge_strategy.findData(strat)
             if idx >= 0:
                 self.label_merge_strategy.setCurrentIndex(idx)
+        self.enable_include_labels.setChecked(d.get("enable_include_labels", False))
+        if "include_labels" in d:
+            self.include_labels.setText(d.get("include_labels", ""))
         self.enable_exclude_labels.setChecked(d.get("enable_exclude_labels", True))
         if "exclude_labels" in d:
             self.exclude_labels.setText(d.get("exclude_labels", ""))
@@ -282,6 +328,46 @@ class MergeDialog(QDialog):
         self.save_settings_to_pcfg()
         super().closeEvent(event)
 
+    def _import_detector_defaults(self):
+        try:
+            enabled = bool(getattr(getattr(pcfg, "module", None), "merge_nearby_blocks_collision", False))
+            gap_ratio = float(getattr(getattr(pcfg, "module", None), "merge_nearby_blocks_gap_ratio", 1.5) or 1.5)
+            min_blocks = int(getattr(getattr(pcfg, "module", None), "merge_nearby_blocks_min_blocks", 18) or 18)
+            approx_gap = max(1, int(round(10.0 * gap_ratio)))
+            approx_overlap = int(max(55, min(98, 100 - (gap_ratio - 1.0) * 20)))
+            self.max_vertical_gap.setValue(approx_gap)
+            self.max_horizontal_gap.setValue(approx_gap)
+            self.min_width_overlap_ratio.setValue(approx_overlap)
+            self.min_height_overlap_ratio.setValue(approx_overlap)
+            if enabled and min_blocks >= 24:
+                self.profile_combo.setCurrentIndex(self.profile_combo.findData("aggressive"))
+            elif enabled:
+                self.profile_combo.setCurrentIndex(self.profile_combo.findData("balanced"))
+            QMessageBox.information(self, self.tr("Imported"), self.tr("Imported detector defaults. You can still fine-tune for region merge."))
+        except Exception as e:
+            QMessageBox.warning(self, self.tr("Import failed"), str(e))
+
+    def _on_profile_changed(self):
+        profile = self.profile_combo.currentData()
+        if profile == "conservative":
+            self.max_vertical_gap.setValue(2)
+            self.max_horizontal_gap.setValue(2)
+            self.min_width_overlap_ratio.setValue(95)
+            self.min_height_overlap_ratio.setValue(95)
+            self.require_same_label.setChecked(True)
+        elif profile == "balanced":
+            self.max_vertical_gap.setValue(10)
+            self.max_horizontal_gap.setValue(10)
+            self.min_width_overlap_ratio.setValue(90)
+            self.min_height_overlap_ratio.setValue(90)
+            self.require_same_label.setChecked(False)
+        elif profile == "aggressive":
+            self.max_vertical_gap.setValue(24)
+            self.max_horizontal_gap.setValue(24)
+            self.min_width_overlap_ratio.setValue(65)
+            self.min_height_overlap_ratio.setValue(65)
+            self.require_same_label.setChecked(False)
+
     def get_config(self):
         """Return merge config from dialog."""
         config = {}
@@ -296,6 +382,12 @@ class MergeDialog(QDialog):
         for label in [l.strip() for l in self.ttb_labels_edit.text().split(',') if l.strip()]:
             per_label_directions[label] = 'TTB'
         config["PER_LABEL_DIRECTIONS"] = per_label_directions
+
+        if self.enable_include_labels.isChecked():
+            included = self.include_labels.text().strip()
+            config["LABELS_TO_INCLUDE_IN_MERGE"] = set(l.strip() for l in included.split(",") if l.strip())
+        else:
+            config["LABELS_TO_INCLUDE_IN_MERGE"] = set()
 
         if self.enable_exclude_labels.isChecked():
             excluded = self.exclude_labels.text().strip()

@@ -126,6 +126,12 @@ class PageListView(QListWidget):
         self.setIconSize(QSize(shared.PAGELIST_THUMBNAIL_SIZE, shared.PAGELIST_THUMBNAIL_SIZE))
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
+
+    def _item_page_name(self, item: QListWidgetItem) -> str:
+        if item is None:
+            return ''
+        return item.data(Qt.ItemDataRole.UserRole) or item.text()
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_A and event.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
             self.selectAll()
@@ -172,31 +178,31 @@ class PageListView(QListWidget):
         elif rst == select_all_pages_act:
             self.selectAll()
         elif selected_items and rst == translate_act:
-            self.translate_images.emit([item.text() for item in selected_items])
+            self.translate_images.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and 'lettering_workflow_act' in locals() and rst == lettering_workflow_act:
-            self.lettering_workflow_requested.emit([item.text() for item in selected_items])
+            self.lettering_workflow_requested.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and rst == run_detect_act:
-            self.run_detect_images.emit([item.text() for item in selected_items])
+            self.run_detect_images.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and rst == run_ocr_act:
-            self.run_ocr_images.emit([item.text() for item in selected_items])
+            self.run_ocr_images.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and rst == run_translate_act:
-            self.run_translate_images.emit([item.text() for item in selected_items])
+            self.run_translate_images.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and rst == run_inpaint_act:
-            self.run_inpaint_images.emit([item.text() for item in selected_items])
+            self.run_inpaint_images.emit([self._item_page_name(item) for item in selected_items])
         elif selected_items and rst == ignore_act:
-            self.toggle_ignore_requested.emit([item.text() for item in selected_items], True)
+            self.toggle_ignore_requested.emit([self._item_page_name(item) for item in selected_items], True)
         elif selected_items and rst == include_act:
-            self.toggle_ignore_requested.emit([item.text() for item in selected_items], False)
+            self.toggle_ignore_requested.emit([self._item_page_name(item) for item in selected_items], False)
         elif selected_items and rst == mark_todo_act:
-            self.set_completion_requested.emit([item.text() for item in selected_items], 'todo')
+            self.set_completion_requested.emit([self._item_page_name(item) for item in selected_items], 'todo')
         elif selected_items and rst == mark_translated_act:
-            self.set_completion_requested.emit([item.text() for item in selected_items], 'translated')
+            self.set_completion_requested.emit([self._item_page_name(item) for item in selected_items], 'translated')
         elif selected_items and rst == mark_reviewed_act:
-            self.set_completion_requested.emit([item.text() for item in selected_items], 'reviewed')
+            self.set_completion_requested.emit([self._item_page_name(item) for item in selected_items], 'reviewed')
         elif selected_items and rst == mark_exported_act:
-            self.set_completion_requested.emit([item.text() for item in selected_items], 'exported')
+            self.set_completion_requested.emit([self._item_page_name(item) for item in selected_items], 'exported')
         elif selected_items and rst == remove_act:
-            self.remove_images.emit([item.text() for item in selected_items])
+            self.remove_images.emit([self._item_page_name(item) for item in selected_items])
 
         return super().contextMenuEvent(e)
 
@@ -345,6 +351,26 @@ class MainWindow(mainwindow_cls):
         if title:
             dialog.setWindowTitle(title)
         dialog.show()   # exec_ will block main thread
+
+
+    def _show_status_message(self, message: str, timeout_ms: int = 5000):
+        """Best-effort status message helper for frameless builds without QStatusBar."""
+        msg = str(message or "").strip()
+        if not msg:
+            return
+        try:
+            status_fn = getattr(self, 'statusBar', None)
+            status_obj = status_fn() if callable(status_fn) else None
+            if status_obj is not None and hasattr(status_obj, 'showMessage'):
+                status_obj.showMessage(msg, int(timeout_ms))
+                return
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'pipelineInsightsPanel') and self.pipelineInsightsPanel is not None:
+                self.pipelineInsightsPanel.add_event('STATUS', msg)
+        except Exception:
+            pass
 
     def register_view_widget(self, widget: ViewWidget):
         assert widget.config_name not in shared.config_name_to_view_widget
@@ -3246,6 +3272,7 @@ class MainWindow(mainwindow_cls):
                 QListWidgetItem(QIcon(osp.join(self.imgtrans_proj.directory, imgname)), imgname)
         for imgname in self.imgtrans_proj.pages:
             lstitem =  item_func(imgname)
+            lstitem.setData(Qt.ItemDataRole.UserRole, imgname)
             self.pageList.addItem(lstitem)
             if imgname == self.imgtrans_proj.current_img:
                 self.pageList.setCurrentItem(lstitem)
@@ -3385,7 +3412,7 @@ class MainWindow(mainwindow_cls):
         if item is not None:
             if self.save_on_page_changed:
                 self.conditional_save()
-            self.imgtrans_proj.set_current_img(item.text())
+            self.imgtrans_proj.set_current_img(item.data(Qt.ItemDataRole.UserRole) or item.text())
             self.canvas.clear_undostack(update_saved_step=True)
             self.canvas.updateCanvas()
             self.st_manager.updateSceneTextitems()
@@ -3893,8 +3920,12 @@ class MainWindow(mainwindow_cls):
                     self.pageList.setCurrentRow(row)
 
     def shortcutTextedit(self):
-        if self.centralStackWidget.currentIndex() == 1:
-            self.bottomBar.texteditChecker.click()
+        if not self._has_open_project():
+            return
+        if self.centralStackWidget.currentIndex() != 1:
+            self._show_main_content()
+        self.bottomBar.setPipelineVisible(True)
+        self.bottomBar.texteditChecker.click()
 
     def shortcutTextblock(self):
         if self.centralStackWidget.currentIndex() == 1:
@@ -3902,8 +3933,12 @@ class MainWindow(mainwindow_cls):
                 self.bottomBar.textblockChecker.click()
 
     def shortcutDrawboard(self):
-        if self.centralStackWidget.currentIndex() == 1:
-            self.bottomBar.paintChecker.click()
+        if not self._has_open_project():
+            return
+        if self.centralStackWidget.currentIndex() != 1:
+            self._show_main_content()
+        self.bottomBar.setPipelineVisible(True)
+        self.bottomBar.paintChecker.click()
 
     def shortcutSpellCheckPanel(self):
         """Show Spell check panel (PR #974)."""
@@ -4149,7 +4184,7 @@ class MainWindow(mainwindow_cls):
             result, target_indices = self._layout_review_result_for_scope(mode)
         except Exception as e:
             self.pipelineInsightsPanel.add_warning('LAYOUT_REVIEW', str(e))
-            self.statusBar().showMessage(self.tr('Layout review unavailable: {0}').format(str(e)), 5000)
+            self._show_status_message(self.tr('Layout review unavailable: {0}').format(str(e)), 5000)
             return
         summary = self._summarize_layout_review_result(result)
         dlg = LayoutReviewReportDialog(result, self)
@@ -4164,10 +4199,10 @@ class MainWindow(mainwindow_cls):
             if self.imgtrans_proj and self.imgtrans_proj.directory:
                 self.imgtrans_proj.save()
             self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Applied {0} layout fix action(s).').format(applied))
-            self.statusBar().showMessage(self.tr('Layout review applied {0} fix action(s).').format(applied), 5000)
+            self._show_status_message(self.tr('Layout review applied {0} fix action(s).').format(applied), 5000)
         else:
             self.pipelineInsightsPanel.add_event('LAYOUT', self.tr('Layout review found no applicable fixes.'))
-            self.statusBar().showMessage(self.tr('Layout review: no applicable fixes.'), 4000)
+            self._show_status_message(self.tr('Layout review: no applicable fixes.'), 4000)
         if summary['issues'] > 0:
             self.pipelineInsightsPanel.add_warning('LAYOUT_REVIEW', self.tr('{0} issue(s), {1} proposed fix(es).').format(summary['issues'], summary['actions']))
 
@@ -4664,8 +4699,9 @@ class MainWindow(mainwindow_cls):
             from utils import merger
             
             self.merge_dialog = MergeDialog(self)
-            self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True))
-            self.merge_dialog.run_all_clicked.connect(lambda: self.run_merge_task(on_current=False))
+            self.merge_dialog.preview_current_clicked.connect(lambda: self.run_merge_task(on_current=True, dry_run=True))
+            self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True, dry_run=False))
+            self.merge_dialog.run_all_clicked.connect(lambda: self.run_merge_task(on_current=False, dry_run=False))
         
         if self.merge_dialog.isVisible():
             self.merge_dialog.raise_()
@@ -5144,7 +5180,7 @@ class MainWindow(mainwindow_cls):
         except Exception:
             pass
 
-    def run_merge_task(self, on_current=False):
+    def run_merge_task(self, on_current=False, dry_run=False):
         """Run the region merge task."""
         from utils import merger
         from qtpy.QtWidgets import QMessageBox
@@ -5154,6 +5190,8 @@ class MainWindow(mainwindow_cls):
             return
         
         config = self.merge_dialog.get_config()
+        if bool(getattr(getattr(pcfg, "module", None), "merge_nearby_blocks_collision", False)) and mode in ("all_pages", "current_page"):
+            self._show_status_message(self.tr("Detector collision-merge and Region merge are both enabled; Region merge runs as a second pass."), 6000)
         
         if on_current:
             # Run on current page — operate in memory, no file I/O
@@ -5200,11 +5238,14 @@ class MainWindow(mainwindow_cls):
                 final_shapes = initial_shapes
             
             if total_merged > 0:
+                final_count = len(final_shapes)
+                if dry_run:
+                    self._msg_information("Preview", f"Merge preview: {initial_count} -> {final_count} blocks (would reduce by {initial_count - final_count})")
+                    return
                 # Convert dicts back to TextBlock and update memory
                 self.imgtrans_proj.pages[current_img] = [TextBlock(**blk_dict) for blk_dict in final_shapes]
                 self.canvas.updateCanvas()
                 self.st_manager.updateSceneTextitems()
-                final_count = len(final_shapes)
                 self._msg_information("Success", f"Merge done: {initial_count} -> {final_count} blocks (reduced by {initial_count - final_count})")
             else:
                 raw_labels = set(s.get('label') for s in initial_shapes)
@@ -6144,9 +6185,12 @@ class MainWindow(mainwindow_cls):
         if not hasattr(self, 'merge_dialog') or self.merge_dialog is None:
             from .merge_dialog import MergeDialog
             self.merge_dialog = MergeDialog(self)
-            self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True))
-            self.merge_dialog.run_all_clicked.connect(lambda: self.run_merge_task(on_current=False))
+            self.merge_dialog.preview_current_clicked.connect(lambda: self.run_merge_task(on_current=True, dry_run=True))
+            self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True, dry_run=False))
+            self.merge_dialog.run_all_clicked.connect(lambda: self.run_merge_task(on_current=False, dry_run=False))
         config = self.merge_dialog.get_config()
+        if bool(getattr(getattr(pcfg, "module", None), "merge_nearby_blocks_collision", False)) and mode in ("all_pages", "current_page"):
+            self._show_status_message(self.tr("Detector collision-merge and Region merge are both enabled; Region merge runs as a second pass."), 6000)
         if mode == 'all_pages':
             img_list = list(self.imgtrans_proj.pages.keys())
             if not img_list:
@@ -6649,7 +6693,7 @@ class MainWindow(mainwindow_cls):
 
     def _selected_page_names(self) -> List[str]:
         try:
-            return [item.text() for item in self.pageList.selectedItems()]
+            return [(item.data(Qt.ItemDataRole.UserRole) or item.text()) for item in self.pageList.selectedItems()]
         except Exception:
             return []
 
@@ -7109,6 +7153,9 @@ class MainWindow(mainwindow_cls):
         """Persist user-visible completion state for selected pages."""
         if not pagenames or self.imgtrans_proj.is_empty:
             return
+        state = str(state or 'todo').strip().lower()
+        if state not in {'todo', 'translated', 'reviewed', 'exported'}:
+            state = 'todo'
         for name in pagenames:
             self.imgtrans_proj.set_page_completion_state(name, state)
         if self.imgtrans_proj.directory:
@@ -7147,9 +7194,15 @@ class MainWindow(mainwindow_cls):
             item = self.pageList.item(i)
             if item is None:
                 continue
-            name = item.text()
+            name = item.data(Qt.ItemDataRole.UserRole) or item.text()
             is_ignored = self.imgtrans_proj.is_page_ignored(name) if not self.imgtrans_proj.is_empty else False
             state = self.imgtrans_proj.get_page_completion_state(name) if not self.imgtrans_proj.is_empty else 'todo'
+            state_prefix = {'todo': '◻', 'translated': '🟦', 'reviewed': '🟩', 'exported': '🟨'}.get(state, '◻')
+            display_name = f"{state_prefix} {name}"
+            if is_ignored:
+                display_name = f"⏭ {display_name}"
+            if item.text() != display_name:
+                item.setText(display_name)
             tips = [self.tr('Completion: {0}').format(labels.get(state, state))]
             if is_ignored:
                 tips.append(self.tr('Ignored in run (right-click → Include in run to process)'))
