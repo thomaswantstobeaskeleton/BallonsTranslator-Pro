@@ -73,6 +73,7 @@ from .reading_order_editor_dialog import ReadingOrderEditorDialog
 from .layout_review_report_dialog import LayoutReviewReportDialog
 from .lettering_workflow_dialog import LetteringWorkflowDialog
 from .auto_format_qa_widget import AutoFormatQADialog
+from .realtime_translator_dialog import RealtimeTranslatorDialog
 from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
@@ -92,6 +93,7 @@ from utils.glossary_io import export_glossary_csv, import_glossary_csv, preview_
 from utils.sfx_dictionary import default_sfx_dictionary, query_sfx_dictionary, merge_sfx_entries, export_sfx_dictionary, import_sfx_dictionary
 from utils.glossary_extraction import extract_glossary_candidates
 from utils.batch_find_replace import preview_batch_find_replace, apply_batch_find_replace
+from utils.image_transform_ops import TransformOptions, transform_image_file
 from utils.layered_psd_export import build_layered_psd_handoff
 from utils.svg_text_export import build_svg_text_handoff
 from utils.lettering_proof_export import build_lettering_proof_pack
@@ -103,6 +105,7 @@ from utils.automation_api_contract import normalize_job_task
 from utils.automation_jobs import new_job, append_log, add_warning, set_status, checkpoint_or_cancel, status_payload
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
+from utils.realtime_mode import RealtimeService, RealtimeRegion
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
 from modules.text_normalization import normalize_text
 from modules.text_replace_profiles import apply_profile, default_profiles
@@ -1003,6 +1006,14 @@ class MainWindow(mainwindow_cls):
             'job_logs': self._api_job_logs,
             'job_result': self._api_job_result,
             'jobs_list': self._api_jobs_list,
+            'realtime_status': self._api_realtime_status,
+            'realtime_regions': self._api_realtime_regions,
+            'realtime_start': self._api_realtime_start,
+            'realtime_pause': self._api_realtime_pause,
+            'realtime_stop': self._api_realtime_stop,
+            'realtime_translate_now': self._api_realtime_translate_now,
+            'realtime_profiles': self._api_realtime_profiles,
+            'image_transform': self._api_image_transform,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -1014,6 +1025,125 @@ class MainWindow(mainwindow_cls):
 
     def _api_pipeline_presets(self, body: dict):
         return self._api_call_ui(self._api_pipeline_presets_ui, body)
+
+    def _realtime_service(self) -> RealtimeService:
+        if not hasattr(self, '_realtime_service_obj') or self._realtime_service_obj is None:
+            self._realtime_service_obj = RealtimeService()
+        return self._realtime_service_obj
+
+    def _api_realtime_status(self, body: dict):
+        return self._api_call_ui(lambda _b: self._realtime_service().status(), body)
+
+    def _api_realtime_regions(self, body: dict):
+        def _ui(_b: dict):
+            svc = self._realtime_service()
+            action = str((_b or {}).get('action', 'list') or 'list').lower()
+            if action == 'list':
+                return {'regions': [vars(v) for v in svc.regions.values()]}
+            if action == 'add':
+                rid = str((_b or {}).get('region_id', '') or '').strip() or f"region_{len(svc.regions)+1}"
+                rect = tuple((_b or {}).get('rect', [0, 0, 640, 360])[:4])
+                profile = str((_b or {}).get('profile', 'chrome_manhua_reader') or 'chrome_manhua_reader')
+                svc.regions[rid] = RealtimeRegion(region_id=rid, rect=rect, profile=profile)
+                return {'ok': True, 'region': vars(svc.regions[rid])}
+            if action == 'delete':
+                rid = str((_b or {}).get('region_id', '') or '').strip()
+                svc.regions.pop(rid, None)
+                return {'ok': True, 'deleted': rid}
+            raise ValueError('realtime_regions action must be list|add|delete')
+        return self._api_call_ui(_ui, body)
+
+    def _api_realtime_start(self, body: dict):
+        return self._api_call_ui(lambda _b: {'ok': True, **self._set_realtime_enabled(True)}, body)
+
+    def _api_realtime_pause(self, body: dict):
+        return self._api_call_ui(lambda _b: {'ok': True, **self._set_realtime_enabled(False), 'paused': True}, body)
+
+    def _api_realtime_stop(self, body: dict):
+        return self._api_call_ui(lambda _b: {'ok': True, **self._set_realtime_enabled(False), 'stopped': True}, body)
+
+    def _api_realtime_translate_now(self, body: dict):
+        return self._api_call_ui(lambda _b: {'ok': True, 'status': 'queued_manual_tick'}, body)
+
+    def _api_realtime_profiles(self, body: dict):
+        return self._api_call_ui(lambda _b: {'profiles': list(self._realtime_service().profiles.values())}, body)
+
+    def _set_realtime_enabled(self, enabled: bool):
+        svc = self._realtime_service()
+        svc.enabled = bool(enabled)
+        return svc.status()
+
+    def _api_image_transform(self, body: dict):
+        return self._api_call_ui(self._api_image_transform_ui, body)
+
+    def _api_image_transform_ui(self, body: dict):
+        data = body if isinstance(body, dict) else {}
+        input_path = str(data.get('input_path', '') or '').strip()
+        output_path = str(data.get('output_path', '') or '').strip()
+        if not input_path or not output_path:
+            raise ValueError('input_path and output_path are required')
+        crop = data.get('crop')
+        resize = data.get('resize')
+        scale = data.get('scale')
+        border = int(data.get('border', 0) or 0)
+        border_color = tuple((data.get('border_color') or [0, 0, 0])[:3])
+        brightness = float(data.get('brightness', 0.0) or 0.0)
+        contrast = float(data.get('contrast', 1.0) or 1.0)
+        perspective_src = data.get('perspective_src')
+        perspective_dst = data.get('perspective_dst')
+        opts = TransformOptions(
+            crop=tuple(crop[:4]) if isinstance(crop, (list, tuple)) and len(crop) >= 4 else None,
+            resize=tuple(resize[:2]) if isinstance(resize, (list, tuple)) and len(resize) >= 2 else None,
+            scale=float(scale) if scale is not None else None,
+            border=border,
+            border_color=border_color,
+            brightness=brightness,
+            contrast=contrast,
+            perspective_src=tuple(tuple(float(v) for v in p[:2]) for p in perspective_src[:4]) if isinstance(perspective_src, (list, tuple)) and len(perspective_src) >= 4 else None,
+            perspective_dst=tuple(tuple(float(v) for v in p[:2]) for p in perspective_dst[:4]) if isinstance(perspective_dst, (list, tuple)) and len(perspective_dst) >= 4 else None,
+        )
+        result = transform_image_file(input_path, output_path, opts)
+        add_as_next_page = bool(data.get('add_as_next_page', False))
+        if add_as_next_page:
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first for add_as_next_page')
+            src_page = str(data.get('source_page', '') or self.imgtrans_proj.current_img or '').strip()
+            if not src_page or src_page not in self.imgtrans_proj.pages:
+                raise ValueError('source_page not found in current project')
+            rel_name = osp.basename(output_path)
+            if osp.isabs(output_path):
+                proj_dir = osp.abspath(self.imgtrans_proj.directory)
+                out_abs = osp.abspath(output_path)
+                if not out_abs.startswith(proj_dir):
+                    raise ValueError('output_path must be inside current project directory for add_as_next_page')
+                rel_name = osp.relpath(out_abs, proj_dir).replace('\\', '/')
+            pages_order = list(self.imgtrans_proj.pages.keys())
+            try:
+                src_idx = pages_order.index(src_page)
+            except ValueError:
+                src_idx = len(pages_order) - 1
+            if rel_name in self.imgtrans_proj.pages:
+                raise ValueError(f'page already exists in project: {rel_name}')
+            new_pages = {}
+            for i, p in enumerate(pages_order):
+                new_pages[p] = self.imgtrans_proj.pages[p]
+                if i == src_idx:
+                    new_pages[rel_name] = []
+            if rel_name not in new_pages:
+                new_pages[rel_name] = []
+            self.imgtrans_proj.pages = new_pages
+            self.imgtrans_proj._pagename2idx = {}
+            self.imgtrans_proj._idx2pagename = {}
+            for ii, imgname in enumerate(self.imgtrans_proj.pages.keys()):
+                self.imgtrans_proj._pagename2idx[imgname] = ii
+                self.imgtrans_proj._idx2pagename[ii] = imgname
+                if imgname not in self.imgtrans_proj._image_info:
+                    self.imgtrans_proj._image_info[imgname] = {'finish_code': 0, 'ignored': False, 'completion_state': 'todo'}
+            self.imgtrans_proj.save()
+            self.updatePageList()
+            result['added_page'] = rel_name
+            result['insert_after'] = src_page
+        return {'ok': True, **result}
 
     def _api_pipeline_presets_ui(self, body: dict):
         action = str((body or {}).get('action', 'list') or 'list').strip().lower()
@@ -3471,6 +3601,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.validate_project_trigger.connect(self.on_validate_project)
         self.titleBar.show_batch_report_trigger.connect(self._show_batch_report_dialog)
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
+        if hasattr(self.titleBar, "realtime_translator_trigger"):
+            self.titleBar.realtime_translator_trigger.connect(self.on_open_realtime_translator)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.install_google_font_trigger.connect(self.on_install_google_font)
@@ -3565,6 +3697,9 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.fit_to_bubble", "", self.shortcutFitToBubble)
         _mk_shortcut("format.auto_fit", "", self.shortcutFormatAutoFit)
         _mk_shortcut("format.auto_fit_binary", "", self.shortcutFormatAutoFitBinary)
+        _mk_shortcut("format.re_auto_fit_selected", "", self.shortcutReAutoFitSelected)
+        _mk_shortcut("format.re_auto_fit_page", "", self.shortcutReAutoFitCurrentPage)
+        _mk_shortcut("format.re_auto_fit_all", "", self.shortcutReAutoFitAllPages)
         _mk_shortcut("format.balloon_shape_auto", "", self.shortcutBalloonShapeAuto)
         _mk_shortcut("format.resize_to_fit_content", "", self.shortcutResizeToFitContent)
         _mk_shortcut("format.layout_review_selected", "", self.shortcutLayoutReviewSelected)
@@ -4115,6 +4250,24 @@ class MainWindow(mainwindow_cls):
         """Auto fit font size binary search (Format shortcut)."""
         if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.auto_fit_binary_signal.emit()
+
+    def shortcutReAutoFitSelected(self):
+        """Re-auto-fit selected text boxes (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            if hasattr(self.canvas, "re_auto_fit_selected_signal"):
+                self.canvas.re_auto_fit_selected_signal.emit()
+
+    def shortcutReAutoFitCurrentPage(self):
+        """Re-auto-fit current page (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
+            if hasattr(self.canvas, "re_auto_fit_page_signal"):
+                self.canvas.re_auto_fit_page_signal.emit()
+
+    def shortcutReAutoFitAllPages(self):
+        """Re-auto-fit all pages (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
+            if hasattr(self.canvas, "re_auto_fit_all_signal"):
+                self.canvas.re_auto_fit_all_signal.emit()
 
     def shortcutBalloonShapeAuto(self):
         """Set balloon shape to Auto (Format shortcut)."""
@@ -4720,6 +4873,16 @@ class MainWindow(mainwindow_cls):
             self.manga_source_dialog.activateWindow()
         else:
             self.manga_source_dialog.show()
+
+    def on_open_realtime_translator(self):
+        """Open realtime screen translation dialog (project-less live mode)."""
+        if not hasattr(self, '_realtime_translator_dialog') or self._realtime_translator_dialog is None:
+            self._realtime_translator_dialog = RealtimeTranslatorDialog(self)
+        if self._realtime_translator_dialog.isVisible():
+            self._realtime_translator_dialog.raise_()
+            self._realtime_translator_dialog.activateWindow()
+        else:
+            self._realtime_translator_dialog.show()
 
     def on_open_batch_queue(self):
         """Open the Batch queue dialog (multiple folders, Pause/Cancel)."""

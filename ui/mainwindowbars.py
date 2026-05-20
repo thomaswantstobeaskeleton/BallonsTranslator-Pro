@@ -685,6 +685,9 @@ class TitleBar(Widget):
 
         mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
         self.manga_source_trigger = mangaSourceAction.triggered
+        realtimeTranslatorAction = QAction(self.tr('Realtime Screen Translator...'), self)
+        realtimeTranslatorAction.setToolTip(self.tr('Live OCR + translation for a selected screen/window region without opening a full project.'))
+        self.realtime_translator_trigger = realtimeTranslatorAction.triggered
 
         batchQueueAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Batch queue...'), self)
         batchQueueAction.setToolTip(self.tr('Process multiple folders in sequence with Pause/Cancel (issue #1020).'))
@@ -807,6 +810,8 @@ class TitleBar(Widget):
         batchFindReplaceAction.setToolTip(self.tr('Preview regex find/replace across project translations before applying.'))
         self.batch_find_replace_trigger = batchFindReplaceAction.triggered
         projectMenu.addAction(batchFindReplaceAction)
+        projectMenu.addSeparator()
+        projectMenu.addAction(realtimeTranslatorAction)
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)

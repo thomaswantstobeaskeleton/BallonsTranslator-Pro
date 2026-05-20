@@ -47,10 +47,25 @@ class LocalAutomationApiServer:
                         return
                     self._send(200, _routes_payload())
                     return
+                if route == 'mcp/commands':
+                    if not self._auth_ok():
+                        return
+                    payload = _routes_payload()
+                    self._send(200, {
+                        'ok': True,
+                        'commands': payload.get('mcp_routes', []),
+                        'count': len(payload.get('mcp_routes', [])),
+                    })
+                    return
                 if route == 'events':
                     if not self._auth_ok():
                         return
                     self._send_events(parsed.query)
+                    return
+                if route == 'realtime/events':
+                    if not self._auth_ok():
+                        return
+                    self._send_realtime_events(parsed.query)
                     return
                 self._send(404, {'ok': False, 'error': f'unknown route: {route}'})
 
@@ -107,6 +122,37 @@ class LocalAutomationApiServer:
                 lines = [
                     f"id: {event_id}",
                     f"event: {status_name}",
+                    'data: ' + json.dumps(payload),
+                    '',
+                ]
+                data = ('\n'.join(lines) + '\n').encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def _send_realtime_events(self, query: str):
+                qs = parse_qs(query or '')
+                region_id = (qs.get('region_id') or [''])[0]
+                payload: Dict[str, Any] = {'ok': True, 'region_id': region_id, 'event': 'realtime_snapshot'}
+                status_fn = handlers.get('realtime_status')
+                regions_fn = handlers.get('realtime_regions')
+                profiles_fn = handlers.get('realtime_profiles')
+                try:
+                    if status_fn is not None:
+                        payload['status'] = status_fn({})
+                    if regions_fn is not None:
+                        payload['regions'] = regions_fn({'action': 'list'})
+                    if profiles_fn is not None:
+                        payload['profiles'] = profiles_fn({})
+                except Exception as e:
+                    self._send(500, {'ok': False, 'error': str(e)})
+                    return
+                lines = [
+                    "id: realtime",
+                    "event: realtime_snapshot",
                     'data: ' + json.dumps(payload),
                     '',
                 ]

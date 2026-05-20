@@ -44,7 +44,7 @@ def test_local_automation_api_health_lists_routes():
     assert out['status'] == 'ok'
     assert out['count'] == 1
     assert 'ping' in out['routes']
-    assert out['methods']['GET'] == ['events', 'health', 'routes']
+    assert out['methods']['GET'] == ['events', 'health', 'mcp/commands', 'realtime/events', 'routes']
     assert out['methods']['POST'] == ['ping']
 
 
@@ -62,7 +62,7 @@ def test_local_automation_api_routes_endpoint_shape():
     assert out['ok'] is True
     assert out['count'] == 2
     assert out['routes'] == ['open_project', 'project_status']
-    assert out['methods']['GET'] == ['events', 'health', 'routes']
+    assert out['methods']['GET'] == ['events', 'health', 'mcp/commands', 'realtime/events', 'routes']
     assert out['methods']['POST'] == ['open_project', 'project_status']
 
 
@@ -80,6 +80,23 @@ def test_local_automation_api_routes_are_sorted_for_stability():
     server.stop()
     assert out['routes'] == ['alpha', 'mid', 'zeta']
     assert out['methods']['POST'] == ['alpha', 'mid', 'zeta']
+
+
+def test_local_automation_api_mcp_commands_endpoint():
+    handlers = {
+        'open_project': lambda body: {'ok': True},
+        'project_status': lambda body: {'ok': True},
+        'foo_custom': lambda body: {},
+    }
+    server = LocalAutomationApiServer('127.0.0.1', 39606, handlers)
+    server.start()
+    req = urllib.request.Request('http://127.0.0.1:39606/mcp/commands', method='GET')
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        out = json.loads(resp.read().decode('utf-8'))
+    server.stop()
+    assert out['ok'] is True
+    assert out['count'] == 2
+    assert out['commands'] == ['open_project', 'project_status']
 
 
 def test_local_automation_api_event_stream_job_snapshot():
@@ -107,3 +124,24 @@ def test_local_automation_api_event_stream_job_snapshot():
     assert 'id: ' in body
     assert '"status": "running"' in body
     assert 'started' in body
+
+
+def test_local_automation_api_realtime_event_stream_snapshot():
+    server = LocalAutomationApiServer(
+        '127.0.0.1',
+        39607,
+        {
+            'realtime_status': lambda body: {'enabled': True, 'region_count': 1},
+            'realtime_regions': lambda body: {'regions': [{'region_id': 'r1'}]},
+            'realtime_profiles': lambda body: {'profiles': [{'id': 'chrome_manhua_reader'}]},
+        },
+    )
+    server.start()
+    req = urllib.request.Request('http://127.0.0.1:39607/realtime/events', method='GET')
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        body = resp.read().decode('utf-8')
+        content_type = resp.headers.get('Content-Type')
+    server.stop()
+    assert content_type == 'text/event-stream'
+    assert 'event: realtime_snapshot' in body
+    assert '"enabled": true' in body

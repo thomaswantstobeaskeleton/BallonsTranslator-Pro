@@ -19,6 +19,10 @@ MCP_COMMAND_ROUTES: Set[str] = {
     "export",
     "undo",
     "redo",
+    "realtime_status",
+    "realtime_start",
+    "realtime_stop",
+    "realtime_translate_now",
 }
 
 JOB_TASK_ALIASES: Mapping[str, str] = {
@@ -70,7 +74,7 @@ def normalize_job_task(task: str) -> str:
 
 def build_route_discovery(handlers: Mapping[str, Any], *, get_routes: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     routes = sorted(str(k) for k in handlers.keys())
-    get_list = sorted(set(str(r) for r in (get_routes or ["health", "routes", "events"])))
+    get_list = sorted(set(str(r) for r in (get_routes or ["health", "routes", "events", "mcp/commands", "realtime/events"])))
     discovery = RouteDiscovery(
         routes=routes,
         get_routes=get_list,
