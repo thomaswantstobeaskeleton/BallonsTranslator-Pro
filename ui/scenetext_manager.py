@@ -784,7 +784,7 @@ class SceneTextManager(QObject):
         self.textpanel = textpanel
         self.textEditList = textpanel.textEditList
         self.textEditList.focus_out.connect(self.on_textedit_list_focusout)
-        self.textEditList.textpanel_contextmenu_requested.connect(canvas.on_create_contextmenu)
+        self.textEditList.textpanel_contextmenu_requested.connect(mainwindow.on_texteditlist_contextmenu_requested)
         self.textEditList.selection_changed.connect(self.on_transwidget_selection_changed)
         self.textEditList.rearrange_blks.connect(self.on_rearrange_blks)
         self.formatpanel = textpanel.formatpanel

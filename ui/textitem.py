@@ -287,8 +287,12 @@ class TextBlkItem(QGraphicsTextItem):
         paint_stroke = self.fontformat.stroke_width > 0
         paint_shadow = self.fontformat.shadow_radius > 0 and self.fontformat.shadow_strength > 0
         warp_style = getattr(self.fontformat, 'warp_style', 0)
+        perspective_x = float(getattr(self.fontformat, 'perspective_x', 0.0) or 0.0)
+        perspective_y = float(getattr(self.fontformat, 'perspective_y', 0.0) or 0.0)
+        extrusion_depth = max(0.0, float(getattr(self.fontformat, 'extrusion_depth', 0.0) or 0.0))
+        use_3d = abs(perspective_x) > 1e-4 or abs(perspective_y) > 1e-4 or extrusion_depth > 1e-4
 
-        if (not use_path and not paint_shadow and not paint_stroke and not paint_secondary_stroke and not warp_style) or empty:
+        if (not use_path and not paint_shadow and not paint_stroke and not paint_secondary_stroke and not warp_style and not use_3d) or empty:
             self.background_pixmap = None
             return
 
@@ -389,10 +393,61 @@ class TextBlkItem(QGraphicsTextItem):
                     warp_style,
                     getattr(self.fontformat, 'warp_strength', 0.5),
                 )
+            if use_3d and effect_map.width() > 2 and effect_map.height() > 2:
+                effect_map = self._apply_3d_text_effect(effect_map, perspective_x, perspective_y, extrusion_depth)
 
             self.background_pixmap = effect_map
         finally:
             self.repainting = False
+
+    def _apply_3d_text_effect(self, src: QPixmap, perspective_x: float, perspective_y: float, extrusion_depth: float) -> QPixmap:
+        w, h = src.width(), src.height()
+        if w < 2 or h < 2:
+            return src
+        font_px = max(1.0, self.layout.max_font_size(to_px=True))
+        depth_px = int(round(max(0.0, extrusion_depth) * font_px * 0.7))
+        shift_x = float(perspective_x) * w * 0.18
+        shift_y = float(perspective_y) * h * 0.18
+        canvas_pad = int(max(4, abs(shift_x), abs(shift_y), depth_px) + 4)
+        out = QPixmap(w + canvas_pad * 2, h + canvas_pad * 2)
+        out.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(out)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        base_pos = QPointF(canvas_pad, canvas_pad)
+        if depth_px > 0:
+            alpha_step = max(8, int(80 / max(1, depth_px)))
+            for i in range(depth_px, 0, -1):
+                t = i / float(max(1, depth_px))
+                layer = self._warp_pixmap(src, shift_x * t, shift_y * t)
+                painter.setOpacity(min(0.8, alpha_step * i / 255.0))
+                painter.drawPixmap(base_pos + QPointF(t * shift_x, t * shift_y), layer)
+            painter.setOpacity(1.0)
+        final = self._warp_pixmap(src, shift_x, shift_y)
+        painter.drawPixmap(base_pos, final)
+        painter.end()
+        return out
+
+    def _warp_pixmap(self, src: QPixmap, shift_x: float, shift_y: float) -> QPixmap:
+        w, h = src.width(), src.height()
+        src_poly = QPolygonF([QPointF(0, 0), QPointF(w, 0), QPointF(w, h), QPointF(0, h)])
+        dst_poly = QPolygonF([
+            QPointF(shift_x, shift_y),
+            QPointF(w - shift_x, -shift_y),
+            QPointF(w + shift_x, h + shift_y),
+            QPointF(-shift_x, h - shift_y),
+        ])
+        transform = QTransform()
+        ok = QTransform.quadToQuad(src_poly, dst_poly, transform)
+        if not ok:
+            return src
+        out = QPixmap(w, h)
+        out.fill(Qt.GlobalColor.transparent)
+        p = QPainter(out)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.setTransform(transform, False)
+        p.drawPixmap(0, 0, src)
+        p.end()
+        return out
     def docSizeChanged(self):
         self.setCenterTransform()
         self.doc_size_changed.emit(self.idx)
