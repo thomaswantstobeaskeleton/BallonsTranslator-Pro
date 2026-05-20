@@ -1124,8 +1124,8 @@ QLabel#angleLabel {
 QToolButton#SpellCheckChecker {
     min-width: 44px;
     max-width: 44px;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: 40px;
+    max-height: 40px;
     border: none;
     border-radius: 4px;
     padding: 0px;
@@ -1138,7 +1138,6 @@ QToolButton#SpellCheckChecker:hover {
 QToolButton#SpellCheckChecker:checked {
     background-color: @accentColorRgba20;
 }
-
 QLabel#FormatScopeLabel {
     color: gray;
     padding: 4px 8px;
@@ -1150,4 +1149,66 @@ QScrollArea#FormatPanelScroll {
 QLabel#LetteringDiagnosticsLabel {
     color: gray;
     padding: 4px 8px;
+}
+
+/* Normalized bottom-bar mode button geometry. */
+QToolButton#TextblockChecker {
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 40px;
+    max-height: 40px;
+    border: none;
+    border-radius: 4px;
+    padding: 0px;
+    margin: 0px;
+    background-color: transparent;
+}
+QToolButton#TextblockChecker:hover {
+    background-color: @accentColorRgba20;
+}
+QToolButton#TextblockChecker:checked {
+    background-color: @accentColorRgba20;
+}
+
+/* Bottom bar mode button compact alignment fix.
+   BOTTOMBAR_HEIGHT is 32px and the layout keeps a 4px bottom border margin,
+   so the usable icon row is 28px tall. Keep mode icons within that row. */
+QCheckBox#PaintChecker,
+QCheckBox#TexteditChecker {
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0px;
+    margin: 0px;
+    spacing: 0px;
+    background-color: transparent;
+}
+
+QCheckBox#PaintChecker::indicator,
+QCheckBox#TexteditChecker::indicator {
+    width: 28px;
+    height: 28px;
+    padding: 0px;
+    margin: 0px;
+}
+
+QToolButton#SpellCheckChecker,
+QToolButton#TextblockChecker {
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 28px;
+    max-height: 28px;
+    border: none;
+    border-radius: 4px;
+    padding: 0px;
+    margin: 0px;
+    background-color: transparent;
+}
+
+QToolButton#SpellCheckChecker:hover,
+QToolButton#TextblockChecker:hover,
+QToolButton#SpellCheckChecker:checked,
+QToolButton#TextblockChecker:checked {
+    background-color: @accentColorRgba20;
 }
