@@ -57,6 +57,8 @@ class MoveBlkItemsCommand(QUndoCommand):
             item.setPos(new_pos - padding)
             if self.shape_ctrl.blk_item == item and self.shape_ctrl.pos() != new_pos:
                 self.shape_ctrl.setPos(new_pos)
+            if getattr(item, 'blk', None) is not None and hasattr(item.blk, 'fontformat'):
+                item.blk.fontformat.user_adjusted = True
 
     def undo(self):
         for item, old_pos in zip(self.items, self.old_pos_lst):
@@ -110,6 +112,8 @@ class ReshapeItemCommand(QUndoCommand):
             self.idx += 1
             return
         self.item.setRect(self.newRect)
+        if getattr(self.item, 'blk', None) is not None and hasattr(self.item.blk, 'fontformat'):
+            self.item.blk.fontformat.user_adjusted = True
 
     def undo(self):
         self.item.setRect(self.oldRect)
@@ -133,6 +137,8 @@ class RotateItemCommand(QUndoCommand):
     def redo(self):
         self.item.setRotation(self.new_angle)
         self.item.blk.angle = self.new_angle
+        if getattr(self.item, 'blk', None) is not None and hasattr(self.item.blk, 'fontformat'):
+            self.item.blk.fontformat.user_adjusted = True
         if self.shape_ctrl.blk_item == self.item and self.shape_ctrl.rotation() != self.new_angle:
             self.shape_ctrl.setRotation(self.new_angle)
 
@@ -297,6 +303,8 @@ class TextItemEditCommand(QUndoCommand):
 
         if self.edit is not None and not self.is_formatting:
             self.edit.redo()
+        if getattr(self.blkitem, 'blk', None) is not None and hasattr(self.blkitem.blk, 'fontformat'):
+            self.blkitem.blk.fontformat.user_adjusted = True
 
     def undo(self):
         self.blkitem.repaint_on_changed = False

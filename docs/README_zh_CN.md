@@ -52,3 +52,8 @@
 ## 本地化专项
 - `HARDCODED_UI_TEXT_AUDIT.md`：硬编码 UI 文案审计（英文）。
 - `HARDCODED_UI_TEXT_AUDIT_zh_CN.md`：硬编码 UI 文案审计（中文）。
+
+
+## 实时屏幕翻译（实验功能）
+
+BallonsTranslator-Pro 现在提供可选的“无项目实时模式”对话框（工具 → Realtime Screen Translator），可对选定屏幕区域进行实时 OCR + 翻译。隐私默认是本地优先：默认不保存截图/OCR/翻译文本，且默认不记录实时文本日志（除非后续设置中显式启用）。

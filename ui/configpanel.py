@@ -1307,6 +1307,11 @@ class ConfigPanel(Widget):
             discription=self.tr('After auto layout, move each text box so its center aligns with the bubble center. Skips boxes that are close to another (combined/overlapping bubbles).')
         )
         self.layout_center_in_bubble_after_autolayout_checker.stateChanged.connect(self._on_layout_center_in_bubble_after_autolayout_changed)
+        self.layout_skip_user_adjusted_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Skip user-adjusted boxes in bulk re-auto-fit'),
+            discription=self.tr('When enabled, page/all re-auto-fit keeps text boxes you manually moved/resized/edited. Selected-scope re-auto-fit can still override manually adjusted boxes.')
+        )
+        self.layout_skip_user_adjusted_checker.stateChanged.connect(self._on_layout_skip_user_adjusted_changed)
         self.layout_center_in_bubble_min_gap_spin = QDoubleSpinBox()
         self.layout_center_in_bubble_min_gap_spin.setRange(0.0, 200.0)
         self.layout_center_in_bubble_min_gap_spin.setSingleStep(10.0)
@@ -1875,6 +1880,7 @@ class ConfigPanel(Widget):
         pairs = [
             ('layout_constrain_to_bubble_checker', 'layout_constrain_to_bubble', 'checked'),
             ('layout_center_in_bubble_after_autolayout_checker', 'layout_center_in_bubble_after_autolayout', 'checked'),
+            ('layout_skip_user_adjusted_checker', 'layout_skip_user_adjusted', 'checked'),
             ('layout_check_overflow_after_layout_checker', 'layout_check_overflow_after_layout', 'checked'),
             ('layout_use_mask_safe_area_checker', 'layout_use_mask_safe_area', 'checked'),
             ('layout_optimal_breaks_checker', 'layout_optimal_breaks', 'checked'),
@@ -1974,6 +1980,10 @@ class ConfigPanel(Widget):
 
     def _on_layout_center_in_bubble_after_autolayout_changed(self):
         pcfg.module.layout_center_in_bubble_after_autolayout = self.layout_center_in_bubble_after_autolayout_checker.isChecked()
+        self.save_config.emit()
+
+    def _on_layout_skip_user_adjusted_changed(self):
+        pcfg.module.layout_skip_user_adjusted = self.layout_skip_user_adjusted_checker.isChecked()
         self.save_config.emit()
 
     def _on_layout_center_in_bubble_min_gap_px_changed(self, value: float):

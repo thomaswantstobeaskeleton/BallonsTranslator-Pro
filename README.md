@@ -150,3 +150,8 @@ python scripts/test_manga_sources.py
 python scripts/test_manga_sources.py --stable-registry-only
 pytest -q tests/test_manga_provider_base.py
 ```
+
+
+## Realtime Screen Translator (Experimental)
+
+BallonsTranslator-Pro now includes an optional project-less realtime dialog (Tools → Realtime Screen Translator) for live OCR+translation on a selected screen region. Privacy defaults are local-first: no screenshot/OCR/translation persistence and no live-text logging unless explicitly enabled in future settings.

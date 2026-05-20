@@ -149,6 +149,8 @@ class ModuleConfig(Config):
     # After auto layout, center each text box in its bubble (centroid). Skip boxes that are close to another (combined/overlapping bubbles).
     layout_center_in_bubble_after_autolayout: bool = True
     layout_center_in_bubble_min_gap_px: float = 40.0  # skip centering if another block is within this many pixels (edge-to-edge)
+    # Preserve manual edits by default: bulk auto-layout passes skip textboxes marked user_adjusted.
+    layout_skip_user_adjusted: bool = True
     # Layout judge: nudge text box toward bubble center and keep it away from bubble edges (no corners). Off = 0.
     layout_judge_d: bool = True
     layout_judge_margin_ratio: float = 0.06  # min margin from bubble edge (fraction of min(bubble_w, bubble_h)); e.g. 0.06 = 6%
@@ -706,7 +708,7 @@ CONTEXT_MENU_DEFAULT = {
     'overlay_import': True, 'overlay_clear': True,
     'transform_free': True, 'transform_reset_warp': True, 'transform_warp_preset': True,
     'order_bring_front': True, 'order_send_back': True,
-    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_smart_auto_fit': True, 'format_atomic_bubble_fit': True, 'format_polish_typography': True, 'format_auto_fit_binary': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_fit_to_mask_safe_box': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
+    'format_apply': True, 'format_layout': True, 'format_auto_fit': True, 'format_fit_to_bubble': True, 'format_smart_auto_fit': True, 'format_atomic_bubble_fit': True, 'format_polish_typography': True, 'format_auto_fit_binary': True, 'format_re_auto_fit_selected': True, 'format_re_auto_fit_page': True, 'format_re_auto_fit_all': True, 'format_balloon_shape': True, 'format_resize_to_fit_content': True, 'format_fit_to_mask_safe_box': True, 'format_center_in_bubble': True, 'format_angle': True, 'format_squeeze': True,
     'format_layout_review_selected': True, 'format_layout_review_page': True, 'format_layout_review_config': True,
     'run_detect_region': True, 'run_detect_page': True, 'run_translate': True, 'run_ocr': True,
     'run_ocr_translate': True, 'run_ocr_translate_inpaint': True, 'run_inpaint': True,

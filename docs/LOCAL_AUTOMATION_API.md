@@ -8,7 +8,9 @@ BallonsTranslator-Pro exposes a localhost-only automation API when `automation_a
 
 - `GET /health` returns service status plus the same route catalog as `/routes`.
 - `GET /routes` returns stable sorted POST routes, GET routes, MCP-compatible command routes, job routes, and the SSE event-stream template.
+- `GET /mcp/commands` returns only MCP-compatible command names (`open_project`, `project_status`, `list_pages`, `apply_edit`, `run_pipeline`, `render`, `export`, `undo`, `redo`) for clients that want a minimal command surface.
 - `GET /events?job_id=<job_id>` returns a Server-Sent Events snapshot for a job. Events now include SSE `id` (job `updated_at`) and `event` (current job status such as `running` / `succeeded` / `failed` / `cancelled`) plus a bounded status/log snapshot payload; this keeps clients forward-compatible with future live streaming loops.
+- `GET /realtime/events` returns a realtime-mode SSE snapshot payload (status, regions, profiles) for lightweight dashboard polling.
 
 If `automation_api_key` is set, send it as `X-API-Key` for every request, including discovery and events.
 
@@ -37,6 +39,42 @@ The route catalog marks these commands as MCP-compatible when the UI registers t
 - `export`
 - `undo`
 - `redo`
+- `realtime_status`
+- `realtime_start`
+- `realtime_stop`
+- `realtime_translate_now`
+
+## Realtime mode API (Phase 1 skeleton)
+
+- `POST /realtime_status`
+- `POST /realtime_regions` with `action=list|add|delete`
+- `POST /realtime_start`
+- `POST /realtime_pause`
+- `POST /realtime_stop`
+- `POST /realtime_translate_now`
+- `POST /realtime_profiles`
+- `GET /realtime/events`
+
+These endpoints are intentionally minimal in the first slice and designed to stay local-only. They expose control/state metadata and profile/region stubs without persisting screenshots or live OCR/translation text by default.
+
+## Image transform utility API
+
+- `POST /image_transform` supports single-image geometric transform pipeline:
+  - `input_path` (required)
+  - `output_path` (required)
+  - `crop`: `[x, y, width, height]` (optional)
+  - `scale`: `0.5` style shrink/enlarge multiplier (optional)
+  - `resize`: `[width, height]` absolute resolution (optional)
+  - `border`: integer px border size (optional)
+  - `border_color`: `[r, g, b]` (optional)
+  - `brightness`: float offset (-255..255, optional)
+  - `contrast`: float multiplier (0.1..4.0, optional)
+  - `perspective_src`: `[[x,y], ... x4]` source quad (optional, must pair with dst)
+  - `perspective_dst`: `[[x,y], ... x4]` destination quad (optional, must pair with src)
+  - `add_as_next_page`: bool (optional, project-open mode) to insert transformed output as the next page after `source_page`
+  - `source_page`: page name to insert after when `add_as_next_page=true` (optional; defaults to current page)
+
+Useful for quick pre-processing workflows (crop/shrink/change resolution/add borders) before OCR/translation pipelines.
 
 Aliases such as `project_open`, `pipeline_run`, `scene_edit`, and `render_page` remain supported for compatibility.
 
