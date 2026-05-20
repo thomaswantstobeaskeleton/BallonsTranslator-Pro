@@ -97,6 +97,38 @@ python --version
 
 ---
 
+## 功能总览（快速索引）
+
+### 核心生产流程
+
+- **流程模块**：检测器、OCR、翻译器、修复器可自由组合，并可叠加排版/版式优化步骤。
+- **版式审阅与自动排版**：内置 Layout Review、自动适配/原子气泡适配、溢出检测、阅读顺序辅助与排版 QA，适合正式汉化流程。
+- **文本编辑能力**：支持富文本气泡编辑、撤销/重做、多选变换、查找替换、样式预设、形变/路径控制，以及按块 OCR/翻译检查。
+- **质量优先后处理**：提供块级 QA 提示、审阅导向工具和一致性辅助，帮助减少明显翻译/排版回归。
+
+### 翻译质量能力栈
+
+- **Translation Assist（测试版）**：按文本块提供 TM/术语表/SFX/语料候选，支持显式应用、先编辑后应用、加入 TM/术语表、块级 QA、提供商遥测显示与缓存控制。
+- **多提供商/模块对比工作流**：支持按预设（`low_latency`、`high_quality`）与范围（`translator`、`ocr`、`detector`、`inpainter`）进行同面板对比。
+- **提示词档位与偏好控制**：可按项目配置 Assist 提示词档位与提供商偏好，便于可控质量调优。
+- **质量文档配套**：质量与模型参考可见 [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) 与 [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)。
+
+### 实时、自动化与工程能力
+
+- **实时屏幕翻译（实验性）**：无需建项目，直接对选定屏幕区域实时 OCR+翻译（工具菜单进入），默认隐私优先。
+- **自动化 API**：提供本地路由发现（`/routes`）与 MCP 风格命令面，便于脚本化和无头控制（含 realtime / translation-assist 命名空间）。
+- **批处理与导出**：批队列、归档/CBZ 流程、结构化 OCR/翻译互换、校对/交付导出链路。
+- **生肉下载器**：基于注册表的源插件体系，保留合规/安全边界并支持后续扩展。
+- **诊断与排障**：环境体检、启动诊断、可选依赖说明、GPU/运行时排障指引。
+
+### 平台与易用性亮点
+
+- **Windows 优先启动体验**：`launcher.bat` / `launch_win.bat` 一键流程覆盖安装与快速启动。
+- **应用内 Google Fonts 安装**：无需离开程序即可下载并注册字体。
+- **模块兼容弹性**：可根据资源/隐私/成本选择本地离线或云端 OCR/MT/LLM 组件。
+
+---
+
 ## 基础工作流
 
 1. **打开页面**：File → Open Folder / Open Images
@@ -118,13 +150,25 @@ python --version
 
 ---
 
-## 文档
+## 文档（按场景）
 
+### 入门与运行
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
-- [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
-- [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
-- [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md)
+- [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md)
+- [docs/DOCS_HIGHLIGHTS.md](docs/DOCS_HIGHLIGHTS.md) — 一页式文档导览，说明每份核心文档的用途与适用场景。
+
+### 质量、翻译与排版
+- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) — 常见模块组合的质量/速度取舍参考。
+- [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md) — 模型/模块能力与选型参考。
+- [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md) — 上下文与术语表组织策略、一致性建议。
+- [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md) — 面向专业后期排版的交接流程说明。
+
+### 自动化、实时与规划
+- [docs/LOCAL_AUTOMATION_API.md](docs/LOCAL_AUTOMATION_API.md) — 本地自动化路由与客户端示例。
+- [docs/REALTIME_TRANSLATION_MODE_PLAN.md](docs/REALTIME_TRANSLATION_MODE_PLAN.md) — 实时模式分期与当前约束。
+- [docs/TRANSLATION_ASSIST_PLAN.md](docs/TRANSLATION_ASSIST_PLAN.md) — Translation Assist 能力清单与路线图。
+- [docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md](docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md) — 功能差距计划与阶段记录。
+- [docs/FEATURE_PARITY_MATRIX.md](docs/FEATURE_PARITY_MATRIX.md) — 跨功能区的对齐/覆盖状态矩阵。
 
 
 ## Manga / Comic Raw Downloader

@@ -101,6 +101,38 @@ python --version
 
 ---
 
+## Feature map (quick overview)
+
+### Core production pipeline
+
+- **Pipeline modules**: Mix-and-match detector, OCR, translator, inpainter, plus typography/layout passes for scanlation workflows.
+- **Layout review & auto-layout**: Layout Review tools, auto-fit/atomic bubble fit, overflow checks, reading-order helpers, and typography QA passes for production lettering.
+- **Text editing abilities**: Rich text bubble editor with undo/redo, multi-select transforms, find/replace tools, text style presets, warp/shape controls, and per-block OCR/translation inspection workflows.
+- **Quality-first postprocessing**: Includes block-level QA hints, review-oriented tooling, and consistency helpers to reduce obvious translation/lettering regressions.
+
+### Translation quality stack
+
+- **Translation Assist (beta)**: Per-block assist dock with TM/glossary/SFX/concordance candidates, explicit apply, edit-before-apply flow, add-to-TM/glossary actions, block QA warnings, provider telemetry, and cache controls.
+- **Compare providers/modules workflow**: Compare candidate outputs by preset (`low_latency`, `high_quality`) and compare scope (`translator`, `ocr`, `detector`, `inpainter`) from one assist surface.
+- **Prompt/profile controls**: Per-project assist prompt profiles and provider preference controls are available for controlled quality tuning.
+- **Structured quality docs**: Quality guidance and model-ranking references are documented under [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) and [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md).
+
+### Realtime, automation, and operations
+
+- **Realtime Screen Translator (experimental)**: Project-less live OCR/translation from selected regions (Tools → Realtime Screen Translator), with privacy-first defaults.
+- **Automation API**: Local API route discovery (`/routes`) and MCP-style command surface for headless/control-plane tooling, including translation-assist and realtime namespaces.
+- **Batch & exports**: Batch queue, archive/CBZ flows, structured OCR/translation interchange, and proof/handoff oriented outputs.
+- **Raw downloader**: Registry-based manga/raw source system with explicit legal/safety boundaries and provider extensibility.
+- **Diagnostics & troubleshooting**: Environment doctor, startup diagnostics, optional dependency docs, GPU/runtime guidance.
+
+### Platform and usability highlights
+
+- **Windows-first launch ergonomics**: `launcher.bat`/`launch_win.bat` flows for setup + fast launch.
+- **In-app Google Fonts installer**: Install and register families without leaving the app.
+- **Model/provider compatibility flexibility**: Blend local/offline and cloud-capable OCR/MT/LLM components depending on your constraints.
+
+---
+
 ## Basic workflow
 
 1. **Open pages**: File → Open Folder / Open Images
@@ -122,13 +154,25 @@ python --version
 
 ---
 
-## Docs
+## Docs by use case
 
+### Start here
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md)
-- [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md)
-- [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md)
-- [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md)
+- [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md)
+- [docs/DOCS_HIGHLIGHTS.md](docs/DOCS_HIGHLIGHTS.md) — one-page guide describing each major document and when to use it.
+
+### Quality, translation, and lettering
+- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) — quality/performance expectations for module combinations.
+- [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md) — model/module reference and selection notes.
+- [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md) — context/glossary strategy and consistency guidance.
+- [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md) — professional handoff workflow for downstream lettering tools.
+
+### Automation, realtime, and plans
+- [docs/LOCAL_AUTOMATION_API.md](docs/LOCAL_AUTOMATION_API.md) — route contract + automation client examples.
+- [docs/REALTIME_TRANSLATION_MODE_PLAN.md](docs/REALTIME_TRANSLATION_MODE_PLAN.md) — realtime mode phases and constraints.
+- [docs/TRANSLATION_ASSIST_PLAN.md](docs/TRANSLATION_ASSIST_PLAN.md) — translation assist capabilities and roadmap.
+- [docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md](docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md) — feature-gap plan and checkpoint log.
+- [docs/FEATURE_PARITY_MATRIX.md](docs/FEATURE_PARITY_MATRIX.md) — parity status tracker across workflow areas.
 
 
 ## Manga / Comic Raw Downloader

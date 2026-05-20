@@ -1,60 +1,36 @@
-# Realtime Translation Mode Plan (Phase 1 Skeleton)
+# Realtime Translation Mode Plan (Phase 0/1 Baseline)
 
-Last updated: 2026-05-19
+## Baseline audit summary
+- 🟨 Existing repo already has a realtime dialog entry and minimal watcher primitives.
+- 🟨 Local automation API already exposes realtime namespace skeleton.
+- 🟨 Privacy defaults exist in `RealtimePrivacyConfig` and default to non-persistent behavior.
+- ⛔ Region/window picker UX, follow-window backend integration, and robust overlay exclusion are partial/incomplete.
 
-## Scope for first PR series
+## First milestone implementation target
+- Keep manga editor unchanged except launcher/menu entry points.
+- Preserve project-less live mode.
+- Stabilize watcher change-detection behavior and route discovery exposure.
+- Keep privacy defaults strict:
+  - do not persist captures by default
+  - do not persist OCR/translation text by default
+  - do not log live text by default
 
-- Add launcher/menu entry for a project-less realtime dialog.
-- Add screenshot backend abstraction (interface + safe fallback backend).
-- Add rectangular region selection model for watcher pipeline.
-- Add change-detection watch loop (skip unchanged frame / unchanged OCR text).
-- Add OCR + translation provider selection controls in realtime UI.
-- Add floating overlay display path.
-- Add privacy-first defaults (no persistence/logging by default).
-- Add minimal local API routes for realtime status/control (`/realtime_*`) without exposing screenshots by default.
-- Add realtime SSE snapshot endpoint (`GET /realtime/events`) for external status dashboards.
+## Migration risk
+- Low: additive mode, no project schema change in this first slice.
+- Primary risk is optional dependency handling around capture backends; keep fallback backend active.
 
-## Existing audit baseline
+## Tests in this milestone
+- unchanged frames are skipped
+- unchanged OCR text is skipped
+- overlay/capture persistence defaults stay disabled
 
-- Local API discovery and job routes already exist and are being extended incrementally.
-- Main manga/comic editor workflow remains primary and must stay unchanged.
-- New realtime mode should be optional and tool-launched.
+## Next slices
+- capture backend implementations (Windows native + MSS + Qt fallback)
+- multi-region/profile manager
+- follow-window coordinate tracking and HiDPI diagnostics
+- richer overlay modes and promote-to-project workflow
 
-## Incremental design
-
-### Components
-
-1. `utils/realtime_mode.py`
-   - `ScreenshotBackendBase`
-   - `NumpyFrameBackend` (test fallback backend)
-   - `RealtimeRegion`
-   - `RealtimePrivacyConfig`
-   - `RealtimeWatcher.tick()` status machine
-
-2. `ui/realtime_translator_dialog.py`
-   - OCR/trans provider comboboxes
-   - privacy hint text
-   - Start/Pause/Translate now controls
-   - floating overlay label
-
-3. Menu entry
-   - Tools → Realtime Screen Translator
-
-### Privacy defaults
-
-- No screenshot persistence by default.
-- No OCR text persistence by default.
-- No translation persistence by default.
-- No live-text logging by default.
-
-## Risks / follow-up
-
-- Real native window capture backends (MSS/Windows APIs) and overlay exclusion are follow-up slices.
-- Follow-window and named-region persistence are follow-up slices.
-- Realtime local API routes (`/realtime/*`) are follow-up slices.
-- This phase intentionally avoids browser scripting/extensions and works from visible pixels only.
-
-## Tests added for skeleton
-
-- skip unchanged frames and unchanged text avoids duplicate OCR/translation calls
-- privacy config defaults remain non-persistent/non-logging
+## 2026-05-20 incremental completion
+- Added follow-window rect resolution path in watcher/backend abstraction (`window_id` + optional `crop`) with diagnostics warning (`follow_window_unavailable`) when window metadata cannot be resolved.
+- Added optional MSS backend path in screenshot backend factory with automatic fallback to Qt compatibility backend when MSS is unavailable.
+- Added Windows-native backend selection path (stub + fallback) in screenshot backend factory to preserve API shape for platform-specific backend rollout.

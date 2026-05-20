@@ -7,6 +7,7 @@ def test_route_discovery_includes_realtime_mcp_routes():
         'realtime_start': lambda body: {},
         'realtime_stop': lambda body: {},
         'realtime_translate_now': lambda body: {},
+        'docs_catalog': lambda body: {},
         'open_project': lambda body: {},
         'z_custom': lambda body: {},
     })
@@ -14,3 +15,4 @@ def test_route_discovery_includes_realtime_mcp_routes():
     assert 'realtime_start' in payload['mcp_routes']
     assert 'realtime_stop' in payload['mcp_routes']
     assert 'realtime_translate_now' in payload['mcp_routes']
+    assert 'docs_catalog' in payload['mcp_routes']

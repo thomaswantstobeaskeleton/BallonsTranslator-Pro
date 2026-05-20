@@ -23,6 +23,9 @@ MCP_COMMAND_ROUTES: Set[str] = {
     "realtime_start",
     "realtime_stop",
     "realtime_translate_now",
+    "translation_assist_block",
+    "translation_assist_apply_candidate",
+    "docs_catalog",
 }
 
 JOB_TASK_ALIASES: Mapping[str, str] = {

@@ -688,6 +688,9 @@ class TitleBar(Widget):
         realtimeTranslatorAction = QAction(self.tr('Realtime Screen Translator...'), self)
         realtimeTranslatorAction.setToolTip(self.tr('Live OCR + translation for a selected screen/window region without opening a full project.'))
         self.realtime_translator_trigger = realtimeTranslatorAction.triggered
+        translationAssistAction = QAction(self.tr('Translation Assist (beta)...'), self)
+        translationAssistAction.setToolTip(self.tr('Open Translation Assist sidebar for side-by-side candidates and glossary/TM hints.'))
+        self.translation_assist_trigger = translationAssistAction.triggered
 
         batchQueueAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'arrow-right.svg')), self.tr('Batch queue...'), self)
         batchQueueAction.setToolTip(self.tr('Process multiple folders in sequence with Pause/Cancel (issue #1020).'))
@@ -812,6 +815,7 @@ class TitleBar(Widget):
         projectMenu.addAction(batchFindReplaceAction)
         projectMenu.addSeparator()
         projectMenu.addAction(realtimeTranslatorAction)
+        projectMenu.addAction(translationAssistAction)
         exportMenuTools = QMenu(self.tr('Export'), self)
         exportMenuTools.addAction(batchExportAction)
         exportMenuTools.addAction(batchExportAsAction)

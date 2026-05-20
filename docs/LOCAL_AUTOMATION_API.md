@@ -1,6 +1,6 @@
 # Local Automation API and MCP Command Surface
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 BallonsTranslator-Pro exposes a localhost-only automation API when `automation_api_enabled` is enabled in config. The API is designed for headless helpers, MCP-style tools, and external workflow scripts while keeping existing UI progress behavior intact.
 
@@ -43,6 +43,7 @@ The route catalog marks these commands as MCP-compatible when the UI registers t
 - `realtime_start`
 - `realtime_stop`
 - `realtime_translate_now`
+- `docs_catalog`
 
 ## Realtime mode API (Phase 1 skeleton)
 
@@ -56,6 +57,15 @@ The route catalog marks these commands as MCP-compatible when the UI registers t
 - `GET /realtime/events`
 
 These endpoints are intentionally minimal in the first slice and designed to stay local-only. They expose control/state metadata and profile/region stubs without persisting screenshots or live OCR/translation text by default.
+
+## Documentation catalog API
+
+- `POST /docs_catalog` returns structured documentation metadata used by README and automation clients:
+  - grouped categories (`start_here`, `quality_translation_lettering`, `automation_realtime_plans`, `raw_sources_and_extensibility`)
+  - per-doc `path`
+  - per-doc `highlight` summary
+
+This route is useful for tools that want to surface contextual docs links in IDE panels, MCP chat tools, or custom dashboards without hard-coding documentation navigation.
 
 ## Image transform utility API
 
