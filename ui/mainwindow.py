@@ -16,7 +16,7 @@ from urllib import request as urlrequest
 from urllib import error as urlerror
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QPushButton
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QPushButton, QSizePolicy
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap, QBrush, QColor
 
@@ -443,6 +443,57 @@ class MainWindow(mainwindow_cls):
         # So main window and children inherit; widgets with stylesheet font-size may keep that size
         self.setFont(f)
 
+    def _relax_right_panel_vertical_minimums(self):
+        # Keep right-side utility panels from forcing the main window taller
+        # than the usable Windows work area. Otherwise a maximized frameless
+        # window can clip the fixed bottom bar off-screen.
+        shrinkable_names = (
+            "drawingPanel",
+            "textPanel",
+            "spellCheckPanel",
+            "pipelineInsightsPanel",
+            "maskDiagnosticsPanel",
+            "ocrCropInspectorPanel",
+            "rightComicTransStackPanel",
+        )
+        for name in shrinkable_names:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                widget.setMinimumHeight(0)
+                policy = widget.sizePolicy()
+                policy.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+                widget.setSizePolicy(policy)
+            except Exception:
+                pass
+
+        expanding_names = ("comicTransSplitter", "centralStackWidget")
+        for name in expanding_names:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                widget.setMinimumHeight(0)
+                policy = widget.sizePolicy()
+                policy.setVerticalPolicy(QSizePolicy.Policy.Expanding)
+                widget.setSizePolicy(policy)
+            except Exception:
+                pass
+
+    def _keep_bottom_bar_visible(self):
+        # Best-effort guard after right-panel switches.
+        try:
+            if hasattr(self, "bottomBar") and self.bottomBar is not None:
+                self.bottomBar.show()
+                self.bottomBar.raise_()
+            if hasattr(self, "mainvlayout") and self.mainvlayout is not None:
+                self.mainvlayout.invalidate()
+                self.mainvlayout.activate()
+        except Exception:
+            pass
+
+
     def setupUi(self):
         screen_size = QGuiApplication.primaryScreen().geometry().size()
         self.setMinimumWidth(screen_size.width() // 2)
@@ -639,6 +690,7 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.addWidget(self.leftStackWidget)
         self.comicTransSplitter.addWidget(self.canvas.gv)
         self.comicTransSplitter.addWidget(self.rightComicTransStackPanel)
+        self._relax_right_panel_vertical_minimums()
 
         self.centralStackWidget.addWidget(self.welcomeWidget)
         self.centralStackWidget.addWidget(self.comicTransSplitter)
@@ -4077,13 +4129,19 @@ class MainWindow(mainwindow_cls):
 
     def shortcutSpellCheckPanel(self):
         """Show Spell check panel (PR #974)."""
-        if self.centralStackWidget.currentIndex() != 1:
+        if not self._has_open_project():
             return
+        if self.centralStackWidget.currentIndex() != 1:
+            self._show_main_content()
+        self._relax_right_panel_vertical_minimums()
         if self.rightComicTransStackPanel.isHidden():
             self.rightComicTransStackPanel.show()
         self.rightComicTransStackPanel.setCurrentIndex(2)
+        self.bottomBar.spellCheckChecker.blockSignals(True)
         self.bottomBar.spellCheckChecker.setChecked(True)
-
+        self.bottomBar._set_spellcheck_icon(True)
+        self.bottomBar.spellCheckChecker.blockSignals(False)
+        self._keep_bottom_bar_visible()
     def _on_spellcheck_panel_close(self):
         """Switch right panel from spell check back to text panel."""
         self.rightComicTransStackPanel.setCurrentIndex(1)
@@ -4094,12 +4152,21 @@ class MainWindow(mainwindow_cls):
     def on_spellcheck_panel_toggled(self):
         """Show or hide Spell check panel from bottom bar toggle."""
         if self.bottomBar.spellCheckChecker.isChecked():
+            if not self._has_open_project():
+                self.bottomBar.spellCheckChecker.blockSignals(True)
+                self.bottomBar.spellCheckChecker.setChecked(False)
+                self.bottomBar._set_spellcheck_icon(False)
+                self.bottomBar.spellCheckChecker.blockSignals(False)
+                return
+            if self.centralStackWidget.currentIndex() != 1:
+                self._show_main_content()
+            self._relax_right_panel_vertical_minimums()
             if self.rightComicTransStackPanel.isHidden():
                 self.rightComicTransStackPanel.show()
             self.rightComicTransStackPanel.setCurrentIndex(2)
         else:
             self.rightComicTransStackPanel.setCurrentIndex(1)
-
+        self._keep_bottom_bar_visible()
     def _on_spellcheck_focus_block(self, block_idx: int, line_idx: int, is_translation: bool):
         """After spell check replace: switch to text panel and select the block so the change is visible."""
         self.rightComicTransStackPanel.setCurrentIndex(1)

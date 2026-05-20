@@ -1919,9 +1919,8 @@ class BottomBar(Widget):
         # QToolButton style metrics can shift this icon differently in the
         # settings stack vs the normal canvas stack.
         self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.spellCheckChecker.setFixedSize(44, 40)
+        self.spellCheckChecker.setFixedSize(44, 28)
         self.spellCheckChecker.setIconSize(QSize(28, 28))
-        self.spellCheckChecker.setStyleSheet("QToolButton { padding: 0px; margin: 0px; }")
         self.spellCheckChecker.setCheckable(True)
         self.spellCheckChecker.setAutoRaise(True)
         self.spellCheckChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
@@ -1930,9 +1929,23 @@ class BottomBar(Widget):
         self.spellCheckChecker.setAccessibleDescription(self.tr('Toggle the spell check side panel.'))
         self._set_spellcheck_icon(False)
         self.spellCheckChecker.clicked.connect(self.onSpellCheckCheckerPressed)
-        self.textblockChecker = QCheckBox()
+        self.textblockChecker = BottomModeToolButton(self)
         self.textblockChecker.setObjectName('TextblockChecker')
+        self.textblockChecker.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.textblockChecker.setFixedSize(44, 28)
+        self.textblockChecker.setIconSize(QSize(28, 28))
+        self.textblockChecker.setCheckable(True)
+        self.textblockChecker.setAutoRaise(True)
+        self.textblockChecker.setToolTip(self.tr('Show text box controls'))
+        self.textblockChecker.setAccessibleName(self.tr('Text box controls'))
+        self.textblockChecker.setAccessibleDescription(self.tr('Toggle text box handles and controls.'))
+        self._set_textblock_icon(False)
         self.textblockChecker.clicked.connect(self.onTextblockCheckerClicked)
+
+        # Keep all bottom-bar mode icons in one fixed, centered row.
+        # QCheckBox mode icons otherwise expand inside the QHBoxLayout and
+        # push the QToolButton-based spell-check icon toward the textblock icon.
+        self._normalize_bottom_mode_button_geometry()
         
         self.originalSlider = PaintQSlider(self.tr("Original image opacity"), Qt.Orientation.Horizontal, self)
         self.originalSlider.setFixedWidth(150)
@@ -1999,6 +2012,44 @@ class BottomBar(Widget):
             install_hover_opacity_animation(chk, duration_ms=100, normal_opacity=0.88, press_opacity=0.74)
 
 
+
+    def _normalize_bottom_mode_button_geometry(self):
+        # Bottom bar height is 32px; its layout keeps a 4px bottom border margin.
+        # Keep every mode button inside the remaining 28px content row.
+        mode_buttons = (
+            getattr(self, "paintChecker", None),
+            getattr(self, "texteditChecker", None),
+            getattr(self, "spellCheckChecker", None),
+            getattr(self, "textblockChecker", None),
+        )
+        for btn in mode_buttons:
+            if btn is None:
+                continue
+            try:
+                btn.setFixedSize(44, 28)
+                btn.setMinimumSize(44, 28)
+                btn.setMaximumSize(44, 28)
+                btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                btn.setContentsMargins(0, 0, 0, 0)
+            except Exception:
+                pass
+
+        for btn in (getattr(self, "spellCheckChecker", None), getattr(self, "textblockChecker", None)):
+            if btn is None:
+                continue
+            try:
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                btn.setIconSize(QSize(28, 28))
+                btn.setAutoRaise(True)
+            except Exception:
+                pass
+
+        try:
+            self.hlayout.setSpacing(6)
+            self.hlayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        except Exception:
+            pass
+
     def _set_spellcheck_icon(self, checked: bool = None):
         """Use a real icon for the bottom-bar spell-check mode button.
 
@@ -2020,7 +2071,25 @@ class BottomBar(Widget):
         if osp.isfile(icon_path):
             self.spellCheckChecker.setIcon(QIcon(icon_path))
             # Match the visual weight of the neighboring bottom-bar checkbox icons.
-            self.spellCheckChecker.setIconSize(QSize(30, 30))
+            self.spellCheckChecker.setIconSize(QSize(28, 28))
+
+
+    def _set_textblock_icon(self, checked: bool = None):
+        """Use the same fixed-size button/icon path as SpellCheckChecker.
+
+        TextblockChecker used to be a QCheckBox painted through ::indicator.
+        That has different size/baseline metrics from QToolButton, which made
+        the textbox icon sit lower than the spell-check icon.
+        """
+        if checked is None:
+            checked = bool(self.textblockChecker.isChecked())
+
+        icon_name = 'bottombar_textblock_activate.svg' if checked else 'bottombar_textblock.svg'
+        icon_path = osp.join(C.PROGRAM_PATH, 'icons', icon_name)
+
+        if osp.isfile(icon_path):
+            self.textblockChecker.setIcon(QIcon(icon_path))
+            self.textblockChecker.setIconSize(QSize(28, 28))
 
     def onPaintCheckerPressed(self):
         checked = self.paintChecker.isChecked()
@@ -2067,6 +2136,7 @@ class BottomBar(Widget):
             self.runBtn.setEnabled(True)
 
     def onTextblockCheckerClicked(self):
+        self._set_textblock_icon(self.textblockChecker.isChecked())
         self.textblock_checkchanged.emit()
     def _refresh_run_button_breathe_animation(self):
         icon_sz = self.runBtn.iconSize()

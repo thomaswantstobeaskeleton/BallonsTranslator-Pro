@@ -13,6 +13,8 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QLabel,
     QMessageBox,
+    QSizePolicy,
+    QLayout,
 )
 from qtpy.QtCore import Signal, Qt
 
@@ -26,11 +28,15 @@ class SpellCheckPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
         self._get_blocks = None
         self._apply_replacement = None
         self._issues = []  # list of (block_idx, line_idx, word, start, end, suggestions, text, use_translation)
         layout = QVBoxLayout(self)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         row = QHBoxLayout()
+        row.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         row.addWidget(QLabel(self.tr('Target:')))
         self.target_combo = QComboBox()
         self.target_combo.addItems([self.tr('Source text'), self.tr('Translation')])
@@ -44,8 +50,9 @@ class SpellCheckPanel(QWidget):
         row.addWidget(close_btn)
         layout.addLayout(row)
         self.list_widget = QListWidget()
-        self.list_widget.setMinimumHeight(120)
-        layout.addWidget(self.list_widget)
+        self.list_widget.setMinimumHeight(0)
+        self.list_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        layout.addWidget(self.list_widget, 1)
         self.replace_btn = QPushButton(self.tr('Replace with suggestion'))
         self.replace_btn.clicked.connect(self._on_replace)
         self.replace_btn.setEnabled(False)
