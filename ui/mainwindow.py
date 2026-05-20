@@ -4450,6 +4450,9 @@ class MainWindow(mainwindow_cls):
         extra_params.setMinimumHeight(80)
         extra_params.setPlaceholderText(self.tr('Optional JSON, e.g. {"reasoning_effort": "low"}'))
 
+        conn_status = QLabel(self.tr("Connection: not tested"), dlg)
+        btn_test_conn = QPushButton(self.tr("Test connection"), dlg)
+
         form.addRow(self.tr("Quick setup"), quick_profile)
         form.addRow(self.tr("Provider"), provider)
         form.addRow("", use_translator)
@@ -4470,9 +4473,6 @@ class MainWindow(mainwindow_cls):
         form.addRow(self.tr("Endpoint preset"), endpoint_preset)
         form.addRow("", btn_test_conn)
         form.addRow("", conn_status)
-
-        conn_status = QLabel(self.tr("Connection: not tested"), dlg)
-        btn_test_conn = QPushButton(self.tr("Test connection"), dlg)
 
         def _apply_endpoint_preset(label: str):
             label = (label or "").strip()
