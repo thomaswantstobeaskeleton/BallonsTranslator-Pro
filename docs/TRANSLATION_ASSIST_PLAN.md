@@ -40,6 +40,8 @@
 - ✅ Added `translation_assist_compare` route with low-latency/high-quality presets for provider-group comparison orchestration.
 - ✅ Added provider-warning normalization + candidate cost telemetry helpers, and synthetic external-provider fan-out placeholders for compare API output shape.
 - ✅ Compare flow now supports scope switching (`translator`, `ocr`, `detector`, `inpainter`) from the dock, so users can compare/apply module choices from the same assist surface.
+- ✅ Right-side text editor list now exposes a context menu with direct compare actions (translator/OCR/detector/inpainter), plus quick open/jump actions so compare is reachable without opening the dock first.
+- ✅ Compare apply flow now uses a dedicated table dialog (provider, candidate, latency, source, current-engine marker) instead of numeric index prompts, improving usability and reducing wrong-pick risk.
 - ✅ Applying a compare candidate can now switch active OCR/detector/inpainter module configuration (saved as project dirty state) in addition to text candidate application.
 
 ## Risk / migration

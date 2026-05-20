@@ -438,6 +438,7 @@ class TransPairWidget(Widget):
     drag_move = Signal(int)
     idx_edited = Signal(int, int)
     pw_drop = Signal()
+    context_menu_requested = Signal(QPoint, int)
 
     def __init__(self, textblock: TextBlock = None, idx: int = None, fold: bool = False, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -523,6 +524,11 @@ class TransPairWidget(Widget):
             self.update_checkstate_by_mousevent(e)
         return super().mousePressEvent(e)
 
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
+        if e.button() == Qt.MouseButton.RightButton:
+            self.context_menu_requested.emit(self.mapToGlobal(e.position().toPoint()), int(self.idx))
+        return super().mouseReleaseEvent(e)
+
     def updateIndex(self, idx: int):
         if self.idx != idx:
             self.idx = idx
@@ -538,7 +544,7 @@ class TextEditListScrollArea(QScrollArea):
     remove_textblock = Signal()
     selection_changed = Signal()   # this signal could only emit in on_widget_checkstate_changed, i.e. via user op
     rearrange_blks = Signal(object)
-    textpanel_contextmenu_requested = Signal(QPoint, bool)
+    textpanel_contextmenu_requested = Signal(QPoint, bool, int)
     focus_out = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
@@ -585,7 +591,7 @@ class TextEditListScrollArea(QScrollArea):
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.RightButton:
             pos = self.mapToGlobal(e.position()).toPoint()
-            self.textpanel_contextmenu_requested.emit(pos, True)
+            self.textpanel_contextmenu_requested.emit(pos, True, -1)
         super().mouseReleaseEvent(e)
 
     def mousePressEvent(self, e: QMouseEvent) -> None:
@@ -706,15 +712,20 @@ class TextEditListScrollArea(QScrollArea):
     def addPairWidget(self, pairwidget: TransPairWidget):
         self.vlayout.insertWidget(pairwidget.idx, pairwidget)
         pairwidget.check_state_changed.connect(self.on_widget_checkstate_changed)
+        pairwidget.context_menu_requested.connect(self._on_pairwidget_context_menu)
         pairwidget.e_trans.setVisible(self.trans_visible)
         pairwidget.e_source.setVisible(self.source_visible)
         pairwidget.setVisible(True)
 
     def insertPairWidget(self, pairwidget: TransPairWidget, idx: int):
         self.vlayout.insertWidget(idx, pairwidget)
+        pairwidget.context_menu_requested.connect(self._on_pairwidget_context_menu)
         pairwidget.e_trans.setVisible(self.trans_visible)
         pairwidget.e_source.setVisible(self.source_visible)
         pairwidget.setVisible(True)
+
+    def _on_pairwidget_context_menu(self, pos: QPoint, block_idx: int):
+        self.textpanel_contextmenu_requested.emit(pos, False, int(block_idx))
 
     def on_widget_checkstate_changed(self, pwc: TransPairWidget, shift_pressed: bool, ctrl_pressed: bool):
         if self.drag is not None:

@@ -106,6 +106,10 @@ class FontFormat(Config):
     # Mesh warp presets (#1093): Arc, Arch, Bulge, Flag (Photoshop-like)
     warp_style: int = 0  # 0 = none, 1 = arc, 2 = arch, 3 = bulge, 4 = flag
     warp_strength: float = 0.5  # 0..1
+    # Lightweight 3D lettering controls: perspective tilt + extrusion depth.
+    perspective_x: float = 0.0  # -1..1 horizontal vanishing tilt
+    perspective_y: float = 0.0  # -1..1 vertical vanishing tilt
+    extrusion_depth: float = 0.0  # 0..1, depth relative to font size
     # Blend mode for compositing block with scene (0=Normal, 1=Multiply, 2=Screen, 3=Overlay, 4=Darken, 5=Lighten)
     blend_mode: int = 0
     # Auto fit font size to block: when True, layout scales font so text fits the block's bounding box (#1077)

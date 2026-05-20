@@ -69,6 +69,7 @@ from .pipeline_insights_widget import PipelineInsightsWidget
 from .image_edit import ImageEditMode
 from .mask_diagnostics_widget import MaskDiagnosticsWidget
 from .ocr_crop_inspector_widget import OcrCropInspectorWidget
+from .compare_results_dialog import CompareResultsDialog
 from .project_ops_dialog import ProjectOpsDialog
 from .reading_order_editor_dialog import ReadingOrderEditorDialog
 from .layout_review_report_dialog import LayoutReviewReportDialog
@@ -5241,6 +5242,83 @@ class MainWindow(mainwindow_cls):
                 
                 self.global_search_widget.commit_search()
 
+    def on_texteditlist_contextmenu_requested(self, pos: QPoint, from_empty: bool = True, block_idx: int = -1):
+        menu = QMenu(self)
+        jump_act = None
+        compare_tr_act = menu.addAction(self.tr("Compare translation providers"))
+        compare_ocr_act = menu.addAction(self.tr("Compare OCR engines"))
+        compare_det_act = menu.addAction(self.tr("Compare detectors"))
+        compare_inp_act = menu.addAction(self.tr("Compare inpainters"))
+        menu.addSeparator()
+        open_assist_act = menu.addAction(self.tr("Open Translation Assist"))
+        if not from_empty and block_idx >= 0:
+            jump_act = menu.addAction(self.tr("Jump to block on canvas"))
+        rst = menu.exec_(pos)
+        if rst is None:
+            return
+        if rst == open_assist_act:
+            self.on_open_translation_assist_dock()
+            return
+        if rst == jump_act:
+            self.jump_to_canvas_block(int(block_idx))
+            return
+        if rst in (compare_tr_act, compare_ocr_act, compare_det_act, compare_inp_act):
+            scope = 'translator'
+            if rst == compare_ocr_act:
+                scope = 'ocr'
+            elif rst == compare_det_act:
+                scope = 'detector'
+            elif rst == compare_inp_act:
+                scope = 'inpainter'
+            self._run_text_block_compare_from_menu(scope=scope, block_idx=int(block_idx))
+
+    def _run_text_block_compare_from_menu(self, scope: str, block_idx: int = -1):
+        try:
+            if block_idx >= 0:
+                self.jump_to_canvas_block(block_idx)
+            if not self._selected_assist_page_block():
+                raise RuntimeError(self.tr("Select a text block first."))
+            rst = self._api_translation_assist_compare({
+                'compare_scope': str(scope or 'translator'),
+                'preset': 'high_quality',
+                'max_candidates': int(getattr(pcfg.module, 'max_mt_candidates', 6) or 6),
+                'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
+            })
+            candidates = list(rst.get('candidates', []) or [])
+            if not candidates:
+                create_info_dialog(self.tr("No compare candidates available."), self.tr("Compare"), "CompareEmpty")
+                return
+            dlg = CompareResultsDialog(scope=scope, candidates=candidates, parent=self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            picked = dlg.selected_index()
+            if picked < 0 or picked >= len(candidates):
+                return
+            row = candidates[picked]
+            if scope == 'ocr':
+                self._api_ocr_apply_compare_choice_ui({
+                    'page': rst.get('page', getattr(self.imgtrans_proj, 'current_img', '')),
+                    'index': (block_idx if block_idx >= 0 else self._selected_assist_page_block()['block']),
+                    'text': str(row.get('text', '') or ''),
+                    'engine': str(row.get('text', '') or ''),
+                })
+                self.pipelineInsightsPanel.add_event('OCR_COMPARE', self.tr('Applied OCR compare choice to selected block.'))
+            elif scope in {'detector', 'inpainter'}:
+                selected = str(row.get('text', '') or '').strip()
+                if scope == 'detector':
+                    pcfg.module.textdetector = selected
+                    self.module_manager.setTextDetector(selected)
+                else:
+                    pcfg.module.inpainter = selected
+                    self.module_manager.setInpainter(selected)
+                self.pipelineInsightsPanel.add_event('MODULE_COMPARE', self.tr('Switched {0} to {1}.').format(scope, selected))
+            else:
+                # Translator-scope compare rows are assist candidates; apply text to current selection.
+                self.apply_translation_assist_text_for_selection(str(row.get('text', '') or '').strip())
+            self.pipelineInsightsPanel.add_event('COMPARE', self.tr('Applied compare candidate #{0} for {1}.').format(int(picked + 1), str(scope)))
+        except Exception as e:
+            create_error_dialog(e, self.tr('Compare failed'))
+
     def show_pre_MT_keyword_window(self):
         self.mtPreSubWidget.show()
 
@@ -5298,7 +5376,12 @@ class MainWindow(mainwindow_cls):
     def on_open_translation_assist_dock(self):
         if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
             self._translation_assist_dock = TranslationAssistDock(self)
-            self.addDockWidget(Qt.RightDockWidgetArea, self._translation_assist_dock)
+            if hasattr(self, 'addDockWidget'):
+                self.addDockWidget(Qt.RightDockWidgetArea, self._translation_assist_dock)
+            else:
+                # FramelessWindow inherits QWidget (not QMainWindow), so fallback to floating tool window.
+                self._translation_assist_dock.setFloating(True)
+                self._translation_assist_dock.setAllowedAreas(Qt.NoDockWidgetArea)
             self._translation_assist_dock.set_callbacks(
                 self.refresh_translation_assist_for_selection,
                 self.apply_translation_assist_candidate_for_selection,

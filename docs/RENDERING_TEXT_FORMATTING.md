@@ -15,6 +15,7 @@ The everyday lettering controls are grouped by ownership:
   - **Text padding**: Insets text inside the box so strokes, shadows, and vertical punctuation are less likely to clip.
 - **Selection font fallback**: Optional per-style/per-textbox fallback font chain. Empty means use the global per-script fallback fonts from Settings. The **Use global fallback fonts** button clears the override without changing the global defaults.
 - **Selection shape/path effects**: Text-on-path, arc span, warp, warp strength, and rounded text-box corners. The **Reset path/warp effects** button returns these decorative effects to neutral values.
+- **Selection 3D text controls**: Perspective X/Y and 3D Depth add lightweight pseudo-3D lettering. Perspective tilts the glyph plane toward a horizontal/vertical vanishing direction, while depth extrudes stacked layers for comic SFX/title text. Works with existing stroke/shadow controls and stays per-style/per-textbox.
 - **Selection defaults / reset**: **Use project text defaults** applies Settings → Project text rendering defaults for writing mode, fit mode, line breaks, padding, and clears fallback overrides. It does not change font family, size, colors, or stroke.
 - **Live lettering diagnostics**: the panel estimates resolved writing mode, fit size, overflow/fallback status, and a quality score for the selected textbox so likely final-lettering issues are visible before exporting.
 
