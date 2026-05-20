@@ -47,6 +47,16 @@ class LocalAutomationApiServer:
                         return
                     self._send(200, _routes_payload())
                     return
+                if route == 'mcp/commands':
+                    if not self._auth_ok():
+                        return
+                    payload = _routes_payload()
+                    self._send(200, {
+                        'ok': True,
+                        'commands': payload.get('mcp_routes', []),
+                        'count': len(payload.get('mcp_routes', [])),
+                    })
+                    return
                 if route == 'events':
                     if not self._auth_ok():
                         return

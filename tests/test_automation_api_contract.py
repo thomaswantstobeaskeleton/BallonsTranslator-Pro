@@ -11,7 +11,7 @@ def test_route_discovery_marks_mcp_and_job_routes():
         "z_extra": lambda body: {},
     })
     assert payload["routes"] == ["apply_edit", "job_status", "project_status", "z_extra"]
-    assert payload["methods"]["GET"] == ["events", "health", "routes"]
+    assert payload["methods"]["GET"] == ["events", "health", "mcp/commands", "routes"]
     assert payload["mcp_routes"] == ["apply_edit", "project_status"]
     assert payload["job_routes"] == ["job_status"]
     assert payload["event_stream"] == "/events?job_id=<job_id>"

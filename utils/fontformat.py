@@ -128,6 +128,13 @@ class FontFormat(Config):
     manga_preset: str = ""
     # #35: per-character stroke color (list of [r,g,b], one per character; used for text-on-path)
     stroke_rgb_per_char: List = field(default=None)  # optional
+    # Auto-layout per-textbox metadata (compat-safe defaults)
+    auto_fit_enabled: bool = True
+    auto_position_enabled: bool = True
+    user_adjusted: bool = False
+    layout_version: str = "v2"
+    last_layout_score: float = 0.0
+    layout_warnings: List = field(default_factory=lambda: [])
 
     deprecated_attributes: dict = field(default_factory = lambda: dict())
 

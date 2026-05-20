@@ -213,6 +213,9 @@ class Canvas(QGraphicsScene):
     atomic_bubble_fit_profile_signal = Signal(str)
     polish_typography_signal = Signal()
     auto_fit_binary_signal = Signal()
+    re_auto_fit_selected_signal = Signal()
+    re_auto_fit_page_signal = Signal()
+    re_auto_fit_all_signal = Signal()
     set_balloon_shape_signal = Signal(str)
     resize_to_fit_content_signal = Signal()
     center_in_bubble_signal = Signal()
@@ -1305,6 +1308,7 @@ class Canvas(QGraphicsScene):
             atomic_comfortable_act = atomic_dense_act = atomic_caption_act = atomic_sfx_act = None
             writing_auto_act = writing_ltr_act = writing_vertical_act = writing_rtl_act = recenter_text_in_box_act = None
             mask_safe_padding_act = resize_to_fit_content_act = center_in_bubble_act = fit_to_mask_safe_box_act = None
+            re_auto_fit_selected_act = re_auto_fit_page_act = re_auto_fit_all_act = None
             balloon_shape_round_act = balloon_shape_elongated_act = balloon_shape_narrow_act = balloon_shape_diamond_act = None
             balloon_shape_square_act = balloon_shape_bevel_act = balloon_shape_pentagon_act = balloon_shape_point_act = balloon_shape_auto_act = None
             format_menu = None
@@ -1358,6 +1362,21 @@ class Canvas(QGraphicsScene):
                 if auto_fit_binary_act is not None:
                     auto_fit_binary_act.setToolTip(self.tr("Find largest font size that fits the bubble (slower, more accurate)."))
                 actions_map['format_auto_fit_binary'] = auto_fit_binary_act
+            if context_menu_visible('format_re_auto_fit_selected') and n_sel >= 1:
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                re_auto_fit_selected_act = format_menu.addAction(self.tr("Re-auto-fit selected text box(es)"))
+                re_auto_fit_selected_act.setToolTip(self.tr("Re-run smart auto-fit for selected text boxes, including user-adjusted boxes."))
+                actions_map['format_re_auto_fit_selected'] = re_auto_fit_selected_act
+            if context_menu_visible('format_re_auto_fit_page'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                re_auto_fit_page_act = format_menu.addAction(self.tr("Re-auto-fit current page"))
+                re_auto_fit_page_act.setToolTip(self.tr("Re-run smart auto-fit on current page; manual user-adjusted boxes are skipped by default."))
+                actions_map['format_re_auto_fit_page'] = re_auto_fit_page_act
+            if context_menu_visible('format_re_auto_fit_all'):
+                if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
+                re_auto_fit_all_act = format_menu.addAction(self.tr("Re-auto-fit all pages"))
+                re_auto_fit_all_act.setToolTip(self.tr("Run page-level re-auto-fit across project pages (currently applies to active page pass)."))
+                actions_map['format_re_auto_fit_all'] = re_auto_fit_all_act
             if context_menu_visible('format_balloon_shape') and n_sel >= 1:
                 if format_menu is None: format_menu = menu.addMenu(self.tr("Format"))
                 balloon_sub = format_menu.addMenu(self.tr("Balloon shape"))
@@ -1715,6 +1734,12 @@ class Canvas(QGraphicsScene):
                 self.polish_typography_signal.emit()
             elif rst == auto_fit_binary_act:
                 self.auto_fit_binary_signal.emit()
+            elif rst == re_auto_fit_selected_act:
+                self.re_auto_fit_selected_signal.emit()
+            elif rst == re_auto_fit_page_act:
+                self.re_auto_fit_page_signal.emit()
+            elif rst == re_auto_fit_all_act:
+                self.re_auto_fit_all_signal.emit()
             elif rst == balloon_shape_round_act:
                 self.set_balloon_shape_signal.emit("round")
             elif rst == balloon_shape_elongated_act:

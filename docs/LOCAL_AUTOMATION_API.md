@@ -8,6 +8,7 @@ BallonsTranslator-Pro exposes a localhost-only automation API when `automation_a
 
 - `GET /health` returns service status plus the same route catalog as `/routes`.
 - `GET /routes` returns stable sorted POST routes, GET routes, MCP-compatible command routes, job routes, and the SSE event-stream template.
+- `GET /mcp/commands` returns only MCP-compatible command names (`open_project`, `project_status`, `list_pages`, `apply_edit`, `run_pipeline`, `render`, `export`, `undo`, `redo`) for clients that want a minimal command surface.
 - `GET /events?job_id=<job_id>` returns a Server-Sent Events snapshot for a job. Events now include SSE `id` (job `updated_at`) and `event` (current job status such as `running` / `succeeded` / `failed` / `cancelled`) plus a bounded status/log snapshot payload; this keeps clients forward-compatible with future live streaming loops.
 
 If `automation_api_key` is set, send it as `X-API-Key` for every request, including discovery and events.

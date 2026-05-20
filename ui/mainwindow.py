@@ -3565,6 +3565,9 @@ class MainWindow(mainwindow_cls):
         _mk_shortcut("format.fit_to_bubble", "", self.shortcutFitToBubble)
         _mk_shortcut("format.auto_fit", "", self.shortcutFormatAutoFit)
         _mk_shortcut("format.auto_fit_binary", "", self.shortcutFormatAutoFitBinary)
+        _mk_shortcut("format.re_auto_fit_selected", "", self.shortcutReAutoFitSelected)
+        _mk_shortcut("format.re_auto_fit_page", "", self.shortcutReAutoFitCurrentPage)
+        _mk_shortcut("format.re_auto_fit_all", "", self.shortcutReAutoFitAllPages)
         _mk_shortcut("format.balloon_shape_auto", "", self.shortcutBalloonShapeAuto)
         _mk_shortcut("format.resize_to_fit_content", "", self.shortcutResizeToFitContent)
         _mk_shortcut("format.layout_review_selected", "", self.shortcutLayoutReviewSelected)
@@ -4115,6 +4118,24 @@ class MainWindow(mainwindow_cls):
         """Auto fit font size binary search (Format shortcut)."""
         if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
             self.canvas.auto_fit_binary_signal.emit()
+
+    def shortcutReAutoFitSelected(self):
+        """Re-auto-fit selected text boxes (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible() and self.canvas.selected_text_items():
+            if hasattr(self.canvas, "re_auto_fit_selected_signal"):
+                self.canvas.re_auto_fit_selected_signal.emit()
+
+    def shortcutReAutoFitCurrentPage(self):
+        """Re-auto-fit current page (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
+            if hasattr(self.canvas, "re_auto_fit_page_signal"):
+                self.canvas.re_auto_fit_page_signal.emit()
+
+    def shortcutReAutoFitAllPages(self):
+        """Re-auto-fit all pages (Format shortcut)."""
+        if self.centralStackWidget.currentIndex() == 1 and self.canvas.gv.isVisible():
+            if hasattr(self.canvas, "re_auto_fit_all_signal"):
+                self.canvas.re_auto_fit_all_signal.emit()
 
     def shortcutBalloonShapeAuto(self):
         """Set balloon shape to Auto (Format shortcut)."""

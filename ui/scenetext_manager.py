@@ -48,6 +48,7 @@ from utils.text_rendering import (
 from utils.line_breaking import split_long_token_with_hyphenation
 from utils.text_masking import bubble_safe_text_rect, masked_text_warnings, recommended_padding_for_mask, mask_effective_box
 from utils.textbox_masking import centered_resize_xyxy, mask_aware_textbox_diagnostics
+from utils.text_layout_auto_fit import AutoFitRequest, auto_fit_text
 
 from utils.layout_review_agent import (
     BlockSnapshot,
@@ -118,6 +119,21 @@ def _auto_lettering_page_scale(img, box_size: Tuple[float, float] = None) -> flo
 def _auto_layout_settings_for(text: str, box_w: float, box_h: float, balloon_shape: str = "auto", line_count: int = None):
     preset = auto_layout_effective_preset(_auto_layout_preset(), text, box_w, box_h, balloon_shape, line_count=line_count)
     return auto_layout_preset_settings(preset)
+
+
+def _auto_width_profile_for_shape(width: float, height: float, line_count: int, balloon_shape: str = "auto") -> List[float]:
+    line_count = max(1, int(line_count or 1))
+    width = max(8.0, float(width))
+    if balloon_shape not in ("round", "ellipse", "diamond", "point"):
+        return [width] * line_count
+    profile: List[float] = []
+    for i in range(line_count):
+        t = 0.0 if line_count <= 1 else (i / float(line_count - 1))
+        d = abs(2.0 * t - 1.0)
+        # narrower near top/bottom, wider near center
+        factor = max(0.56, 0.98 - 0.40 * (d ** 1.6))
+        profile.append(width * factor)
+    return profile
 
 
 def _auto_layout_text_scale(text: str, line_count: int, box_w: float, box_h: float) -> float:
@@ -744,6 +760,12 @@ class SceneTextManager(QObject):
         if hasattr(self.canvas, "polish_typography_signal"):
             self.canvas.polish_typography_signal.connect(self.onPolishTypography)
         self.canvas.auto_fit_binary_signal.connect(self.onAutoFitBinarySearch)
+        if hasattr(self.canvas, "re_auto_fit_selected_signal"):
+            self.canvas.re_auto_fit_selected_signal.connect(self.onReAutoFitSelected)
+        if hasattr(self.canvas, "re_auto_fit_page_signal"):
+            self.canvas.re_auto_fit_page_signal.connect(self.onReAutoFitCurrentPage)
+        if hasattr(self.canvas, "re_auto_fit_all_signal"):
+            self.canvas.re_auto_fit_all_signal.connect(self.onReAutoFitAllPages)
         self.canvas.set_balloon_shape_signal.connect(self.onSetBalloonShape)
         self.canvas.resize_to_fit_content_signal.connect(self.onResizeToFitContent)
         self.canvas.center_in_bubble_signal.connect(self.onCenterInBubble)
@@ -1345,10 +1367,24 @@ class SceneTextManager(QObject):
         )
         blkitem.fontformat.text_box_shape = balloon_shape or "auto"
 
-    def run_auto_layout_on_current_page_once(self):
+    def _collect_autolayout_targets(self, *, selected_only: bool = False, include_user_adjusted: bool = False) -> List[TextBlkItem]:
+        src = self.canvas.selected_text_items() if selected_only else self.textblk_item_list
+        out: List[TextBlkItem] = []
+        skip_user_adjusted = bool(getattr(getattr(pcfg, 'module', None), 'layout_skip_user_adjusted', True))
+        for blkitem in src:
+            if getattr(blkitem.fontformat, 'vertical', False):
+                continue
+            if not bool(getattr(blkitem.fontformat, 'auto_fit_enabled', True)):
+                continue
+            if (not include_user_adjusted) and skip_user_adjusted and bool(getattr(blkitem.fontformat, 'user_adjusted', False)):
+                continue
+            out.append(blkitem)
+        return out
+
+    def run_auto_layout_on_current_page_once(self, include_user_adjusted: bool = False):
         """Run auto layout on all blocks of the current page (e.g. after opening project so first page is formatted)."""
         from utils.config import pcfg
-        all_blks = [b for b in self.textblk_item_list if not getattr(b.fontformat, 'vertical', False)]
+        all_blks = self._collect_autolayout_targets(selected_only=False, include_user_adjusted=include_user_adjusted)
         if not all_blks:
             return
         old_autolayout = getattr(pcfg, 'let_autolayout_flag', True)
@@ -1382,6 +1418,53 @@ class SceneTextManager(QObject):
             pcfg.let_autolayout_flag = old_autolayout
             self.auto_textlayout_flag = old_flag
 
+    def re_auto_fit_selected_textboxes(self, include_user_adjusted: bool = True):
+        selected_blks = self._collect_autolayout_targets(selected_only=True, include_user_adjusted=include_user_adjusted)
+        if not selected_blks:
+            return 0
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        for blkitem in selected_blks:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            self._resolve_balloon_shape_for_block(blkitem)
+            self._apply_smart_fit_to_item(blkitem)
+            self.layout_textblk(blkitem)
+        self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
+        self.canvas.setProjSaveState(True)
+        return len(selected_blks)
+
+    def re_auto_fit_current_page(self, include_user_adjusted: bool = False, push_undo: bool = True):
+        targets = self._collect_autolayout_targets(selected_only=False, include_user_adjusted=include_user_adjusted)
+        if not targets:
+            return 0
+        old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
+        for blkitem in targets:
+            old_html_lst.append(blkitem.toHtml())
+            old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
+            trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
+            self._resolve_balloon_shape_for_block(blkitem)
+            self._apply_smart_fit_to_item(blkitem)
+            self.layout_textblk(blkitem)
+        if push_undo:
+            self.canvas.push_undo_command(AutoLayoutCommand(targets, old_rect_lst, old_html_lst, trans_widget_lst))
+        self.canvas.setProjSaveState(True)
+        return len(targets)
+
+    def re_auto_fit_all_pages(self, include_user_adjusted: bool = False):
+        # Current project view keeps one page loaded in scene; for now this API
+        # re-fits the active page and is safe to call from future multi-page loop.
+        return self.re_auto_fit_current_page(include_user_adjusted=include_user_adjusted, push_undo=True)
+
+    def onReAutoFitSelected(self):
+        self.re_auto_fit_selected_textboxes(include_user_adjusted=True)
+
+    def onReAutoFitCurrentPage(self):
+        self.re_auto_fit_current_page(include_user_adjusted=False)
+
+    def onReAutoFitAllPages(self):
+        self.re_auto_fit_all_pages(include_user_adjusted=False)
+
     def run_detect_post_autofit_on_current_page_once(self, block_indices: List[int]):
         """Apply the same auto-fit routine as shortcut Format→Auto fit to selected detected blocks."""
         from utils.config import pcfg
@@ -1410,9 +1493,8 @@ class SceneTextManager(QObject):
             self.auto_textlayout_flag = old_flag
 
     def onAutoLayoutTextblks(self):
-        selected_blks = self.canvas.selected_text_items()
+        selected_blks = self._collect_autolayout_targets(selected_only=True, include_user_adjusted=True)
         old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
-        selected_blks = [blk for blk in selected_blks if not blk.fontformat.vertical]
         if len(selected_blks) > 0:
             for blkitem in selected_blks:
                 old_html_lst.append(blkitem.toHtml())
@@ -1575,9 +1657,29 @@ class SceneTextManager(QObject):
         page_scale = _auto_lettering_page_scale(getattr(self.imgtrans_proj, 'img_array', None), (rect.width(), rect.height()))
         style_min = max(4.0, style_min * page_scale)
         style_max = max(style_min + 1.0, style_max * page_scale)
+        box_w = float(effective.get('width', rect.width())) if effective.get('uses_mask') else float(rect.width())
+        box_h = float(effective.get('height', rect.height())) if effective.get('uses_mask') else float(rect.height())
+        shape = str(getattr(ff, 'text_box_shape', '') or '')
+        initial_line_count = max(1, text.count('\n') + 1)
+        width_profile = _auto_width_profile_for_shape(box_w, box_h, initial_line_count + 3, shape)
+        auto_req = AutoFitRequest(
+            text=text,
+            box=(0.0, 0.0, box_w, box_h),
+            min_font_size=float(style_min),
+            max_font_size=float(style_max),
+            writing_mode='vertical' if bool(getattr(ff, 'vertical', False)) else 'horizontal',
+            line_spacing=float(getattr(ff, 'line_spacing', 1.15) or 1.15),
+            letter_spacing=float(getattr(ff, 'letter_spacing', 1.0) or 1.0),
+            padding=float(getattr(ff, 'text_padding', 0.0) or 0.0),
+            stroke_width=float(getattr(ff, 'stroke_width', 0.0) or 0.0) + float(getattr(ff, 'secondary_stroke_width', 0.0) or 0.0),
+            shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
+            shadow_offset=tuple((getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0])[:2]),
+            width_profile=width_profile,
+        )
+        auto_res = auto_fit_text(auto_req)
         result = smart_fit_text_to_box(
-            text,
-            float(getattr(ff, 'font_size', 24.0) or 24.0),
+            "\n".join(auto_res.lines) if auto_res.lines else text,
+            float(auto_res.font_size or getattr(ff, 'font_size', 24.0) or 24.0),
             (rect.width(), rect.height()),
             getattr(ff, 'writing_mode', 'auto'),
             getattr(ff, 'fit_mode', 'shrink'),
@@ -1591,7 +1693,7 @@ class SceneTextManager(QObject):
             line_break_strategy=getattr(ff, 'line_break_strategy', 'auto'),
             shadow_radius=float(getattr(ff, 'shadow_radius', 0.0) or 0.0),
             shadow_offset=getattr(ff, 'shadow_offset', [0.0, 0.0]) or [0.0, 0.0],
-            effective_box_size=(float(effective.get('width', rect.width())), float(effective.get('height', rect.height()))) if effective.get('uses_mask') else None,
+            effective_box_size=(box_w, box_h),
         )
         changed = False
         if result.text and result.text != text:
@@ -1619,6 +1721,10 @@ class SceneTextManager(QObject):
         if changed:
             blkitem.set_fontformat(ff)
             fit_diag = (result.diagnostics or {}).get('fit', {})
+            if blkitem.blk is not None and hasattr(blkitem.blk, 'fontformat'):
+                blkitem.blk.fontformat.last_layout_score = float(auto_res.score)
+                blkitem.blk.fontformat.layout_warnings = list(auto_res.warnings)
+                blkitem.blk.fontformat.layout_version = "v2"
             changed = self._postprocess_auto_lettering_item(blkitem, fit_diag=fit_diag) or changed
             if blkitem.blk is not None:
                 blkitem.blk.fontformat = ff.deepcopy()

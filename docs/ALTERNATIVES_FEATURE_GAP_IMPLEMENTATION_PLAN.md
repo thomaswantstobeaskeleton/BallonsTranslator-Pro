@@ -1,6 +1,6 @@
 # Alternatives Feature Gap Implementation Plan
 
-Last updated: 2026-05-19 (Phase 0 baseline audit pass 3)
+Last updated: 2026-05-19 (Phase 0 baseline audit pass 4)
 
 This document is the safety baseline for closing gaps versus manga-image-translator, Koharu, ImageTrans, manga-translator-ui, and focused cleanup tools. The rule for every phase is: audit first, extend existing Pro systems, do not duplicate equivalent functionality, and do not remove existing Pro behavior.
 
@@ -138,3 +138,9 @@ To keep changes reviewable and reduce regression risk, implement each phase in m
 7. **Phase 3+**: export/interchange and CAT/OCR/renderer/cleanup/batch features, each split into doc/schema/test-first slices before UI surfacing.
 
 Each slice should include: (a) migration notes, (b) startup/model-picker impact statement, (c) README/README_zh_CN parity check when user-visible behavior changes.
+
+### Pass 4 incremental completion notes
+
+- Added dedicated `GET /mcp/commands` discovery endpoint in local automation server for MCP-only command enumeration.
+- Extended route-discovery GET methods contract to include `mcp/commands`.
+- Added API tests for the new endpoint and updated existing route-discovery shape assertions.
