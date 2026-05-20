@@ -3187,6 +3187,8 @@ class SceneTextManager(QObject):
                 self.formatpanel.set_textblk_item(textitems[-1])
             else:
                 self.formatpanel.set_textblk_item(multi_select=bool(textitems))
+            if hasattr(self.mainwindow, "on_translation_assist_selection_changed"):
+                self.mainwindow.on_translation_assist_selection_changed()
 
     def layout_textblk(self, blkitem: TextBlkItem, text: str = None, mask: np.ndarray = None, bounding_rect: List = None, region_rect: List = None):
         '''

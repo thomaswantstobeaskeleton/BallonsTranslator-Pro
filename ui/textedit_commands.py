@@ -347,6 +347,32 @@ class TextEditCommand(QUndoCommand):
             self.blkitem.undo()
 
 
+class ApplyTranslationCandidateCommand(QUndoCommand):
+    def __init__(self, blk_item: TextBlkItem, trans_edit: Optional[TransTextEdit], new_text: str):
+        super().__init__()
+        self.blk_item = blk_item
+        self.trans_edit = trans_edit
+        self.new_text = str(new_text or "")
+        self.old_text = str(getattr(getattr(blk_item, "blk", None), "translation", "") or "")
+        self._first = True
+
+    def _apply(self, text: str):
+        if getattr(self.blk_item, "blk", None) is not None:
+            self.blk_item.blk.translation = text
+        self.blk_item.setPlainText(text)
+        if self.trans_edit is not None:
+            self.trans_edit.setPlainText(text)
+
+    def redo(self):
+        if self._first:
+            self._first = False
+            return
+        self._apply(self.new_text)
+
+    def undo(self):
+        self._apply(self.old_text)
+
+
 class PageReplaceOneCommand(QUndoCommand):
     def __init__(self, se: PageSearchWidget, parent=None):
         super(PageReplaceOneCommand, self).__init__(parent)

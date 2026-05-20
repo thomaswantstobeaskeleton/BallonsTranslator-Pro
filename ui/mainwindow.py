@@ -6,6 +6,7 @@ import shutil
 import copy
 import numpy as np
 import json
+import time
 from typing import List, Union
 from pathlib import Path
 import subprocess
@@ -51,7 +52,7 @@ from .mainwindowbars import TitleBar, LeftBar, BottomBar
 from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, GitUpdateThread, ModelDownloadThread
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
-from .textedit_commands import GlobalRepalceAllCommand
+from .textedit_commands import GlobalRepalceAllCommand, ApplyTranslationCandidateCommand
 from .framelesswindow import FramelessWindow, FramelessMoveResize
 from .drawing_commands import RunBlkTransCommand
 from .keywordsubwidget import KeywordSubWidget
@@ -74,6 +75,7 @@ from .layout_review_report_dialog import LayoutReviewReportDialog
 from .lettering_workflow_dialog import LetteringWorkflowDialog
 from .auto_format_qa_widget import AutoFormatQADialog
 from .realtime_translator_dialog import RealtimeTranslatorDialog
+from .translation_assist_dock import TranslationAssistDock
 from utils.fontformat import pt2px
 from utils.image_colorization import apply_colorization
 from utils.structured_ocr_export import build_structured_ocr_export
@@ -102,10 +104,18 @@ from utils.auto_format_qa import score_auto_format_candidates, summarize_auto_fo
 from utils.text_rendering import locale_aware_upper
 from utils.local_automation_api import LocalAutomationApiServer
 from utils.automation_api_contract import normalize_job_task
+from utils.docs_catalog import build_docs_catalog
 from utils.automation_jobs import new_job, append_log, add_warning, set_status, checkpoint_or_cancel, status_payload
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
 from utils.realtime_mode import RealtimeService, RealtimeRegion
+from utils.translation_assist import (
+    TranslationAssistService,
+    build_candidates_from_sources,
+    normalize_provider_warning,
+    estimate_candidate_cost_usd,
+    make_synthetic_mt_candidate,
+)
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
 from modules.text_normalization import normalize_text
 from modules.text_replace_profiles import apply_profile, default_profiles
@@ -1065,7 +1075,22 @@ class MainWindow(mainwindow_cls):
             'realtime_stop': self._api_realtime_stop,
             'realtime_translate_now': self._api_realtime_translate_now,
             'realtime_profiles': self._api_realtime_profiles,
+            'translation_assist_block': self._api_translation_assist_block,
+            'translation_assist_candidates': self._api_translation_assist_candidates,
+            'translation_assist_apply_candidate': self._api_translation_assist_apply_candidate,
+            'translation_assist_tm': self._api_translation_assist_tm,
+            'translation_assist_glossary': self._api_translation_assist_glossary,
+            'translation_assist_concordance': self._api_translation_assist_concordance,
+            'translation_assist_sfx': self._api_translation_assist_sfx,
+            'translation_assist_add_to_tm': self._api_translation_assist_add_to_tm,
+            'translation_assist_add_to_glossary': self._api_translation_assist_add_to_glossary,
+            'translation_assist_qa': self._api_translation_assist_qa,
+            'translation_assist_profiles': self._api_translation_assist_profiles,
+            'translation_assist_apply_text': self._api_translation_assist_apply_text,
+            'translation_assist_cache': self._api_translation_assist_cache,
+            'translation_assist_compare': self._api_translation_assist_compare,
             'image_transform': self._api_image_transform,
+            'docs_catalog': self._api_docs_catalog,
         }
         try:
             self._automation_api = LocalAutomationApiServer('127.0.0.1', int(getattr(pcfg, 'automation_api_port', 39542)), handlers, api_key=str(getattr(pcfg, 'automation_api_key', '') or ''))
@@ -1085,6 +1110,9 @@ class MainWindow(mainwindow_cls):
 
     def _api_realtime_status(self, body: dict):
         return self._api_call_ui(lambda _b: self._realtime_service().status(), body)
+
+    def _api_docs_catalog(self, body: dict):
+        return self._api_call_ui(lambda _b: {'ok': True, 'docs': build_docs_catalog()}, body)
 
     def _api_realtime_regions(self, body: dict):
         def _ui(_b: dict):
@@ -1124,6 +1152,330 @@ class MainWindow(mainwindow_cls):
         svc = self._realtime_service()
         svc.enabled = bool(enabled)
         return svc.status()
+
+
+    def _translation_assist_service(self) -> TranslationAssistService:
+        if not hasattr(self, '_translation_assist_service_obj') or self._translation_assist_service_obj is None:
+            self._translation_assist_service_obj = TranslationAssistService()
+        return self._translation_assist_service_obj
+
+    def _api_translation_assist_block(self, body: dict):
+        def _ui(_b: dict):
+            page, block, blk = self._resolve_assist_block(_b or {})
+            st = self._translation_assist_service().get_block(page, block)
+            src = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            tgt = str(getattr(blk, 'translation', '') or '').strip()
+            if src:
+                st.source_text = src
+            st.current_target_text = tgt
+            return {'ok': True, 'page': page, 'block': block, 'source_text': st.source_text, 'current_target_text': st.current_target_text, 'candidates': [vars(c) for c in st.candidates], 'applied_candidate_id': st.applied_candidate_id}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_candidates(self, body: dict):
+        def _ui(_b: dict):
+            page = int((_b or {}).get('page', 0) or 0)
+            block = int((_b or {}).get('block', 0) or 0)
+            st = self._translation_assist_service().set_candidates(page, block, (_b or {}).get('source_text', ''), (_b or {}).get('current_target_text', ''), (_b or {}).get('candidates', []))
+            return {'ok': True, 'page': page, 'block': block, 'candidate_count': len(st.candidates), 'candidates': [vars(c) for c in st.candidates]}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_apply_candidate(self, body: dict):
+        def _ui(_b: dict):
+            page, block, blk = self._resolve_assist_block(_b or {})
+            cid = str((_b or {}).get('candidate_id', '') or '').strip()
+            if not cid:
+                raise ValueError('candidate_id is required')
+            st = self._translation_assist_service().apply_candidate(page, block, cid)
+            candidate_text = ''
+            for c in st.candidates:
+                if c.candidate_id == cid:
+                    candidate_text = str(c.text or '')
+                    break
+            apply_to_project = bool((_b or {}).get('apply_to_project', False))
+            changed = False
+            if apply_to_project and candidate_text:
+                provider = ''
+                for c in st.candidates:
+                    if c.candidate_id == cid:
+                        provider = str(c.provider or '')
+                        break
+                if provider.startswith('ocr:'):
+                    if str(getattr(pcfg.module, 'ocr', '') or '') != candidate_text:
+                        pcfg.module.ocr = candidate_text
+                        self.module_manager.setOCR(candidate_text)
+                        changed = True
+                elif provider.startswith('detector:'):
+                    if str(getattr(pcfg.module, 'textdetector', '') or '') != candidate_text:
+                        pcfg.module.textdetector = candidate_text
+                        self.module_manager.setTextDetector(candidate_text)
+                        changed = True
+                elif provider.startswith('inpainter:'):
+                    if str(getattr(pcfg.module, 'inpainter', '') or '') != candidate_text:
+                        pcfg.module.inpainter = candidate_text
+                        self.module_manager.setInpainter(candidate_text)
+                        changed = True
+                else:
+                    old = str(getattr(blk, 'translation', '') or '')
+                    if old != candidate_text:
+                        blk.translation = candidate_text
+                        changed = True
+                        self.canvas.updateTextBlkList()
+                if changed:
+                    self.canvas.setProjSaveState(True)
+            return {'ok': True, 'page': page, 'block': block, 'applied_candidate_id': st.applied_candidate_id, 'applied_to_project': changed, 'candidate_text': candidate_text}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_tm(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            source = str((_b or {}).get('source_text', '') or '').strip()
+            if not source:
+                _p, _idx, blk = self._resolve_assist_block(_b or {})
+                source = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            min_score = float((_b or {}).get('min_score', 0.65) or 0.65)
+            limit = int((_b or {}).get('limit', 5) or 5)
+            store = list(getattr(self.imgtrans_proj, 'translation_memory', []) or [])
+            hits = query_tm(store, source, min_score=min_score, limit=limit)
+            return {'ok': True, 'source_text': source, 'hits': hits, 'count': len(hits)}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_glossary(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            source = str((_b or {}).get('source_text', '') or '').strip()
+            if not source:
+                _p, _idx, blk = self._resolve_assist_block(_b or {})
+                source = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            entries = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+            hits = []
+            src_l = source.lower()
+            for row in entries:
+                term = str((row or {}).get('source', '') or '').strip()
+                tgt = str((row or {}).get('target', '') or '').strip()
+                if term and term.lower() in src_l:
+                    hits.append({'source': term, 'target': tgt, 'rule': 'project_glossary'})
+            return {'ok': True, 'source_text': source, 'hits': hits, 'count': len(hits)}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_concordance(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            query = str((_b or {}).get('query', '') or '').strip()
+            if not query:
+                _p, _idx, blk = self._resolve_assist_block(_b or {})
+                query = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            rows = build_concordance_from_project(self.imgtrans_proj)
+            hits = query_concordance(rows, query, in_target=bool((_b or {}).get('in_target', True)), limit=int((_b or {}).get('limit', 20) or 20))
+            return {'ok': True, 'query': query, 'hits': hits, 'count': len(hits)}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_sfx(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            query = str((_b or {}).get('query', '') or '').strip()
+            if not query:
+                _p, _idx, blk = self._resolve_assist_block(_b or {})
+                query = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            store = list(getattr(self.imgtrans_proj, 'sfx_dictionary', []) or [])
+            rows = default_sfx_dictionary() + store if bool((_b or {}).get('include_defaults', True)) else store
+            hits = query_sfx_dictionary(rows, query, limit=int((_b or {}).get('limit', 20) or 20))
+            return {'ok': True, 'query': query, 'hits': hits, 'count': len(hits)}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_add_to_tm(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            page, block, blk = self._resolve_assist_block(_b or {})
+            text = str((_b or {}).get('text', '') or '').strip()
+            if not text:
+                raise ValueError('text is required')
+            source = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            store = list(getattr(self.imgtrans_proj, 'translation_memory', []) or [])
+            add_tm_entry(store, source, text, page=str(page), block_id=str(block))
+            self.imgtrans_proj.translation_memory = store
+            self.canvas.setProjSaveState(True)
+            return {'ok': True, 'entries': len(store), 'source': source, 'target': text}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_add_to_glossary(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            source = str((_b or {}).get('source', '') or '').strip()
+            target = str((_b or {}).get('target', '') or '').strip()
+            if not source or not target:
+                raise ValueError('source and target are required')
+            store = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+            seen = {str((r or {}).get('source', '') or '').strip().lower() for r in store}
+            if source.lower() not in seen:
+                store.append({'source': source, 'target': target})
+            self.imgtrans_proj.translation_glossary = store
+            self.canvas.setProjSaveState(True)
+            return {'ok': True, 'entries': len(store), 'source': source, 'target': target}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_qa(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            _page_idx, _block_idx, blk = self._resolve_assist_block(_b or {})
+            src = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            tgt = str(getattr(blk, 'translation', '') or '').strip()
+            glossary = list(getattr(self.imgtrans_proj, 'translation_glossary', []) or [])
+            from utils.translation_review import check_translation_guardrails
+            issues = check_translation_guardrails(src, tgt, glossary=glossary)
+            warnings = [str(it.get('message', '')) for it in issues if str(it.get('message', '')).strip()]
+            return {'ok': True, 'source_text': src, 'target_text': tgt, 'warnings': warnings, 'issue_count': len(warnings)}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_profiles(self, body: dict):
+        def _ui(_b: dict):
+            action = str((_b or {}).get('action', 'get') or 'get').strip().lower()
+            if action == 'set':
+                pcfg.module.preferred_assist_providers = list((_b or {}).get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
+                pcfg.module.default_assist_prompt_profile = str((_b or {}).get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
+            return {
+                'ok': True,
+                'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
+                'default_assist_prompt_profile': str(getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue') or 'dialogue'),
+                'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
+            }
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_apply_text(self, body: dict):
+        def _ui(_b: dict):
+            page, block, _blk = self._resolve_assist_block(_b or {})
+            text = str((_b or {}).get('text', '') or '').strip()
+            if not text:
+                raise ValueError('text is required')
+            return {'ok': True, 'page': page, 'block': block, 'text': text}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_cache(self, body: dict):
+        def _ui(_b: dict):
+            action = str((_b or {}).get('action', 'status') or 'status').strip().lower()
+            svc = self._translation_assist_service()
+            if action == 'clear':
+                return {'ok': True, 'cleared': svc.clear_cache()}
+            return {'ok': True, 'entries': len(getattr(svc, 'candidate_cache', {}) or {})}
+        return self._api_call_ui(_ui, body)
+
+    def _api_translation_assist_compare(self, body: dict):
+        def _ui(_b: dict):
+            if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+                raise ValueError('open a project first')
+            _p, _bidx, blk = self._resolve_assist_block(_b or {})
+            scope = str((_b or {}).get('compare_scope', 'translator') or 'translator').strip().lower()
+            if scope in {'ocr', 'detector', 'inpainter'}:
+                current_map = {
+                    'ocr': str(getattr(pcfg.module, 'ocr', '') or ''),
+                    'detector': str(getattr(pcfg.module, 'textdetector', '') or ''),
+                    'inpainter': str(getattr(pcfg.module, 'inpainter', '') or ''),
+                }
+                valid_map = {
+                    'ocr': sorted(GET_VALID_OCR()),
+                    'detector': sorted(GET_VALID_TEXTDETECTORS()),
+                    'inpainter': sorted(GET_VALID_INPAINTERS()),
+                }
+                preferred = [str(x).strip() for x in list((_b or {}).get('preferred_assist_providers', []) or []) if str(x).strip()]
+                max_n = max(1, int((_b or {}).get('max_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6))
+                names = []
+                for nm in preferred + valid_map.get(scope, []):
+                    if nm and nm in valid_map.get(scope, []) and nm not in names:
+                        names.append(nm)
+                names = names[:max_n]
+                candidates = []
+                for i, nm in enumerate(names, 1):
+                    candidates.append({
+                        'candidate_id': f"module_{scope}_{i}",
+                        'provider': f"{scope}:{nm}",
+                        'text': nm,
+                        'telemetry': {'source': f'{scope}_module_registry', 'is_current': (nm == current_map.get(scope, ''))},
+                    })
+                return {'ok': True, 'preset': 'module_compare', 'scope': scope, 'providers': names, 'source_text': (getattr(blk, 'get_text', lambda: '')() or '').strip(), 'candidates': candidates, 'count': len(candidates), 'warnings': []}
+            source = str((_b or {}).get('source_text', '') or '').strip()
+            if not source:
+                source = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            preset = str((_b or {}).get('preset', 'low_latency') or 'low_latency').strip().lower()
+            if preset == 'high_quality':
+                providers = ['TM', 'Glossary', 'Concordance', 'SFX', 'openai', 'deepl']
+            else:
+                providers = ['TM', 'Glossary', 'SFX', 'google']
+            telemetry = {}
+            warnings = []
+            tm_hits = glossary_hits = sfx_hits = concordance_hits = []
+            max_n = int((_b or {}).get('max_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6)
+            if 'TM' in providers:
+                t0 = time.perf_counter(); tm_hits = list(self._api_translation_assist_tm({'page': _p, 'block': _bidx, 'source_text': source}).get('hits', []) or [])
+                telemetry['TM'] = {'latency_ms': int((time.perf_counter()-t0)*1000), 'source': 'project_tm'}
+            if 'Glossary' in providers:
+                t0 = time.perf_counter(); glossary_hits = list(self._api_translation_assist_glossary({'page': _p, 'block': _bidx, 'source_text': source}).get('hits', []) or [])
+                telemetry['Glossary'] = {'latency_ms': int((time.perf_counter()-t0)*1000), 'source': 'project_glossary'}
+            if 'SFX' in providers:
+                t0 = time.perf_counter(); sfx_hits = list(self._api_translation_assist_sfx({'page': _p, 'block': _bidx, 'query': source}).get('hits', []) or [])
+                telemetry['SFX'] = {'latency_ms': int((time.perf_counter()-t0)*1000), 'source': 'sfx_dictionary'}
+            if 'Concordance' in providers:
+                t0 = time.perf_counter(); concordance_hits = list(self._api_translation_assist_concordance({'page': _p, 'block': _bidx, 'query': source, 'limit': max_n}).get('hits', []) or [])
+                telemetry['Concordance'] = {'latency_ms': int((time.perf_counter()-t0)*1000), 'source': 'project_concordance'}
+            candidates = build_candidates_from_sources(
+                tm_hits=tm_hits, glossary_hits=glossary_hits, sfx_hits=sfx_hits, concordance_hits=concordance_hits, max_candidates=max_n, telemetry=telemetry
+            )
+            # external provider fan-out (synthetic candidate orchestration placeholder)
+            external = [p for p in providers if p.lower() in {'openai', 'deepl', 'google', 'ollama', 'lmstudio'}]
+            for p in external:
+                try:
+                    t0 = time.perf_counter()
+                    row = make_synthetic_mt_candidate(source, p, mode=preset)
+                    tele = {
+                        "latency_ms": int((time.perf_counter()-t0)*1000),
+                        "source": "external_provider",
+                        "cost_usd": estimate_candidate_cost_usd(row.get("text", ""), p),
+                    }
+                    candidates.append({
+                        "candidate_id": f"ext_{p}_{len(candidates)+1}",
+                        "provider": p,
+                        "text": row.get("text", ""),
+                        "telemetry": tele,
+                    })
+                except Exception as e:
+                    nw = normalize_provider_warning(p, err=e)
+                    if nw:
+                        warnings.append(nw)
+            if external and not warnings:
+                # explicit caveat until true provider orchestration lands
+                for p in external:
+                    nw = normalize_provider_warning(p, warning_text="synthetic_compare_candidate: provider call not executed in this baseline slice")
+                    if nw:
+                        warnings.append(nw)
+            candidates = candidates[:max_n]
+            return {'ok': True, 'preset': preset, 'scope': scope, 'providers': providers, 'source_text': source, 'candidates': candidates, 'count': len(candidates), 'warnings': warnings}
+        return self._api_call_ui(_ui, body)
+
+    def _resolve_assist_block(self, body: dict):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            raise ValueError('open a project first')
+        pages = list((self.imgtrans_proj.pages or {}).keys())
+        page_v = body.get('page', self.imgtrans_proj.current_img if getattr(self.imgtrans_proj, 'current_img', None) else '')
+        if isinstance(page_v, int):
+            page_idx = int(page_v)
+            if page_idx < 0 or page_idx >= len(pages):
+                raise ValueError('invalid page index')
+            page = pages[page_idx]
+        else:
+            page = str(page_v or '').strip()
+            if page not in (self.imgtrans_proj.pages or {}):
+                raise ValueError('invalid page')
+            page_idx = pages.index(page)
+        block_idx = int(body.get('block', 0) or 0)
+        blocks = list((self.imgtrans_proj.pages or {}).get(page, []) or [])
+        if block_idx < 0 or block_idx >= len(blocks):
+            raise ValueError('invalid block index')
+        return page_idx, block_idx, blocks[block_idx]
 
     def _api_image_transform(self, body: dict):
         return self._api_call_ui(self._api_image_transform_ui, body)
@@ -3655,6 +4007,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         if hasattr(self.titleBar, "realtime_translator_trigger"):
             self.titleBar.realtime_translator_trigger.connect(self.on_open_realtime_translator)
+        if hasattr(self.titleBar, "translation_assist_trigger"):
+            self.titleBar.translation_assist_trigger.connect(self.on_open_translation_assist_dock)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
         self.titleBar.manage_models_trigger.connect(self.on_open_manage_models)
         self.titleBar.install_google_font_trigger.connect(self.on_install_google_font)
@@ -4940,6 +5294,257 @@ class MainWindow(mainwindow_cls):
             self.manga_source_dialog.activateWindow()
         else:
             self.manga_source_dialog.show()
+
+    def on_open_translation_assist_dock(self):
+        if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
+            self._translation_assist_dock = TranslationAssistDock(self)
+            self.addDockWidget(Qt.RightDockWidgetArea, self._translation_assist_dock)
+            self._translation_assist_dock.set_callbacks(
+                self.refresh_translation_assist_for_selection,
+                self.apply_translation_assist_candidate_for_selection,
+                self.add_translation_assist_candidate_to_tm,
+                self.add_translation_assist_candidate_to_glossary,
+                self.apply_translation_assist_text_for_selection,
+            )
+            self._translation_assist_dock.set_query_defaults({
+                'auto_query_tm': getattr(pcfg.module, 'auto_query_tm', True),
+                'auto_query_glossary': getattr(pcfg.module, 'auto_query_glossary', True),
+                'auto_query_sfx': getattr(pcfg.module, 'auto_query_sfx', True),
+                'auto_query_concordance': getattr(pcfg.module, 'auto_query_concordance', False),
+                'max_mt_candidates': getattr(pcfg.module, 'max_mt_candidates', 6),
+                'preferred_assist_providers': getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']),
+                'default_assist_prompt_profile': getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue'),
+                'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
+            })
+        self._translation_assist_dock.show()
+        self._translation_assist_dock.raise_()
+        self.refresh_translation_assist_for_selection()
+
+    def _selected_assist_page_block(self):
+        if self.imgtrans_proj is None or self.imgtrans_proj.is_empty:
+            return None
+        page = str(getattr(self.imgtrans_proj, 'current_img', '') or '').strip()
+        if not page:
+            return None
+        blocks = list((self.imgtrans_proj.pages or {}).get(page, []) or [])
+        sel = list(self.canvas.selected_text_items() or [])
+        if not sel:
+            return None
+        blk = getattr(sel[0], 'blk', None)
+        if blk is None:
+            return None
+        for i, b in enumerate(blocks):
+            if b is blk:
+                return {'page': page, 'block': i}
+        return None
+
+    def refresh_translation_assist_for_selection(self, opts: dict = None):
+        if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
+            return
+        opts = dict(opts or {})
+        pcfg.module.auto_query_tm = bool(opts.get('auto_query_tm', getattr(pcfg.module, 'auto_query_tm', True)))
+        pcfg.module.auto_query_glossary = bool(opts.get('auto_query_glossary', getattr(pcfg.module, 'auto_query_glossary', True)))
+        pcfg.module.auto_query_sfx = bool(opts.get('auto_query_sfx', getattr(pcfg.module, 'auto_query_sfx', True)))
+        pcfg.module.auto_query_concordance = bool(opts.get('auto_query_concordance', getattr(pcfg.module, 'auto_query_concordance', False)))
+        pcfg.module.max_mt_candidates = int(opts.get('max_mt_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6)
+        pcfg.module.preferred_assist_providers = list(opts.get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
+        pcfg.module.default_assist_prompt_profile = str(opts.get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
+        if bool(opts.get('clear_assist_cache', False)):
+            self._api_translation_assist_cache({'action': 'clear'})
+        sel = self._selected_assist_page_block()
+        if not sel:
+            self._translation_assist_dock.set_assist_payload({
+                'source_text': '',
+                'current_target_text': '',
+                'candidates': [],
+                'summary': self.tr('Select a text block first.'),
+            })
+            return
+        base = self._api_translation_assist_block({'page': sel['page'], 'block': sel['block']})
+        source = str(base.get('source_text', '') or '')
+        target = str(base.get('current_target_text', '') or '')
+        if bool(opts.get('run_compare', False)):
+            cmp_rst = self._api_translation_assist_compare({
+                'page': sel['page'],
+                'block': sel['block'],
+                'source_text': source,
+                'preset': str(opts.get('compare_preset', 'low_latency') or 'low_latency'),
+                'max_candidates': int(opts.get('max_mt_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6),
+            })
+            self._api_translation_assist_candidates({
+                'page': sel['page'], 'block': sel['block'],
+                'source_text': source, 'current_target_text': target,
+                'candidates': list(cmp_rst.get('candidates', []) or []),
+            })
+            warn = [str(w.get('message', '')) for w in list(cmp_rst.get('warnings', []) or []) if str(w.get('message', '')).strip()]
+            self._translation_assist_dock.set_assist_payload({
+                'source_text': source,
+                'current_target_text': target,
+                'candidates': list(cmp_rst.get('candidates', []) or []),
+                'summary': self.tr('Compare preset: {0} | candidates: {1}').format(str(cmp_rst.get('preset', 'low_latency')), int(cmp_rst.get('count', 0))),
+                'qa_warnings': self._translation_assist_block_qa_warnings(sel['page'], sel['block']) + warn,
+            })
+            return
+        max_n = max(1, int(getattr(pcfg.module, 'max_mt_candidates', 6) or 6))
+        tm_hits = []
+        glossary_hits = []
+        sfx_hits = []
+        concordance_hits = []
+        telemetry = {}
+        if bool(getattr(pcfg.module, 'auto_query_tm', True)):
+            t0 = time.perf_counter()
+            tm_hits = list(self._api_translation_assist_tm({'page': sel['page'], 'block': sel['block'], 'source_text': source}).get('hits', []) or [])
+            telemetry["TM"] = {"latency_ms": int((time.perf_counter() - t0) * 1000), "source": "project_tm"}
+        if bool(getattr(pcfg.module, 'auto_query_glossary', True)):
+            t0 = time.perf_counter()
+            glossary_hits = list(self._api_translation_assist_glossary({'page': sel['page'], 'block': sel['block'], 'source_text': source}).get('hits', []) or [])
+            telemetry["Glossary"] = {"latency_ms": int((time.perf_counter() - t0) * 1000), "source": "project_glossary"}
+        if bool(getattr(pcfg.module, 'auto_query_sfx', True)):
+            t0 = time.perf_counter()
+            sfx_hits = list(self._api_translation_assist_sfx({'page': sel['page'], 'block': sel['block'], 'query': source}).get('hits', []) or [])
+            telemetry["SFX"] = {"latency_ms": int((time.perf_counter() - t0) * 1000), "source": "sfx_dictionary"}
+        if bool(getattr(pcfg.module, 'auto_query_concordance', False)):
+            t0 = time.perf_counter()
+            concordance_hits = list(self._api_translation_assist_concordance({'page': sel['page'], 'block': sel['block'], 'query': source, 'limit': max_n}).get('hits', []) or [])
+            telemetry["Concordance"] = {"latency_ms": int((time.perf_counter() - t0) * 1000), "source": "project_concordance"}
+        providers = list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or [])
+        profile = str(getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue') or 'dialogue')
+        cached = self._translation_assist_service().get_cached_candidates(source, profile, providers)
+        candidates = cached if cached else build_candidates_from_sources(
+            tm_hits=tm_hits,
+            glossary_hits=glossary_hits,
+            sfx_hits=sfx_hits,
+            concordance_hits=concordance_hits,
+            max_candidates=max_n,
+            telemetry=telemetry,
+        )
+        if not cached:
+            self._translation_assist_service().set_cached_candidates(source, profile, providers, candidates)
+        cand_payload = self._api_translation_assist_candidates({
+            'page': sel['page'], 'block': sel['block'],
+            'source_text': source, 'current_target_text': target,
+            'candidates': candidates,
+        })
+        self._translation_assist_dock.set_assist_payload({
+            'source_text': source,
+            'current_target_text': target,
+            'candidates': list(cand_payload.get('candidates', []) or []),
+            'summary': self.tr('Candidates: {0}').format(len(candidates)),
+            'qa_warnings': self._translation_assist_block_qa_warnings(sel['page'], sel['block']),
+        })
+
+    def on_translation_assist_selection_changed(self):
+        if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
+            return
+        if not self._translation_assist_dock.isVisible():
+            return
+        if not bool(getattr(pcfg.module, 'enable_translation_assist', True)):
+            return
+        self.refresh_translation_assist_for_selection()
+
+    def apply_translation_assist_candidate_for_selection(self, candidate_id: str):
+        sel = self._selected_assist_page_block()
+        if not sel:
+            return
+        rst = self._api_translation_assist_apply_candidate({
+            'page': sel['page'],
+            'block': sel['block'],
+            'candidate_id': str(candidate_id or ''),
+            'apply_to_project': False,
+        })
+        candidate_text = str((rst or {}).get('candidate_text', '') or '')
+        if candidate_text:
+            page = str(sel['page'])
+            block = int(sel['block'])
+            blk_items = list(self.st_manager.textblk_item_list or [])
+            if 0 <= block < len(blk_items):
+                blk_item = blk_items[block]
+                trans_edit = None
+                if 0 <= block < len(self.st_manager.pairwidget_list):
+                    trans_edit = self.st_manager.pairwidget_list[block].e_trans
+                self.canvas.push_undo_command(ApplyTranslationCandidateCommand(blk_item, trans_edit, candidate_text))
+                self.canvas.setProjSaveState(False)
+        self.refresh_translation_assist_for_selection()
+
+    def add_translation_assist_candidate_to_tm(self, candidate_id: str):
+        sel = self._selected_assist_page_block()
+        if not sel:
+            return
+        rst = self._api_translation_assist_apply_candidate({
+            'page': sel['page'],
+            'block': sel['block'],
+            'candidate_id': str(candidate_id or ''),
+            'apply_to_project': False,
+        })
+        text = str((rst or {}).get('candidate_text', '') or '').strip()
+        if not text:
+            return
+        self._api_translation_assist_add_to_tm({'page': sel['page'], 'block': sel['block'], 'text': text})
+        self.refresh_translation_assist_for_selection()
+
+    def add_translation_assist_candidate_to_glossary(self, candidate_id: str):
+        sel = self._selected_assist_page_block()
+        if not sel:
+            return
+        _p, _b, blk = self._resolve_assist_block(sel)
+        source = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+        rst = self._api_translation_assist_apply_candidate({
+            'page': sel['page'],
+            'block': sel['block'],
+            'candidate_id': str(candidate_id or ''),
+            'apply_to_project': False,
+        })
+        target = str((rst or {}).get('candidate_text', '') or '').strip()
+        if not source or not target:
+            return
+        self._api_translation_assist_add_to_glossary({'source': source, 'target': target})
+        self.refresh_translation_assist_for_selection()
+
+    def apply_translation_assist_text_for_selection(self, text: str):
+        sel = self._selected_assist_page_block()
+        if not sel:
+            return
+        rst = self._api_translation_assist_apply_text({'page': sel['page'], 'block': sel['block'], 'text': text})
+        candidate_text = str((rst or {}).get('text', '') or '')
+        if not candidate_text:
+            return
+        page = str(sel['page'])
+        block = int(sel['block'])
+        blk_items = list(self.st_manager.textblk_item_list or [])
+        if 0 <= block < len(blk_items):
+            blk_item = blk_items[block]
+            trans_edit = None
+            if 0 <= block < len(self.st_manager.pairwidget_list):
+                trans_edit = self.st_manager.pairwidget_list[block].e_trans
+            self.canvas.push_undo_command(ApplyTranslationCandidateCommand(blk_item, trans_edit, candidate_text))
+            self.canvas.setProjSaveState(False)
+        self.refresh_translation_assist_for_selection()
+
+    def _translation_assist_block_qa_warnings(self, page: str, block: int):
+        warnings = []
+        try:
+            qa = self._api_translation_assist_qa({'page': page, 'block': block})
+            warnings.extend(list(qa.get('warnings', []) or []))
+            _p, _b, blk = self._resolve_assist_block({'page': page, 'block': block})
+            src = (getattr(blk, 'get_text', lambda: '')() or '').strip()
+            tgt = str(getattr(blk, 'translation', '') or '').strip()
+            if not tgt:
+                warnings.append(self.tr('Target text is empty.'))
+            if src and tgt and src == tgt:
+                warnings.append(self.tr('Target equals source (untranslated risk).'))
+            if src and tgt and len(tgt) < max(1, int(len(src) * 0.2)):
+                warnings.append(self.tr('Target may be too short versus source.'))
+        except Exception:
+            return warnings
+        # stable unique order
+        seen = set()
+        out = []
+        for w in warnings:
+            k = str(w).strip().lower()
+            if k and k not in seen:
+                seen.add(k)
+                out.append(w)
+        return out
 
     def on_open_realtime_translator(self):
         """Open realtime screen translation dialog (project-less live mode)."""

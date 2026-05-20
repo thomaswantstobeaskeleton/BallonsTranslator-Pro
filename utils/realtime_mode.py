@@ -4,6 +4,14 @@ from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
 import hashlib
 import numpy as np
+try:
+    import mss  # type: ignore
+except Exception:
+    mss = None
+try:
+    import platform
+except Exception:
+    platform = None
 
 
 @dataclass
@@ -20,6 +28,9 @@ class RealtimeRegion:
     rect: Tuple[int, int, int, int]
     profile: str = "chrome_manhua_reader"
     paused: bool = False
+    window_id: str = ""
+    follow_window: bool = False
+    crop: Optional[Tuple[int, int, int, int]] = None
 
 
 @dataclass
@@ -41,13 +52,34 @@ class ScreenshotBackendBase:
     def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
         raise NotImplementedError
 
+    def capture_window(self, window_id: str, crop: Optional[Tuple[int, int, int, int]] = None) -> np.ndarray:
+        if crop is None:
+            crop = (0, 0, 1, 1)
+        return self.capture_region(crop)
+
+    def list_windows(self) -> List[Dict[str, Any]]:
+        return []
+
+    def resolve_follow_window_rect(self, window_id: str, crop: Optional[Tuple[int, int, int, int]] = None) -> Optional[Tuple[int, int, int, int]]:
+        for w in self.list_windows():
+            if str(w.get("id", "")) == str(window_id):
+                rect = tuple(w.get("rect", (0, 0, 1, 1))[:4])
+                if crop:
+                    x, y, ww, hh = [int(v) for v in rect]
+                    cx, cy, cw, ch = [int(v) for v in crop]
+                    return (x + cx, y + cy, cw, ch)
+                return rect
+        return None
+
 
 class NumpyFrameBackend(ScreenshotBackendBase):
     backend_name = "numpy_test"
+    supports_follow_window = True
 
     def __init__(self, frames: List[np.ndarray]):
         self._frames = list(frames)
         self._idx = 0
+        self._windows: List[Dict[str, Any]] = []
 
     def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
         if not self._frames:
@@ -55,6 +87,125 @@ class NumpyFrameBackend(ScreenshotBackendBase):
         frame = self._frames[min(self._idx, len(self._frames)-1)]
         self._idx += 1
         return frame
+
+    def list_windows(self) -> List[Dict[str, Any]]:
+        return list(self._windows)
+
+    def set_windows(self, wins: List[Dict[str, Any]]):
+        self._windows = list(wins or [])
+
+
+class QtFallbackBackend(ScreenshotBackendBase):
+    backend_name = "qt_fallback"
+
+    def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
+        # Safe fallback: return an empty frame if Qt screen capture path is unavailable.
+        x, y, w, h = [int(v) for v in region]
+        w = max(1, w)
+        h = max(1, h)
+        return np.zeros((h, w, 3), dtype=np.uint8)
+
+
+class MSSBackend(ScreenshotBackendBase):
+    backend_name = "mss"
+    supports_follow_window = False
+    supports_window_exclusion = False
+    supports_high_dpi = True
+
+    def __init__(self):
+        if mss is None:
+            raise RuntimeError("mss not available")
+        self._mss = mss.mss()
+
+    def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
+        x, y, w, h = [int(v) for v in region]
+        w = max(1, w)
+        h = max(1, h)
+        shot = self._mss.grab({"left": x, "top": y, "width": w, "height": h})
+        arr = np.array(shot)
+        if arr.ndim == 3 and arr.shape[2] >= 3:
+            return arr[:, :, :3]
+        return np.zeros((h, w, 3), dtype=np.uint8)
+
+
+class WindowsNativeBackend(ScreenshotBackendBase):
+    backend_name = "windows_native_stub"
+    supports_follow_window = True
+    supports_window_exclusion = False
+    supports_high_dpi = True
+
+    def __init__(self):
+        self._mss_fallback = MSSBackend() if mss is not None else QtFallbackBackend()
+
+    def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
+        return self._mss_fallback.capture_region(region)
+
+
+class OverlayExclusionBackend(ScreenshotBackendBase):
+    backend_name = "overlay_exclusion_wrapper"
+
+    def __init__(self, inner: ScreenshotBackendBase, hide_overlay_cb: Optional[Callable[[], None]] = None, show_overlay_cb: Optional[Callable[[], None]] = None):
+        self.inner = inner
+        self.hide_overlay_cb = hide_overlay_cb
+        self.show_overlay_cb = show_overlay_cb
+        self.supports_window_exclusion = bool(getattr(inner, "supports_window_exclusion", False))
+        self.supports_follow_window = bool(getattr(inner, "supports_follow_window", False))
+        self.supports_high_dpi = bool(getattr(inner, "supports_high_dpi", True))
+
+    def capture_region(self, region: Tuple[int, int, int, int]) -> np.ndarray:
+        if self.supports_window_exclusion:
+            return self.inner.capture_region(region)
+        if self.hide_overlay_cb is not None:
+            self.hide_overlay_cb()
+        try:
+            return self.inner.capture_region(region)
+        finally:
+            if self.show_overlay_cb is not None:
+                self.show_overlay_cb()
+
+    def capture_window(self, window_id: str, crop: Optional[Tuple[int, int, int, int]] = None) -> np.ndarray:
+        if self.supports_window_exclusion:
+            return self.inner.capture_window(window_id, crop)
+        if self.hide_overlay_cb is not None:
+            self.hide_overlay_cb()
+        try:
+            return self.inner.capture_window(window_id, crop)
+        finally:
+            if self.show_overlay_cb is not None:
+                self.show_overlay_cb()
+
+    def list_windows(self) -> List[Dict[str, Any]]:
+        return self.inner.list_windows()
+
+
+def create_screenshot_backend(preferred: str = "auto") -> ScreenshotBackendBase:
+    choice = str(preferred or "auto").strip().lower()
+    if choice in {"numpy_test"}:
+        return NumpyFrameBackend([])
+    if choice in {"windows_native"}:
+        if platform is not None and platform.system().lower().startswith("win"):
+            try:
+                return WindowsNativeBackend()
+            except Exception:
+                return QtFallbackBackend()
+        return QtFallbackBackend()
+    if choice in {"mss"}:
+        if mss is not None:
+            return MSSBackend()
+        return QtFallbackBackend()
+    if choice in {"auto"} and mss is not None:
+        try:
+            if platform is not None and platform.system().lower().startswith("win"):
+                try:
+                    return WindowsNativeBackend()
+                except Exception:
+                    pass
+            return MSSBackend()
+        except Exception:
+            return QtFallbackBackend()
+    # In this baseline slice we keep compatibility-first fallback behavior.
+    # Future slices can inject MSS/Windows-native backends here.
+    return QtFallbackBackend()
 
 
 def frame_hash(im: np.ndarray) -> str:
@@ -77,7 +228,16 @@ class RealtimeWatcher:
         if region.paused:
             st.status = "paused"
             return st
-        img = self.backend.capture_region(region.rect)
+        capture_rect = region.rect
+        if region.follow_window and region.window_id and self.backend.supports_follow_window:
+            resolved = self.backend.resolve_follow_window_rect(region.window_id, region.crop)
+            if resolved is not None:
+                capture_rect = resolved
+                st.warnings = [w for w in st.warnings if w != "follow_window_unavailable"]
+            else:
+                if "follow_window_unavailable" not in st.warnings:
+                    st.warnings.append("follow_window_unavailable")
+        img = self.backend.capture_region(capture_rect)
         h = frame_hash(img)
         if st.last_hash == h:
             st.status = "skipped_unchanged"

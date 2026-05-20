@@ -41,3 +41,8 @@ This matrix tracks BallonsTranslator-Pro parity progress against major alternati
 1. **Phase 1 next:** complete cooperative cancellation wiring deeper into long-running tasks and add endpoint tests around job lifecycle paths.
 2. **Phase 1 next:** formalize headless CLI pipeline invocation contract and exit codes.
 3. **Phase 2 start:** introduce keyring-backed provider secret storage with migration tests.
+
+## 2026-05-20 Phase 0/1 checkpoint
+- Realtime mode and Translation Assist were re-audited before implementation updates.
+- Existing realtime/API scaffolding was extended (not duplicated) for first milestone route wiring and UI entry points.
+- Next implementation slices remain phased to avoid startup/project compatibility regressions.

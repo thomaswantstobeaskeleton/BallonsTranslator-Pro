@@ -258,6 +258,16 @@ class ModuleConfig(Config):
     video_translator_use_scene_detection: bool = False  # Run pipeline only on scene-change frames (reuse result until next scene); saves work.
     video_translator_scene_threshold: float = 30.0  # Histogram diff threshold for scene change (higher = fewer scene cuts).
     video_translator_temporal_smoothing: bool = False  # Blend current result with previous in subtitle region to reduce flicker.
+    # Translation Assist (Phase 5 baseline)
+    enable_translation_assist: bool = True
+    auto_query_tm: bool = True
+    auto_query_glossary: bool = True
+    auto_query_concordance: bool = False
+    auto_query_sfx: bool = True
+    auto_run_mt_candidates: bool = False
+    max_mt_candidates: int = 6
+    preferred_assist_providers: List = field(default_factory=lambda: ["current_translator"])
+    default_assist_prompt_profile: str = "dialogue"
     video_translator_temporal_alpha: float = 0.25  # Weight of previous frame in blend (0=no smoothing, 0.5=half previous).
     video_translator_use_ffmpeg: bool = False  # Encode output with FFmpeg (libx264) for better compatibility than OpenCV.
     video_translator_ffmpeg_path: str = ''  # Path to ffmpeg.exe if not on PATH (e.g. C:\ffmpeg\bin\ffmpeg.exe).

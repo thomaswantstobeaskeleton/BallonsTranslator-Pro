@@ -144,3 +144,8 @@ Each slice should include: (a) migration notes, (b) startup/model-picker impact 
 - Added dedicated `GET /mcp/commands` discovery endpoint in local automation server for MCP-only command enumeration.
 - Extended route-discovery GET methods contract to include `mcp/commands`.
 - Added API tests for the new endpoint and updated existing route-discovery shape assertions.
+
+## 2026-05-20 Phase 0/1 checkpoint
+- Realtime mode and Translation Assist were re-audited before implementation updates.
+- Existing realtime/API scaffolding was extended (not duplicated) for first milestone route wiring and UI entry points.
+- Next implementation slices remain phased to avoid startup/project compatibility regressions.
