@@ -13,6 +13,77 @@ except Exception:  # pragma: no cover
 MaskRunner = Callable[[np.ndarray, str], Sequence[np.ndarray]]
 BoxRunner = Callable[[np.ndarray, str], Sequence[Sequence[float]]]
 
+SAM3_REFINEMENT_SETTINGS_KEY = "sam3_refinement"
+SAM3_REFINEMENT_MODEL_DEFAULT = "facebook/sam3"
+SAM3_REFINEMENT_MODEL_CUSTOM = "Custom SAM 3 model id"
+SAM3_REFINEMENT_MODEL_OPTIONS: Tuple[str, ...] = (
+    SAM3_REFINEMENT_MODEL_DEFAULT,
+    SAM3_REFINEMENT_MODEL_CUSTOM,
+)
+SAM3_REFINEMENT_BASE_DETECTOR_OPTIONS: Tuple[str, ...] = (
+    "ctd",
+    "hf_object_det",
+    "ysgyolo",
+    "paddle_det",
+    "paddle_det_v5",
+    "easyocr_det",
+    "craft_det",
+)
+
+
+def curated_sam3_refinement_models() -> Tuple[str, ...]:
+    """Model choices shown in UI for SAM-based refinement.
+
+    Keep this intentionally short: these are only models that should help mask
+    refinement.  General OCR/detector/LLM models are deliberately excluded.
+    """
+    return SAM3_REFINEMENT_MODEL_OPTIONS
+
+
+def resolve_refinement_model_id(choice: str, custom_model_id: str = "") -> str:
+    choice = (choice or SAM3_REFINEMENT_MODEL_DEFAULT).strip()
+    if choice == SAM3_REFINEMENT_MODEL_CUSTOM:
+        return (custom_model_id or "").strip() or SAM3_REFINEMENT_MODEL_DEFAULT
+    if choice not in SAM3_REFINEMENT_MODEL_OPTIONS:
+        return SAM3_REFINEMENT_MODEL_DEFAULT
+    return choice
+
+
+def default_refinement_settings() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "base_detector": "ctd",
+        "refinement_model": SAM3_REFINEMENT_MODEL_DEFAULT,
+        "custom_model_id": "",
+        "prompt": "speech bubble",
+        "fallback_prompt": "text",
+        "merge_mode": "union",
+        "min_mask_area": 64,
+        "max_mask_area_ratio": 0.75,
+        "min_iou_with_initial": 0.02,
+        "expand_px": 0,
+        "safe_rect_min_coverage": 0.88,
+        "attach_safe_areas": True,
+    }
+
+
+def get_persistent_refinement_settings(module_cfg: Any) -> Dict[str, Any]:
+    """Read persistent settings from pcfg.module.textdetector_params.
+
+    This avoids adding another custom config save path: settings live beside the
+    normal detector params and round-trip through existing config serialization.
+    """
+    params = getattr(module_cfg, "textdetector_params", None) or {}
+    stored = params.get(SAM3_REFINEMENT_SETTINGS_KEY, {}) or {}
+    out = default_refinement_settings()
+    if isinstance(stored, dict):
+        for key in out:
+            val = stored.get(key, out[key])
+            if isinstance(val, dict) and "value" in val:
+                val = val["value"]
+            out[key] = val
+    return out
+
 
 @dataclass(frozen=True)
 class SAM3RefinementOptions:
@@ -25,6 +96,20 @@ class SAM3RefinementOptions:
     min_iou_with_initial: float = 0.02
     expand_px: int = 0
     safe_rect_min_coverage: float = 0.88
+
+    @classmethod
+    def from_settings(cls, settings: Mapping[str, Any]) -> "SAM3RefinementOptions":
+        return cls(
+            enabled=bool(settings.get("enabled", False)),
+            prompt=str(settings.get("prompt", "speech bubble") or "speech bubble"),
+            fallback_prompt=str(settings.get("fallback_prompt", "text") or "text"),
+            merge_mode=str(settings.get("merge_mode", "union") or "union"),
+            min_mask_area=int(settings.get("min_mask_area", 64) or 64),
+            max_mask_area_ratio=float(settings.get("max_mask_area_ratio", 0.75) or 0.75),
+            min_iou_with_initial=float(settings.get("min_iou_with_initial", 0.02) or 0.02),
+            expand_px=int(settings.get("expand_px", 0) or 0),
+            safe_rect_min_coverage=float(settings.get("safe_rect_min_coverage", 0.88) or 0.88),
+        )
 
 
 @dataclass(frozen=True)
@@ -204,5 +289,5 @@ def should_use_sam3_for_live_translation(profile: str | Mapping[str, Any] | None
     return any(t in text for t in ("high_quality", "hq", "slower", "slow")) and "fast" not in text
 
 
-def cleanup_only_mode_plan(detector: str = "sam_text_det", sam_prompt: str = "speech bubble", inpainter: str = "lama_manga_onnx", export_clean_raws: bool = True) -> Dict[str, Any]:
+def cleanup_only_mode_plan(detector: str = "sam3_refiner", sam_prompt: str = "speech bubble", inpainter: str = "lama_manga_onnx", export_clean_raws: bool = True) -> Dict[str, Any]:
     return {"mode": "cleanup_only", "run_detection": True, "run_ocr": False, "run_translation": False, "run_inpaint": True, "run_render": False, "detector": detector, "sam_prompt": sam_prompt, "inpainter": inpainter, "export_clean_raws": bool(export_clean_raws)}
