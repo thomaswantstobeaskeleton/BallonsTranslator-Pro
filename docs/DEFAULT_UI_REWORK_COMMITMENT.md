@@ -1,0 +1,165 @@
+# Default UI rework commitment
+
+The experimental shell is not intended to remain a hidden side feature. It is scaffolding for safely replacing the default BallonsTranslator-Pro UI.
+
+## Product decision
+
+The reworked UI should become the default UI.
+
+Legacy UI should become:
+
+- a temporary fallback during migration
+- a troubleshooting/rollback option
+- eventually a compatibility mode, not the primary product surface
+
+## Design principle
+
+Modern does not mean simple.
+
+For BallonsTranslator-Pro, modern means:
+
+- advanced
+- dense where useful
+- professional
+- polished
+- discoverable
+- fast for power users
+- approachable for new users without hiding expert tools
+
+The goal is not to remove menus, panels, QA tools, CAT features, model controls, diagnostics, or export formats. The goal is to organize them into a high-quality interface with clear modes, strong visual hierarchy, and fewer confusing duplicate entry points.
+
+## Default target shell
+
+The default app should move toward:
+
+- left mode rail
+- top command/status bar
+- center workflow workspace
+- right inspector
+- bottom job/status drawer
+- command palette
+- legacy menus available during migration
+
+Default modes:
+
+1. Home
+2. Editor
+3. Live Translation
+4. Quick Image
+5. Raw Downloader
+6. Batch Queue
+7. Translation Assist / QA
+8. Models / Providers
+9. Settings
+10. Diagnostics / Help
+
+## Migration rule
+
+Do not delete the legacy editor until the modern shell has feature parity.
+
+Instead:
+
+1. Make Home/Launcher modern by default.
+2. Add the mode rail as the default navigation surface.
+3. Embed the existing editor canvas into the Editor page.
+4. Embed existing right-side text/style/OCR panels into the EditorInspector tabs.
+5. Embed existing progress/job reporting into JobStatusDrawer.
+6. Wire dashboard actions to existing handlers via `dashboard_action_dispatcher.py`.
+7. Move raw downloader, live translation, batch queue, models, and diagnostics into their mode pages.
+8. Keep old menus and keyboard shortcuts during migration.
+9. Add `use_legacy_ui` as the rollback option.
+
+## Current branch state
+
+Already added:
+
+- `ui/design_tokens.py`
+- `ui/workflow_home.py`
+- `ui/mode_rail.py`
+- `ui/editor_inspector.py`
+- `ui/job_status_drawer.py`
+- `ui/mode_dashboard.py`
+- `ui/experimental_app_shell.py`
+- `ui/experimental_shell_preview_dialog.py`
+- `ui/dashboard_action_router.py`
+- `ui/dashboard_action_dispatcher.py`
+- `ui/experimental_shell_settings.py`
+- `ui/experimental_shell_menu.py`
+- `ui/experimental_shell_bootstrap.py`
+
+Already default-facing:
+
+- `WelcomeWidget` embeds `WorkflowHomeWidget`.
+- Existing welcome screen now uses workflow cards.
+
+Still to make default-facing:
+
+- Install modern mode rail into main layout.
+- Install editor inspector into the editor workspace.
+- Install job drawer into the main window.
+- Make dashboard actions call existing handlers.
+- Make the experimental shell become the default app shell once legacy editor embedding is complete.
+
+## Next implementation order
+
+### Milestone A: default Home
+
+Status: mostly complete.
+
+- Modern workflow cards are in the default welcome screen.
+- Continue polishing setup health, recent workflows, and model/provider warnings.
+
+### Milestone B: default navigation
+
+- Add `ModeRail` beside or in place of the legacy `LeftBar`.
+- Keep legacy `LeftBar` available through `use_legacy_left_bar` during migration.
+- Connect modes to existing handlers:
+  - Home -> welcome screen
+  - Editor -> existing editor
+  - Live -> realtime translator
+  - Quick Image -> open images
+  - Downloader -> raw downloader
+  - Batch -> batch queue
+  - Assist -> Translation Assist dock
+  - Models -> model manager
+  - Settings -> config panel
+  - Diagnostics -> environment doctor / logs
+
+### Milestone C: default editor inspector
+
+- Add `EditorInspector` as the primary right-side panel.
+- Move existing text/style/layout/OCR/QA controls into tabs.
+- Preserve existing panels until parity is confirmed.
+
+### Milestone D: default job/status drawer
+
+- Add `JobStatusDrawer` under the editor workspace.
+- Feed it OCR/translation/inpaint/render/export/download/model jobs.
+- Keep existing progress dialogs until parity is confirmed.
+
+### Milestone E: default advanced dashboards
+
+- Use `ModeDashboard` pages for mode landing screens.
+- Wire dashboard actions through `dashboard_action_dispatcher.py`.
+- Replace placeholder pages with real workflow UI.
+
+### Milestone F: legacy fallback
+
+- Add `use_legacy_ui` config.
+- Keep legacy layout reachable while modern shell becomes default.
+- Add UI reset/troubleshooting docs.
+
+## Acceptance criteria
+
+The rework is not complete until:
+
+- the modern shell is the default app UI
+- legacy UI is a fallback, not the main path
+- all current features remain accessible
+- existing projects/configs continue to work
+- model manager and first-run picker continue to work
+- local API routes continue to work
+- startup scripts continue to work
+- power-user menu/shortcut workflows continue to work
+- modern dashboards expose advanced tools instead of hiding them
+- the app feels polished like high-quality modern software, with Dango-like friendliness and ImageTrans-like professional depth
