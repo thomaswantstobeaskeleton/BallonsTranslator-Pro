@@ -185,7 +185,7 @@ class LeftBar(Widget):
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
         actionCloseProject = QAction(self.tr("Close project and go to welcome screen"), self)
-        actionCloseProject.triggered.connect(self.close_project_requested.emit)
+        self.close_project_requested = actionCloseProject.triggered
         openMenu.addAction(actionCloseProject)
         openMenu.addSeparator()
         openMenu.addAction(actionSaveProj)
@@ -718,6 +718,10 @@ class TitleBar(Widget):
         exportActionRegistryAction = QAction(self.tr('Export action registry...'), self)
         exportActionRegistryAction.setToolTip(self.tr('Export all registered menu/command metadata to JSON for UI audit and migration checks.'))
         self.export_action_registry_trigger = exportActionRegistryAction.triggered
+        acValidateRegistry = QAction(self.tr('Validate action registry now'), self)
+        acValidateRegistry.setToolTip(self.tr('Show action counts, simple/advanced visibility counts, and duplicate shortcut report.'))
+        self.validate_action_registry_trigger = acValidateRegistry.triggered
+
         self.validate_action_registry_trigger = acValidateRegistry.triggered
         openLogFolderAction.setToolTip(self.tr('Open logs directory in your file explorer.'))
         self.open_log_folder_trigger = openLogFolderAction.triggered
@@ -897,13 +901,13 @@ class TitleBar(Widget):
         self.translationToolBtn.setText(self.tr('Translation'))
         translationMenu = QMenu(self.translationToolBtn)
         acTranslatePage = QAction(self.tr('Translate page'), self)
-        acTranslatePage.triggered.connect(self.translate_page_trigger.emit)
+        self.translate_page_trigger = acTranslatePage.triggered
         acTranslationAssist = QAction(self.tr('Translation Assist (beta)...'), self)
-        acTranslationAssist.triggered.connect(self.translation_assist_trigger.emit)
+        self.translation_assist_trigger = acTranslationAssist.triggered
         acConcordance = QAction(self.tr('Concordance search (project)...'), self)
-        acConcordance.triggered.connect(self.concordance_search_trigger.emit)
+        self.concordance_search_trigger = acConcordance.triggered
         acTranslationQA = QAction(self.tr('Translation QA report (current page)...'), self)
-        acTranslationQA.triggered.connect(self.translation_qa_report_trigger.emit)
+        self.translation_qa_report_trigger = acTranslationQA.triggered
         translationMenu.addActions([acTranslatePage, acTranslationAssist, acConcordance, acTranslationQA])
         self.translationToolBtn.setMenu(translationMenu)
         self.translationToolBtn.setPopupMode(QToolButton.InstantPopup)
@@ -912,16 +916,13 @@ class TitleBar(Widget):
         self.diagnosticsToolBtn.setText(self.tr('Diagnostics'))
         diagnosticsMenu = QMenu(self.diagnosticsToolBtn)
         acEnvDoctor = QAction(self.tr('Environment doctor...'), self)
-        acEnvDoctor.triggered.connect(self.environment_doctor_trigger.emit)
+        self.environment_doctor_trigger = acEnvDoctor.triggered
         acStartupDiag = QAction(self.tr('Copy startup diagnostics'), self)
-        acStartupDiag.triggered.connect(self.copy_startup_diag_trigger.emit)
+        self.copy_startup_diag_trigger = acStartupDiag.triggered
         acRuntimeSummary = QAction(self.tr('Runtime resource summary'), self)
-        acRuntimeSummary.triggered.connect(self.runtime_resource_summary_trigger.emit)
+        self.runtime_resource_summary_trigger = acRuntimeSummary.triggered
         acExportStartup = QAction(self.tr('Export startup report...'), self)
-        acExportStartup.triggered.connect(self.export_startup_diag_trigger.emit)
-        acValidateRegistry = QAction(self.tr('Validate action registry now'), self)
-        acValidateRegistry.setToolTip(self.tr('Show action counts, simple/advanced visibility counts, and duplicate shortcut report.'))
-        acValidateRegistry.triggered.connect(self.validate_action_registry_trigger.emit)
+        self.export_startup_diag_trigger = acExportStartup.triggered
         diagnosticsMenu.addActions([acEnvDoctor, acStartupDiag, acRuntimeSummary, acExportStartup, acValidateRegistry])
         self.diagnosticsToolBtn.setMenu(diagnosticsMenu)
         self.diagnosticsToolBtn.setPopupMode(QToolButton.InstantPopup)
@@ -932,13 +933,13 @@ class TitleBar(Widget):
         acExportCurrent = QAction(self.tr('Export current page as...'), self)
         acExportCurrent.triggered.connect(lambda: getattr(getattr(self.mainwindow, 'leftBar', None), 'export_current_page_as', self.batch_export_trigger).emit())
         acExportAll = QAction(self.tr('Export all pages'), self)
-        acExportAll.triggered.connect(self.batch_export_trigger.emit)
+        self.batch_export_trigger = acExportAll.triggered
         acExportAllAs = QAction(self.tr('Export all pages as...'), self)
-        acExportAllAs.triggered.connect(self.batch_export_as_trigger.emit)
+        self.batch_export_as_trigger = acExportAllAs.triggered
         acExportJson = QAction(self.tr('Export translation JSON...'), self)
-        acExportJson.triggered.connect(self.export_translation_json_trigger.emit)
+        self.export_translation_json_trigger = acExportJson.triggered
         acExportXliff = QAction(self.tr('Export XLIFF...'), self)
-        acExportXliff.triggered.connect(self.export_xliff_trigger.emit)
+        self.export_xliff_trigger = acExportXliff.triggered
         exportTopMenu.addActions([acExportCurrent, acExportAll, acExportAllAs, acExportJson, acExportXliff])
         self.exportToolBtn.setMenu(exportTopMenu)
         self.exportToolBtn.setPopupMode(QToolButton.InstantPopup)
@@ -947,15 +948,15 @@ class TitleBar(Widget):
         self.modelsToolBtn.setText(self.tr('Models'))
         modelsTopMenu = QMenu(self.modelsToolBtn)
         acManageModels = QAction(self.tr('Manage models...'), self)
-        acManageModels.triggered.connect(self.manage_models_trigger.emit)
+        self.manage_models_trigger = acManageModels.triggered
         acRetryModels = QAction(self.tr('Retry model downloads'), self)
-        acRetryModels.triggered.connect(self.retry_models_trigger.emit)
+        self.retry_models_trigger = acRetryModels.triggered
         acReleaseCaches = QAction(self.tr('Release model caches'), self)
-        acReleaseCaches.triggered.connect(self.release_model_caches_trigger.emit)
+        self.release_model_caches_trigger = acReleaseCaches.triggered
         acClearCaches = QAction(self.tr('Clear OCR and translation caches'), self)
-        acClearCaches.triggered.connect(self.clear_pipeline_caches_trigger.emit)
+        self.clear_pipeline_caches_trigger = acClearCaches.triggered
         acExportRegistry = QAction(self.tr('Export action registry...'), self)
-        acExportRegistry.triggered.connect(self.export_action_registry_trigger.emit)
+        self.export_action_registry_trigger = acExportRegistry.triggered
         modelsTopMenu.addActions([acManageModels, acRetryModels, acReleaseCaches, acClearCaches, acExportRegistry])
         self.modelsToolBtn.setMenu(modelsTopMenu)
         self.modelsToolBtn.setPopupMode(QToolButton.InstantPopup)
@@ -964,17 +965,17 @@ class TitleBar(Widget):
         self.helpToolBtn.setText(self.tr('Help'))
         helpTopMenu = QMenu(self.helpToolBtn)
         acHelpDoc = QAction(self.tr('Documentation'), self)
-        acHelpDoc.triggered.connect(self.help_doc_trigger.emit)
+        self.help_doc_trigger = acHelpDoc.triggered
         acHelpAbout = QAction(self.tr('About'), self)
-        acHelpAbout.triggered.connect(self.help_about_trigger.emit)
+        self.help_about_trigger = acHelpAbout.triggered
         acHelpUpdate = QAction(self.tr('Update from GitHub'), self)
-        acHelpUpdate.triggered.connect(self.help_update_from_github_trigger.emit)
+        self.help_update_from_github_trigger = acHelpUpdate.triggered
         acFeatureMatrix = QAction(self.tr('Feature matrix / model coverage'), self)
         self.feature_matrix_trigger = acFeatureMatrix.triggered
         acHelpShortcuts = QAction(self.tr('Keyboard Shortcuts...'), self)
-        acHelpShortcuts.triggered.connect(self.keyboard_shortcuts_trigger.emit)
+        self.keyboard_shortcuts_trigger = acHelpShortcuts.triggered
         acHelpCtx = QAction(self.tr('Context menu options...'), self)
-        acHelpCtx.triggered.connect(self.context_menu_options_trigger.emit)
+        self.context_menu_options_trigger = acHelpCtx.triggered
         helpTopMenu.addActions([acHelpDoc, acHelpAbout, acHelpUpdate, acFeatureMatrix])
         helpTopMenu.addSeparator()
         helpTopMenu.addActions([acHelpShortcuts, acHelpCtx])

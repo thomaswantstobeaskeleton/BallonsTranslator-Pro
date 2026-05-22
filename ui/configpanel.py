@@ -410,6 +410,9 @@ class ConfigPanel(Widget):
     display_lang_changed = Signal(str)
     dev_mode_changed = Signal()
     manual_mode_changed = Signal()
+    ui_mode_changed = Signal(str)
+    legacy_menu_layout_changed = Signal(bool)
+    omni_options_changed = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
