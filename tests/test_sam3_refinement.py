@@ -2,11 +2,17 @@ import numpy as np
 
 from utils.sam3_refinement import (
     SAM3RefinementOptions,
+    SAM3_REFINEMENT_MODEL_CUSTOM,
+    SAM3_REFINEMENT_MODEL_DEFAULT,
+    curated_sam3_refinement_models,
     cleanup_only_mode_plan,
     combine_refined_mask,
+    default_refinement_settings,
+    get_persistent_refinement_settings,
     mask_area,
     mask_iou,
     refine_mask_with_sam3,
+    resolve_refinement_model_id,
     sam3_safe_areas_from_mask,
     should_use_sam3_for_live_translation,
 )
@@ -92,8 +98,45 @@ def test_live_translation_sam3_gate_only_allows_slow_quality_profiles():
 def test_cleanup_only_mode_plan_disables_ocr_translation_and_render():
     plan = cleanup_only_mode_plan()
     assert plan["mode"] == "cleanup_only"
+    assert plan["detector"] == "sam3_refiner"
     assert plan["run_detection"] is True
     assert plan["run_inpaint"] is True
     assert plan["run_ocr"] is False
     assert plan["run_translation"] is False
     assert plan["run_render"] is False
+
+
+def test_curated_model_choices_only_include_sam_refinement_options():
+    models = curated_sam3_refinement_models()
+    assert SAM3_REFINEMENT_MODEL_DEFAULT in models
+    assert SAM3_REFINEMENT_MODEL_CUSTOM in models
+    assert all("gpt" not in m.lower() for m in models)
+    assert all("ocr" not in m.lower() for m in models)
+    assert all("lama" not in m.lower() for m in models)
+
+
+def test_resolve_refinement_model_id_handles_custom_and_invalid_values():
+    assert resolve_refinement_model_id(SAM3_REFINEMENT_MODEL_DEFAULT) == SAM3_REFINEMENT_MODEL_DEFAULT
+    assert resolve_refinement_model_id(SAM3_REFINEMENT_MODEL_CUSTOM, "org/custom-sam3") == "org/custom-sam3"
+    assert resolve_refinement_model_id(SAM3_REFINEMENT_MODEL_CUSTOM, "") == SAM3_REFINEMENT_MODEL_DEFAULT
+    assert resolve_refinement_model_id("not-a-refiner") == SAM3_REFINEMENT_MODEL_DEFAULT
+
+
+def test_persistent_settings_round_trip_from_textdetector_params():
+    class ModuleCfg:
+        textdetector_params = {
+            "sam3_refinement": {
+                "enabled": {"value": True},
+                "base_detector": {"value": "paddle_det"},
+                "refinement_model": {"value": SAM3_REFINEMENT_MODEL_CUSTOM},
+                "custom_model_id": {"value": "org/custom-sam3"},
+                "prompt": {"value": "speech bubble"},
+            }
+        }
+
+    settings = get_persistent_refinement_settings(ModuleCfg())
+    assert settings["enabled"] is True
+    assert settings["base_detector"] == "paddle_det"
+    assert settings["refinement_model"] == SAM3_REFINEMENT_MODEL_CUSTOM
+    assert settings["custom_model_id"] == "org/custom-sam3"
+    assert set(default_refinement_settings()) <= set(settings)
