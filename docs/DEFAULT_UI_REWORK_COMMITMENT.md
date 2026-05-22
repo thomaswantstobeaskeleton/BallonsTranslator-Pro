@@ -76,6 +76,7 @@ Already added:
 - `ui/design_tokens.py`
 - `ui/workflow_home.py`
 - `ui/mode_rail.py`
+- `ui/default_modern_shell.py`
 - `ui/editor_inspector.py`
 - `ui/job_status_drawer.py`
 - `ui/mode_dashboard.py`
@@ -91,13 +92,19 @@ Already default-facing:
 
 - `WelcomeWidget` embeds `WorkflowHomeWidget`.
 - Existing welcome screen now uses workflow cards.
+- `WelcomeWidget` now schedules `install_default_modern_navigation()` so `ModeRail` is inserted into the default `MainWindow` layout beside the legacy `LeftBar`.
+- `ModeRail` routes default modes to existing handlers without replacing legacy controls yet.
+- `WelcomeWidget.open_assist_requested` has a fallback connection to Translation Assist through `install_default_welcome_signal_fallbacks()`.
+
+Covered by tests:
+
+- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, and mode routing reuses existing handlers.
 
 Still to make default-facing:
 
-- Install modern mode rail into main layout.
 - Install editor inspector into the editor workspace.
 - Install job drawer into the main window.
-- Make dashboard actions call existing handlers.
+- Make dashboard actions call existing handlers from the default shell.
 - Make the experimental shell become the default app shell once legacy editor embedding is complete.
 
 ## Next implementation order
@@ -111,9 +118,11 @@ Status: mostly complete.
 
 ### Milestone B: default navigation
 
-- Add `ModeRail` beside or in place of the legacy `LeftBar`.
-- Keep legacy `LeftBar` available through `use_legacy_left_bar` during migration.
-- Connect modes to existing handlers:
+Status: initial default-facing implementation complete.
+
+- `ModeRail` is installed beside the legacy `LeftBar` by `ui/default_modern_shell.py`.
+- Legacy `LeftBar` stays visible and functional during migration.
+- Mode routes currently map to existing handlers:
   - Home -> welcome screen
   - Editor -> existing editor
   - Live -> realtime translator
@@ -123,7 +132,13 @@ Status: mostly complete.
   - Assist -> Translation Assist dock
   - Models -> model manager
   - Settings -> config panel
-  - Diagnostics -> environment doctor / logs
+  - Diagnostics -> environment doctor
+
+Remaining navigation work:
+
+- Add a `use_legacy_ui` / `use_legacy_left_bar` rollback setting before hiding or replacing the legacy left bar.
+- Sync current rail selection after every navigation path, not only rail-originated navigation.
+- Add richer visual state for project/job/provider health.
 
 ### Milestone C: default editor inspector
 
