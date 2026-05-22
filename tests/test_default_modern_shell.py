@@ -46,6 +46,9 @@ class DummyMainWindow(QWidget):
     def _show_welcome_screen(self):
         self.calls.append("home")
 
+    def _show_main_content(self):
+        self.calls.append("main")
+
     def _has_open_project(self):
         return self.project_open
 
@@ -109,3 +112,37 @@ def test_route_modern_mode_request_reuses_existing_handlers(qapp):
 
     assert win.calls == ["home", "home", "editor", "assist", "diagnostics"]
     assert win.leftBar.open_images_called == 1
+
+
+def test_legacy_navigation_handlers_keep_mode_rail_selection_synced(qapp):
+    win = DummyMainWindow()
+    install_default_modern_navigation(win)
+
+    win.setupConfigUI()
+    assert win.modeRail.current_mode() == "settings"
+
+    win.on_open_manga_source()
+    assert win.modeRail.current_mode() == "downloader"
+
+    win.on_open_translation_assist_dock()
+    assert win.modeRail.current_mode() == "assist"
+
+    win.project_open = True
+    win.setupImgTransUI()
+    assert win.modeRail.current_mode() == "editor"
+
+    win._show_welcome_screen()
+    assert win.modeRail.current_mode() == "home"
+
+
+def test_mode_sync_wrappers_are_not_installed_twice(qapp):
+    win = DummyMainWindow()
+    install_default_modern_navigation(win)
+    first_setup_settings = win.setupConfigUI
+
+    install_default_modern_navigation(win)
+    win.setupConfigUI()
+
+    assert win.setupConfigUI is first_setup_settings
+    assert win.calls == ["settings"]
+    assert win.modeRail.current_mode() == "settings"
