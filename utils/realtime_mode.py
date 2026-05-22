@@ -276,10 +276,31 @@ class RealtimeService:
             "generic_screen_ocr": {"id": "generic_screen_ocr", "label": "Generic Screen OCR"},
         }
         self.watcher = RealtimeWatcher(NumpyFrameBackend([]), lambda _im: "", lambda _tx: "")
+        self._default_region_id = "default"
 
     def status(self) -> Dict[str, Any]:
         return {
             "enabled": bool(self.enabled),
             "region_count": len(self.regions),
             "regions": sorted(self.regions.keys()),
+            "states": {k: vars(v) for k, v in self.states.items()},
         }
+
+    def ensure_region(self, region_id: str = "default", rect: Tuple[int, int, int, int] = (0, 0, 640, 360), profile: str = "generic_screen_ocr") -> RealtimeRegion:
+        rid = str(region_id or "default").strip() or "default"
+        if rid not in self.regions:
+            self.regions[rid] = RealtimeRegion(region_id=rid, rect=tuple(int(v) for v in rect[:4]), profile=str(profile or "generic_screen_ocr"))
+        return self.regions[rid]
+
+    def apply_defaults(self, *, rect: Tuple[int, int, int, int], profile: str = "generic_screen_ocr", follow_window: bool = False):
+        region = self.ensure_region(region_id=self._default_region_id, rect=rect, profile=profile)
+        region.rect = tuple(int(v) for v in rect[:4])
+        region.profile = str(profile or "generic_screen_ocr")
+        region.follow_window = bool(follow_window)
+        return region
+
+    def tick_region(self, region_id: str = "default") -> Dict[str, Any]:
+        region = self.ensure_region(region_id=region_id)
+        state = self.watcher.tick(region)
+        self.states[region.region_id] = state
+        return {"region_id": region.region_id, "status": state.status, "ocr_text": state.last_ocr_text, "translation": state.last_translation}

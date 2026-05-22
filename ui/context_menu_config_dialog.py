@@ -38,7 +38,7 @@ def _all_keys_with_labels() -> List[Tuple[str, str]]:
 
 # (category_title, items: [(key, label), ...])
 CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
-    ("Edit", [
+    ("Text box", [
         ("edit_copy", "Copy"),
         ("edit_paste", "Paste"),
         ("edit_copy_trans", "Copy translation"),
@@ -51,7 +51,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("edit_clear_trans", "Clear translation"),
         ("edit_select_all", "Select all"),
     ]),
-    ("Text", [
+    ("Style", [
         ("text_spell_src", "Spell check source text"),
         ("text_spell_trans", "Spell check translation"),
         ("text_trim", "Trim whitespace"),
@@ -61,7 +61,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("text_gradient", "Gradient type (submenu)"),
         ("text_on_path", "Text on path (submenu)"),
     ]),
-    ("Block", [
+    ("Layout", [
         ("block_merge", "Merge selected blocks"),
         ("block_split", "Split selected region(s)"),
         ("block_move_up", "Move block(s) up"),
@@ -70,20 +70,20 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("block_triage_mark_reviewed", "Mark selected as reviewed"),
         ("create_textbox", "Create text box"),
     ]),
-    ("Image / Overlay", [
+    ("Export", [
         ("overlay_import", "Import Image"),
         ("overlay_clear", "Clear overlay image"),
     ]),
-    ("Transform", [
+    ("Layout", [
         ("transform_free", "Free Transform"),
         ("transform_reset_warp", "Reset warp"),
         ("transform_warp_preset", "Warp preset (submenu)"),
     ]),
-    ("Order", [
+    ("Layout", [
         ("order_bring_front", "Bring to front"),
         ("order_send_back", "Send to back"),
     ]),
-    ("Format", [
+    ("Style", [
         ("format_apply", "Apply font formatting"),
         ("format_layout", "Auto layout"),
         ("format_fit_to_bubble", "Fit to bubble"),
@@ -107,19 +107,25 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_layout_review_config", "Layout review settings"),
         ("review_export_lettering_proof", "Export lettering proof pack"),
     ]),
-    ("Run", [
+    ("OCR", [
         ("run_detect_region", "Detect text in region"),
         ("run_detect_page", "Detect text on page"),
-        ("run_translate", "Translate"),
         ("run_ocr", "OCR"),
+    ]),
+    ("Translation", [
+        ("run_translate", "Translate"),
         ("run_ocr_translate", "OCR and translate"),
         ("run_ocr_translate_inpaint", "OCR, translate and inpaint"),
+    ]),
+    ("Layout", [
         ("run_inpaint", "Inpaint"),
+    ]),
+    ("QA", [
         ("review_ocr_triage_page", "OCR triage worklist (current page)"),
         ("review_translation_qa_page", "Translation QA report (current page)"),
         ("review_auto_extract_glossary_page", "Auto-extract glossary (current page)"),
     ]),
-    ("Download image", [
+    ("Export", [
         ("download_image", "Download image (submenu)"),
     ]),
 ]
@@ -178,6 +184,11 @@ class ContextMenuConfigDialog(QDialog):
 
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel(self.tr("Quick profiles:")))
+        self._profile_combo = QLineEdit(self)
+        self._profile_combo.setReadOnly(True)
+        self._profile_combo.setMaximumWidth(190)
+        self._profile_combo.setToolTip(self.tr("Shows the last-applied quick profile. Manual checkbox edits set this to Custom."))
+        preset_row.addWidget(self._profile_combo)
         btn_edit = QPushButton(self.tr("Editing-focused"))
         btn_edit.clicked.connect(lambda: self._apply_profile("editing"))
         preset_row.addWidget(btn_edit)
@@ -210,6 +221,7 @@ class ContextMenuConfigDialog(QDialog):
                 cb = QCheckBox(self.tr(label))
                 cb.setToolTip(self.tr(f"Canvas context menu action: {label} ({key})"))
                 cb.setChecked(pcfg.context_menu.get(key, True))
+                cb.stateChanged.connect(self._mark_custom_profile)
                 self._checkboxes[key] = cb
                 row.addWidget(cb, 1)
                 pin_btn = QPushButton(self.tr("Pin to top"))
@@ -253,6 +265,7 @@ class ContextMenuConfigDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._refresh_pinned_list()
+        self._set_profile_label(str(getattr(pcfg, "context_menu_profile", "custom") or "custom"))
 
     def _apply_filter(self, text: str = None):
         needle = (text if text is not None else self._filter_edit.text()).strip().lower()
@@ -292,6 +305,22 @@ class ContextMenuConfigDialog(QDialog):
         chosen = editing_keys if profile == 'editing' else pipeline_keys if profile == 'pipeline' else layout_keys
         for key, cb in self._checkboxes.items():
             cb.setChecked(key in chosen)
+        self._set_profile_label(profile)
+
+    def _set_profile_label(self, profile: str):
+        p = str(profile or "custom").lower()
+        labels = {
+            "editing": self.tr("Profile: Editing-focused"),
+            "pipeline": self.tr("Profile: Pipeline-focused"),
+            "layout": self.tr("Profile: Layout-focused"),
+            "custom": self.tr("Profile: Custom"),
+        }
+        self._profile_combo.setText(labels.get(p, labels["custom"]))
+        self._current_profile = p if p in labels else "custom"
+
+    def _mark_custom_profile(self, *_args):
+        if getattr(self, "_current_profile", "custom") != "custom":
+            self._set_profile_label("custom")
 
     def _refresh_pinned_list(self):
         self._pinned_list.clear()
@@ -343,6 +372,7 @@ class ContextMenuConfigDialog(QDialog):
             if k and k not in self._pinned_keys:
                 self._pinned_keys.append(k)
         pcfg.context_menu_pinned = self._pinned_keys
+        pcfg.context_menu_profile = str(getattr(self, "_current_profile", "custom") or "custom")
         try:
             pcfg.context_run_macros = parse_context_run_macros(self._macros_edit.toPlainText())
         except Exception as e:

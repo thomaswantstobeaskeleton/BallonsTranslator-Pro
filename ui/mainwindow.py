@@ -110,6 +110,7 @@ from utils.automation_jobs import new_job, append_log, add_warning, set_status, 
 from utils.workflow_presets import apply_workflow_preset, list_workflow_presets, workflow_stage_vector
 from utils.model_manager import get_available_module_keys
 from utils.realtime_mode import RealtimeService, RealtimeRegion
+from utils.feature_matrix import feature_matrix_text
 from utils.translation_assist import (
     TranslationAssistService,
     build_candidates_from_sources,
@@ -293,6 +294,10 @@ class MainWindow(mainwindow_cls):
         self.setupConfig()
         self.setupShortcuts()
         self.setupRegisterWidget()
+        try:
+            self.titleBar.apply_legacy_menu_layout(bool(getattr(pcfg, "show_legacy_menus", True)))
+        except Exception:
+            pass
         self.st_manager.layout_review_local_api_handler = self._layout_review_local_api_handler
         self.st_manager.layout_review_cloud_api_handler = self._layout_review_cloud_api_handler
         self._recover_window_geometry_if_offscreen()
@@ -303,25 +308,20 @@ class MainWindow(mainwindow_cls):
         force_welcome = bool(getattr(shared, 'FORCE_SHOW_WELCOME_ON_STARTUP', False))
         explicit_start_target = bool(open_dir and str(open_dir).strip())
 
-        # Startup routing:
-        # - explicit CLI/file target always wins
-        # - otherwise, respect the welcome preference
-        # - otherwise, try the first valid recent project
-        # - if nothing opens, always fall back to the welcome screen
         if explicit_start_target and osp.exists(open_dir):
             if osp.isfile(open_dir) and open_dir.lower().endswith('.json'):
                 self.openJsonProj(open_dir)
             else:
                 self.OpenProj(open_dir)
-        elif not force_welcome and not bool(getattr(pcfg, 'show_welcome_screen', True)) and pcfg.open_recent_on_startup:
-            for proj_dir in list(getattr(self.leftBar, 'recent_proj_list', []) or []):
-                if proj_dir and osp.exists(proj_dir):
-                    self.OpenProj(proj_dir)
-                    break
+            self._record_recent_workflow('editor')
+            self.titleBar.set_workflow_hint("editor")
+        elif not force_welcome:
+            self._open_startup_mode_target(getattr(pcfg, 'startup_mode', 'last_used'))
 
         if not (shared.HEADLESS or shared.HEADLESS_CONTINUOUS):
-            if force_welcome or not self._has_open_project():
+            if force_welcome or (not self._has_open_project() and not self._showing_welcome_screen):
                 self._show_welcome_screen()
+                self._record_recent_workflow('home')
                 shared.FORCE_SHOW_WELCOME_ON_STARTUP = False
 
         if shared.HEADLESS or shared.HEADLESS_CONTINUOUS:
@@ -568,6 +568,16 @@ class MainWindow(mainwindow_cls):
         self.welcomeWidget.open_images_requested.connect(self.leftBar.onOpenImages)
         self.welcomeWidget.open_acbf_requested.connect(self.leftBar.onOpenACBFCBZ)
         self.welcomeWidget.recent_project_clicked.connect(self._welcome_recent_clicked)
+        if hasattr(self.welcomeWidget, 'open_live_requested'):
+            self.welcomeWidget.open_live_requested.connect(self.on_open_realtime_translator)
+        if hasattr(self.welcomeWidget, 'open_downloader_requested'):
+            self.welcomeWidget.open_downloader_requested.connect(self.on_open_manga_source)
+        if hasattr(self.welcomeWidget, 'open_batch_requested'):
+            self.welcomeWidget.open_batch_requested.connect(self.on_open_batch_queue)
+        if hasattr(self.welcomeWidget, 'open_models_requested'):
+            self.welcomeWidget.open_models_requested.connect(self.on_open_manage_models)
+        if hasattr(self.welcomeWidget, 'open_diagnostics_requested'):
+            self.welcomeWidget.open_diagnostics_requested.connect(self.on_environment_doctor)
 
         self.titleBar = TitleBar(self)
         self.titleBar.closebtn_clicked.connect(self.on_closebtn_clicked)
@@ -898,6 +908,9 @@ class MainWindow(mainwindow_cls):
         self.configPanel.darkmode_changed.connect(self.on_config_darkmode_changed)
         self.configPanel.custom_cursor_changed.connect(self._on_config_custom_cursor_changed)
         self.configPanel.display_lang_changed.connect(self.on_display_lang_changed)
+        self.configPanel.ui_mode_changed.connect(self._on_ui_mode_changed)
+        self.configPanel.omni_options_changed.connect(self._on_omni_options_changed)
+        self.configPanel.legacy_menu_layout_changed.connect(self._on_legacy_menu_layout_changed)
         self.configPanel.dev_mode_changed.connect(self.on_dev_mode_changed)
         self.configPanel.manual_mode_changed.connect(self._update_run_button_tooltip)
         if pcfg.let_show_only_custom_fonts_flag:
@@ -1107,6 +1120,17 @@ class MainWindow(mainwindow_cls):
     def _realtime_service(self) -> RealtimeService:
         if not hasattr(self, '_realtime_service_obj') or self._realtime_service_obj is None:
             self._realtime_service_obj = RealtimeService()
+            try:
+                rect = list(getattr(pcfg, 'realtime_region_rect', [0, 0, 100, 100]) or [0, 0, 100, 100])
+                while len(rect) < 4:
+                    rect.append(0)
+                self._realtime_service_obj.apply_defaults(
+                    rect=(int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])),
+                    profile=str(getattr(pcfg, 'realtime_profile_id', 'generic_screen_ocr') or 'generic_screen_ocr'),
+                    follow_window=bool(getattr(pcfg, 'realtime_follow_window', False)),
+                )
+            except Exception:
+                pass
         return self._realtime_service_obj
 
     def _api_realtime_status(self, body: dict):
@@ -1125,13 +1149,30 @@ class MainWindow(mainwindow_cls):
                 rid = str((_b or {}).get('region_id', '') or '').strip() or f"region_{len(svc.regions)+1}"
                 rect = tuple((_b or {}).get('rect', [0, 0, 640, 360])[:4])
                 profile = str((_b or {}).get('profile', 'chrome_manhua_reader') or 'chrome_manhua_reader')
-                svc.regions[rid] = RealtimeRegion(region_id=rid, rect=rect, profile=profile)
+                follow_window = bool((_b or {}).get('follow_window', False))
+                window_id = str((_b or {}).get('window_id', '') or '')
+                svc.regions[rid] = RealtimeRegion(region_id=rid, rect=rect, profile=profile, follow_window=follow_window, window_id=window_id)
                 return {'ok': True, 'region': vars(svc.regions[rid])}
             if action == 'delete':
                 rid = str((_b or {}).get('region_id', '') or '').strip()
                 svc.regions.pop(rid, None)
                 return {'ok': True, 'deleted': rid}
-            raise ValueError('realtime_regions action must be list|add|delete')
+            if action == 'update':
+                rid = str((_b or {}).get('region_id', '') or '').strip()
+                if rid not in svc.regions:
+                    raise ValueError('realtime region not found')
+                region = svc.regions[rid]
+                if 'rect' in (_b or {}):
+                    rect = tuple((_b or {}).get('rect', list(region.rect))[:4])
+                    region.rect = rect
+                if 'profile' in (_b or {}):
+                    region.profile = str((_b or {}).get('profile', region.profile) or region.profile)
+                if 'follow_window' in (_b or {}):
+                    region.follow_window = bool((_b or {}).get('follow_window', region.follow_window))
+                if 'window_id' in (_b or {}):
+                    region.window_id = str((_b or {}).get('window_id', region.window_id) or "")
+                return {'ok': True, 'region': vars(region)}
+            raise ValueError('realtime_regions action must be list|add|delete|update')
         return self._api_call_ui(_ui, body)
 
     def _api_realtime_start(self, body: dict):
@@ -1144,13 +1185,29 @@ class MainWindow(mainwindow_cls):
         return self._api_call_ui(lambda _b: {'ok': True, **self._set_realtime_enabled(False), 'stopped': True}, body)
 
     def _api_realtime_translate_now(self, body: dict):
-        return self._api_call_ui(lambda _b: {'ok': True, 'status': 'queued_manual_tick'}, body)
+        def _ui(_b: dict):
+            svc = self._realtime_service()
+            rid = str((_b or {}).get('region_id', 'default') or 'default')
+            return {'ok': True, **svc.tick_region(region_id=rid)}
+        return self._api_call_ui(_ui, body)
 
     def _api_realtime_profiles(self, body: dict):
         return self._api_call_ui(lambda _b: {'profiles': list(self._realtime_service().profiles.values())}, body)
 
     def _set_realtime_enabled(self, enabled: bool):
         svc = self._realtime_service()
+        if enabled:
+            try:
+                rect = list(getattr(pcfg, 'realtime_region_rect', [0, 0, 100, 100]) or [0, 0, 100, 100])
+                while len(rect) < 4:
+                    rect.append(0)
+                svc.apply_defaults(
+                    rect=(int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])),
+                    profile=str(getattr(pcfg, 'realtime_profile_id', 'generic_screen_ocr') or 'generic_screen_ocr'),
+                    follow_window=bool(getattr(pcfg, 'realtime_follow_window', False)),
+                )
+            except Exception:
+                pass
         svc.enabled = bool(enabled)
         return svc.status()
 
@@ -3581,6 +3638,8 @@ class MainWindow(mainwindow_cls):
                 checker.blockSignals(False)
 
     def setupImgTransUI(self):
+        self._record_recent_workflow('editor')
+        self.titleBar.set_workflow_hint("editor")
         # The imgtrans checker can be toggled during startup by setupConfig() or
         # LeftBar.stateCheckerChanged(). Never show an empty canvas when no
         # project is loaded; route back to welcome instead.
@@ -3601,6 +3660,8 @@ class MainWindow(mainwindow_cls):
             self.leftStackWidget.hide()
 
     def setupConfigUI(self):
+        self._record_recent_workflow('settings')
+        self.titleBar.set_workflow_hint("settings")
         self._set_leftbar_mode('config')
         self.centralStackWidget.setCurrentIndex(2)
         self.bottomBar.setPipelineVisible(False)
@@ -3627,6 +3688,7 @@ class MainWindow(mainwindow_cls):
     def _show_welcome_screen(self):
         """Switch to welcome screen and refresh recent list."""
         self._showing_welcome_screen = True
+        self.titleBar.set_workflow_hint("home")
         self._set_leftbar_mode(None)
         if hasattr(self, 'welcomeWidget'):
             self.welcomeWidget.set_recent_projects(getattr(self.leftBar, 'recent_proj_list', []) or [])
@@ -4012,6 +4074,8 @@ class MainWindow(mainwindow_cls):
         self.titleBar.manga_source_trigger.connect(self.on_open_manga_source)
         if hasattr(self.titleBar, "realtime_translator_trigger"):
             self.titleBar.realtime_translator_trigger.connect(self.on_open_realtime_translator)
+        if hasattr(self.titleBar, "feature_matrix_trigger"):
+            self.titleBar.feature_matrix_trigger.connect(self.on_show_feature_matrix)
         if hasattr(self.titleBar, "translation_assist_trigger"):
             self.titleBar.translation_assist_trigger.connect(self.on_open_translation_assist_dock)
         self.titleBar.batch_queue_trigger.connect(self.on_open_batch_queue)
@@ -4042,6 +4106,10 @@ class MainWindow(mainwindow_cls):
         self.titleBar.runtime_resource_summary_trigger.connect(self.on_runtime_resource_summary)
         self.titleBar.export_startup_diag_trigger.connect(self.on_export_startup_report)
         self.titleBar.open_log_folder_trigger.connect(self.on_open_log_folder)
+        if hasattr(self.titleBar, "export_action_registry_trigger"):
+            self.titleBar.export_action_registry_trigger.connect(self.on_export_action_registry)
+        if hasattr(self.titleBar, "validate_action_registry_trigger"):
+            self.titleBar.validate_action_registry_trigger.connect(self.on_validate_action_registry)
         self.titleBar.relaunch_pyqt5_trigger.connect(self.on_relaunch_pyqt5_safe_mode)
         self.titleBar.relaunch_cpu_only_trigger.connect(self.on_relaunch_cpu_only_safe_mode)
         self.titleBar.release_model_caches_trigger.connect(self.on_release_model_caches)
@@ -4214,6 +4282,9 @@ class MainWindow(mainwindow_cls):
         from .theme_customizer_dialog import ThemeCustomizerDialog
         dlg = ThemeCustomizerDialog(self)
         dlg.theme_applied.connect(self._on_theme_customizer_applied)
+        dlg.ui_mode_changed.connect(self._on_ui_mode_changed)
+        if hasattr(dlg, "startup_mode_changed"):
+            dlg.startup_mode_changed.connect(self._on_startup_mode_changed)
         dlg.show()
 
     def _on_theme_customizer_applied(self, font_family: str, font_size: int):
@@ -4221,6 +4292,36 @@ class MainWindow(mainwindow_cls):
         self.titleBar.themeDarkAction.setChecked(pcfg.darkmode)
         self.resetStyleSheet()
         # Font is applied in resetStyleSheet() -> _apply_app_font() (pcfg already saved by dialog)
+
+    def _on_ui_mode_changed(self, mode: str):
+        pcfg.ui_mode = str(mode or "advanced")
+        try:
+            self.titleBar.apply_ui_mode_visibility(pcfg.ui_mode)
+        except Exception:
+            pass
+
+    def _on_omni_options_changed(self):
+        try:
+            self.titleBar._omni_actions_cache = None
+            if hasattr(self.titleBar, '_omniShowUnavailable'):
+                self.titleBar._omniShowUnavailable.setChecked(bool(getattr(pcfg, 'omni_show_unavailable', False)))
+            if hasattr(self.titleBar, '_omniTypeFilter'):
+                _tf = str(getattr(pcfg, 'omni_result_type_filter', 'all') or 'all')
+                _tidx = self.titleBar._omniTypeFilter.findData(_tf)
+                self.titleBar._omniTypeFilter.setCurrentIndex(_tidx if _tidx >= 0 else 0)
+        except Exception:
+            pass
+
+    def _on_legacy_menu_layout_changed(self, enabled: bool):
+        try:
+            self.titleBar.apply_legacy_menu_layout(bool(enabled))
+            self.titleBar._omni_actions_cache = None
+        except Exception:
+            pass
+
+    def _on_startup_mode_changed(self, mode: str):
+        pcfg.startup_mode = str(mode or "last_used")
+        self._show_status_message(self.tr('Startup mode set to: {0}').format(pcfg.startup_mode), 4000)
 
     def on_help_documentation(self):
         """Open project README (#126 Help menu)."""
@@ -5248,15 +5349,25 @@ class MainWindow(mainwindow_cls):
 
     def on_texteditlist_contextmenu_requested(self, pos: QPoint, from_empty: bool = True, block_idx: int = -1):
         menu = QMenu(self)
+        ui_mode = str(getattr(pcfg, "ui_mode", "advanced") or "advanced").lower()
+        is_simple = ui_mode == "simple"
         jump_act = None
-        compare_tr_act = menu.addAction(self.tr("Compare translation providers"))
-        compare_ocr_act = menu.addAction(self.tr("Compare OCR engines"))
-        compare_det_act = menu.addAction(self.tr("Compare detectors"))
-        compare_inp_act = menu.addAction(self.tr("Compare inpainters"))
-        menu.addSeparator()
-        open_assist_act = menu.addAction(self.tr("Open Translation Assist"))
+        compare_tr_act = compare_ocr_act = compare_det_act = compare_inp_act = None
+
+        translation_menu = menu.addMenu(self.tr("Translation"))
+        open_assist_act = translation_menu.addAction(self.tr("Open Translation Assist"))
+        compare_tr_act = translation_menu.addAction(self.tr("Compare translation providers"))
+
+        ocr_menu = menu.addMenu(self.tr("OCR"))
+        compare_ocr_act = ocr_menu.addAction(self.tr("Compare OCR engines"))
+
+        if not is_simple:
+            debug_menu = menu.addMenu(self.tr("Debug"))
+            compare_det_act = debug_menu.addAction(self.tr("Compare detectors"))
+            compare_inp_act = debug_menu.addAction(self.tr("Compare inpainters"))
         if not from_empty and block_idx >= 0:
-            jump_act = menu.addAction(self.tr("Jump to block on canvas"))
+            layout_menu = menu.addMenu(self.tr("Layout"))
+            jump_act = layout_menu.addAction(self.tr("Jump to block on canvas"))
         rst = menu.exec_(pos)
         if rst is None:
             return
@@ -5357,6 +5468,93 @@ class MainWindow(mainwindow_cls):
     def show_OCR_keyword_window(self):
         self.ocrSubWidget.show()
 
+    def _normalize_workflow_id(self, workflow_id: str) -> str:
+        wid = str(workflow_id or "").strip().lower()
+        alias = {
+            "model": "models",
+            "diag": "diagnostics",
+            "download": "downloader",
+        }
+        wid = alias.get(wid, wid)
+        allowed = {"home", "editor", "settings", "live", "downloader", "batch", "models", "diagnostics"}
+        return wid if wid in allowed else ""
+
+    def _record_recent_workflow(self, workflow_id: str):
+        wid = self._normalize_workflow_id(workflow_id)
+        if not wid:
+            return
+        cur = list(getattr(pcfg, 'recent_workflows', []) or [])
+        cur = [self._normalize_workflow_id(w) for w in cur]
+        cur = [w for w in cur if w and w != wid]
+        cur.insert(0, wid)
+        pcfg.recent_workflows = cur[:12]
+        try:
+            self.titleBar.set_workflow_hint(wid)
+        except Exception:
+            pass
+
+    def _open_startup_mode_target(self, startup_mode: str) -> bool:
+        mode = self._normalize_workflow_id(startup_mode) or "last_used"
+        if mode == 'home':
+            self._show_welcome_screen()
+            self._record_recent_workflow('home')
+            return True
+        if mode == 'live':
+            self.on_open_realtime_translator()
+            self._record_recent_workflow('live')
+            self.titleBar.set_workflow_hint("live")
+            return True
+        if mode == 'downloader':
+            self.on_open_manga_source()
+            self._record_recent_workflow('downloader')
+            self.titleBar.set_workflow_hint("downloader")
+            return True
+        if mode == 'settings':
+            self.setupConfigUI()
+            self._record_recent_workflow('settings')
+            self.titleBar.set_workflow_hint("settings")
+            return True
+        if mode == 'batch':
+            self.on_open_batch_queue()
+            self._record_recent_workflow('batch')
+            self.titleBar.set_workflow_hint("batch")
+            return True
+        if mode == 'models':
+            self.on_open_manage_models()
+            self._record_recent_workflow('models')
+            self.titleBar.set_workflow_hint("models")
+            return True
+        if mode == 'diagnostics':
+            self.on_environment_doctor()
+            self._record_recent_workflow('diagnostics')
+            self.titleBar.set_workflow_hint("diagnostics")
+            return True
+        if mode == 'editor':
+            if self._has_open_project():
+                self.setupImgTransUI()
+                self._record_recent_workflow('editor')
+                self.titleBar.set_workflow_hint("editor")
+                return True
+            if pcfg.open_recent_on_startup:
+                for proj_dir in list(getattr(self.leftBar, 'recent_proj_list', []) or []):
+                    if proj_dir and osp.exists(proj_dir):
+                        self.OpenProj(proj_dir)
+                        self._record_recent_workflow('editor')
+                        self.titleBar.set_workflow_hint("editor")
+                        return True
+            self._show_welcome_screen()
+            self._record_recent_workflow('home')
+            return True
+        # last_used
+        rec = list(getattr(pcfg, 'recent_workflows', []) or [])
+        if rec:
+            return self._open_startup_mode_target(rec[0])
+        if bool(getattr(pcfg, 'show_home_on_startup', True)):
+            self._show_welcome_screen()
+            self._record_recent_workflow('home')
+            return True
+        return False
+
     def on_open_merge_tool(self):
         """Open the region merge tool dialog."""
         if not hasattr(self, 'merge_dialog') or self.merge_dialog is None:
@@ -5387,6 +5585,8 @@ class MainWindow(mainwindow_cls):
             self.manga_source_dialog.activateWindow()
         else:
             self.manga_source_dialog.show()
+        self._record_recent_workflow('downloader')
+        self.titleBar.set_workflow_hint("downloader")
 
     def on_open_translation_assist_dock(self):
         if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
@@ -5661,6 +5861,8 @@ class MainWindow(mainwindow_cls):
             self._realtime_translator_dialog.activateWindow()
         else:
             self._realtime_translator_dialog.show()
+        self._record_recent_workflow('live')
+        self.titleBar.set_workflow_hint("live")
 
     def on_open_batch_queue(self):
         """Open the Batch queue dialog (multiple folders, Pause/Cancel)."""
@@ -5678,6 +5880,8 @@ class MainWindow(mainwindow_cls):
             self._batch_queue_dialog.activateWindow()
         else:
             self._batch_queue_dialog.show()
+        self._record_recent_workflow('batch')
+        self.titleBar.set_workflow_hint("batch")
 
     def _on_batch_start(self, paths: list, skip_ignored_pages: bool = True):
         self.run_batch(paths, skip_ignored_pages=skip_ignored_pages)
@@ -5699,9 +5903,14 @@ class MainWindow(mainwindow_cls):
                 self._batch_queue_dialog.list_widget.takeItem(0)
 
     def on_open_manage_models(self):
+        self._record_recent_workflow("models")
+        self.titleBar.set_workflow_hint("models")
         """Open the Manage models dialog (check downloaded models, download selected)."""
         dlg = ModelManagerDialog(self)
         dlg.exec()
+
+    def on_show_feature_matrix(self):
+        create_info_dialog({'title': self.tr('Feature matrix / model coverage'), 'text': feature_matrix_text()})
 
     def on_open_troubleshooting(self):
         """Open troubleshooting docs for model downloads and environment/network issues."""
@@ -5805,6 +6014,50 @@ class MainWindow(mainwindow_cls):
             self.on_relaunch_pyqt5_safe_mode()
         elif clicked == cpu_btn:
             self.on_relaunch_cpu_only_safe_mode()
+
+    def on_validate_action_registry(self):
+        try:
+            self.titleBar._get_actions_cache(force_rebuild=True)
+            reg = getattr(self.titleBar, '_action_registry', None)
+            if reg is None:
+                create_info_dialog({'title': self.tr('Action registry validation'), 'text': self.tr('Action registry is unavailable.')})
+                return
+            stats = reg.summary_stats() if hasattr(reg, 'summary_stats') else {}
+            dups = stats.get('duplicate_shortcuts', {}) if isinstance(stats, dict) else {}
+            lines = [
+                self.tr('Total actions: {0}').format(stats.get('total_actions', 0)),
+                self.tr('Enabled: {0} | Disabled: {1}').format(stats.get('enabled_actions', 0), stats.get('disabled_actions', 0)),
+                self.tr('Simple visible: {0} | Advanced visible: {1}').format(stats.get('simple_visible_actions', 0), stats.get('advanced_visible_actions', 0)),
+            ]
+            if dups:
+                lines.append(self.tr('Duplicate shortcuts:'))
+                for k, ids in sorted(dups.items()):
+                    lines.append(f"- {k}: {len(ids)} actions")
+            else:
+                lines.append(self.tr('No duplicate shortcuts detected in registered menu actions.'))
+            create_info_dialog({'title': self.tr('Action registry validation'), 'text': '\n'.join(lines)})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to validate action registry.'))
+
+    def on_export_action_registry(self):
+        try:
+            import json
+            default_name = f"action_registry_{time.strftime('%Y%m%d_%H%M%S')}.json"
+            out_path = QFileDialog.getSaveFileName(self, self.tr('Export action registry'), default_name, self.tr('JSON files (*.json)'))[0]
+            if not out_path:
+                return
+            reg = getattr(self.titleBar, '_action_registry', None)
+            if reg is None:
+                create_info_dialog({'title': self.tr('Export action registry'), 'text': self.tr('Action registry is unavailable.')})
+                return
+            # Rebuild latest menu state first.
+            self.titleBar._get_actions_cache(force_rebuild=True)
+            rows = reg.to_rows() if hasattr(reg, 'to_rows') else []
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump(rows, f, ensure_ascii=False, indent=2)
+            create_info_dialog({'title': self.tr('Export action registry'), 'text': self.tr('Exported {0} actions.').format(len(rows))})
+        except Exception as e:
+            create_error_dialog(e, self.tr('Failed to export action registry.'))
 
     def on_copy_startup_diagnostics(self):
         text = self._collect_startup_diagnostics_text()
@@ -8825,6 +9078,8 @@ class MainWindow(mainwindow_cls):
             )
 
     def on_environment_doctor(self):
+        self._record_recent_workflow("diagnostics")
+        self.titleBar.set_workflow_hint("diagnostics")
         from utils.environment_doctor import run_environment_doctor
         checks = run_environment_doctor()
         lines = [f"{name}: {status} ({detail})" for name, status, detail in checks]
@@ -9027,6 +9282,11 @@ class MainWindow(mainwindow_cls):
         fit_action.setToolTip(self.tr("Zoom canvas so image width fits the view."))
         fit_action.triggered.connect(self._on_canvas_fit_to_width)
         self.titleBar.viewMenu.addAction(fit_action)
+
+        try:
+            self.titleBar.apply_ui_mode_visibility(getattr(pcfg, "ui_mode", "advanced"))
+        except Exception:
+            pass
 
     def _on_canvas_view_mode_triggered(self):
         action = self.sender()
