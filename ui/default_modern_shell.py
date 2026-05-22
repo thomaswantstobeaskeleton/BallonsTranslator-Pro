@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import MethodType
 from typing import Optional
 
 from qtpy.QtCore import QTimer
@@ -54,6 +55,7 @@ def route_modern_mode_request(mainwindow: QWidget, mode: str):
         mainwindow.on_open_realtime_translator()
     elif mode == "quick_image" and hasattr(mainwindow, "leftBar") and hasattr(mainwindow.leftBar, "onOpenImages"):
         mainwindow.leftBar.onOpenImages()
+        set_modern_mode(mainwindow, "quick_image")
     elif mode == "downloader" and hasattr(mainwindow, "on_open_manga_source"):
         mainwindow.on_open_manga_source()
     elif mode == "batch" and hasattr(mainwindow, "on_open_batch_queue"):
@@ -77,6 +79,50 @@ def set_modern_mode(mainwindow: QWidget, mode: str):
             pass
 
 
+def _install_mode_sync_wrappers(mainwindow: QWidget):
+    """Keep ModeRail checked state in sync when legacy menus/buttons navigate.
+
+    During migration the old left bar, top menus, welcome cards, and shortcuts can
+    all still change the current workspace.  Wrapping the existing handlers keeps
+    the new rail accurate without rewriting every call site in MainWindow.
+    """
+    if mainwindow is None or getattr(mainwindow, "_modern_mode_sync_wrappers_installed", False):
+        return
+
+    def wrap(handler_name: str, mode: str, *, editor_requires_project: bool = False):
+        original = getattr(mainwindow, handler_name, None)
+        if not callable(original):
+            return
+
+        def wrapped(self, *args, __original=original, __mode=mode, __editor_requires_project=editor_requires_project, **kwargs):
+            result = __original(*args, **kwargs)
+            resolved_mode = __mode
+            if __editor_requires_project:
+                try:
+                    resolved_mode = "editor" if self._has_open_project() else "home"
+                except Exception:
+                    resolved_mode = "home"
+            set_modern_mode(self, resolved_mode)
+            return result
+
+        try:
+            setattr(mainwindow, handler_name, MethodType(wrapped, mainwindow))
+        except Exception:
+            pass
+
+    wrap("_show_welcome_screen", "home")
+    wrap("_show_main_content", "editor", editor_requires_project=True)
+    wrap("setupImgTransUI", "editor", editor_requires_project=True)
+    wrap("setupConfigUI", "settings")
+    wrap("on_open_realtime_translator", "live")
+    wrap("on_open_manga_source", "downloader")
+    wrap("on_open_batch_queue", "batch")
+    wrap("on_open_translation_assist_dock", "assist")
+    wrap("on_open_manage_models", "models")
+    wrap("on_environment_doctor", "diagnostics")
+    mainwindow._modern_mode_sync_wrappers_installed = True
+
+
 def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True) -> bool:
     """Install ModeRail into the existing default MainWindow layout.
 
@@ -87,6 +133,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
     if mainwindow is None:
         return False
     if getattr(mainwindow, "modeRail", None) is not None:
+        _install_mode_sync_wrappers(mainwindow)
         return True
     left_bar = getattr(mainwindow, "leftBar", None)
     root_layout = getattr(mainwindow, "mainvlayout", None)
@@ -103,6 +150,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
         insert_at = 0
     target_layout.insertWidget(insert_at, rail)
     mainwindow.modeRail = rail
+    _install_mode_sync_wrappers(mainwindow)
     set_modern_mode(mainwindow, "home")
     return True
 
