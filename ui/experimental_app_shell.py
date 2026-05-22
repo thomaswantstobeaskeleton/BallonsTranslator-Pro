@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 from qtpy.QtCore import QByteArray, Qt, Signal
-from qtpy.QtWidgets import QFrame, QLabel, QSplitter, QStackedWidget, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
-from .design_tokens import TOKENS, WORKFLOW_ACCENTS, app_shell_style, hero_panel_style
+from .design_tokens import TOKENS, app_shell_style
 from .editor_inspector import EditorInspector
 from .job_status_drawer import JobStatusDrawer, JobStatusSpec
+from .mode_dashboard import ModeDashboard, dashboard_for_mode
 from .mode_rail import DEFAULT_MODE_RAIL_ITEMS, ModeRail, ModeRailItemSpec
 from .workflow_home import WorkflowHomeWidget
 
@@ -34,42 +35,16 @@ DEFAULT_SHELL_PAGES: tuple[ShellPageSpec, ...] = (
 )
 
 
-class PlaceholderShellPage(QWidget):
-    def __init__(self, spec: ShellPageSpec, parent=None):
-        super().__init__(parent)
-        self.spec = spec
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl)
-        layout.setSpacing(TOKENS.spacing.lg)
-
-        hero = QFrame(self)
-        hero.setObjectName("PlaceholderShellHero")
-        hero.setStyleSheet(hero_panel_style(spec.key))
-        hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl)
-        hero_layout.setSpacing(TOKENS.spacing.sm)
-
-        title = QLabel(spec.title, hero)
-        title.setStyleSheet(f"font-size: {TOKENS.typography.display}px; font-weight: 900; color: {TOKENS.colors.text};")
-        hero_layout.addWidget(title)
-        desc = QLabel(spec.description, hero)
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"font-size: {TOKENS.typography.body_large}px; color: {TOKENS.colors.text_muted};")
-        hero_layout.addWidget(desc)
-        layout.addWidget(hero)
-
-        note = QLabel(self.tr("This modern shell page is ready for the existing workflow UI to be embedded in a later migration step. Legacy menus and panels remain available while this page is wired."), self)
-        note.setWordWrap(True)
-        note.setStyleSheet(f"font-size: {TOKENS.typography.body}px; color: {TOKENS.colors.text_muted}; padding: {TOKENS.spacing.lg}px;")
-        layout.addWidget(note)
-        layout.addStretch(1)
-
-
 class ExperimentalAppShell(QWidget):
-    """Composable app-shell prototype for the phased UI/UX rework."""
+    """Composable app-shell prototype for the phased UI/UX rework.
+
+    Modern here means advanced and polished: dashboards expose professional
+    actions, metrics, warnings, and notes instead of hiding complexity.
+    """
 
     mode_changed = Signal(str)
     workflow_requested = Signal(str)
+    dashboard_action_requested = Signal(str, str)
     translation_assist_requested = Signal()
     ocr_rerun_requested = Signal()
     layout_review_requested = Signal()
@@ -144,7 +119,9 @@ class ExperimentalAppShell(QWidget):
                 page.workflow_requested.connect(self.workflow_requested.emit)
                 page.workflow_requested.connect(self.set_current_mode)
             else:
-                page = PlaceholderShellPage(spec, self.center_stack)
+                dashboard_spec = dashboard_for_mode(spec.key, spec.title, spec.description)
+                page = ModeDashboard(dashboard_spec, self.center_stack)
+                page.action_requested.connect(self.dashboard_action_requested.emit)
             self._page_indexes[spec.key] = self.center_stack.addWidget(page)
 
     def set_current_mode(self, key: str):
