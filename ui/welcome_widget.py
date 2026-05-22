@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Welcome / first-start screen when no project is open.
-Inspired by manhua-translator and Komakun: select or create project from a single, bubbly welcome view.
+Inspired by manhua-translator, Komakun, Dango-style workflow cards, and ImageTrans-style production entry points.
 """
 import os.path as osp
 
@@ -20,6 +20,7 @@ from qtpy.QtCore import Qt, Signal, QTimer
 from .custom_widget import Widget
 from .custom_widget.push_button import NoBorderPushBtn
 from .custom_widget.helper import isDarkTheme
+from .workflow_home import WorkflowHomeWidget
 
 
 def _welcome_stylesheet(dark: bool) -> str:
@@ -122,7 +123,7 @@ class WelcomeCard(QFrame):
 
 
 class WelcomeWidget(Widget):
-    """First-start / welcome screen: open or create project, recent projects list."""
+    """First-start / welcome screen: open projects, choose workflows, and resume recent work."""
     open_folder_requested = Signal()
     open_project_requested = Signal(str)
     open_images_requested = Signal()
@@ -133,6 +134,7 @@ class WelcomeWidget(Widget):
     open_batch_requested = Signal()
     open_models_requested = Signal()
     open_diagnostics_requested = Signal()
+    open_assist_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -206,48 +208,11 @@ class WelcomeWidget(Widget):
         actions_card.addLayout(btn_layout)
         layout.addWidget(actions_card)
 
-        workflows_card = WelcomeCard(self.tr("Workflows"), self)
-        wf_layout = QHBoxLayout()
-        wf_layout.setSpacing(10)
-
-        self._btn_wf_editor = NoBorderPushBtn(self.tr("Manga Editor  ·  Recommended"))
-        self._btn_wf_editor.setToolTip(self.tr("Open folder/project/images to edit manga/comic pages."))
-        self._btn_wf_editor.setMinimumHeight(40)
-        self._btn_wf_editor.clicked.connect(self._on_open_folder)
-        wf_layout.addWidget(self._btn_wf_editor)
-
-        self._btn_wf_live = NoBorderPushBtn(self.tr("Live Translator"))
-        self._btn_wf_live.setToolTip(self.tr("Realtime OCR + translation over your screen selection."))
-        self._btn_wf_live.setMinimumHeight(40)
-        self._btn_wf_live.clicked.connect(self.open_live_requested.emit)
-        wf_layout.addWidget(self._btn_wf_live)
-
-        self._btn_wf_downloader = NoBorderPushBtn(self.tr("Raw Downloader"))
-        self._btn_wf_downloader.setToolTip(self.tr("Search/download chapters from manga/manhua sources."))
-        self._btn_wf_downloader.setMinimumHeight(40)
-        self._btn_wf_downloader.clicked.connect(self.open_downloader_requested.emit)
-        wf_layout.addWidget(self._btn_wf_downloader)
-
-        self._btn_wf_batch = NoBorderPushBtn(self.tr("Batch Queue"))
-        self._btn_wf_batch.setToolTip(self.tr("Queue multiple folders for automated processing."))
-        self._btn_wf_batch.setMinimumHeight(40)
-        self._btn_wf_batch.clicked.connect(self.open_batch_requested.emit)
-        wf_layout.addWidget(self._btn_wf_batch)
-
-        self._btn_wf_models = NoBorderPushBtn(self.tr("Models"))
-        self._btn_wf_models.setToolTip(self.tr("Manage model downloads, caches, and runtime resources."))
-        self._btn_wf_models.setMinimumHeight(40)
-        self._btn_wf_models.clicked.connect(self.open_models_requested.emit)
-        wf_layout.addWidget(self._btn_wf_models)
-
-        self._btn_wf_diag = NoBorderPushBtn(self.tr("Diagnostics / Help"))
-        self._btn_wf_diag.setToolTip(self.tr("Run environment checks and export diagnostics."))
-        self._btn_wf_diag.setMinimumHeight(40)
-        self._btn_wf_diag.clicked.connect(self.open_diagnostics_requested.emit)
-        wf_layout.addWidget(self._btn_wf_diag)
-
-        workflows_card.addLayout(wf_layout)
-        layout.addWidget(workflows_card)
+        # Dango-style workflow cards.  Kept as a standalone widget so the final
+        # app-shell rework can promote it without rewriting the welcome screen.
+        self._workflow_home = WorkflowHomeWidget(parent=self)
+        self._workflow_home.workflow_requested.connect(self._on_workflow_requested)
+        layout.addWidget(self._workflow_home)
 
         # Recent projects card
         self._recent_card = WelcomeCard(self.tr("Recent projects"), self)
@@ -270,6 +235,26 @@ class WelcomeWidget(Widget):
         layout.addWidget(self._recent_card)
 
         layout.addStretch()
+
+    def _on_workflow_requested(self, key: str):
+        if key == "editor":
+            self._on_open_folder()
+        elif key == "live":
+            self.open_live_requested.emit()
+        elif key == "quick_image":
+            self.open_images_requested.emit()
+        elif key == "downloader":
+            self.open_downloader_requested.emit()
+        elif key == "batch":
+            self.open_batch_requested.emit()
+        elif key == "assist":
+            self.open_assist_requested.emit()
+        elif key == "models":
+            self.open_models_requested.emit()
+        elif key == "diagnostics":
+            self.open_diagnostics_requested.emit()
+        else:
+            self._on_open_folder()
 
     def _on_open_folder(self):
         self.open_folder_requested.emit()
