@@ -35,6 +35,8 @@ from utils.model_manager import (
     get_all_downloadable_modules,
     check_all_models,
 )
+from utils.model_packages import MODEL_PACKAGES, MODEL_PACKAGE_PRESETS
+from utils.config import pcfg, save_config
 
 
 class CheckModelsWorker(QObject):
@@ -160,6 +162,23 @@ class ModelManagerDialog(QDialog):
         desc.setWordWrap(True)
         download_layout.addWidget(desc)
         btn_row = QHBoxLayout()
+        self.packagePresetCombo = QComboBox(self)
+        self.packagePresetCombo.addItem(self.tr('Preset: manual selection'), '')
+        for preset_id, preset in MODEL_PACKAGE_PRESETS.items():
+            self.packagePresetCombo.addItem(self.tr(str(preset.get('label') or preset_id)), preset_id)
+        self.packagePresetCombo.setToolTip(self.tr('Apply a model package preset to quickly select related modules.'))
+        self.packagePresetCombo.currentIndexChanged.connect(self._on_package_preset_changed)
+        _last = str(getattr(pcfg, 'model_manager_last_preset', '') or '')
+        _last_idx = self.packagePresetCombo.findData(_last)
+        if _last_idx >= 0:
+            self.packagePresetCombo.setCurrentIndex(_last_idx)
+        btn_row.addWidget(self.packagePresetCombo)
+        self.packagePresetSummary = QLabel(self.tr('Manual selection: choose modules individually.'))
+        self.packagePresetSummary.setWordWrap(True)
+        self.packagePresetSummary.setStyleSheet('color: gray;')
+        self.showPresetOnlyCb = QCheckBox(self.tr('Show preset modules only'))
+        self.showPresetOnlyCb.setToolTip(self.tr('When enabled, only display checkboxes for modules included in the selected preset.'))
+        self.showPresetOnlyCb.toggled.connect(self._apply_download_filters)
         select_all_btn = QPushButton(self.tr('Select all'))
         select_all_btn.clicked.connect(self._select_all_download)
         deselect_all_btn = QPushButton(self.tr('Deselect all'))
@@ -171,10 +190,12 @@ class ModelManagerDialog(QDialog):
         self.downloadSelectedBtn.clicked.connect(self._on_download_clicked)
         btn_row.addWidget(select_all_btn)
         btn_row.addWidget(deselect_all_btn)
+        btn_row.addWidget(self.showPresetOnlyCb)
         btn_row.addWidget(import_local_btn)
         btn_row.addWidget(self.downloadSelectedBtn)
         btn_row.addStretch()
         download_layout.addLayout(btn_row)
+        download_layout.addWidget(self.packagePresetSummary)
         self.downloadProgress = QProgressBar()
         self.downloadProgress.setVisible(False)
         download_layout.addWidget(self.downloadProgress)
@@ -194,6 +215,52 @@ class ModelManagerDialog(QDialog):
         layout.addWidget(close_btn)
 
         self._refresh_download_list()
+
+    def _on_package_preset_changed(self):
+        preset_id = str(self.packagePresetCombo.currentData() or '').strip()
+        pcfg.model_manager_last_preset = preset_id
+        save_config()
+        if not preset_id:
+            self.packagePresetSummary.setText(self.tr('Manual selection: choose modules individually.'))
+            return
+        preset = dict(MODEL_PACKAGE_PRESETS.get(preset_id, {}) or {})
+        package_ids = list(preset.get('package_ids') or [])
+        intended = str(preset.get('intended_use', '') or '').strip()
+        deps = str(preset.get('dependency_hints', '') or '').strip()
+        size = str(preset.get('approx_size', '') or '').strip()
+        summary_bits = [self.tr('Preset packages: {0}').format(', '.join(package_ids) if package_ids else self.tr('none'))]
+        if size:
+            summary_bits.append(self.tr('Approx size: {0}').format(size))
+        if intended:
+            summary_bits.append(intended)
+        if deps:
+            summary_bits.append(self.tr('Dependency notes: {0}').format(deps))
+        self.packagePresetSummary.setText('\n'.join(summary_bits))
+        wanted_pairs = set()
+        for pid in package_ids:
+            for category, module_key in MODEL_PACKAGES.get(pid, []):
+                if isinstance(module_key, str) and module_key:
+                    wanted_pairs.add((str(category), str(module_key)))
+        for cb in self._check_boxes:
+            info = cb.property('module_info') or {}
+            key = (str(info.get('category', '')), str(info.get('module_key', '')))
+            cb.setChecked(key in wanted_pairs and cb.isEnabled())
+        self._apply_download_filters()
+
+    def _apply_download_filters(self):
+        preset_only = bool(self.showPresetOnlyCb.isChecked())
+        preset_id = str(self.packagePresetCombo.currentData() or '').strip()
+        allowed = set()
+        if preset_only and preset_id:
+            package_ids = list((MODEL_PACKAGE_PRESETS.get(preset_id, {}) or {}).get('package_ids') or [])
+            for pid in package_ids:
+                for category, module_key in MODEL_PACKAGES.get(pid, []):
+                    if isinstance(module_key, str) and module_key:
+                        allowed.add((str(category), str(module_key)))
+        for cb in self._check_boxes:
+            info = cb.property('module_info') or {}
+            key = (str(info.get('category', '')), str(info.get('module_key', '')))
+            cb.setVisible((not preset_only) or (not preset_id) or (key in allowed))
 
     def _refresh_download_list(self):
         self._module_infos = get_all_downloadable_modules()

@@ -47,6 +47,7 @@ PACKAGE_TIERS = {
     "advanced_inpaint": "Beta",
     "advanced_ocr": "External dependency heavy",
     "optional_onnx": "Experimental",
+    "community_showcase": "Community / optional",
 }
 
 # Human-readable labels and short descriptions for the first-launch dialog
@@ -74,6 +75,10 @@ PACKAGE_LABELS = {
     "optional_onnx": (
         QT_TRANSLATE_NOOP("ModelPackageCatalog", "Optional ONNX inpainting"),
         QT_TRANSLATE_NOOP("ModelPackageCatalog", "Lama 2025 / lama-manga ONNX (smaller, CPU-friendly)"),
+    ),
+    "community_showcase": (
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Community showcase models"),
+        QT_TRANSLATE_NOOP("ModelPackageCatalog", "Optional community models from feature screenshots: YSG, MangaLens, SAM2/3, Flux variants, PaddleOCR-VL-1.5, Real-CUGAN/AnimeSharp."),
     ),
 }
 
@@ -389,6 +394,13 @@ MODEL_PACKAGE_PRESETS: Dict[str, Dict[str, Any]] = {
         "approx_size": "~5.0 GB",
         "package_ids": ["core", "advanced_ocr", "advanced_inpaint", "optional_onnx"],
         "dependency_hints": "Largest download. Recommended only with stable bandwidth/storage and optional GPU runtimes.",
+    },
+    "showcase_full_stack": {
+        "label": "Showcase full stack (community)",
+        "intended_use": "Installs baseline + community screenshot models (segmentation/inpaint/OCR/upscaling) for feature parity exploration.",
+        "approx_size": "10+ GB (varies by backend/model)",
+        "package_ids": ["core", "advanced_ocr", "advanced_inpaint", "optional_onnx", "community_showcase"],
+        "dependency_hints": "Very large download; community models may require extra runtimes and stronger GPU/VRAM.",
     },
 }
 

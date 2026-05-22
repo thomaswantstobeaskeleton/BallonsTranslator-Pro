@@ -584,6 +584,7 @@ class ProgramConfig(Config):
     model_download_last_status: Dict = field(default_factory=dict)
     # User-facing preset IDs selected on first run (or ["custom"] for manual package selection).
     model_package_preset_ids: List[str] = field(default_factory=lambda: ["balanced_default"])
+    model_manager_last_preset: str = ""
     # When True, show all modules in detector/OCR/translator dropdowns (including not downloaded or incompatible). When False, only show ready modules.
     dev_mode: bool = False
     # Temporary: when enabled, emit structured diagnostic logs for UI actions and pipeline stage transitions.
@@ -593,10 +594,16 @@ class ProgramConfig(Config):
     region_merge_settings: Dict = field(default_factory=dict)  # Region merge tool dialog (persisted)
     context_menu: Dict = field(default_factory=dict)  # Canvas right-click: action key -> visible (default True)
     context_menu_pinned: List = field(default_factory=list)  # Action keys to show at top of right-click menu (order preserved)
+    context_menu_profile: str = "custom"  # Last-applied quick profile: editing|pipeline|layout|custom
     context_run_macros: List = field(default_factory=lambda: [
         {'id': 'detect_ocr_translate', 'label': 'Macro: Detect+OCR+Translate', 'mode': 1, 'detect_first': True},
         {'id': 'ocr_translate_inpaint', 'label': 'Macro: OCR+Translate+Inpaint', 'mode': 2, 'detect_first': False},
     ])
+    realtime_profile_id: str = "generic_screen_ocr"
+    realtime_capture_interval_ms: int = 700
+    realtime_min_ocr_interval_ms: int = 0
+    realtime_follow_window: bool = False
+    realtime_region_rect: List[int] = field(default_factory=lambda: [0, 0, 100, 100])
     huggingface_token: str = ''  # Optional: gated models + faster HF downloads (Xet). Prefer env HF_TOKEN to avoid storing in config.
     translator_last_model_by_provider: Dict = field(default_factory=dict)  # Section 9: last-used model per LLM provider
     # When True, the "Add Open in BallonsTranslator to context menu?" dialog has been shown once (first launch); don't show again.
@@ -645,6 +652,16 @@ class ProgramConfig(Config):
     motion_blur_on_scroll: bool = False
     # When True, shorten or disable UI animations (accessibility / preference). Durations → 0 or minimal; scale and motion-blur effects off.
     reduce_motion: bool = False
+
+    # UI complexity and startup flow defaults (UI rework migration-safe fields).
+    ui_mode: str = "advanced"  # "simple" | "advanced" | "developer"
+    show_experimental_features: bool = False
+    show_legacy_menus: bool = True
+    startup_mode: str = "last_used"  # "home" | "editor" | "last_used" | "settings" | "live" | "downloader" | "batch" | "models" | "diagnostics"
+    show_home_on_startup: bool = True
+    recent_workflows: List = field(default_factory=list)
+    omni_show_unavailable: bool = False
+    omni_result_type_filter: str = "all"  # all|command|setting|text_block|page|recent|help
 
     @staticmethod
     def default_downloaded_chapters_dir() -> str:
@@ -697,6 +714,57 @@ class ProgramConfig(Config):
             config_dict["offline_local_only_mode"] = False
         if not config_dict.get("model_package_preset_ids"):
             config_dict["model_package_preset_ids"] = ["balanced_default"]
+        if not isinstance(config_dict.get("model_manager_last_preset"), str):
+            config_dict["model_manager_last_preset"] = ""
+
+        # UI rework migration-safe defaults for existing configs.
+        if config_dict.get("ui_mode") not in {"simple", "advanced", "developer"}:
+            config_dict["ui_mode"] = "advanced"
+        if "show_experimental_features" not in config_dict:
+            config_dict["show_experimental_features"] = False
+        if "show_legacy_menus" not in config_dict:
+            config_dict["show_legacy_menus"] = True
+        if config_dict.get("startup_mode") not in {"home", "editor", "last_used", "settings", "live", "downloader", "batch", "models", "diagnostics"}:
+            config_dict["startup_mode"] = "last_used"
+        if "show_home_on_startup" not in config_dict:
+            config_dict["show_home_on_startup"] = bool(config_dict.get("show_welcome_screen", True))
+        allowed_workflows = {"home", "editor", "settings", "live", "downloader", "batch", "models", "diagnostics"}
+        if not isinstance(config_dict.get("recent_workflows"), list):
+            config_dict["recent_workflows"] = []
+        else:
+            cleaned = []
+            for w in config_dict.get("recent_workflows", []):
+                ws = str(w or "").strip().lower()
+                if ws in allowed_workflows and ws not in cleaned:
+                    cleaned.append(ws)
+            config_dict["recent_workflows"] = cleaned[:12]
+        if "omni_show_unavailable" not in config_dict:
+            config_dict["omni_show_unavailable"] = False
+        if config_dict.get("omni_result_type_filter") not in {"all", "command", "setting", "text_block", "page", "recent", "help"}:
+            config_dict["omni_result_type_filter"] = "all"
+        if str(config_dict.get("realtime_profile_id") or "") not in {"chrome_manhua_reader", "manga_reader", "generic_screen_ocr"}:
+            config_dict["realtime_profile_id"] = "generic_screen_ocr"
+        try:
+            config_dict["realtime_capture_interval_ms"] = max(100, min(5000, int(config_dict.get("realtime_capture_interval_ms", 700))))
+        except Exception:
+            config_dict["realtime_capture_interval_ms"] = 700
+        try:
+            config_dict["realtime_min_ocr_interval_ms"] = max(0, min(5000, int(config_dict.get("realtime_min_ocr_interval_ms", 0))))
+        except Exception:
+            config_dict["realtime_min_ocr_interval_ms"] = 0
+        config_dict["realtime_follow_window"] = bool(config_dict.get("realtime_follow_window", False))
+        rect = config_dict.get("realtime_region_rect", [0, 0, 100, 100])
+        if not isinstance(rect, (list, tuple)) or len(rect) < 4:
+            rect = [0, 0, 100, 100]
+        try:
+            rx, ry, rw, rh = [int(rect[i]) for i in range(4)]
+            rw = max(1, min(10000, rw))
+            rh = max(1, min(10000, rh))
+            rx = max(0, min(10000, rx))
+            ry = max(0, min(10000, ry))
+            config_dict["realtime_region_rect"] = [rx, ry, rw, rh]
+        except Exception:
+            config_dict["realtime_region_rect"] = [0, 0, 100, 100]
 
         return ProgramConfig(**config_dict)
     
@@ -755,12 +823,14 @@ CONFIG_KEY_ORDER = (
     "offline_local_only_mode",
     "show_module_tier_badges_in_tooltips",
     "model_packages_enabled", "model_download_last_status",
-    "model_packages_enabled", "model_package_preset_ids",
+    "model_packages_enabled", "model_package_preset_ids", "model_manager_last_preset",
     "dev_mode",
+    "ui_mode", "show_experimental_features", "show_legacy_menus", "startup_mode", "show_home_on_startup", "recent_workflows", "omni_show_unavailable", "omni_result_type_filter",
     "diagnostic_mode",
     "release_caches_after_batch", "manual_mode", "skip_ignored_in_run", "skip_satisfied_pipeline_steps", "auto_mark_translated_pages", "render_default_writing_mode", "render_default_fit_mode", "render_default_line_break_strategy", "render_default_reading_order", "render_overflow_warnings", "render_diagnostics_overlay", "render_auto_polish_on_ocr", "render_default_font_family", "render_default_stroke_width", "render_default_secondary_stroke_width", "render_default_secondary_stroke_color", "render_default_shadow_radius", "render_default_shadow_strength", "render_default_text_padding", "render_atomic_fit_target_fill", "render_atomic_fit_max_expand", "render_atomic_fit_profile", "render_fallback_fonts_latin", "render_fallback_fonts_cjk", "render_fallback_fonts_korean", "render_fallback_fonts_rtl", "render_fallback_fonts_emoji", "render_favorite_fonts", "render_recent_fonts", "render_custom_manga_presets", "export_open_folder_after_batch", "export_include_unrendered_pages", "export_filename_template", "text_editor_top_padding",
     "smooth_scroll_duration_ms", "motion_blur_on_scroll", "reduce_motion",
-    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_run_macros",
+    "shortcuts", "auto_region_merge_after_run", "region_merge_settings", "context_menu", "context_menu_pinned", "context_menu_profile", "context_run_macros",
+    "realtime_profile_id", "realtime_capture_interval_ms", "realtime_min_ocr_interval_ms", "realtime_follow_window", "realtime_region_rect",
     "huggingface_token", "translator_last_model_by_provider",
     "windows_context_menu_offered",
 )
@@ -883,6 +953,8 @@ def load_config(config_path: str = shared.CONFIG_PATH):
         pcfg.context_menu = dict(CONTEXT_MENU_DEFAULT)
     if not isinstance(getattr(pcfg, 'context_menu_pinned', None), list):
         pcfg.context_menu_pinned = []
+    if str(getattr(pcfg, 'context_menu_profile', 'custom') or 'custom') not in {'editing', 'pipeline', 'layout', 'custom'}:
+        pcfg.context_menu_profile = 'custom'
     if not isinstance(getattr(pcfg, 'context_run_macros', None), list):
         pcfg.context_run_macros = [
             {'id': 'detect_ocr_translate', 'label': 'Macro: Detect+OCR+Translate', 'mode': 1, 'detect_first': True},

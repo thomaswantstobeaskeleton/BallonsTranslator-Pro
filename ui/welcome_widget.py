@@ -128,6 +128,11 @@ class WelcomeWidget(Widget):
     open_images_requested = Signal()
     open_acbf_requested = Signal()
     recent_project_clicked = Signal(str)
+    open_live_requested = Signal()
+    open_downloader_requested = Signal()
+    open_batch_requested = Signal()
+    open_models_requested = Signal()
+    open_diagnostics_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,7 +162,7 @@ class WelcomeWidget(Widget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        subtitle = QLabel(self.tr("Open a project folder or choose a recent one to start."))
+        subtitle = QLabel(self.tr("Choose a workflow to begin, or open a recent project."))
         subtitle.setObjectName("WelcomeSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
@@ -200,6 +205,49 @@ class WelcomeWidget(Widget):
         btn_layout.addStretch()
         actions_card.addLayout(btn_layout)
         layout.addWidget(actions_card)
+
+        workflows_card = WelcomeCard(self.tr("Workflows"), self)
+        wf_layout = QHBoxLayout()
+        wf_layout.setSpacing(10)
+
+        self._btn_wf_editor = NoBorderPushBtn(self.tr("Manga Editor  ·  Recommended"))
+        self._btn_wf_editor.setToolTip(self.tr("Open folder/project/images to edit manga/comic pages."))
+        self._btn_wf_editor.setMinimumHeight(40)
+        self._btn_wf_editor.clicked.connect(self._on_open_folder)
+        wf_layout.addWidget(self._btn_wf_editor)
+
+        self._btn_wf_live = NoBorderPushBtn(self.tr("Live Translator"))
+        self._btn_wf_live.setToolTip(self.tr("Realtime OCR + translation over your screen selection."))
+        self._btn_wf_live.setMinimumHeight(40)
+        self._btn_wf_live.clicked.connect(self.open_live_requested.emit)
+        wf_layout.addWidget(self._btn_wf_live)
+
+        self._btn_wf_downloader = NoBorderPushBtn(self.tr("Raw Downloader"))
+        self._btn_wf_downloader.setToolTip(self.tr("Search/download chapters from manga/manhua sources."))
+        self._btn_wf_downloader.setMinimumHeight(40)
+        self._btn_wf_downloader.clicked.connect(self.open_downloader_requested.emit)
+        wf_layout.addWidget(self._btn_wf_downloader)
+
+        self._btn_wf_batch = NoBorderPushBtn(self.tr("Batch Queue"))
+        self._btn_wf_batch.setToolTip(self.tr("Queue multiple folders for automated processing."))
+        self._btn_wf_batch.setMinimumHeight(40)
+        self._btn_wf_batch.clicked.connect(self.open_batch_requested.emit)
+        wf_layout.addWidget(self._btn_wf_batch)
+
+        self._btn_wf_models = NoBorderPushBtn(self.tr("Models"))
+        self._btn_wf_models.setToolTip(self.tr("Manage model downloads, caches, and runtime resources."))
+        self._btn_wf_models.setMinimumHeight(40)
+        self._btn_wf_models.clicked.connect(self.open_models_requested.emit)
+        wf_layout.addWidget(self._btn_wf_models)
+
+        self._btn_wf_diag = NoBorderPushBtn(self.tr("Diagnostics / Help"))
+        self._btn_wf_diag.setToolTip(self.tr("Run environment checks and export diagnostics."))
+        self._btn_wf_diag.setMinimumHeight(40)
+        self._btn_wf_diag.clicked.connect(self.open_diagnostics_requested.emit)
+        wf_layout.addWidget(self._btn_wf_diag)
+
+        workflows_card.addLayout(wf_layout)
+        layout.addWidget(workflows_card)
 
         # Recent projects card
         self._recent_card = WelcomeCard(self.tr("Recent projects"), self)
