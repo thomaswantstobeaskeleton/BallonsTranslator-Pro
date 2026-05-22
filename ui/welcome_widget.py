@@ -21,6 +21,7 @@ from .custom_widget import Widget
 from .custom_widget.push_button import NoBorderPushBtn
 from .custom_widget.helper import isDarkTheme
 from .workflow_home import WorkflowHomeWidget
+from .default_modern_shell import install_default_modern_navigation, install_default_welcome_signal_fallbacks
 
 
 def _welcome_stylesheet(dark: bool) -> str:
@@ -142,6 +143,10 @@ class WelcomeWidget(Widget):
         self._recent_buttons = []
         self._build_ui()
         self._update_styles()
+        # Install the new default shell even if the welcome page is not shown
+        # (for example, direct-open project startup).  The installer is idempotent
+        # and safely no-ops until MainWindow's layout exists.
+        QTimer.singleShot(0, self._install_default_modern_shell)
 
     def _update_styles(self):
         """Apply cohesive light/dark styles from current theme."""
@@ -152,6 +157,15 @@ class WelcomeWidget(Widget):
         # Defer stylesheet update to avoid QPainter conflicts with QGraphicsOpacityEffect
         # during the show/paint cycle (fixes "paint device can only be painted by one painter" spam).
         QTimer.singleShot(0, self._update_styles)
+        QTimer.singleShot(0, self._install_default_modern_shell)
+
+    def _install_default_modern_shell(self):
+        """Promote the modern navigation shell into the default app layout."""
+        mainwindow = self.window()
+        if mainwindow is self:
+            mainwindow = self.parentWidget()
+        install_default_welcome_signal_fallbacks(self, mainwindow)
+        install_default_modern_navigation(mainwindow)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
