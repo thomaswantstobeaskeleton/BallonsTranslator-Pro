@@ -138,11 +138,12 @@ def test_legacy_navigation_handlers_keep_mode_rail_selection_synced(qapp):
 def test_mode_sync_wrappers_are_not_installed_twice(qapp):
     win = DummyMainWindow()
     install_default_modern_navigation(win)
-    first_setup_settings = win.setupConfigUI
+    first_setup_settings_func = getattr(win.setupConfigUI, "__func__", None)
 
     install_default_modern_navigation(win)
+    second_setup_settings_func = getattr(win.setupConfigUI, "__func__", None)
     win.setupConfigUI()
 
-    assert win.setupConfigUI is first_setup_settings
+    assert second_setup_settings_func is first_setup_settings_func
     assert win.calls == ["settings"]
     assert win.modeRail.current_mode() == "settings"
