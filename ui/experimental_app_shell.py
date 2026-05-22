@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 from qtpy.QtCore import QByteArray, Qt, Signal
-from qtpy.QtWidgets import QLabel, QSplitter, QStackedWidget, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QFrame, QLabel, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
-from .design_tokens import TOKENS
+from .design_tokens import TOKENS, WORKFLOW_ACCENTS, app_shell_style, hero_panel_style
 from .editor_inspector import EditorInspector
 from .job_status_drawer import JobStatusDrawer, JobStatusSpec
 from .mode_rail import DEFAULT_MODE_RAIL_ITEMS, ModeRail, ModeRailItemSpec
@@ -40,34 +40,33 @@ class PlaceholderShellPage(QWidget):
         self.spec = spec
         layout = QVBoxLayout(self)
         layout.setContentsMargins(TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl)
-        layout.setSpacing(TOKENS.spacing.md)
-        title = QLabel(spec.title, self)
-        title.setStyleSheet(f"font-size: {TOKENS.typography.headline}px; font-weight: 700;")
-        layout.addWidget(title)
-        desc = QLabel(spec.description, self)
+        layout.setSpacing(TOKENS.spacing.lg)
+
+        hero = QFrame(self)
+        hero.setObjectName("PlaceholderShellHero")
+        hero.setStyleSheet(hero_panel_style(spec.key))
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl, TOKENS.spacing.xl)
+        hero_layout.setSpacing(TOKENS.spacing.sm)
+
+        title = QLabel(spec.title, hero)
+        title.setStyleSheet(f"font-size: {TOKENS.typography.display}px; font-weight: 900; color: {TOKENS.colors.text};")
+        hero_layout.addWidget(title)
+        desc = QLabel(spec.description, hero)
         desc.setWordWrap(True)
         desc.setStyleSheet(f"font-size: {TOKENS.typography.body_large}px; color: {TOKENS.colors.text_muted};")
-        layout.addWidget(desc)
-        note = QLabel(self.tr("This page is a shell placeholder. Future PRs should embed the existing workflow UI here without removing legacy paths."), self)
+        hero_layout.addWidget(desc)
+        layout.addWidget(hero)
+
+        note = QLabel(self.tr("This modern shell page is ready for the existing workflow UI to be embedded in a later migration step. Legacy menus and panels remain available while this page is wired."), self)
         note.setWordWrap(True)
-        note.setStyleSheet(f"font-size: {TOKENS.typography.body}px; color: {TOKENS.colors.text_muted};")
+        note.setStyleSheet(f"font-size: {TOKENS.typography.body}px; color: {TOKENS.colors.text_muted}; padding: {TOKENS.spacing.lg}px;")
         layout.addWidget(note)
         layout.addStretch(1)
 
 
 class ExperimentalAppShell(QWidget):
-    """Composable app-shell prototype for the phased UI/UX rework.
-
-    This widget is intentionally not wired as the default MainWindow central
-    layout yet. It provides a safe host for the target structure:
-
-    - left ModeRail
-    - central stacked workflow workspace
-    - right EditorInspector
-    - bottom JobStatusDrawer
-
-    Future PRs can embed existing legacy panels into each page one by one.
-    """
+    """Composable app-shell prototype for the phased UI/UX rework."""
 
     mode_changed = Signal(str)
     workflow_requested = Signal(str)
@@ -86,6 +85,17 @@ class ExperimentalAppShell(QWidget):
         parent=None,
     ):
         super().__init__(parent)
+        self.setObjectName("ExperimentalAppShell")
+        self.setStyleSheet(
+            "QWidget#ExperimentalAppShell {" + app_shell_style() + "}"
+            "QSplitter::handle { background: rgba(255, 255, 255, 0.05); }"
+            "QSplitter::handle:hover { background: rgba(122, 162, 255, 0.28); }"
+            "QStackedWidget#ExperimentalAppShellCenterStack {"
+            f"background: {TOKENS.colors.background_soft};"
+            f"border-left: 1px solid {TOKENS.colors.border_soft};"
+            f"border-right: 1px solid {TOKENS.colors.border_soft};"
+            "}"
+        )
         self.pages: List[ShellPageSpec] = list(pages or DEFAULT_SHELL_PAGES)
         self._page_indexes: Dict[str, int] = {}
         self._build_ui(rail_items)
@@ -119,6 +129,7 @@ class ExperimentalAppShell(QWidget):
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setStretchFactor(2, 0)
+        self.main_splitter.setSizes([128, 900, 340])
 
         self.job_drawer = JobStatusDrawer(parent=self)
         self.job_drawer.cancel_requested.connect(self.job_cancel_requested.emit)
