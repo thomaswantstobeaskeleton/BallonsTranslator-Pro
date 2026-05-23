@@ -99,15 +99,17 @@ Already default-facing:
 - `WelcomeWidget.open_assist_requested` has a fallback connection to Translation Assist through `install_default_welcome_signal_fallbacks()`.
 - `install_default_job_drawer()` inserts a collapsed `JobStatusDrawer` into the default `MainWindow` layout before the legacy `BottomBar` when available.
 - The job drawer is a default status surface but does not replace legacy progress dialogs yet.
+- Pipeline stage events are mirrored into the drawer as a `pipeline-current` job after legacy handlers run.
+- Pipeline completion marks the drawer's current pipeline job as succeeded after legacy completion logic runs.
 
 Covered by tests:
 
-- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, mode routing reuses existing handlers, legacy navigation keeps the rail synced, welcome Assist fallback connects once, the collapsed job drawer installs before `BottomBar`, and jobs can be upserted into the drawer.
+- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, mode routing reuses existing handlers, legacy navigation keeps the rail synced, welcome Assist fallback connects once, the collapsed job drawer installs before `BottomBar`, jobs can be upserted into the drawer, pipeline stage events update the drawer, and pipeline finish marks the drawer job succeeded.
 
 Still to make default-facing:
 
 - Install editor inspector into the editor workspace.
-- Feed real OCR/translation/inpaint/export/download/model jobs into `JobStatusDrawer`.
+- Feed export/download/model jobs into `JobStatusDrawer`.
 - Make dashboard actions call existing handlers from the default shell.
 - Make the experimental shell become the default app shell once legacy editor embedding is complete.
 
@@ -149,11 +151,12 @@ Status: initial default-facing implementation complete.
 
 - `JobStatusDrawer` is installed collapsed into the default main layout before `BottomBar`.
 - It can accept `JobStatusSpec` entries through `upsert_default_job()`.
+- Pipeline stage events update a current pipeline job with stage, page, progress, and cancel availability.
+- Pipeline completion updates that job to `succeeded` at 100%.
 - It intentionally does not replace existing progress dialogs yet.
 
 Remaining drawer work:
 
-- Feed module-manager pipeline stage events into the drawer.
 - Feed batch/export/archive/download/model jobs into the drawer.
 - Add clear completed, details, cancel, pause, and resume behavior per real job type.
 - Preserve legacy progress dialogs until the drawer has parity.
