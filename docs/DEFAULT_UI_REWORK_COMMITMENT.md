@@ -61,13 +61,14 @@ Instead:
 
 1. Make Home/Launcher modern by default.
 2. Add the mode rail as the default navigation surface.
-3. Embed the existing editor canvas into the Editor page.
-4. Embed existing right-side text/style/OCR panels into the EditorInspector tabs.
-5. Embed existing progress/job reporting into JobStatusDrawer.
-6. Wire dashboard actions to existing handlers via `dashboard_action_dispatcher.py`.
-7. Move raw downloader, live translation, batch queue, models, and diagnostics into their mode pages.
-8. Keep old menus and keyboard shortcuts during migration.
-9. Add `use_legacy_ui` as the rollback option.
+3. Add the bottom job/status drawer as the default status surface.
+4. Embed the existing editor canvas into the Editor page.
+5. Embed existing right-side text/style/OCR panels into the EditorInspector tabs.
+6. Feed real pipeline/export/download jobs into JobStatusDrawer.
+7. Wire dashboard actions to existing handlers via `dashboard_action_dispatcher.py`.
+8. Move raw downloader, live translation, batch queue, models, and diagnostics into their mode pages.
+9. Keep old menus and keyboard shortcuts during migration.
+10. Add `use_legacy_ui` as the rollback option.
 
 ## Current branch state
 
@@ -94,16 +95,19 @@ Already default-facing:
 - Existing welcome screen now uses workflow cards.
 - `WelcomeWidget` now schedules `install_default_modern_navigation()` so `ModeRail` is inserted into the default `MainWindow` layout beside the legacy `LeftBar`.
 - `ModeRail` routes default modes to existing handlers without replacing legacy controls yet.
+- `ModeRail` selection is kept in sync when legacy handlers navigate to Home, Editor, Live, Downloader, Batch, Assist, Models, Settings, or Diagnostics.
 - `WelcomeWidget.open_assist_requested` has a fallback connection to Translation Assist through `install_default_welcome_signal_fallbacks()`.
+- `install_default_job_drawer()` inserts a collapsed `JobStatusDrawer` into the default `MainWindow` layout before the legacy `BottomBar` when available.
+- The job drawer is a default status surface but does not replace legacy progress dialogs yet.
 
 Covered by tests:
 
-- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, and mode routing reuses existing handlers.
+- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, mode routing reuses existing handlers, legacy navigation keeps the rail synced, welcome Assist fallback connects once, the collapsed job drawer installs before `BottomBar`, and jobs can be upserted into the drawer.
 
 Still to make default-facing:
 
 - Install editor inspector into the editor workspace.
-- Install job drawer into the main window.
+- Feed real OCR/translation/inpaint/export/download/model jobs into `JobStatusDrawer`.
 - Make dashboard actions call existing handlers from the default shell.
 - Make the experimental shell become the default app shell once legacy editor embedding is complete.
 
@@ -137,20 +141,28 @@ Status: initial default-facing implementation complete.
 Remaining navigation work:
 
 - Add a `use_legacy_ui` / `use_legacy_left_bar` rollback setting before hiding or replacing the legacy left bar.
-- Sync current rail selection after every navigation path, not only rail-originated navigation.
 - Add richer visual state for project/job/provider health.
 
-### Milestone C: default editor inspector
+### Milestone C: default job/status drawer
+
+Status: initial default-facing implementation complete.
+
+- `JobStatusDrawer` is installed collapsed into the default main layout before `BottomBar`.
+- It can accept `JobStatusSpec` entries through `upsert_default_job()`.
+- It intentionally does not replace existing progress dialogs yet.
+
+Remaining drawer work:
+
+- Feed module-manager pipeline stage events into the drawer.
+- Feed batch/export/archive/download/model jobs into the drawer.
+- Add clear completed, details, cancel, pause, and resume behavior per real job type.
+- Preserve legacy progress dialogs until the drawer has parity.
+
+### Milestone D: default editor inspector
 
 - Add `EditorInspector` as the primary right-side panel.
 - Move existing text/style/layout/OCR/QA controls into tabs.
 - Preserve existing panels until parity is confirmed.
-
-### Milestone D: default job/status drawer
-
-- Add `JobStatusDrawer` under the editor workspace.
-- Feed it OCR/translation/inpaint/render/export/download/model jobs.
-- Keep existing progress dialogs until parity is confirmed.
 
 ### Milestone E: default advanced dashboards
 
