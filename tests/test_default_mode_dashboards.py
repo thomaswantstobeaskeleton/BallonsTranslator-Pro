@@ -16,6 +16,7 @@ from ui.default_mode_dashboards import (
     route_default_dashboard_mode,
     show_default_mode_dashboard,
 )
+from ui.job_status_drawer import JobStatusSpec
 from ui.mode_rail import ModeRail
 
 
@@ -56,6 +57,14 @@ class FakeTitleBar:
         self.workflow_hints.append(mode)
 
 
+class FakeDrawer:
+    def __init__(self):
+        self._jobs = {}
+
+    def upsert_job(self, job: JobStatusSpec):
+        self._jobs[job.job_id] = job
+
+
 class DummyMainWindow(QWidget):
     def __init__(self, *, with_stack: bool = True, with_rail: bool = False):
         super().__init__()
@@ -63,6 +72,7 @@ class DummyMainWindow(QWidget):
         self.leftBar = FakeLeftBar(self)
         self.pipelineInsightsPanel = FakePipelinePanel()
         self.titleBar = FakeTitleBar()
+        self.jobStatusDrawer = FakeDrawer()
         self.project_open = False
         if with_stack:
             self.centralStackWidget = QStackedWidget(self)
@@ -175,3 +185,16 @@ def test_dashboard_action_dispatch_uses_existing_child_handler_and_logs(qapp):
     assert result.invoked == "handler:leftBar.onOpenImages"
     assert win.leftBar.open_images_called == 1
     assert win.pipelineInsightsPanel.events[-1][0] == "DASHBOARD"
+
+
+def test_dashboard_action_dispatch_mirrors_task_jobs_to_drawer(qapp):
+    win = DummyMainWindow(with_stack=True)
+
+    result = dispatch_default_dashboard_action(win, "models", "primary")
+
+    assert result.handled is True
+    assert win.calls == ["models"]
+    job = win.jobStatusDrawer._jobs["model-manager"]
+    assert job.title == "Models & providers"
+    assert job.kind == "Models"
+    assert job.status == "running"
