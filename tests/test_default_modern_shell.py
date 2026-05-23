@@ -6,18 +6,20 @@ import pytest
 
 try:
     from qtpy.QtCore import Signal
-    from qtpy.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 except Exception as exc:  # pragma: no cover - optional Qt test environment
     pytest.skip(f"Qt is not available: {exc}", allow_module_level=True)
 
 from ui.default_modern_shell import (
     PIPELINE_JOB_ID,
+    install_default_editor_inspector,
     install_default_job_drawer,
     install_default_modern_navigation,
     install_default_welcome_signal_fallbacks,
     route_modern_mode_request,
     upsert_default_job,
 )
+from ui.editor_inspector import EditorInspector
 from ui.job_status_drawer import JobStatusDrawer, JobStatusSpec
 from ui.mode_rail import ModeRail
 
@@ -48,7 +50,7 @@ class DummyWelcomeWidget(QWidget):
 
 
 class DummyMainWindow(QWidget):
-    def __init__(self, include_bottom_bar: bool = False):
+    def __init__(self, include_bottom_bar: bool = False, include_right_stack: bool = False):
         super().__init__()
         self.calls = []
         self.leftBar = DummyLeftBar(self)
@@ -61,6 +63,9 @@ class DummyMainWindow(QWidget):
         self.bottomBar = DummyBottomBar(self) if include_bottom_bar else None
         if self.bottomBar is not None:
             self.mainvlayout.addWidget(self.bottomBar)
+        self.rightComicTransStackPanel = QStackedWidget(self) if include_right_stack else None
+        if self.rightComicTransStackPanel is not None:
+            self.rightComicTransStackPanel.addWidget(QWidget(self))
         self.project_open = False
 
     def _show_welcome_screen(self):
@@ -95,6 +100,15 @@ class DummyMainWindow(QWidget):
 
     def on_environment_doctor(self):
         self.calls.append("diagnostics")
+
+    def on_open_ocr_crop_inspector_requested(self):
+        self.calls.append("ocr_crop")
+
+    def on_run_layout_review_requested(self):
+        self.calls.append("layout_review")
+
+    def on_open_typography_qa_report(self):
+        self.calls.append("typography_qa")
 
     def on_pipeline_stage_event(self, stage_name: str, progress: int, page_name: str):
         self.calls.append(f"stage:{stage_name}:{progress}:{page_name}")
@@ -175,6 +189,29 @@ def test_pipeline_finish_event_marks_default_job_complete(qapp):
     assert job.progress == 100
     assert job.detail == "Pipeline finished"
     assert job.can_cancel is False
+
+
+def test_install_default_editor_inspector_adds_shell_to_right_stack(qapp):
+    win = DummyMainWindow(include_right_stack=True)
+    before = win.rightComicTransStackPanel.count()
+
+    assert install_default_editor_inspector(win) is True
+
+    assert isinstance(win.editorInspector, EditorInspector)
+    assert win.rightComicTransStackPanel.count() == before + 1
+    assert win.rightComicTransStackPanel.indexOf(win.editorInspector) == before
+
+
+def test_default_editor_inspector_buttons_reuse_existing_handlers(qapp):
+    win = DummyMainWindow(include_right_stack=True)
+    install_default_editor_inspector(win)
+
+    win.editorInspector.request_translation_assist.emit()
+    win.editorInspector.request_ocr_rerun.emit()
+    win.editorInspector.request_layout_review.emit()
+    win.editorInspector.request_typography_qa.emit()
+
+    assert win.calls == ["assist", "ocr_crop", "layout_review", "typography_qa"]
 
 
 def test_route_modern_mode_request_reuses_existing_handlers(qapp):
