@@ -5,11 +5,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 try:
+    from qtpy.QtCore import Signal
     from qtpy.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 except Exception as exc:  # pragma: no cover - optional Qt test environment
     pytest.skip(f"Qt is not available: {exc}", allow_module_level=True)
 
-from ui.default_modern_shell import install_default_modern_navigation, route_modern_mode_request
+from ui.default_modern_shell import (
+    install_default_modern_navigation,
+    install_default_welcome_signal_fallbacks,
+    route_modern_mode_request,
+)
 from ui.mode_rail import ModeRail
 
 
@@ -28,6 +33,10 @@ class DummyLeftBar(QWidget):
 
     def onOpenImages(self):
         self.open_images_called += 1
+
+
+class DummyWelcomeWidget(QWidget):
+    open_assist_requested = Signal()
 
 
 class DummyMainWindow(QWidget):
@@ -147,3 +156,14 @@ def test_mode_sync_wrappers_are_not_installed_twice(qapp):
     assert second_setup_settings_func is first_setup_settings_func
     assert win.calls == ["settings"]
     assert win.modeRail.current_mode() == "settings"
+
+
+def test_welcome_assist_fallback_connects_once(qapp):
+    win = DummyMainWindow()
+    welcome = DummyWelcomeWidget()
+
+    assert install_default_welcome_signal_fallbacks(welcome, win) is True
+    assert install_default_welcome_signal_fallbacks(welcome, win) is True
+    welcome.open_assist_requested.emit()
+
+    assert win.calls == ["assist"]
