@@ -1,5 +1,5 @@
 from ui.dashboard_action_dispatcher import dispatch_dashboard_action, dispatch_message_for_result
-from ui.dashboard_action_router import dashboard_action_id_for, safe_dashboard_routes
+from ui.dashboard_action_router import dashboard_action_id_for, dashboard_handler_for, safe_dashboard_routes
 
 
 class FakeAction:
@@ -66,16 +66,26 @@ def test_dispatch_reports_missing_route():
     assert "No route" in dispatch_message_for_result(result)
 
 
-def test_dispatch_reports_intentionally_unwired_action():
+def test_editor_layout_review_route_uses_current_handler():
     owner = FakeOwner()
+    owner.called = False
+
+    def handler():
+        owner.called = True
+
+    owner.shortcutLayoutReviewSelected = handler
+
     result = dispatch_dashboard_action(owner, "editor", "layout_review")
 
-    assert result.handled is False
+    assert result.handled is True
     assert result.route_found is True
-    assert "not wired yet" in dispatch_message_for_result(result)
+    assert result.invoked == "handler:shortcutLayoutReviewSelected"
+    assert owner.called is True
 
 
 def test_router_has_safe_routes_and_known_action_ids():
     routes = safe_dashboard_routes()
     assert ("live", "primary") in routes
+    assert ("editor", "layout_review") in routes
     assert dashboard_action_id_for("assist", "primary") == "translation.assist"
+    assert dashboard_handler_for("assist", "primary") == "on_open_translation_assist_dock"
