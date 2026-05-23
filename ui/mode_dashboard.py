@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Iterable, List, Optional
 
 from qtpy.QtCore import Signal
@@ -46,13 +46,13 @@ DEFAULT_MODE_DASHBOARDS: Dict[str, ModeDashboardSpec] = {
         description="Production workspace for detection, OCR, translation, cleanup, typesetting, QA, and export.",
         primary_action="Open project or folder",
         actions=(
-            DashboardActionSpec("run_pipeline", "Run full pipeline", "Detection → OCR → Translation → Inpaint → Render.", "Pipeline", True, "running"),
+            DashboardActionSpec("run_pipeline", "Run full pipeline", "Detection -> OCR -> Translation -> Inpaint -> Render.", "Pipeline", True, "running"),
             DashboardActionSpec("selected_ocr", "OCR selected blocks", "Rerun OCR without touching the whole page.", "OCR"),
             DashboardActionSpec("layout_review", "Review layout", "Check overflow, clipping, safe areas, and typography.", "QA", False, "warning"),
             DashboardActionSpec("export_proof", "Export proof pack", "Create reviewer handoff with warnings and manifests.", "Export"),
         ),
         metrics=(
-            DashboardMetricSpec("pages", "Pages", "Project", "idle", "Shows current project/page state when wired."),
+            DashboardMetricSpec("pages", "Pages", "Project", "idle", "Current project/page state."),
             DashboardMetricSpec("warnings", "Warnings", "0", "success", "Typography, mask, and export warnings."),
             DashboardMetricSpec("models", "Models", "Ready", "success", "Detector/OCR/inpaint/model health."),
         ),
@@ -125,21 +125,39 @@ class MetricCard(QFrame):
         layout.setContentsMargins(TOKENS.spacing.md, TOKENS.spacing.md, TOKENS.spacing.md, TOKENS.spacing.md)
         layout.setSpacing(TOKENS.spacing.xs)
         row = QHBoxLayout()
-        label = QLabel(spec.label, self)
-        label.setStyleSheet(f"font-size: {TOKENS.typography.caption}px; color: {TOKENS.colors.text_muted};")
-        row.addWidget(label, 1)
-        status = QLabel(spec.status, self)
-        status.setStyleSheet(badge_style(spec.status))
-        row.addWidget(status)
+        self.label = QLabel(spec.label, self)
+        self.label.setStyleSheet(f"font-size: {TOKENS.typography.caption}px; color: {TOKENS.colors.text_muted};")
+        row.addWidget(self.label, 1)
+        self.status_label = QLabel(spec.status, self)
+        row.addWidget(self.status_label)
         layout.addLayout(row)
-        value = QLabel(spec.value, self)
-        value.setStyleSheet(f"font-size: {TOKENS.typography.title}px; font-weight: 800; color: {TOKENS.colors.text};")
-        layout.addWidget(value)
-        if spec.description:
-            desc = QLabel(spec.description, self)
-            desc.setWordWrap(True)
-            desc.setStyleSheet(f"font-size: {TOKENS.typography.caption}px; color: {TOKENS.colors.text_subtle};")
-            layout.addWidget(desc)
+        self.value_label = QLabel(spec.value, self)
+        self.value_label.setStyleSheet(f"font-size: {TOKENS.typography.title}px; font-weight: 800; color: {TOKENS.colors.text};")
+        layout.addWidget(self.value_label)
+        self.description_label = QLabel("", self)
+        self.description_label.setWordWrap(True)
+        self.description_label.setStyleSheet(f"font-size: {TOKENS.typography.caption}px; color: {TOKENS.colors.text_subtle};")
+        layout.addWidget(self.description_label)
+        self.update_spec(spec)
+
+    def update_spec(self, spec: DashboardMetricSpec):
+        self.spec = spec
+        self.label.setText(spec.label)
+        self.status_label.setText(spec.status)
+        self.status_label.setStyleSheet(badge_style(spec.status))
+        self.value_label.setText(spec.value)
+        self.description_label.setText(spec.description or "")
+        self.description_label.setVisible(bool(spec.description))
+
+    def update_value(self, value: str, status: Optional[str] = None, description: Optional[str] = None):
+        self.update_spec(
+            replace(
+                self.spec,
+                value=str(value),
+                status=self.spec.status if status is None else str(status),
+                description=self.spec.description if description is None else str(description),
+            )
+        )
 
 
 class ActionCard(QFrame):
@@ -184,6 +202,7 @@ class ModeDashboard(QWidget):
     def __init__(self, spec: ModeDashboardSpec, parent=None):
         super().__init__(parent)
         self.spec = spec
+        self.metric_cards: Dict[str, MetricCard] = {}
         self._build_ui()
 
     def _build_ui(self):
@@ -225,7 +244,9 @@ class ModeDashboard(QWidget):
         metrics_grid.setHorizontalSpacing(TOKENS.spacing.md)
         metrics_grid.setVerticalSpacing(TOKENS.spacing.md)
         for idx, metric in enumerate(self.spec.metrics):
-            metrics_grid.addWidget(MetricCard(metric, body), 0, idx)
+            card = MetricCard(metric, body)
+            self.metric_cards[metric.key] = card
+            metrics_grid.addWidget(card, 0, idx)
         layout.addLayout(metrics_grid)
 
         actions_title = QLabel(self.tr("Advanced actions"), body)
@@ -251,12 +272,28 @@ class ModeDashboard(QWidget):
             notes_title.setStyleSheet(f"font-size: {TOKENS.typography.body_large}px; font-weight: 800;")
             notes_layout.addWidget(notes_title)
             for note in self.spec.advanced_notes:
-                label = QLabel(f"• {note}", notes)
+                label = QLabel(f"- {note}", notes)
                 label.setWordWrap(True)
                 label.setStyleSheet(f"font-size: {TOKENS.typography.caption}px; color: {TOKENS.colors.text_muted};")
                 notes_layout.addWidget(label)
             layout.addWidget(notes)
         layout.addStretch(1)
+
+    def update_metric(self, key: str, value: str, status: Optional[str] = None, description: Optional[str] = None) -> bool:
+        card = self.metric_cards.get(str(key or ""))
+        if card is None:
+            return False
+        card.update_value(value, status=status, description=description)
+        return True
+
+    def update_metrics(self, metrics: Iterable[DashboardMetricSpec]):
+        for metric in metrics:
+            card = self.metric_cards.get(metric.key)
+            if card is not None:
+                card.update_spec(metric)
+
+    def metric_snapshot(self) -> Dict[str, DashboardMetricSpec]:
+        return {key: card.spec for key, card in self.metric_cards.items()}
 
 
 def dashboard_for_mode(key: str, title: str, description: str) -> ModeDashboardSpec:
