@@ -94,7 +94,7 @@ CONTEXT_MENU_ITEMS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("format_re_auto_fit_selected", "Re-auto-fit selected text box(es)"),
         ("format_re_auto_fit_page", "Re-auto-fit current page"),
         ("format_re_auto_fit_all", "Re-auto-fit all pages"),
-        ("format_balloon_shape", "Balloon shape (submenu)"),
+        ("format_balloon_shape", "Text box shape: Rectangle / Auto (submenu)"),
         ("format_resize_to_fit_content", "Resize to fit content"),
         ("format_fit_to_mask_safe_box", "Fit box to visible mask area"),
         ("format_center_in_bubble", "Center in bubble"),
