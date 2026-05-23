@@ -33,7 +33,9 @@ AUTO_LAYOUT_PROFILE_DEFAULTS = {
         "layout_font_fit_bubble": True,
         "layout_font_binary_search": True,
         "layout_auto_final_fit_pass": True,
-        "layout_balloon_shape": "auto",
+        # Default to a simple rectangular textbox shape. Users can still opt
+        # into Auto/Round/Diamond/etc. from advanced settings or the context menu.
+        "layout_balloon_shape": "square",
         "layout_balloon_shape_auto_method": "contour_ratio",
         "layout_balloon_shape_model_id": "",
         "layout_min_line_width_px": 80.0,
@@ -57,7 +59,7 @@ AUTO_LAYOUT_PROFILE_DEFAULTS = {
         "layout_font_fit_bubble": True,
         "layout_font_binary_search": True,
         "layout_auto_final_fit_pass": True,
-        "layout_balloon_shape": "auto",
+        "layout_balloon_shape": "square",
         "layout_balloon_shape_auto_method": "contour_ratio",
         "layout_balloon_shape_model_id": "",
         "layout_min_line_width_px": 70.0,
@@ -81,7 +83,7 @@ AUTO_LAYOUT_PROFILE_DEFAULTS = {
         "layout_font_fit_bubble": True,
         "layout_font_binary_search": True,
         "layout_auto_final_fit_pass": True,
-        "layout_balloon_shape": "auto",
+        "layout_balloon_shape": "square",
         "layout_balloon_shape_auto_method": "contour_ratio",
         "layout_balloon_shape_model_id": "",
         "layout_min_line_width_px": 92.0,
@@ -118,10 +120,10 @@ def apply_auto_layout_profile(config_obj, value: str | None) -> dict:
 def auto_layout_profile_summary(value: str | None) -> str:
     preset = normalize_auto_layout_preset(value)
     if preset == AUTO_LAYOUT_PRESET_FIT:
-        return "Strict fit: smaller min font, strong overflow penalties, compact line widths, mask-safe area, no model checks by default."
+        return "Strict fit: smaller min font, strong overflow penalties, compact line widths, mask-safe area, and simple rectangular text boxes by default."
     if preset == AUTO_LAYOUT_PRESET_READABLE:
-        return "Readable: allows roomier boxes/fewer lines and larger font while keeping final overflow checks and bubble centering on."
-    return "Balanced: mask-safe geometry, centered bubbles, optimal line breaks, binary font fitting, and model-free shape detection by default."
+        return "Readable: allows roomier boxes/fewer lines and larger font while keeping final overflow checks and simple rectangular text boxes by default."
+    return "Balanced: mask-safe geometry, centered bubbles, optimal line breaks, binary font fitting, and simple rectangular text boxes by default."
 
 
 def _band(value: float, bands: tuple[tuple[float, str], ...], fallback: str) -> str:
@@ -160,6 +162,7 @@ def auto_layout_setting_hints(values: dict | object | None = None) -> dict:
     box_model = str(get("layout_box_size_check_model_id", "") or "").strip()
     shape_model = str(get("layout_balloon_shape_model_id", "") or "").strip()
     shape_method = str(get("layout_balloon_shape_auto_method", "contour_ratio") or "contour_ratio")
+    shape_value = str(get("layout_balloon_shape", "square") or "square").strip().lower()
 
     return {
         "font_range": f"{min_pt:g}–{max_pt:g} pt (" + _band(min_pt, ((6.5, "tiny text allowed"), (9.5, "normal manga range")), "large/readable minimum") + ")",
@@ -170,7 +173,7 @@ def auto_layout_setting_hints(values: dict | object | None = None) -> dict:
         "no_bubble_width": _band(no_bubble, ((0.70, "compact"), (0.82, "balanced"), (0.92, "wide/readable")), "very wide"),
         "center_gap": "never skip centering" if center_gap <= 0 else f"skip combined bubbles within {center_gap:g}px",
         "box_model": "geometry only" if not box_model else ("built-in CLIP" if box_model == "builtin" else "custom model"),
-        "shape_detection": ("model-assisted" if shape_model or shape_method.startswith("model") else "model-free contour/aspect"),
+        "shape_detection": "simple rectangle" if shape_value in ("square", "rectangle", "rect") else ("model-assisted" if shape_model or shape_method.startswith("model") else "model-free contour/aspect"),
     }
 
 
@@ -372,6 +375,8 @@ def candidate_layout_widths(
         "narrow": (0.50, 0.60, 0.72, 0.84),
         "point": (0.52, 0.64, 0.76, 0.88),
         "square": (0.66, 0.76, 0.86, 0.96),
+        "rectangle": (0.66, 0.76, 0.86, 0.96),
+        "rect": (0.66, 0.76, 0.86, 0.96),
         "bevel": (0.64, 0.74, 0.86, 0.96),
         "pentagon": (0.62, 0.74, 0.84, 0.94),
         "elongated": (0.74, 0.84, 0.92, 1.0),
