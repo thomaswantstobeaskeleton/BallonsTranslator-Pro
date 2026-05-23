@@ -22,6 +22,7 @@ from .custom_widget.push_button import NoBorderPushBtn
 from .custom_widget.helper import isDarkTheme
 from .workflow_home import WorkflowHomeWidget
 from .default_modern_shell import install_default_modern_navigation, install_default_welcome_signal_fallbacks
+from .default_mode_dashboards import install_default_mode_dashboards
 
 
 def _welcome_stylesheet(dark: bool) -> str:
@@ -166,6 +167,7 @@ class WelcomeWidget(Widget):
             mainwindow = self.parentWidget()
         install_default_welcome_signal_fallbacks(self, mainwindow)
         install_default_modern_navigation(mainwindow)
+        install_default_mode_dashboards(mainwindow)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
