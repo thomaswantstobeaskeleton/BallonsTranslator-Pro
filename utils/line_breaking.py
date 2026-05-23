@@ -1,4 +1,11 @@
 from typing import Callable, List, Optional, Tuple
+import re
+
+
+_HYPHEN_CHARS = "\u002d\u2010\u2011\u2012\u2013\u2014\u2212"
+_HYPHEN_CLASS = re.escape(_HYPHEN_CHARS)
+_ARTIFICIAL_ALPHA_HYPHEN_RE = re.compile(rf"(?i)([a-z]{{1,12}})[{_HYPHEN_CLASS}][ \t\r\n]+([a-z]{{1,18}})")
+_ARTIFICIAL_PUNCT_HYPHEN_RE = re.compile(rf"(?i)([a-z]{{1,12}})[{_HYPHEN_CLASS}][ \t\r\n]*(?=(?:\.{2,}|…|[!?！？]))")
 
 
 def _badness(slack: float) -> float:
@@ -8,9 +15,29 @@ def _badness(slack: float) -> float:
     return slack * slack * slack
 
 
-# Penalty per line break to strongly prefer fewer, longer lines (avoids 1–2 words per line)
+# Penalty per line break to strongly prefer fewer, longer lines (avoids 1-2 words per line)
 # Increase slightly so long sentences are less likely to be split into many very short lines.
 _LINE_BREAK_PENALTY = 130.0
+
+
+def normalize_artificial_hyphenation(text: str) -> str:
+    """Remove hyphens that were inserted only to split a word across lines.
+
+    Comic auto-lettering used to enable Pyphen by default.  That can turn short
+    translated words into awkward fragments such as ``NE-\nVER`` or
+    ``MI‐ ND``.  This helper only removes hyphens followed by whitespace/newline
+    or punctuation ellipses, so normal typed hyphenated words like
+    ``well-being`` are preserved.
+    """
+    if not text:
+        return text or ""
+    out = str(text)
+    previous = None
+    while previous != out:
+        previous = out
+        out = _ARTIFICIAL_ALPHA_HYPHEN_RE.sub(lambda m: m.group(1) + m.group(2), out)
+    out = _ARTIFICIAL_PUNCT_HYPHEN_RE.sub(lambda m: m.group(1), out)
+    return out
 
 
 def find_optimal_breaks_dp(
@@ -91,12 +118,15 @@ def split_long_token_with_hyphenation(
     token: str,
     measure: Callable[[str], int],
     max_width: int,
-    hyphenate: bool = True,
+    hyphenate: bool = False,
     hyphen_lang: str = "en_US",
 ) -> List[Tuple[str, int]]:
     """
-    If token is wider than max_width, try to split it into smaller pieces with hyphens.
-    Returns list of (piece, piece_width) where pieces may include trailing hyphen.
+    If token is wider than max_width, optionally split it into smaller pieces.
+
+    Hyphenation is now opt-in.  It can look very poor in manga/manhua bubbles
+    (e.g. ``NE- VER``), so default auto-layout should shrink/fit/reflow before
+    inserting visible hyphens.
     """
     tok = token or ""
     w = int(measure(tok))
@@ -130,4 +160,3 @@ def split_long_token_with_hyphenation(
     if len(out) == 1 and out[0][0] == tok:
         return [(tok, w)]
     return out
-
