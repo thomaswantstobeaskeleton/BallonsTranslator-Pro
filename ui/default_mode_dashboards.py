@@ -6,6 +6,7 @@ from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QWidget
 
 from .dashboard_action_dispatcher import dispatch_dashboard_action, dispatch_message_for_result
+from .dashboard_status_provider import apply_dashboard_metrics, refresh_default_dashboard_metrics
 from .mode_dashboard import ModeDashboard, dashboard_for_mode
 
 DEFAULT_DASHBOARD_MODES: tuple[tuple[str, str, str], ...] = (
@@ -55,6 +56,7 @@ def dispatch_default_dashboard_action(mainwindow: QWidget, mode: str, action: st
     """Dispatch a ModeDashboard action through the existing action/router layer."""
     result = dispatch_dashboard_action(mainwindow, mode, action)
     _log_dashboard_dispatch(mainwindow, result.handled, dispatch_message_for_result(result))
+    refresh_default_dashboard_metrics(mainwindow)
     return result
 
 
@@ -62,12 +64,14 @@ def _legacy_route_for_mode(mainwindow: QWidget, mode: str) -> bool:
     """Fallback to existing handlers if dashboard pages are not installed."""
     if mode == "home" and hasattr(mainwindow, "_show_welcome_screen"):
         mainwindow._show_welcome_screen()
+        refresh_default_dashboard_metrics(mainwindow)
         return True
     if mode == "editor":
         if hasattr(mainwindow, "_has_open_project") and mainwindow._has_open_project() and hasattr(mainwindow, "setupImgTransUI"):
             mainwindow.setupImgTransUI()
         elif hasattr(mainwindow, "_show_welcome_screen"):
             mainwindow._show_welcome_screen()
+        refresh_default_dashboard_metrics(mainwindow)
         return True
     handler_map = {
         "live": "on_open_realtime_translator",
@@ -82,11 +86,13 @@ def _legacy_route_for_mode(mainwindow: QWidget, mode: str) -> bool:
         mainwindow.leftBar.onOpenImages()
         _set_mode_rail(mainwindow, "quick_image")
         _set_workflow_hint(mainwindow, "quick_image")
+        refresh_default_dashboard_metrics(mainwindow)
         return True
     handler_name = handler_map.get(mode)
     handler = getattr(mainwindow, handler_name, None) if handler_name else None
     if callable(handler):
         handler()
+        refresh_default_dashboard_metrics(mainwindow)
         return True
     return False
 
@@ -101,6 +107,7 @@ def route_default_dashboard_mode(mainwindow: QWidget, mode: str) -> bool:
     if mode in DASHBOARD_MODE_KEYS and show_default_mode_dashboard(mainwindow, mode):
         _set_mode_rail(mainwindow, mode)
         _set_workflow_hint(mainwindow, mode)
+        refresh_default_dashboard_metrics(mainwindow)
         return True
     return _legacy_route_for_mode(mainwindow, mode)
 
@@ -132,7 +139,7 @@ def install_default_mode_dashboards(
     """Install mode dashboard landing pages into MainWindow.centralStackWidget.
 
     This is intentionally additive: it appends dashboard pages after the existing
-    welcome/editor/settings pages and records their indexes.  Existing handlers
+    welcome/editor/settings pages and records their indexes. Existing handlers
     remain one click away through dashboard action buttons.
     """
     if mainwindow is None:
@@ -150,8 +157,11 @@ def install_default_mode_dashboards(
             page = ModeDashboard(spec, central_stack)
             page.setObjectName(f"DefaultModeDashboard_{key}")
             page.action_requested.connect(lambda mode, action: dispatch_default_dashboard_action(mainwindow, mode, action))
+            apply_dashboard_metrics(mainwindow, page)
             indexes[key] = central_stack.addWidget(page)
         mainwindow._modern_dashboard_indexes = indexes
+    else:
+        refresh_default_dashboard_metrics(mainwindow)
     _install_dashboard_rail_router(mainwindow)
     return True
 
@@ -166,6 +176,9 @@ def show_default_mode_dashboard(mainwindow: QWidget, mode: str) -> bool:
     if central_stack is None or not hasattr(central_stack, "setCurrentIndex"):
         return False
     try:
+        dashboard = central_stack.widget(idx) if hasattr(central_stack, "widget") else None
+        if dashboard is not None:
+            apply_dashboard_metrics(mainwindow, dashboard)
         central_stack.setCurrentIndex(idx)
         return True
     except Exception:
