@@ -6,6 +6,7 @@ from typing import Optional
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QHBoxLayout, QWidget
 
+from .job_status_drawer import JobStatusDrawer, JobStatusSpec
 from .mode_rail import ModeRail
 
 
@@ -123,6 +124,80 @@ def _install_mode_sync_wrappers(mainwindow: QWidget):
     mainwindow._modern_mode_sync_wrappers_installed = True
 
 
+def _record_job_drawer_event(mainwindow: QWidget, event_type: str, job_id: str):
+    """Best-effort bridge from the new drawer buttons to existing status surfaces."""
+    label = f"{event_type}: {job_id}"
+    panel = getattr(mainwindow, "pipelineInsightsPanel", None)
+    if panel is not None:
+        try:
+            if event_type == "cancel" and hasattr(panel, "add_warning"):
+                panel.add_warning("JOB", label)
+            elif hasattr(panel, "add_event"):
+                panel.add_event("JOB", label)
+        except Exception:
+            pass
+    if event_type == "cancel":
+        try:
+            module_manager = getattr(mainwindow, "module_manager", None)
+            if module_manager is not None and hasattr(module_manager, "stopImgtransPipeline"):
+                module_manager.stopImgtransPipeline()
+        except Exception:
+            pass
+
+
+def install_default_job_drawer(mainwindow: QWidget, *, retry: bool = True) -> bool:
+    """Install the collapsed bottom Jobs & Status drawer into the default layout.
+
+    The drawer starts collapsed and does not replace existing progress dialogs.
+    It gives the modern shell a persistent status surface while later PRs wire
+    concrete OCR/translation/inpaint/export/download jobs into it.
+    """
+    if mainwindow is None:
+        return False
+    if getattr(mainwindow, "jobStatusDrawer", None) is not None:
+        return True
+    root_layout = getattr(mainwindow, "mainvlayout", None)
+    if root_layout is None:
+        if retry:
+            QTimer.singleShot(0, lambda: install_default_job_drawer(mainwindow, retry=False))
+        return False
+    drawer = JobStatusDrawer(parent=mainwindow)
+    drawer.setObjectName("DefaultJobStatusDrawer")
+    drawer.set_expanded(False)
+    drawer.cancel_requested.connect(lambda job_id: _record_job_drawer_event(mainwindow, "cancel", job_id))
+    drawer.pause_requested.connect(lambda job_id: _record_job_drawer_event(mainwindow, "pause", job_id))
+    drawer.details_requested.connect(lambda job_id: _record_job_drawer_event(mainwindow, "details", job_id))
+    insert_at = None
+    bottom_bar = getattr(mainwindow, "bottomBar", None)
+    if bottom_bar is not None:
+        try:
+            idx = root_layout.indexOf(bottom_bar)
+            if idx >= 0:
+                insert_at = idx
+        except Exception:
+            insert_at = None
+    if insert_at is None:
+        try:
+            insert_at = max(0, root_layout.count())
+        except Exception:
+            insert_at = 0
+    root_layout.insertWidget(insert_at, drawer)
+    mainwindow.jobStatusDrawer = drawer
+    return True
+
+
+def upsert_default_job(mainwindow: QWidget, job: JobStatusSpec) -> bool:
+    """Add/update a job in the default drawer when installed."""
+    drawer = getattr(mainwindow, "jobStatusDrawer", None)
+    if drawer is None:
+        return False
+    try:
+        drawer.upsert_job(job)
+        return True
+    except Exception:
+        return False
+
+
 def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True) -> bool:
     """Install ModeRail into the existing default MainWindow layout.
 
@@ -134,6 +209,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
         return False
     if getattr(mainwindow, "modeRail", None) is not None:
         _install_mode_sync_wrappers(mainwindow)
+        install_default_job_drawer(mainwindow, retry=retry)
         return True
     left_bar = getattr(mainwindow, "leftBar", None)
     root_layout = getattr(mainwindow, "mainvlayout", None)
@@ -141,6 +217,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
     if target_layout is None:
         if retry:
             QTimer.singleShot(0, lambda: install_default_modern_navigation(mainwindow, retry=False))
+            QTimer.singleShot(0, lambda: install_default_job_drawer(mainwindow, retry=False))
         return False
     rail = ModeRail(parent=mainwindow)
     rail.mode_requested.connect(lambda mode: route_modern_mode_request(mainwindow, mode))
@@ -151,6 +228,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
     target_layout.insertWidget(insert_at, rail)
     mainwindow.modeRail = rail
     _install_mode_sync_wrappers(mainwindow)
+    install_default_job_drawer(mainwindow, retry=retry)
     set_modern_mode(mainwindow, "home")
     return True
 
