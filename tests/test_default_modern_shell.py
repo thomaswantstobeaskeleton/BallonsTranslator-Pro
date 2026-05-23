@@ -11,6 +11,7 @@ except Exception as exc:  # pragma: no cover - optional Qt test environment
     pytest.skip(f"Qt is not available: {exc}", allow_module_level=True)
 
 from ui.default_modern_shell import (
+    PIPELINE_JOB_ID,
     install_default_job_drawer,
     install_default_modern_navigation,
     install_default_welcome_signal_fallbacks,
@@ -95,6 +96,12 @@ class DummyMainWindow(QWidget):
     def on_environment_doctor(self):
         self.calls.append("diagnostics")
 
+    def on_pipeline_stage_event(self, stage_name: str, progress: int, page_name: str):
+        self.calls.append(f"stage:{stage_name}:{progress}:{page_name}")
+
+    def on_imgtrans_pipeline_finished(self):
+        self.calls.append("pipeline_finished")
+
 
 def test_install_default_modern_navigation_adds_mode_rail_before_leftbar(qapp):
     win = DummyMainWindow()
@@ -138,6 +145,36 @@ def test_upsert_default_job_populates_installed_drawer(qapp):
     assert upsert_default_job(win, JobStatusSpec(job_id="pipeline-1", title="Pipeline", status="running", progress=25)) is True
 
     assert win.jobStatusDrawer.job_ids() == ["pipeline-1"]
+
+
+def test_pipeline_stage_events_are_mirrored_to_default_job_drawer(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    win.on_pipeline_stage_event("OCR", 42, "001.png")
+
+    assert win.calls == ["stage:OCR:42:001.png"]
+    assert win.jobStatusDrawer.job_ids() == [PIPELINE_JOB_ID]
+    job = win.jobStatusDrawer._jobs[PIPELINE_JOB_ID]
+    assert job.status == "running"
+    assert job.progress == 42
+    assert job.detail == "OCR · 001.png"
+    assert job.can_cancel is True
+
+
+def test_pipeline_finish_event_marks_default_job_complete(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    win.on_pipeline_stage_event("Translate", 65, "002.png")
+    win.on_imgtrans_pipeline_finished()
+
+    assert win.calls == ["stage:Translate:65:002.png", "pipeline_finished"]
+    job = win.jobStatusDrawer._jobs[PIPELINE_JOB_ID]
+    assert job.status == "succeeded"
+    assert job.progress == 100
+    assert job.detail == "Pipeline finished"
+    assert job.can_cancel is False
 
 
 def test_route_modern_mode_request_reuses_existing_handlers(qapp):
