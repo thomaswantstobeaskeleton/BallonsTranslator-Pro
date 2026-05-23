@@ -49,6 +49,51 @@ def _project_page_count(mainwindow) -> int | None:
     return None
 
 
+def _project_pages_mapping(mainwindow):
+    project = _first_attr(mainwindow, ("imgtrans_proj", "project", "proj", "image_project"))
+    pages = _call_or_value(_first_attr(project, ("pages", "page_map", "page_blocks")))
+    return pages if isinstance(pages, dict) else None
+
+
+def _block_has_translation(block) -> bool:
+    for attr in ("translation", "rich_text", "translated_text", "target_text"):
+        try:
+            value = getattr(block, attr, None)
+        except Exception:
+            value = None
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _project_translation_stats(mainwindow) -> tuple[int | None, int | None, int | None]:
+    """Return (translated_pages, total_pages, text_blocks) when project block data is available."""
+    pages = _project_pages_mapping(mainwindow)
+    if not pages:
+        total = _project_page_count(mainwindow)
+        return None, total, None
+    translated_pages = 0
+    text_blocks = 0
+    total_pages = len(pages)
+    for blocks in pages.values():
+        try:
+            block_list = list(blocks or [])
+        except Exception:
+            block_list = []
+        text_blocks += len(block_list)
+        if block_list and all(_block_has_translation(block) for block in block_list):
+            translated_pages += 1
+    return translated_pages, total_pages, text_blocks
+
+
+def _selected_text_count(mainwindow) -> int | None:
+    canvas = _first_attr(mainwindow, ("canvas", "sceneCanvas"))
+    if canvas is None:
+        return None
+    selected = _call_or_value(getattr(canvas, "selected_text_items", None))
+    return _safe_len(selected)
+
+
 def _has_project(mainwindow) -> bool:
     checker = getattr(mainwindow, "_has_open_project", None)
     if callable(checker):
@@ -129,17 +174,35 @@ def _translation_assist_status(mainwindow) -> tuple[str, str, str]:
     return ("Open" if visible else "Available", "success" if visible else "idle", "Translation Assist dock status.")
 
 
+def _project_progress_metric(mainwindow, project_open: bool) -> DashboardMetricSpec:
+    translated_pages, total_pages, text_blocks = _project_translation_stats(mainwindow)
+    if total_pages is None:
+        return DashboardMetricSpec("pages", "Pages", "Loaded" if project_open else "No project", "success" if project_open else "idle", "Current project/page count.")
+    if translated_pages is None:
+        return DashboardMetricSpec("pages", "Pages", str(total_pages), "success" if project_open else "idle", "Current project/page count.")
+    status = "success" if total_pages > 0 and translated_pages == total_pages else "running" if translated_pages else "idle"
+    block_note = f" · {text_blocks} text blocks" if text_blocks is not None else ""
+    return DashboardMetricSpec("pages", "Pages", f"{translated_pages}/{total_pages}", status, f"Translated pages / total pages{block_note}.")
+
+
+def _selected_metric(mainwindow) -> DashboardMetricSpec:
+    selected = _selected_text_count(mainwindow)
+    if selected is None:
+        return DashboardMetricSpec("selected", "Selected", "--", "idle", "Select text boxes to inspect or run targeted actions.")
+    return DashboardMetricSpec("selected", "Selected", str(selected), "success" if selected else "idle", "Currently selected text boxes.")
+
+
 def metrics_for_mode(mainwindow, mode: str) -> list[DashboardMetricSpec]:
     mode = str(mode or "")
     project_open = _has_project(mainwindow)
-    pages = _project_page_count(mainwindow)
     warnings = _warning_count(mainwindow)
     job_value, job_status, job_desc = _job_summary(mainwindow)
     model_value, model_status, model_desc = _model_status(mainwindow)
 
     if mode in {"editor", "quick_image"}:
         return [
-            DashboardMetricSpec("pages", "Pages", str(pages) if pages is not None else ("Loaded" if project_open else "No project"), "success" if project_open else "idle", "Current project/page count."),
+            _project_progress_metric(mainwindow, project_open),
+            _selected_metric(mainwindow),
             DashboardMetricSpec("warnings", "Warnings", str(warnings), "warning" if warnings else "success", "Typography, mask, job, and export warnings."),
             DashboardMetricSpec("models", "Models", model_value, model_status, model_desc),
         ]
@@ -166,6 +229,7 @@ def metrics_for_mode(mainwindow, mode: str) -> list[DashboardMetricSpec]:
     if mode in {"batch", "models", "diagnostics"}:
         return [
             DashboardMetricSpec("jobs", "Jobs", job_value, job_status, job_desc),
+            _project_progress_metric(mainwindow, project_open),
             DashboardMetricSpec("warnings", "Warnings", str(warnings), "warning" if warnings else "success", "Current warning count."),
             DashboardMetricSpec("models", "Models", model_value, model_status, model_desc),
         ]
