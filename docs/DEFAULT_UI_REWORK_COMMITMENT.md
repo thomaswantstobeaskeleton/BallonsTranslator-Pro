@@ -62,13 +62,14 @@ Instead:
 1. Make Home/Launcher modern by default.
 2. Add the mode rail as the default navigation surface.
 3. Add the bottom job/status drawer as the default status surface.
-4. Embed the existing editor canvas into the Editor page.
-5. Embed existing right-side text/style/OCR panels into the EditorInspector tabs.
-6. Feed real pipeline/export/download jobs into JobStatusDrawer.
-7. Wire dashboard actions to existing handlers via `dashboard_action_dispatcher.py`.
-8. Move raw downloader, live translation, batch queue, models, and diagnostics into their mode pages.
-9. Keep old menus and keyboard shortcuts during migration.
-10. Add `use_legacy_ui` as the rollback option.
+4. Add the editor inspector as the default right-side shell, initially alongside legacy panels.
+5. Embed the existing editor canvas into the Editor page.
+6. Move existing right-side text/style/OCR panels into the EditorInspector tabs.
+7. Feed real pipeline/export/download jobs into JobStatusDrawer.
+8. Wire dashboard actions to existing handlers via `dashboard_action_dispatcher.py`.
+9. Move raw downloader, live translation, batch queue, models, and diagnostics into their mode pages.
+10. Keep old menus and keyboard shortcuts during migration.
+11. Add `use_legacy_ui` as the rollback option.
 
 ## Current branch state
 
@@ -101,17 +102,20 @@ Already default-facing:
 - The job drawer is a default status surface but does not replace legacy progress dialogs yet.
 - Pipeline stage events are mirrored into the drawer as a `pipeline-current` job after legacy handlers run.
 - Pipeline completion marks the drawer's current pipeline job as succeeded after legacy completion logic runs.
+- `install_default_editor_inspector()` adds `EditorInspector` to the existing right-side editor stack.
+- `EditorInspector` buttons reuse existing handlers for Translation Assist, OCR crop/triage, layout review, and typography QA.
+- The inspector is additive and does not replace `DrawingPanel`, `TextPanel`, `SpellCheckPanel`, `PipelineInsightsWidget`, `MaskDiagnosticsWidget`, or `OcrCropInspectorWidget` yet.
 
 Covered by tests:
 
-- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, mode routing reuses existing handlers, legacy navigation keeps the rail synced, welcome Assist fallback connects once, the collapsed job drawer installs before `BottomBar`, jobs can be upserted into the drawer, pipeline stage events update the drawer, and pipeline finish marks the drawer job succeeded.
+- `tests/test_default_modern_shell.py` verifies that the rail is inserted before `LeftBar`, installation is idempotent, mode routing reuses existing handlers, legacy navigation keeps the rail synced, welcome Assist fallback connects once, the collapsed job drawer installs before `BottomBar`, jobs can be upserted into the drawer, pipeline stage events update the drawer, pipeline finish marks the drawer job succeeded, the editor inspector installs into the right stack, and inspector buttons call existing handlers.
 
 Still to make default-facing:
 
-- Install editor inspector into the editor workspace.
 - Feed export/download/model jobs into `JobStatusDrawer`.
 - Make dashboard actions call existing handlers from the default shell.
 - Make the experimental shell become the default app shell once legacy editor embedding is complete.
+- Replace inspector placeholders with embedded legacy controls after parity is confirmed.
 
 ## Next implementation order
 
@@ -163,9 +167,18 @@ Remaining drawer work:
 
 ### Milestone D: default editor inspector
 
-- Add `EditorInspector` as the primary right-side panel.
-- Move existing text/style/layout/OCR/QA controls into tabs.
-- Preserve existing panels until parity is confirmed.
+Status: initial default-facing implementation complete.
+
+- `EditorInspector` is installed into `rightComicTransStackPanel` as an additional panel.
+- Its buttons call existing handlers instead of duplicating editor logic.
+- Legacy panels remain available until parity is confirmed.
+
+Remaining inspector work:
+
+- Make it the primary right-side panel when opening projects.
+- Move/embed existing text, style, layout, OCR, assist, QA, and metadata controls into inspector tabs.
+- Update selected-block previews as canvas selection changes.
+- Keep a fallback path to the current TextPanel/DrawingPanel stack while migrating.
 
 ### Milestone E: default advanced dashboards
 
