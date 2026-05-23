@@ -11,10 +11,13 @@ except Exception as exc:  # pragma: no cover - optional Qt test environment
     pytest.skip(f"Qt is not available: {exc}", allow_module_level=True)
 
 from ui.default_modern_shell import (
+    install_default_job_drawer,
     install_default_modern_navigation,
     install_default_welcome_signal_fallbacks,
     route_modern_mode_request,
+    upsert_default_job,
 )
+from ui.job_status_drawer import JobStatusDrawer, JobStatusSpec
 from ui.mode_rail import ModeRail
 
 
@@ -35,12 +38,16 @@ class DummyLeftBar(QWidget):
         self.open_images_called += 1
 
 
+class DummyBottomBar(QWidget):
+    pass
+
+
 class DummyWelcomeWidget(QWidget):
     open_assist_requested = Signal()
 
 
 class DummyMainWindow(QWidget):
-    def __init__(self):
+    def __init__(self, include_bottom_bar: bool = False):
         super().__init__()
         self.calls = []
         self.leftBar = DummyLeftBar(self)
@@ -50,6 +57,9 @@ class DummyMainWindow(QWidget):
         self.main_hlayout.addWidget(self.leftBar)
         self.main_hlayout.addWidget(self.content)
         self.mainvlayout.addLayout(self.main_hlayout)
+        self.bottomBar = DummyBottomBar(self) if include_bottom_bar else None
+        if self.bottomBar is not None:
+            self.mainvlayout.addWidget(self.bottomBar)
         self.project_open = False
 
     def _show_welcome_screen(self):
@@ -102,10 +112,32 @@ def test_install_default_modern_navigation_is_idempotent(qapp):
 
     assert install_default_modern_navigation(win) is True
     first = win.modeRail
+    first_drawer = win.jobStatusDrawer
     assert install_default_modern_navigation(win) is True
 
     assert win.modeRail is first
+    assert win.jobStatusDrawer is first_drawer
     assert sum(1 for i in range(win.main_hlayout.count()) if win.main_hlayout.itemAt(i).widget() is first) == 1
+    assert sum(1 for i in range(win.mainvlayout.count()) if win.mainvlayout.itemAt(i).widget() is first_drawer) == 1
+
+
+def test_install_default_job_drawer_adds_collapsed_drawer_before_bottom_bar(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+
+    assert install_default_job_drawer(win) is True
+
+    assert isinstance(win.jobStatusDrawer, JobStatusDrawer)
+    assert win.mainvlayout.indexOf(win.jobStatusDrawer) == win.mainvlayout.indexOf(win.bottomBar) - 1
+    assert win.jobStatusDrawer.list_widget.isVisible() is False
+
+
+def test_upsert_default_job_populates_installed_drawer(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    assert upsert_default_job(win, JobStatusSpec(job_id="pipeline-1", title="Pipeline", status="running", progress=25)) is True
+
+    assert win.jobStatusDrawer.job_ids() == ["pipeline-1"]
 
 
 def test_route_modern_mode_request_reuses_existing_handlers(qapp):
