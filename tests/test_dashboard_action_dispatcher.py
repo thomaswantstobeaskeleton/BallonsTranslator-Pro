@@ -24,6 +24,14 @@ class FakeRegistry:
         return list(self._records)
 
 
+class FakeLeftBar:
+    def __init__(self):
+        self.opened_images = False
+
+    def onOpenImages(self):
+        self.opened_images = True
+
+
 class FakeOwner:
     pass
 
@@ -55,6 +63,18 @@ def test_dispatch_falls_back_to_handler_name():
     assert result.handled is True
     assert result.invoked == "handler:on_open_realtime_translator"
     assert owner.called is True
+
+
+def test_dispatch_supports_dotted_handler_paths():
+    owner = FakeOwner()
+    owner.leftBar = FakeLeftBar()
+
+    result = dispatch_dashboard_action(owner, "quick_image", "primary")
+
+    assert result.handled is True
+    assert result.route_found is True
+    assert result.invoked == "handler:leftBar.onOpenImages"
+    assert owner.leftBar.opened_images is True
 
 
 def test_dispatch_reports_missing_route():
@@ -89,3 +109,4 @@ def test_router_has_safe_routes_and_known_action_ids():
     assert ("editor", "layout_review") in routes
     assert dashboard_action_id_for("assist", "primary") == "translation.assist"
     assert dashboard_handler_for("assist", "primary") == "on_open_translation_assist_dock"
+    assert dashboard_handler_for("quick_image", "primary") == "leftBar.onOpenImages"
