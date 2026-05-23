@@ -8,6 +8,7 @@ from qtpy.QtWidgets import QWidget
 from .dashboard_action_dispatcher import dispatch_dashboard_action, dispatch_message_for_result
 from .dashboard_status_provider import apply_dashboard_metrics, refresh_default_dashboard_metrics
 from .mode_dashboard import ModeDashboard, dashboard_for_mode
+from .task_job_bridge import mirror_dashboard_task_job
 
 DEFAULT_DASHBOARD_MODES: tuple[tuple[str, str, str], ...] = (
     ("live", "Live Translation", "Realtime screen or Chrome manhua translation."),
@@ -53,9 +54,10 @@ def _set_workflow_hint(mainwindow: QWidget, mode: str):
 
 
 def dispatch_default_dashboard_action(mainwindow: QWidget, mode: str, action: str):
-    """Dispatch a ModeDashboard action through the existing action/router layer."""
+    """Dispatch a ModeDashboard action and mirror task-like actions into the drawer."""
     result = dispatch_dashboard_action(mainwindow, mode, action)
     _log_dashboard_dispatch(mainwindow, result.handled, dispatch_message_for_result(result))
+    mirror_dashboard_task_job(mainwindow, mode, action, handled=result.handled)
     refresh_default_dashboard_metrics(mainwindow)
     return result
 
