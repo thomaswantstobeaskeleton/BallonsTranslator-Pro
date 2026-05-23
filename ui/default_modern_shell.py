@@ -9,6 +9,8 @@ from qtpy.QtWidgets import QHBoxLayout, QWidget
 from .job_status_drawer import JobStatusDrawer, JobStatusSpec
 from .mode_rail import ModeRail
 
+PIPELINE_JOB_ID = "pipeline-current"
+
 
 def _find_layout_containing_widget(root_layout, widget: QWidget) -> Optional[QHBoxLayout]:
     """Find the first nested layout that directly contains widget."""
@@ -145,6 +147,82 @@ def _record_job_drawer_event(mainwindow: QWidget, event_type: str, job_id: str):
             pass
 
 
+def upsert_default_job(mainwindow: QWidget, job: JobStatusSpec) -> bool:
+    """Add/update a job in the default drawer when installed."""
+    drawer = getattr(mainwindow, "jobStatusDrawer", None)
+    if drawer is None:
+        return False
+    try:
+        drawer.upsert_job(job)
+        return True
+    except Exception:
+        return False
+
+
+def _install_job_event_wrappers(mainwindow: QWidget):
+    """Mirror legacy pipeline events into JobStatusDrawer without changing pipeline logic."""
+    if mainwindow is None or getattr(mainwindow, "_modern_job_event_wrappers_installed", False):
+        return
+
+    stage_original = getattr(mainwindow, "on_pipeline_stage_event", None)
+    if callable(stage_original):
+        def stage_wrapped(self, stage_name: str, progress: int, page_name: str, __original=stage_original):
+            result = __original(stage_name, progress, page_name)
+            try:
+                stage = str(stage_name or "Pipeline")
+                page = str(page_name or "")
+                detail = f"{stage} · {page}" if page else stage
+                upsert_default_job(
+                    self,
+                    JobStatusSpec(
+                        job_id=PIPELINE_JOB_ID,
+                        title="Pipeline",
+                        kind="pipeline",
+                        status="running",
+                        progress=max(0, min(100, int(progress or 0))),
+                        detail=detail,
+                        can_cancel=True,
+                        can_pause=False,
+                    ),
+                )
+            except Exception:
+                pass
+            return result
+
+        try:
+            setattr(mainwindow, "on_pipeline_stage_event", MethodType(stage_wrapped, mainwindow))
+        except Exception:
+            pass
+
+    finish_original = getattr(mainwindow, "on_imgtrans_pipeline_finished", None)
+    if callable(finish_original):
+        def finish_wrapped(self, *args, __original=finish_original, **kwargs):
+            result = __original(*args, **kwargs)
+            try:
+                upsert_default_job(
+                    self,
+                    JobStatusSpec(
+                        job_id=PIPELINE_JOB_ID,
+                        title="Pipeline",
+                        kind="pipeline",
+                        status="succeeded",
+                        progress=100,
+                        detail="Pipeline finished",
+                        can_cancel=False,
+                    ),
+                )
+            except Exception:
+                pass
+            return result
+
+        try:
+            setattr(mainwindow, "on_imgtrans_pipeline_finished", MethodType(finish_wrapped, mainwindow))
+        except Exception:
+            pass
+
+    mainwindow._modern_job_event_wrappers_installed = True
+
+
 def install_default_job_drawer(mainwindow: QWidget, *, retry: bool = True) -> bool:
     """Install the collapsed bottom Jobs & Status drawer into the default layout.
 
@@ -155,6 +233,7 @@ def install_default_job_drawer(mainwindow: QWidget, *, retry: bool = True) -> bo
     if mainwindow is None:
         return False
     if getattr(mainwindow, "jobStatusDrawer", None) is not None:
+        _install_job_event_wrappers(mainwindow)
         return True
     root_layout = getattr(mainwindow, "mainvlayout", None)
     if root_layout is None:
@@ -183,19 +262,8 @@ def install_default_job_drawer(mainwindow: QWidget, *, retry: bool = True) -> bo
             insert_at = 0
     root_layout.insertWidget(insert_at, drawer)
     mainwindow.jobStatusDrawer = drawer
+    _install_job_event_wrappers(mainwindow)
     return True
-
-
-def upsert_default_job(mainwindow: QWidget, job: JobStatusSpec) -> bool:
-    """Add/update a job in the default drawer when installed."""
-    drawer = getattr(mainwindow, "jobStatusDrawer", None)
-    if drawer is None:
-        return False
-    try:
-        drawer.upsert_job(job)
-        return True
-    except Exception:
-        return False
 
 
 def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True) -> bool:
