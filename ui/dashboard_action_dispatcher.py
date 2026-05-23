@@ -51,10 +51,23 @@ def _trigger_action_by_id(owner: Any, action_id: str) -> bool:
     return False
 
 
+def _resolve_attr_path(owner: Any, attr_path: str):
+    """Resolve handler paths such as 'leftBar.onOpenImages'."""
+    target = owner
+    for part in str(attr_path or "").split("."):
+        part = part.strip()
+        if not part:
+            return None
+        target = getattr(target, part, None)
+        if target is None:
+            return None
+    return target
+
+
 def _invoke_handler(owner: Any, handler_name: str) -> bool:
     if not handler_name:
         return False
-    handler = getattr(owner, handler_name, None)
+    handler = _resolve_attr_path(owner, handler_name)
     if handler is None or not callable(handler):
         return False
     handler()
@@ -66,7 +79,7 @@ def dispatch_dashboard_action(owner: Any, mode: str, action: str) -> DashboardDi
 
     Resolution order:
     1. Action registry ID, if present and registered.
-    2. Existing handler method name on the owner.
+    2. Existing handler method/path on the owner.
     3. Structured unhandled result for future wiring.
 
     This lets the modern dashboards become useful incrementally without forcing
