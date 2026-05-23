@@ -6,6 +6,7 @@ from typing import Optional
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QHBoxLayout, QWidget
 
+from .editor_inspector import EditorInspector
 from .job_status_drawer import JobStatusDrawer, JobStatusSpec
 from .mode_rail import ModeRail
 
@@ -36,6 +37,16 @@ def _find_layout_containing_widget(root_layout, widget: QWidget) -> Optional[QHB
         if found is not None:
             return found
     return None
+
+
+def _connect_if_present(signal, handler) -> bool:
+    if signal is None or not callable(handler):
+        return False
+    try:
+        signal.connect(handler)
+        return True
+    except Exception:
+        return False
 
 
 def route_modern_mode_request(mainwindow: QWidget, mode: str):
@@ -266,6 +277,47 @@ def install_default_job_drawer(mainwindow: QWidget, *, retry: bool = True) -> bo
     return True
 
 
+def _first_existing_handler(mainwindow: QWidget, *names: str):
+    for name in names:
+        handler = getattr(mainwindow, name, None)
+        if callable(handler):
+            return handler
+    return None
+
+
+def install_default_editor_inspector(mainwindow: QWidget, *, retry: bool = True) -> bool:
+    """Install the modern EditorInspector into the existing right-side editor stack.
+
+    The inspector is added alongside legacy `DrawingPanel`/`TextPanel`/QA panels,
+    not as a replacement yet.  Its action buttons call existing handlers so the
+    new shell advances without duplicating editor logic.
+    """
+    if mainwindow is None:
+        return False
+    if getattr(mainwindow, "editorInspector", None) is not None:
+        return True
+    stack = getattr(mainwindow, "rightComicTransStackPanel", None)
+    if stack is None or not hasattr(stack, "addWidget"):
+        if retry:
+            QTimer.singleShot(0, lambda: install_default_editor_inspector(mainwindow, retry=False))
+        return False
+    inspector = EditorInspector(parent=mainwindow)
+    inspector.setObjectName("DefaultEditorInspector")
+    _connect_if_present(inspector.request_translation_assist, getattr(mainwindow, "on_open_translation_assist_dock", None))
+    _connect_if_present(
+        inspector.request_ocr_rerun,
+        _first_existing_handler(mainwindow, "on_open_ocr_crop_inspector_requested", "on_open_ocr_triage_current_page"),
+    )
+    _connect_if_present(
+        inspector.request_layout_review,
+        _first_existing_handler(mainwindow, "on_run_layout_review_requested", "shortcutLayoutReviewSelected", "shortcutLayoutReviewPage"),
+    )
+    _connect_if_present(inspector.request_typography_qa, getattr(mainwindow, "on_open_typography_qa_report", None))
+    stack.addWidget(inspector)
+    mainwindow.editorInspector = inspector
+    return True
+
+
 def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True) -> bool:
     """Install ModeRail into the existing default MainWindow layout.
 
@@ -278,6 +330,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
     if getattr(mainwindow, "modeRail", None) is not None:
         _install_mode_sync_wrappers(mainwindow)
         install_default_job_drawer(mainwindow, retry=retry)
+        install_default_editor_inspector(mainwindow, retry=retry)
         return True
     left_bar = getattr(mainwindow, "leftBar", None)
     root_layout = getattr(mainwindow, "mainvlayout", None)
@@ -286,6 +339,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
         if retry:
             QTimer.singleShot(0, lambda: install_default_modern_navigation(mainwindow, retry=False))
             QTimer.singleShot(0, lambda: install_default_job_drawer(mainwindow, retry=False))
+            QTimer.singleShot(0, lambda: install_default_editor_inspector(mainwindow, retry=False))
         return False
     rail = ModeRail(parent=mainwindow)
     rail.mode_requested.connect(lambda mode: route_modern_mode_request(mainwindow, mode))
@@ -297,6 +351,7 @@ def install_default_modern_navigation(mainwindow: QWidget, *, retry: bool = True
     mainwindow.modeRail = rail
     _install_mode_sync_wrappers(mainwindow)
     install_default_job_drawer(mainwindow, retry=retry)
+    install_default_editor_inspector(mainwindow, retry=retry)
     set_modern_mode(mainwindow, "home")
     return True
 
@@ -314,11 +369,7 @@ def install_default_welcome_signal_fallbacks(welcome_widget: QWidget, mainwindow
     for signal_name, handler_name in pairs:
         signal = getattr(welcome_widget, signal_name, None)
         handler = getattr(mainwindow, handler_name, None)
-        if signal is not None and callable(handler):
-            try:
-                signal.connect(handler)
-                connected = True
-            except Exception:
-                pass
+        if _connect_if_present(signal, handler):
+            connected = True
     welcome_widget._modern_shell_fallbacks_installed = True
     return connected
