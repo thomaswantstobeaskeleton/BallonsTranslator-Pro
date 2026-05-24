@@ -563,6 +563,8 @@ class ProgramConfig(Config):
     text_advanced_format_panel: bool = True
     expand_tadvanced_panel: bool = True
     config_panel_font_scale: float = 1.0
+    # When False, the Config panel hides expert/advanced layout-engine knobs to reduce visual clutter for new users.
+    show_advanced_settings: bool = False
     default_device: str = ''
     unload_after_idle_minutes: int = 0
     ocr_spell_check: bool = False
@@ -749,6 +751,7 @@ CONFIG_KEY_ORDER = (
     "pipeline_retry_detect", "pipeline_retry_ocr", "pipeline_retry_translate", "pipeline_retry_inpaint",
     "supersampling_factor", "show_text_style_preset", "expand_tstyle_panel", "show_text_effect_panel",
     "expand_teffect_panel", "text_advanced_format_panel", "expand_tadvanced_panel", "config_panel_font_scale",
+    "show_advanced_settings",
     "default_device", "unload_after_idle_minutes", "ocr_spell_check",
     "manga_source_lang", "manga_source_data_saver", "manga_source_download_dir",
     "manga_source_request_delay", "manga_source_open_after_download", "manga_source_playwright_headless",
