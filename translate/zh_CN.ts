@@ -15,7 +15,7 @@
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="64" />
         <source>Add folder(s)...</source>
-        <translation>添加文件夹...</translation>
+        <translation>添加文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="66" />
@@ -136,7 +136,7 @@
         <location filename="../ui/batch_queue_dialog.py" line="233" />
         <location filename="../ui/batch_queue_dialog.py" line="201" />
         <source>Running…</source>
-        <translation>运行中…</translation>
+        <translation>运行中……</translation>
     </message>
     <message>
         <location filename="../ui/batch_queue_dialog.py" line="206" />
@@ -468,13 +468,13 @@
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1205" />
-        <source>Add selected to triage worklist</source>
-        <translation>Add selected to triage worklist</translation>
+        <source>添加 selected to triage worklist</source>
+        <translation>将选中项加入待处理列表</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1206" />
         <source>Mark selected as reviewed</source>
-        <translation>Mark selected as reviewed</translation>
+        <translation>将选中项标记为已阅</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1218" />
@@ -627,7 +627,7 @@
     <message>
         <location filename="../ui/canvas.py" line="1301" />
         <source>Diamond</source>
-        <translation>钻石</translation>
+        <translation>菱形</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1302" />
@@ -642,17 +642,17 @@
     <message>
         <location filename="../ui/canvas.py" line="1304" />
         <source>Pentagon</source>
-        <translation>五角大楼</translation>
+        <translation>五边形</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1305" />
         <source>Point</source>
-        <translation>观点</translation>
+        <translation>点状</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1306" />
         <source>Auto</source>
-        <translation>汽车</translation>
+        <translation>自动</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1310" />
@@ -767,20 +767,20 @@
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1397" />
-        <source>Pin quick actions</source>
-        <translation>Pin quick actions</translation>
+        <source>置顶 quick actions</source>
+        <translation>固定快捷操作</translation>
     </message>
     <message>
         <location filename="../ui/canvas.py" line="1426" />
         <source>Configure menu...</source>
-        <translation>配置菜单...</translation>
+        <translation>配置菜单……</translation>
     </message>
 </context><context>
     <name>ColorPickerLabel</name>
     <message>
         <location filename="../ui/custom_widget/label.py" line="64" />
         <source>Apply Color</source>
-        <translation>Apply Color</translation>
+        <translation>应用颜色</translation>
     </message>
 </context><context>
     <name>ConfigPanel</name>
@@ -1079,7 +1079,7 @@
     <message>
         <location filename="../ui/configpanel.py" line="578" />
         <source>Soft (Twilight, manga-friendly)</source>
-        <translation>柔和（暮光之城，适合漫画）</translation>
+        <translation>柔和（暮光色调，适合漫画）</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="579" />
@@ -1324,7 +1324,7 @@
     <message>
         <location filename="../ui/configpanel.py" line="775" />
         <source>Browse...</source>
-        <translation>浏览...</translation>
+        <translation>浏览……</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="784" />
@@ -1655,7 +1655,7 @@
     <message>
         <location filename="../ui/configpanel.py" line="1034" />
         <source>Auto</source>
-        <translation>汽车</translation>
+        <translation>自动</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="1034" />
@@ -1675,7 +1675,7 @@
     <message>
         <location filename="../ui/configpanel.py" line="1035" />
         <source>Diamond</source>
-        <translation>钻石</translation>
+        <translation>菱形</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="1035" />
@@ -1690,12 +1690,12 @@
     <message>
         <location filename="../ui/configpanel.py" line="1035" />
         <source>Pentagon</source>
-        <translation>五角大楼</translation>
+        <translation>五边形</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="1035" />
         <source>Point</source>
-        <translation>观点</translation>
+        <translation>点状</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="1037" />
@@ -1860,7 +1860,7 @@
     <message>
         <location filename="../ui/configpanel.py" line="1142" />
         <source>Context menu options...</source>
-        <translation>右键菜单选项...</translation>
+        <translation>右键菜单选项……</translation>
     </message>
     <message>
         <location filename="../ui/configpanel.py" line="1143" />
@@ -2011,7 +2011,7 @@
     <message>
         <location filename="../ui/drawingpanel.py" line="350" />
         <source>Hand (H) – Pan canvas</source>
-        <translation>手 (H) – 平底画布</translation>
+        <translation>手 (H) – 平移画布</translation>
     </message>
     <message>
         <location filename="../ui/drawingpanel.py" line="355" />
@@ -2043,7 +2043,7 @@
     <message>
         <location filename="../ui/io_thread.py" line="118" />
         <source>Export as doc...</source>
-        <translation>导出word文档...</translation>
+        <translation>导出word文档……</translation>
     </message>
     <message>
         <location filename="../ui/io_thread.py" line="124" />
@@ -2055,12 +2055,12 @@
     <message>
         <location filename="../ui/export_dialog.py" line="33" />
         <source>Export all pages as...</source>
-        <translation>将所有页面导出为...</translation>
+        <translation>将所有页面导出为……</translation>
     </message>
     <message>
         <location filename="../ui/export_dialog.py" line="38" />
         <source>Choose folder...</source>
-        <translation>选择文件夹...</translation>
+        <translation>选择文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/export_dialog.py" line="108" />
@@ -2107,7 +2107,7 @@
     <message>
         <location filename="../ui/export_dialog.py" line="71" />
         <source>Choose ZIP file...</source>
-        <translation>选择 ZIP 文件...</translation>
+        <translation>选择 ZIP 文件……</translation>
     </message>
     <message>
         <location filename="../ui/export_dialog.py" line="77" />
@@ -2342,7 +2342,7 @@
     <message>
         <location filename="../ui/global_search_widget.py" line="192" />
         <source>Replace...</source>
-        <translation>替换中...</translation>
+        <translation>替换中……</translation>
     </message>
     <message>
         <location filename="../ui/global_search_widget.py" line="198" />
@@ -2424,7 +2424,7 @@
     <message>
         <location filename="../ui/global_search_widget.py" line="385" />
         <source>Replace...</source>
-        <translation>替换中...</translation>
+        <translation>替换中………</translation>
     </message>
     <message>
         <location filename="../ui/global_search_widget.py" line="490" />
@@ -2457,17 +2457,17 @@
         <location filename="../ui/custom_widget/message.py" line="248" />
         <location filename="../ui/custom_widget/message.py" line="195" />
         <source>Stop</source>
-        <translation>Stop</translation>
+        <translation>停止</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/message.py" line="199" />
         <source>Force stop</source>
-        <translation>Force stop</translation>
+        <translation>强制停止</translation>
     </message>
     <message>
         <location filename="../ui/custom_widget/message.py" line="222" />
         <source>trying to stop...</source>
-        <translation>trying to stop...</translation>
+        <translation>尝试停止………</translation>
     </message>
 </context><context>
     <name>ImgtransThread</name>
@@ -2502,7 +2502,7 @@
     <message>
         <location filename="../ui/io_thread.py" line="154" />
         <source>Import doc...</source>
-        <translation>导入word文档...</translation>
+        <translation>导入word文档……</translation>
     </message>
     <message>
         <location filename="../ui/io_thread.py" line="161" />
@@ -2519,7 +2519,7 @@
     <message>
         <location filename="../ui/module_parse_widgets.py" line="538" />
         <source>Inpaint tile size:</source>
-        <translation>修补瓷砖尺寸：</translation>
+        <translation>修复分块大小：</translation>
     </message>
     <message>
         <location filename="../ui/module_parse_widgets.py" line="542" />
@@ -2667,7 +2667,7 @@
     <message>
         <location filename="../ui/mainwindowbars.py" line="128" />
         <source>Open Folder ...</source>
-        <translation>打开文件夹...</translation>
+        <translation>打开文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="132" />
@@ -2677,12 +2677,12 @@
     <message>
         <location filename="../ui/mainwindowbars.py" line="135" />
         <source>Open Images ...</source>
-        <translation>打开图片...</translation>
+        <translation>打开图片……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="138" />
         <source>Open ACBF/CBZ ...</source>
-        <translation>打开 ACBF/CBZ...</translation>
+        <translation>打开 ACBF/CBZ……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="139" />
@@ -2692,7 +2692,7 @@
     <message>
         <location filename="../ui/mainwindowbars.py" line="142" />
         <source>Open CBR ...</source>
-        <translation>打开 CBR...</translation>
+        <translation>打开 CBR……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="143" />
@@ -2712,7 +2712,7 @@
     <message>
         <location filename="../ui/mainwindowbars.py" line="157" />
         <source>Export current page as...</source>
-        <translation>将当前页面导出为...</translation>
+        <translation>将当前页面导出为……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="158" />
@@ -2889,7 +2889,7 @@
     <message>
         <location filename="../ui/mainwindow.py" line="1356" />
         <source>Checking for updates...</source>
-        <translation>正在检查更新...</translation>
+        <translation>正在检查更新……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="1747" />
@@ -3239,7 +3239,7 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/mainwindow.py" line="3258" />
         <source>Saving image...</source>
-        <translation>保存中...</translation>
+        <translation>保存中……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindow.py" line="3297" />
@@ -3674,7 +3674,7 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="537" />
         <source>Enter manga title...</source>
-        <translation>输入漫画标题...</translation>
+        <translation>输入漫画标题……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="543" />
@@ -3690,7 +3690,7 @@ Package IDs: {5}</source>
         <location filename="../ui/manga_source_dialog.py" line="787" />
         <location filename="../ui/manga_source_dialog.py" line="553" />
         <source>Paste MangaDex chapter URL or chapter UUID...</source>
-        <translation>粘贴 MangaDex 章节 URL 或章节 UUID...</translation>
+        <translation>粘贴 MangaDex 章节 URL 或章节 UUID……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="556" />
@@ -3800,12 +3800,12 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="660" />
         <source>Choose folder...</source>
-        <translation>选择文件夹...</translation>
+        <translation>选择文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="663" />
         <source>Browse...</source>
-        <translation>浏览...</translation>
+        <translation>浏览……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="675" />
@@ -3830,12 +3830,12 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="783" />
         <source>Paste chapter URL (raw manga, manhwa, manhua sites)...</source>
-        <translation>粘贴章节 URL（原始漫画、漫画、漫画网站）...</translation>
+        <translation>粘贴章节 URL（原始漫画、漫画、漫画网站）……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="785" />
         <source>Paste chapter page URL (HTML with images)...</source>
-        <translation>粘贴章节页面 URL（带图像的 HTML）...</translation>
+        <translation>粘贴章节页面 URL（带图像的 HTML）……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="901" />
@@ -3873,7 +3873,7 @@ Package IDs: {5}</source>
         <location filename="../ui/manga_source_dialog.py" line="829" />
         <location filename="../ui/manga_source_dialog.py" line="822" />
         <source>Loading chapter...</source>
-        <translation>正在加载章节...</translation>
+        <translation>正在加载章节……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="827" />
@@ -3888,7 +3888,7 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="846" />
         <source>Searching...</source>
-        <translation>正在寻找...</translation>
+        <translation>正在寻找……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="862" />
@@ -3908,7 +3908,7 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="887" />
         <source>Loading chapters...</source>
-        <translation>正在加载章节...</translation>
+        <translation>正在加载章节……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="913" />
@@ -3943,7 +3943,7 @@ Package IDs: {5}</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="976" />
         <source>Downloading...</source>
-        <translation>正在下载...</translation>
+        <translation>正在下载……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="993" />
@@ -3974,7 +3974,7 @@ You can open a chapter folder in BallonsTranslator to translate.</source>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="1035" />
         <source>Installing Chromium...</source>
-        <translation>正在安装铬...</translation>
+        <translation>正在安装铬……</translation>
     </message>
     <message>
         <location filename="../ui/manga_source_dialog.py" line="1065" />
@@ -4011,7 +4011,7 @@ You can open a chapter folder in BallonsTranslator to translate.</source>
     <message>
         <location filename="../ui/merge_dialog.py" line="35" />
         <source>None</source>
-        <translation>没有任何</translation>
+        <translation>无</translation>
     </message>
     <message>
         <location filename="../ui/merge_dialog.py" line="38" />
@@ -4051,12 +4051,12 @@ You can open a chapter folder in BallonsTranslator to translate.</source>
     <message>
         <location filename="../ui/merge_dialog.py" line="63" />
         <source>label1,label2,...</source>
-        <translation>标签1，标签2，...</translation>
+        <translation>标签1，标签2，……</translation>
     </message>
     <message>
         <location filename="../ui/merge_dialog.py" line="65" />
         <source>balloon,qipao,shuqing</source>
-        <translation>气球、旗袍、舒庆</translation>
+        <translation>balloon,qipao,shuqing</translation>
     </message>
     <message>
         <location filename="../ui/merge_dialog.py" line="67" />
@@ -4272,7 +4272,7 @@ qipao,qipao2</source>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="133" />
         <source>Search module key/name/description…</source>
-        <translation>搜索模块键/名称/描述...</translation>
+        <translation>搜索模块键/名称/描述……</translation>
     </message>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="369" />
@@ -4333,7 +4333,7 @@ qipao,qipao2</source>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="167" />
         <source>Import local model directory...</source>
-        <translation>导入本地模型目录...</translation>
+        <translation>导入本地模型目录……</translation>
     </message>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="168" />
@@ -4413,7 +4413,7 @@ qipao,qipao2</source>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="284" />
         <source>Downloading…</source>
-        <translation>下载中…</translation>
+        <translation>下载中……</translation>
     </message>
     <message>
         <location filename="../ui/model_manager_dialog.py" line="296" />
@@ -4613,7 +4613,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/module_manager.py" line="2101" />
         <source>Set Inpainter...</source>
-        <translation>正在初始化修复工具...</translation>
+        <translation>正在初始化修复工具……</translation>
     </message>
     <message>
         <location filename="../ui/module_manager.py" line="2115" />
@@ -4650,7 +4650,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/module_manager.py" line="2228" />
         <source>Testing...</source>
-        <translation>测试...</translation>
+        <translation>测试……</translation>
     </message>
     <message>
         <location filename="../ui/module_manager.py" line="2233" />
@@ -4995,12 +4995,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/drawingpanel.py" line="228" />
         <source>Canny + flood</source>
-        <translation>精明+洪水</translation>
+        <translation>边缘检测 + 漫水填充</translation>
     </message>
     <message>
         <location filename="../ui/drawingpanel.py" line="229" />
         <source>Connected Canny</source>
-        <translation>连接精明</translation>
+        <translation>连通 Canny</translation>
     </message>
     <message>
         <location filename="../ui/drawingpanel.py" line="230" />
@@ -5111,7 +5111,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="52" />
         <source>Search action or category...</source>
-        <translation>搜索操作或类别...</translation>
+        <translation>搜索操作或类别……</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="56" />
@@ -5309,7 +5309,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="184" />
         <source>Translate subtitle file…</source>
-        <translation>翻译字幕文件...</translation>
+        <translation>翻译字幕文件……</translation>
     </message>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="194" />
@@ -5324,7 +5324,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="205" />
         <source>Open…</source>
-        <translation>打开…</translation>
+        <translation>打开……</translation>
     </message>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="211" />
@@ -5437,7 +5437,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="307" />
         <source>Translate and save as…</source>
-        <translation>翻译并另存为...</translation>
+        <translation>翻译并另存为……</translation>
     </message>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="464" />
@@ -5503,7 +5503,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="446" />
         <source>Save</source>
-        <translation>节省</translation>
+        <translation>保存</translation>
     </message>
     <message>
         <location filename="../ui/subtitle_file_translator_dialog.py" line="450" />
@@ -5947,7 +5947,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/theme_customizer_dialog.py" line="70" />
         <source>Choose color...</source>
-        <translation>选择颜色...</translation>
+        <translation>选择颜色……</translation>
     </message>
     <message>
         <location filename="../ui/theme_customizer_dialog.py" line="80" />
@@ -6044,7 +6044,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="465" />
         <source>Translation context (project)...</source>
-        <translation>翻译上下文（项目）...</translation>
+        <translation>翻译上下文（项目）……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="468" />
@@ -6094,12 +6094,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="509" />
         <source>Keyboard Shortcuts...</source>
-        <translation>键盘快捷键...</translation>
+        <translation>键盘快捷键……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="512" />
         <source>Context menu options...</source>
-        <translation>右键菜单选项...</translation>
+        <translation>右键菜单选项……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="514" />
@@ -6184,7 +6184,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="567" />
         <source>Theme and UI customizer...</source>
-        <translation>主题和 UI 定制器...</translation>
+        <translation>主题和 UI 定制器……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="568" />
@@ -6244,7 +6244,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="631" />
         <source>Export all pages as...</source>
-        <translation>导出全部页面为...</translation>
+        <translation>导出全部页面为……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="632" />
@@ -6269,12 +6269,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="643" />
         <source>Manga / Comic source...</source>
-        <translation>漫画来源...</translation>
+        <translation>漫画来源……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="646" />
         <source>Batch queue...</source>
-        <translation>批处理队列...</translation>
+        <translation>批处理队列……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="647" />
@@ -6284,7 +6284,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="650" />
         <source>Manage models...</source>
-        <translation>管理模型...</translation>
+        <translation>管理模型……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="651" />
@@ -6324,7 +6324,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="663" />
         <source>Export startup report...</source>
-        <translation>导出启动报告...</translation>
+        <translation>导出启动报告……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="664" />
@@ -6364,7 +6364,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="676" />
         <source>Environment doctor...</source>
-        <translation>Environment doctor...</translation>
+        <translation>Environment doctor……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="677" />
@@ -6374,7 +6374,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="680" />
         <source>OCR triage worklist (current page)...</source>
-        <translation>OCR triage worklist (current page)...</translation>
+        <translation>OCR triage worklist (current page)……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="681" />
@@ -6384,7 +6384,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="684" />
         <source>Auto-extract glossary (current page)...</source>
-        <translation>Auto-extract glossary (current page)...</translation>
+        <translation>Auto-extract glossary (current page)……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="685" />
@@ -6394,7 +6394,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="688" />
         <source>Translation QA report (current page)...</source>
-        <translation>Translation QA report (current page)...</translation>
+        <translation>Translation QA report (current page)……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="689" />
@@ -6404,7 +6404,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="692" />
         <source>Save run profile snapshot...</source>
-        <translation>Save run profile snapshot...</translation>
+        <translation>Save run profile snapshot……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="693" />
@@ -6414,7 +6414,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="696" />
         <source>Apply run profile snapshot...</source>
-        <translation>Apply run profile snapshot...</translation>
+        <translation>Apply run profile snapshot……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="697" />
@@ -6455,7 +6455,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="724" />
         <source>Export translation to LPtxt...</source>
-        <translation>导出译文为 LPtxt...</translation>
+        <translation>导出译文为 LPtxt……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="725" />
@@ -6545,7 +6545,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="793" />
         <source>Video translator...</source>
-        <translation>视频翻译器...</translation>
+        <translation>视频翻译器……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="794" />
@@ -6555,7 +6555,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="797" />
         <source>Translate subtitle file…</source>
-        <translation>翻译字幕文件...</translation>
+        <translation>翻译字幕文件……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="799" />
@@ -6565,7 +6565,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="803" />
         <source>Video Subtitle Editor...</source>
-        <translation>视频字幕编辑器...</translation>
+        <translation>视频字幕编辑器……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="804" />
@@ -6585,7 +6585,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="834" />
         <source>Search: menus, settings, canvas…</source>
-        <translation>搜索：菜单、设置、画布…</translation>
+        <translation>搜索：菜单、设置、画布……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="880" />
@@ -6595,12 +6595,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="1267" />
         <source>Open Folder ...</source>
-        <translation>打开文件夹...</translation>
+        <translation>打开文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="1269" />
         <source>Open Images ...</source>
-        <translation>打开图片...</translation>
+        <translation>打开图片……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="1271" />
@@ -6625,7 +6625,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="1287" />
         <source>Export current page as...</source>
-        <translation>导出当前页为...</translation>
+        <translation>导出当前页为……</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="1289" />
@@ -6759,7 +6759,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/module_parse_widgets.py" line="442" />
         <source>Translation context (project)...</source>
-        <translation>翻译上下文（项目）...</translation>
+        <translation>翻译上下文（项目）……</translation>
     </message>
     <message>
         <location filename="../ui/module_parse_widgets.py" line="443" />
@@ -6843,32 +6843,32 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="213" />
         <source>Open video...</source>
-        <translation>打开视频...</translation>
+        <translation>打开视频……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="216" />
         <source>Load subtitles...</source>
-        <translation>加载字幕...</translation>
+        <translation>加载字幕……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="220" />
         <source>Save SRT...</source>
-        <translation>保存 SRT...</translation>
+        <translation>保存 SRT……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="223" />
         <source>Export ASS...</source>
-        <translation>出口ASS...</translation>
+        <translation>出口ASS……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="226" />
         <source>Export WebVTT...</source>
-        <translation>导出 WebVTT...</translation>
+        <translation>导出 WebVTT……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="230" />
         <source>Render video (burn subtitles)...</source>
-        <translation>渲染视频（刻录字幕）...</translation>
+        <translation>渲染视频（刻录字幕）……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="234" />
@@ -6890,7 +6890,7 @@ Continue with advanced-only packages?</source>
         <location filename="../ui/video_subtitle_editor.py" line="657" />
         <location filename="../ui/video_subtitle_editor.py" line="259" />
         <source>Play</source>
-        <translation>玩</translation>
+        <translation>播放</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="281" />
@@ -6945,7 +6945,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="315" />
         <source>In:</source>
-        <translation>在：</translation>
+        <translation>入点：</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="317" />
@@ -6961,7 +6961,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="323" />
         <source>Out:</source>
-        <translation>出去：</translation>
+        <translation>出点：</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="325" />
@@ -6976,7 +6976,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="337" />
         <source>Crop % (L,T,R,B):</source>
-        <translation>作物百分比（长、T、R、B）：</translation>
+        <translation>裁剪比例 (左,上,右,下)：</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="367" />
@@ -7164,7 +7164,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="809" />
         <source>Rendering video...</source>
-        <translation>渲染视频...</translation>
+        <translation>渲染视频……</translation>
     </message>
     <message>
         <location filename="../ui/video_subtitle_editor.py" line="809" />
@@ -7216,7 +7216,7 @@ Continue with advanced-only packages?</source>
         <location filename="../ui/video_translator_dialog.py" line="3207" />
         <location filename="../ui/video_translator_dialog.py" line="3199" />
         <source>Browse...</source>
-        <translation>浏览...</translation>
+        <translation>浏览……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3202" />
@@ -7246,12 +7246,12 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3225" />
         <source>Add files...</source>
-        <translation>添加文件...</translation>
+        <translation>添加文件……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3227" />
         <source>Add folder...</source>
-        <translation>添加文件夹...</translation>
+        <translation>添加文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3229" />
@@ -7321,7 +7321,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3292" />
         <source>ja, en, zh, ...</source>
-        <translation>日文、日文、日文、...</translation>
+        <translation>日文、日文、日文、……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3296" />
@@ -7336,7 +7336,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3301" />
         <source>Smart sentence break (LLM)</source>
-        <translation>智能断句（法学硕士）</translation>
+        <translation>智能断句（LLM/大模型）</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3304" />
@@ -7988,12 +7988,12 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3803" />
         <source>Terminology, names, script excerpt or correction hints…</source>
-        <translation>术语、名称、脚本摘录或更正提示……</translation>
+        <translation>术语、名称、脚本摘录或更正提示………</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3805" />
         <source>Optional. Sent to the LLM for OCR/ASR correction and translation (e.g. terms, names, script excerpt). VideoCaptioner-style.</source>
-        <translation>选修的。发送至法学硕士进行 OCR/ASR 更正和翻译（例如术语、名称、脚本摘录）。 VideoCaptioner 风格。</translation>
+        <translation>可选。发送到大模型进行 OCR/ASR 更正和翻译（例如术语、名称、脚本摘录）。 VideoCaptioner 风格。</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3809" />
@@ -8078,7 +8078,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3875" />
         <source>Flow fixer (optional)</source>
-        <translation>流动固定器（可选）</translation>
+        <translation>语序润色（可选）</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3877" />
@@ -8233,7 +8233,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3958" />
         <source>Reasoning effort:</source>
-        <translation>推理努力：</translation>
+        <translation>推理强度：</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="3965" />
@@ -8353,7 +8353,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4087" />
         <source>View history…</source>
-        <translation>查看历史记录...</translation>
+        <translation>查看历史记录……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4088" />
@@ -8363,7 +8363,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4090" />
         <source>A/B compare models…</source>
-        <translation>A/B 比较模型...</translation>
+        <translation>A/B 比较模型……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4091" />
@@ -8378,7 +8378,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4124" />
         <source>Edit subtitles...</source>
-        <translation>编辑字幕...</translation>
+        <translation>编辑字幕……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4125" />
@@ -8490,7 +8490,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4552" />
         <source>Running pipeline...</source>
-        <translation>正在运行的管道...</translation>
+        <translation>正在运行的管道……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="4696" />
@@ -8671,7 +8671,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/video_translator_dialog.py" line="5029" />
         <source>A/B compare running...</source>
-        <translation>A/B 比较运行...</translation>
+        <translation>A/B 比较运行……</translation>
     </message>
     <message>
         <location filename="../ui/video_translator_dialog.py" line="5067" />
@@ -8746,7 +8746,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/welcome_widget.py" line="172" />
         <source>Open folder…</source>
-        <translation>打开文件夹...</translation>
+        <translation>打开文件夹……</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="173" />
@@ -8756,7 +8756,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/welcome_widget.py" line="179" />
         <source>Open project…</source>
-        <translation>打开项目...</translation>
+        <translation>打开项目……</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="180" />
@@ -8766,7 +8766,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/welcome_widget.py" line="186" />
         <source>Open images…</source>
-        <translation>打开图像...</translation>
+        <translation>打开图像……</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="187" />
@@ -8776,7 +8776,7 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/welcome_widget.py" line="193" />
         <source>Open ACBF/CBZ…</source>
-        <translation>打开ACBF/CBZ…</translation>
+        <translation>打开ACBF/CBZ……</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="194" />
