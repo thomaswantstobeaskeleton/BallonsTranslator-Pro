@@ -5161,7 +5161,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="103" />
         <source>Apply</source>
-        <translation>申请</translation>
+        <translation>应用</translation>
     </message>
     <message>
         <location filename="../ui/shortcuts_dialog.py" line="107" />
@@ -5992,7 +5992,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/theme_customizer_dialog.py" line="118" />
         <source>Apply</source>
-        <translation>申请</translation>
+        <translation>应用</translation>
     </message>
     <message>
         <location filename="../ui/theme_customizer_dialog.py" line="120" />
@@ -6580,7 +6580,7 @@ Continue with advanced-only packages?</source>
     <message>
         <location filename="../ui/mainwindowbars.py" line="827" />
         <source>BallonsTranslatorPro</source>
-        <translation>气球翻译器Pro</translation>
+        <translation>BallonsTranslator Pro</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="834" />
@@ -8731,12 +8731,12 @@ At 30 fps: use 1 to never miss text (every frame); 2–3 to catch quickly with l
     <message>
         <location filename="../ui/welcome_widget.py" line="155" />
         <source>BallonsTranslator Pro</source>
-        <translation>气球翻译专业版</translation>
+        <translation>BallonsTranslator Pro</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="160" />
         <source>Open a project folder or choose a recent one to start.</source>
-        <translation>打开项目文件夹或选择最近的一个来启动。</translation>
+        <translation>打开项目文件夹或选择最近的一个来启动</translation>
     </message>
     <message>
         <location filename="../ui/welcome_widget.py" line="168" />
