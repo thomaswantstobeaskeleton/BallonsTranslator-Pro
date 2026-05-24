@@ -410,6 +410,9 @@ class ConfigPanel(Widget):
     display_lang_changed = Signal(str)
     dev_mode_changed = Signal()
     manual_mode_changed = Signal()
+    ui_mode_changed = Signal(str)
+    legacy_menu_layout_changed = Signal(bool)
+    omni_options_changed = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -674,6 +677,104 @@ class ConfigPanel(Widget):
             discription=self.tr('On startup, when no project is opened, show the welcome screen to open or create a project (manhua-translator / Komakun style).')
         )
         self.show_welcome_screen_checker.stateChanged.connect(self.on_show_welcome_screen_changed)
+
+        self.startup_mode_combo = QComboBox(self)
+        self.startup_mode_combo.addItem(self.tr('Home / Launcher'), 'home')
+        self.startup_mode_combo.addItem(self.tr('Editor'), 'editor')
+        self.startup_mode_combo.addItem(self.tr('Last used workflow'), 'last_used')
+        self.startup_mode_combo.addItem(self.tr('Settings'), 'settings')
+        self.startup_mode_combo.addItem(self.tr('Live translator'), 'live')
+        self.startup_mode_combo.addItem(self.tr('Raw downloader'), 'downloader')
+        self.startup_mode_combo.addItem(self.tr('Batch queue'), 'batch')
+        self.startup_mode_combo.addItem(self.tr('Models hub'), 'models')
+        self.startup_mode_combo.addItem(self.tr('Diagnostics'), 'diagnostics')
+        self.startup_mode_combo.currentIndexChanged.connect(self.on_startup_mode_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.startup_mode_combo,
+            self.tr('Startup mode'),
+            discription=self.tr('Choose which surface opens at startup when no explicit file/path argument is provided.')
+        ))
+
+        self.show_home_on_startup_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Fallback to Home when startup target is unavailable'),
+            discription=self.tr('If last-used/startup target cannot be opened, return to Home instead of staying in an empty editor state.')
+        )
+        self.show_home_on_startup_checker.stateChanged.connect(self.on_show_home_on_startup_changed)
+
+        self.ui_mode_combo = QComboBox(self)
+        self.ui_mode_combo.addItem(self.tr('Simple'), 'simple')
+        self.ui_mode_combo.addItem(self.tr('Advanced'), 'advanced')
+        self.ui_mode_combo.addItem(self.tr('Developer'), 'developer')
+        self.ui_mode_combo.currentIndexChanged.connect(self.on_ui_mode_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.ui_mode_combo,
+            self.tr('UI complexity mode'),
+            discription=self.tr('Simple mode hides advanced/diagnostic-heavy menu actions. Advanced keeps full standard menus. Developer keeps all actions.')
+        ))
+
+        self.show_legacy_menus_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Show legacy menu layout'),
+            discription=self.tr('Keep the existing menu structure visible while workflow-centered navigation is rolled out.')
+        )
+        self.show_legacy_menus_checker.stateChanged.connect(self.on_show_legacy_menus_changed)
+
+        self.omni_show_unavailable_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Omni-search: show unavailable commands'),
+            discription=self.tr('Include disabled commands in command search results with a reason why they are unavailable.')
+        )
+        self.omni_show_unavailable_checker.stateChanged.connect(self.on_omni_show_unavailable_changed)
+
+        self.omni_type_filter_combo = QComboBox(self)
+        self.omni_type_filter_combo.addItem(self.tr('All'), 'all')
+        self.omni_type_filter_combo.addItem(self.tr('Commands'), 'command')
+        self.omni_type_filter_combo.addItem(self.tr('Settings'), 'setting')
+        self.omni_type_filter_combo.addItem(self.tr('Text blocks'), 'text_block')
+        self.omni_type_filter_combo.addItem(self.tr('Page'), 'page')
+        self.omni_type_filter_combo.addItem(self.tr('Recent'), 'recent')
+        self.omni_type_filter_combo.addItem(self.tr('Help'), 'help')
+        self.omni_type_filter_combo.currentIndexChanged.connect(self.on_omni_result_type_filter_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.omni_type_filter_combo,
+            self.tr('Omni-search default result filter'),
+            discription=self.tr('Choose the default result type shown in omni-search.')
+        ))
+
+        self.realtime_profile_combo = QComboBox(self)
+        self.realtime_profile_combo.addItem(self.tr('Chrome Manhua Reader'), 'chrome_manhua_reader')
+        self.realtime_profile_combo.addItem(self.tr('Manga Reader'), 'manga_reader')
+        self.realtime_profile_combo.addItem(self.tr('Generic Screen OCR'), 'generic_screen_ocr')
+        self.realtime_profile_combo.currentIndexChanged.connect(self.on_realtime_profile_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.realtime_profile_combo,
+            self.tr('Live Translator profile'),
+            discription=self.tr('Default profile for Realtime Screen Translator startup behavior.')
+        ))
+
+        self.realtime_capture_interval_spin = QSpinBox(self)
+        self.realtime_capture_interval_spin.setRange(100, 5000)
+        self.realtime_capture_interval_spin.setSingleStep(50)
+        self.realtime_capture_interval_spin.valueChanged.connect(self.on_realtime_capture_interval_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.realtime_capture_interval_spin,
+            self.tr('Live capture interval (ms)'),
+            discription=self.tr('Default screenshot capture interval for Live Translator.')
+        ))
+
+        self.realtime_min_ocr_interval_spin = QSpinBox(self)
+        self.realtime_min_ocr_interval_spin.setRange(0, 5000)
+        self.realtime_min_ocr_interval_spin.setSingleStep(50)
+        self.realtime_min_ocr_interval_spin.valueChanged.connect(self.on_realtime_min_ocr_interval_changed)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            self.realtime_min_ocr_interval_spin,
+            self.tr('Live min OCR interval (ms)'),
+            discription=self.tr('Debounce OCR runs in Live Translator to reduce repeated OCR calls.')
+        ))
+
+        self.realtime_follow_window_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Live Translator: follow selected window by default'),
+            discription=self.tr('When enabled, Live Translator follows selected window position when backend support is available.')
+        )
+        self.realtime_follow_window_checker.stateChanged.connect(self.on_realtime_follow_window_changed)
 
         self.auto_update_from_github_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Auto update from GitHub on startup'),
@@ -1670,6 +1771,46 @@ class ConfigPanel(Widget):
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
 
+    def on_startup_mode_changed(self):
+        pcfg.startup_mode = str(self.startup_mode_combo.currentData() or 'last_used')
+        self._refresh_startup_mode_dependent_ui()
+
+    def on_show_home_on_startup_changed(self):
+        pcfg.show_home_on_startup = self.show_home_on_startup_checker.isChecked()
+
+    def on_ui_mode_changed(self):
+        pcfg.ui_mode = str(self.ui_mode_combo.currentData() or 'advanced')
+        self.ui_mode_changed.emit(pcfg.ui_mode)
+
+    def on_show_legacy_menus_changed(self):
+        pcfg.show_legacy_menus = self.show_legacy_menus_checker.isChecked()
+        self.legacy_menu_layout_changed.emit(bool(pcfg.show_legacy_menus))
+
+    def on_omni_show_unavailable_changed(self):
+        pcfg.omni_show_unavailable = self.omni_show_unavailable_checker.isChecked()
+        self.omni_options_changed.emit()
+
+    def on_omni_result_type_filter_changed(self):
+        pcfg.omni_result_type_filter = str(self.omni_type_filter_combo.currentData() or "all")
+        self.omni_options_changed.emit()
+
+    def on_realtime_profile_changed(self):
+        pcfg.realtime_profile_id = str(self.realtime_profile_combo.currentData() or "generic_screen_ocr")
+
+    def on_realtime_capture_interval_changed(self):
+        pcfg.realtime_capture_interval_ms = int(self.realtime_capture_interval_spin.value())
+
+    def on_realtime_min_ocr_interval_changed(self):
+        pcfg.realtime_min_ocr_interval_ms = int(self.realtime_min_ocr_interval_spin.value())
+
+    def on_realtime_follow_window_changed(self):
+        pcfg.realtime_follow_window = bool(self.realtime_follow_window_checker.isChecked())
+
+    def _refresh_startup_mode_dependent_ui(self):
+        mode = str(getattr(pcfg, 'startup_mode', 'last_used') or 'last_used')
+        # Fallback toggle is only meaningful when startup target may be unavailable.
+        self.show_home_on_startup_checker.setEnabled(mode in ('last_used', 'editor', 'settings', 'live', 'downloader', 'batch', 'models', 'diagnostics'))
+
     def on_show_welcome_screen_changed(self):
         pcfg.show_welcome_screen = self.show_welcome_screen_checker.isChecked()
 
@@ -2616,6 +2757,29 @@ class ConfigPanel(Widget):
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
         self.recent_proj_list_max_spin.setValue(getattr(pcfg, 'recent_proj_list_max', 14))
         self.show_welcome_screen_checker.setChecked(getattr(pcfg, 'show_welcome_screen', True))
+        startup_mode = str(getattr(pcfg, 'startup_mode', 'last_used') or 'last_used')
+        sm_idx = self.startup_mode_combo.findData(startup_mode)
+        if sm_idx < 0:
+            sm_idx = self.startup_mode_combo.findData('last_used')
+        self.startup_mode_combo.setCurrentIndex(max(0, sm_idx))
+        self.show_home_on_startup_checker.setChecked(bool(getattr(pcfg, 'show_home_on_startup', True)))
+        ui_mode = str(getattr(pcfg, 'ui_mode', 'advanced') or 'advanced')
+        ui_idx = self.ui_mode_combo.findData(ui_mode)
+        if ui_idx < 0:
+            ui_idx = self.ui_mode_combo.findData('advanced')
+        self.ui_mode_combo.setCurrentIndex(max(0, ui_idx))
+        self.show_legacy_menus_checker.setChecked(bool(getattr(pcfg, 'show_legacy_menus', True)))
+        self.omni_show_unavailable_checker.setChecked(bool(getattr(pcfg, 'omni_show_unavailable', False)))
+        _ot = str(getattr(pcfg, 'omni_result_type_filter', 'all') or 'all')
+        _ot_idx = self.omni_type_filter_combo.findData(_ot)
+        self.omni_type_filter_combo.setCurrentIndex(_ot_idx if _ot_idx >= 0 else 0)
+        _rtp = str(getattr(pcfg, 'realtime_profile_id', 'generic_screen_ocr') or 'generic_screen_ocr')
+        _rtp_idx = self.realtime_profile_combo.findData(_rtp)
+        self.realtime_profile_combo.setCurrentIndex(_rtp_idx if _rtp_idx >= 0 else self.realtime_profile_combo.findData('generic_screen_ocr'))
+        self.realtime_capture_interval_spin.setValue(int(getattr(pcfg, 'realtime_capture_interval_ms', 700) or 700))
+        self.realtime_min_ocr_interval_spin.setValue(int(getattr(pcfg, 'realtime_min_ocr_interval_ms', 0) or 0))
+        self.realtime_follow_window_checker.setChecked(bool(getattr(pcfg, 'realtime_follow_window', False)))
+        self._refresh_startup_mode_dependent_ui()
         self.show_model_download_result_dialog_checker.setChecked(getattr(pcfg, 'show_model_download_result_dialog', True))
         self.show_startup_health_dialog_checker.setChecked(getattr(pcfg, 'show_startup_health_dialog', True))
         self.dev_mode_checker.setChecked(getattr(pcfg, 'dev_mode', False))

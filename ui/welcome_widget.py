@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Welcome / first-start screen when no project is open.
-Inspired by manhua-translator and Komakun: select or create project from a single, bubbly welcome view.
+Inspired by manhua-translator, Komakun, Dango-style workflow cards, and ImageTrans-style production entry points.
 """
 import os.path as osp
 
@@ -20,6 +20,9 @@ from qtpy.QtCore import Qt, Signal, QTimer
 from .custom_widget import Widget
 from .custom_widget.push_button import NoBorderPushBtn
 from .custom_widget.helper import isDarkTheme
+from .workflow_home import WorkflowHomeWidget
+from .default_modern_shell import install_default_modern_navigation, install_default_welcome_signal_fallbacks
+from .default_mode_dashboards import install_default_mode_dashboards
 
 
 def _welcome_stylesheet(dark: bool) -> str:
@@ -122,12 +125,18 @@ class WelcomeCard(QFrame):
 
 
 class WelcomeWidget(Widget):
-    """First-start / welcome screen: open or create project, recent projects list."""
+    """First-start / welcome screen: open projects, choose workflows, and resume recent work."""
     open_folder_requested = Signal()
     open_project_requested = Signal(str)
     open_images_requested = Signal()
     open_acbf_requested = Signal()
     recent_project_clicked = Signal(str)
+    open_live_requested = Signal()
+    open_downloader_requested = Signal()
+    open_batch_requested = Signal()
+    open_models_requested = Signal()
+    open_diagnostics_requested = Signal()
+    open_assist_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -135,6 +144,10 @@ class WelcomeWidget(Widget):
         self._recent_buttons = []
         self._build_ui()
         self._update_styles()
+        # Install the new default shell even if the welcome page is not shown
+        # (for example, direct-open project startup).  The installer is idempotent
+        # and safely no-ops until MainWindow's layout exists.
+        QTimer.singleShot(0, self._install_default_modern_shell)
 
     def _update_styles(self):
         """Apply cohesive light/dark styles from current theme."""
@@ -145,6 +158,16 @@ class WelcomeWidget(Widget):
         # Defer stylesheet update to avoid QPainter conflicts with QGraphicsOpacityEffect
         # during the show/paint cycle (fixes "paint device can only be painted by one painter" spam).
         QTimer.singleShot(0, self._update_styles)
+        QTimer.singleShot(0, self._install_default_modern_shell)
+
+    def _install_default_modern_shell(self):
+        """Promote the modern navigation shell into the default app layout."""
+        mainwindow = self.window()
+        if mainwindow is self:
+            mainwindow = self.parentWidget()
+        install_default_welcome_signal_fallbacks(self, mainwindow)
+        install_default_modern_navigation(mainwindow)
+        install_default_mode_dashboards(mainwindow)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -157,7 +180,7 @@ class WelcomeWidget(Widget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        subtitle = QLabel(self.tr("Open a project folder or choose a recent one to start."))
+        subtitle = QLabel(self.tr("Choose a workflow to begin, or open a recent project."))
         subtitle.setObjectName("WelcomeSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
@@ -201,6 +224,12 @@ class WelcomeWidget(Widget):
         actions_card.addLayout(btn_layout)
         layout.addWidget(actions_card)
 
+        # Dango-style workflow cards.  Kept as a standalone widget so the final
+        # app-shell rework can promote it without rewriting the welcome screen.
+        self._workflow_home = WorkflowHomeWidget(parent=self)
+        self._workflow_home.workflow_requested.connect(self._on_workflow_requested)
+        layout.addWidget(self._workflow_home)
+
         # Recent projects card
         self._recent_card = WelcomeCard(self.tr("Recent projects"), self)
         self._recent_scroll = QScrollArea()
@@ -222,6 +251,26 @@ class WelcomeWidget(Widget):
         layout.addWidget(self._recent_card)
 
         layout.addStretch()
+
+    def _on_workflow_requested(self, key: str):
+        if key == "editor":
+            self._on_open_folder()
+        elif key == "live":
+            self.open_live_requested.emit()
+        elif key == "quick_image":
+            self.open_images_requested.emit()
+        elif key == "downloader":
+            self.open_downloader_requested.emit()
+        elif key == "batch":
+            self.open_batch_requested.emit()
+        elif key == "assist":
+            self.open_assist_requested.emit()
+        elif key == "models":
+            self.open_models_requested.emit()
+        elif key == "diagnostics":
+            self.open_diagnostics_requested.emit()
+        else:
+            self._on_open_folder()
 
     def _on_open_folder(self):
         self.open_folder_requested.emit()

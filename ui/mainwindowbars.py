@@ -36,6 +36,7 @@ from .framelesswindow import FramelessMoveResize
 from utils.config import pcfg
 from utils import shared as C
 from utils.shortcuts import get_shortcut
+from .action_registry import ActionRegistry
 if C.FLAG_QT6:
     from qtpy.QtGui import QAction
 else:
@@ -184,7 +185,7 @@ class LeftBar(Widget):
         openMenu.addMenu(self.recentMenu)
         openMenu.addSeparator()
         actionCloseProject = QAction(self.tr("Close project and go to welcome screen"), self)
-        actionCloseProject.triggered.connect(self.close_project_requested.emit)
+        self.close_project_requested = actionCloseProject.triggered
         openMenu.addAction(actionCloseProject)
         openMenu.addSeparator()
         openMenu.addAction(actionSaveProj)
@@ -249,12 +250,7 @@ class LeftBar(Widget):
         self._run_btn_pulse_down.setStartValue(up_sz)
         self._run_btn_pulse_down.setEndValue(icon_sz)
 
-    def apply_shortcuts(self, shortcuts_dict):
-        """Apply keyboard shortcuts from config (action_id -> key string)."""
-        from qtpy.QtGui import QKeySequence
-        for action_id, default_key, action in self._shortcut_actions_left:
-            key = (shortcuts_dict or {}).get(action_id) or default_key
-            action.setShortcut(QKeySequence.fromString(key) if key else QKeySequence())
+
 
     def initRecentProjMenu(self, proj_list: List[str]):
         self.recent_proj_list = proj_list
@@ -719,6 +715,14 @@ class TitleBar(Widget):
         exportStartupDiagAction.setToolTip(self.tr('Save startup diagnostics to a text file for support.'))
         self.export_startup_diag_trigger = exportStartupDiagAction.triggered
         openLogFolderAction = QAction(QIcon(osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')), self.tr('Open log folder'), self)
+        exportActionRegistryAction = QAction(self.tr('Export action registry...'), self)
+        exportActionRegistryAction.setToolTip(self.tr('Export all registered menu/command metadata to JSON for UI audit and migration checks.'))
+        self.export_action_registry_trigger = exportActionRegistryAction.triggered
+        acValidateRegistry = QAction(self.tr('Validate action registry now'), self)
+        acValidateRegistry.setToolTip(self.tr('Show action counts, simple/advanced visibility counts, and duplicate shortcut report.'))
+        self.validate_action_registry_trigger = acValidateRegistry.triggered
+
+        self.validate_action_registry_trigger = acValidateRegistry.triggered
         openLogFolderAction.setToolTip(self.tr('Open logs directory in your file explorer.'))
         self.open_log_folder_trigger = openLogFolderAction.triggered
         relaunchPyQt5Action = QAction(self.tr('Relaunch with PyQt5 (safe mode)'), self)
@@ -878,6 +882,7 @@ class TitleBar(Widget):
         modelsMenu.addAction(runtimeResourceSummaryAction)
         modelsMenu.addAction(exportStartupDiagAction)
         modelsMenu.addAction(openLogFolderAction)
+        modelsMenu.addAction(exportActionRegistryAction)
         modelsMenu.addAction(relaunchPyQt5Action)
         modelsMenu.addAction(relaunchCpuOnlyAction)
         modelsMenu.addSeparator()
@@ -890,6 +895,92 @@ class TitleBar(Widget):
         toolsMenu.addMenu(modelsMenu)
         self.toolsToolBtn.setMenu(toolsMenu)
         self.toolsToolBtn.setPopupMode(QToolButton.InstantPopup)
+
+        # New workflow-oriented top-level menus (non-breaking; legacy Tools remains available)
+        self.translationToolBtn = TitleBarToolBtn(self)
+        self.translationToolBtn.setText(self.tr('Translation'))
+        translationMenu = QMenu(self.translationToolBtn)
+        acTranslatePage = QAction(self.tr('Translate page'), self)
+        self.translate_page_trigger = acTranslatePage.triggered
+        acTranslationAssist = QAction(self.tr('Translation Assist (beta)...'), self)
+        self.translation_assist_trigger = acTranslationAssist.triggered
+        acConcordance = QAction(self.tr('Concordance search (project)...'), self)
+        self.concordance_search_trigger = acConcordance.triggered
+        acTranslationQA = QAction(self.tr('Translation QA report (current page)...'), self)
+        self.translation_qa_report_trigger = acTranslationQA.triggered
+        translationMenu.addActions([acTranslatePage, acTranslationAssist, acConcordance, acTranslationQA])
+        self.translationToolBtn.setMenu(translationMenu)
+        self.translationToolBtn.setPopupMode(QToolButton.InstantPopup)
+
+        self.diagnosticsToolBtn = TitleBarToolBtn(self)
+        self.diagnosticsToolBtn.setText(self.tr('Diagnostics'))
+        diagnosticsMenu = QMenu(self.diagnosticsToolBtn)
+        acEnvDoctor = QAction(self.tr('Environment doctor...'), self)
+        self.environment_doctor_trigger = acEnvDoctor.triggered
+        acStartupDiag = QAction(self.tr('Copy startup diagnostics'), self)
+        self.copy_startup_diag_trigger = acStartupDiag.triggered
+        acRuntimeSummary = QAction(self.tr('Runtime resource summary'), self)
+        self.runtime_resource_summary_trigger = acRuntimeSummary.triggered
+        acExportStartup = QAction(self.tr('Export startup report...'), self)
+        self.export_startup_diag_trigger = acExportStartup.triggered
+        diagnosticsMenu.addActions([acEnvDoctor, acStartupDiag, acRuntimeSummary, acExportStartup, acValidateRegistry])
+        self.diagnosticsToolBtn.setMenu(diagnosticsMenu)
+        self.diagnosticsToolBtn.setPopupMode(QToolButton.InstantPopup)
+
+        self.exportToolBtn = TitleBarToolBtn(self)
+        self.exportToolBtn.setText(self.tr('Export'))
+        exportTopMenu = QMenu(self.exportToolBtn)
+        acExportCurrent = QAction(self.tr('Export current page as...'), self)
+        acExportCurrent.triggered.connect(lambda: getattr(getattr(self.mainwindow, 'leftBar', None), 'export_current_page_as', self.batch_export_trigger).emit())
+        acExportAll = QAction(self.tr('Export all pages'), self)
+        self.batch_export_trigger = acExportAll.triggered
+        acExportAllAs = QAction(self.tr('Export all pages as...'), self)
+        self.batch_export_as_trigger = acExportAllAs.triggered
+        acExportJson = QAction(self.tr('Export translation JSON...'), self)
+        self.export_translation_json_trigger = acExportJson.triggered
+        acExportXliff = QAction(self.tr('Export XLIFF...'), self)
+        self.export_xliff_trigger = acExportXliff.triggered
+        exportTopMenu.addActions([acExportCurrent, acExportAll, acExportAllAs, acExportJson, acExportXliff])
+        self.exportToolBtn.setMenu(exportTopMenu)
+        self.exportToolBtn.setPopupMode(QToolButton.InstantPopup)
+
+        self.modelsToolBtn = TitleBarToolBtn(self)
+        self.modelsToolBtn.setText(self.tr('Models'))
+        modelsTopMenu = QMenu(self.modelsToolBtn)
+        acManageModels = QAction(self.tr('Manage models...'), self)
+        self.manage_models_trigger = acManageModels.triggered
+        acRetryModels = QAction(self.tr('Retry model downloads'), self)
+        self.retry_models_trigger = acRetryModels.triggered
+        acReleaseCaches = QAction(self.tr('Release model caches'), self)
+        self.release_model_caches_trigger = acReleaseCaches.triggered
+        acClearCaches = QAction(self.tr('Clear OCR and translation caches'), self)
+        self.clear_pipeline_caches_trigger = acClearCaches.triggered
+        acExportRegistry = QAction(self.tr('Export action registry...'), self)
+        self.export_action_registry_trigger = acExportRegistry.triggered
+        modelsTopMenu.addActions([acManageModels, acRetryModels, acReleaseCaches, acClearCaches, acExportRegistry])
+        self.modelsToolBtn.setMenu(modelsTopMenu)
+        self.modelsToolBtn.setPopupMode(QToolButton.InstantPopup)
+
+        self.helpToolBtn = TitleBarToolBtn(self)
+        self.helpToolBtn.setText(self.tr('Help'))
+        helpTopMenu = QMenu(self.helpToolBtn)
+        acHelpDoc = QAction(self.tr('Documentation'), self)
+        self.help_doc_trigger = acHelpDoc.triggered
+        acHelpAbout = QAction(self.tr('About'), self)
+        self.help_about_trigger = acHelpAbout.triggered
+        acHelpUpdate = QAction(self.tr('Update from GitHub'), self)
+        self.help_update_from_github_trigger = acHelpUpdate.triggered
+        acFeatureMatrix = QAction(self.tr('Feature matrix / model coverage'), self)
+        self.feature_matrix_trigger = acFeatureMatrix.triggered
+        acHelpShortcuts = QAction(self.tr('Keyboard Shortcuts...'), self)
+        self.keyboard_shortcuts_trigger = acHelpShortcuts.triggered
+        acHelpCtx = QAction(self.tr('Context menu options...'), self)
+        self.context_menu_options_trigger = acHelpCtx.triggered
+        helpTopMenu.addActions([acHelpDoc, acHelpAbout, acHelpUpdate, acFeatureMatrix])
+        helpTopMenu.addSeparator()
+        helpTopMenu.addActions([acHelpShortcuts, acHelpCtx])
+        self.helpToolBtn.setMenu(helpTopMenu)
+        self.helpToolBtn.setPopupMode(QToolButton.InstantPopup)
 
         self.runToolBtn = TitleBarToolBtn(self)
         self.runToolBtn.setObjectName('PipelineRunBtn')
@@ -950,6 +1041,13 @@ class TitleBar(Widget):
         self.run_woupdate_textstyle_trigger = runWoUpdateTextStyle.triggered
         self.translate_page_trigger = translatePageAction.triggered
 
+        self._advanced_action_keywords = (
+            "diagnostics", "doctor", "triage", "qa", "concordance", "profile snapshot",
+            "model", "google font", "relaunch", "cache", "batch queue", "video", "subtitle",
+            "xliff", "json", "csv", "lptxt", "structured ocr", "layered psd", "svg text",
+            "layout review", "lettering workflow", "translation assist", "realtime screen",
+        )
+
         self.iconLabel = QLabel(self)
         if not C.ON_MACOS:
             self.iconLabel.setFixedWidth(LEFTBAR_WIDTH - 12)
@@ -965,6 +1063,9 @@ class TitleBar(Widget):
         self.fileToolBtn.setPopupMode(QToolButton.InstantPopup)
 
         self.titleLabel = QLabel(self.tr('BallonsTranslatorPro'))
+        self.workflowHintLabel = QLabel(self.tr("Workflow: home"))
+        self.workflowHintLabel.setObjectName("WorkflowHintLabel")
+        self.workflowHintLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.titleLabel.setObjectName('TitleLabel')
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -1016,6 +1117,7 @@ class TitleBar(Widget):
             pass
         self.omniSearch.setCompleter(self._omni_completer)
         self._omni_actions_cache = None  # lazily built list of (label, QAction)
+        self._action_registry = ActionRegistry(self)
         
         # Center container: keep title + search aligned to the canvas area (between left/right panes).
         # Use two rows so the title stays visually centered and the search doesn't "steal" its space.
@@ -1026,6 +1128,7 @@ class TitleBar(Widget):
 
         # Row 1: title / project / page label
         self._centerLayout.addWidget(self.titleLabel)
+        self._centerLayout.addWidget(self.workflowHintLabel)
 
         # Row 2: omni search + dropdown button
         self._searchRow = QWidget(self._centerContainer)
@@ -1057,6 +1160,27 @@ class TitleBar(Widget):
 
         self._searchRowLayout.addStretch()
         self._searchRowLayout.addWidget(self._searchToggleBtn, 0)
+        self._omniShowUnavailable = QCheckBox(self.tr("Show unavailable"), self._searchRow)
+        self._omniShowUnavailable.setChecked(bool(getattr(pcfg, "omni_show_unavailable", False)))
+        self._omniShowUnavailable.setToolTip(self.tr("Include disabled commands in results and show why they are unavailable."))
+        self._omniShowUnavailable.stateChanged.connect(self._on_omni_show_unavailable_changed)
+        self._omniShowUnavailable.hide()
+        self._searchRowLayout.addWidget(self._omniShowUnavailable, 0)
+        self._omniTypeFilter = QComboBox(self._searchRow)
+        self._omniTypeFilter.addItem(self.tr("All"), "all")
+        self._omniTypeFilter.addItem(self.tr("Commands"), "command")
+        self._omniTypeFilter.addItem(self.tr("Settings"), "setting")
+        self._omniTypeFilter.addItem(self.tr("Text blocks"), "text_block")
+        self._omniTypeFilter.addItem(self.tr("Page"), "page")
+        self._omniTypeFilter.addItem(self.tr("Recent"), "recent")
+        self._omniTypeFilter.addItem(self.tr("Help"), "help")
+        _rf = str(getattr(pcfg, "omni_result_type_filter", "all") or "all")
+        _ridx = self._omniTypeFilter.findData(_rf)
+        self._omniTypeFilter.setCurrentIndex(_ridx if _ridx >= 0 else 0)
+        self._omniTypeFilter.setToolTip(self.tr("Filter omni-search results by result type."))
+        self._omniTypeFilter.currentIndexChanged.connect(self._on_omni_type_filter_changed)
+        self._omniTypeFilter.hide()
+        self._searchRowLayout.addWidget(self._omniTypeFilter, 0)
         self._searchRowLayout.addWidget(self.omniSearch, 0)
         self._searchRowLayout.addWidget(self._omniDropBtn, 0)
         self._searchRowLayout.addStretch()
@@ -1073,6 +1197,11 @@ class TitleBar(Widget):
         hlayout.addWidget(self.goToolBtn)
         hlayout.addWidget(self.runToolBtn)
         hlayout.addWidget(self.toolsToolBtn)
+        hlayout.addWidget(self.translationToolBtn)
+        hlayout.addWidget(self.diagnosticsToolBtn)
+        hlayout.addWidget(self.exportToolBtn)
+        hlayout.addWidget(self.modelsToolBtn)
+        hlayout.addWidget(self.helpToolBtn)
         hlayout.addStretch()
         hlayout.addWidget(self._centerContainer)
         hlayout.addStretch()
@@ -1095,7 +1224,7 @@ class TitleBar(Widget):
             hlayout.setContentsMargins(0, 0, 0, 0)
             hlayout.setSpacing(0)
 
-        for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn):
+        for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn, self.translationToolBtn, self.diagnosticsToolBtn, self.exportToolBtn, self.modelsToolBtn, self.helpToolBtn):
             install_button_animations(btn, normal_opacity=0.9, press_opacity=0.74, with_scale=True)
 
     def resizeEvent(self, event) -> None:
@@ -1133,6 +1262,8 @@ class TitleBar(Widget):
         else:
             self.omniSearch.show()
             self._omniDropBtn.show()
+            self._omniShowUnavailable.show()
+            self._omniTypeFilter.show()
             self.omniSearch.setFocus(Qt.FocusReason.ShortcutFocusReason)
             self.omniSearch.selectAll()
 
@@ -1147,6 +1278,8 @@ class TitleBar(Widget):
                 pass
             self.omniSearch.hide()
             self._omniDropBtn.hide()
+            self._omniShowUnavailable.hide()
+            self._omniTypeFilter.hide()
 
     def _toggle_omni_search(self):
         expand = not bool(getattr(self, '_searchExpanded', False))
@@ -1156,6 +1289,8 @@ class TitleBar(Widget):
         if expand:
             self.omniSearch.show()
             self._omniDropBtn.show()
+            self._omniShowUnavailable.show()
+            self._omniTypeFilter.show()
             self.omniSearch.setFocus()
             self.omniSearch.selectAll()
         else:
@@ -1172,6 +1307,8 @@ class TitleBar(Widget):
                 def _hide_after():
                     self.omniSearch.hide()
                     self._omniDropBtn.hide()
+                    self._omniShowUnavailable.hide()
+                    self._omniTypeFilter.hide()
                 anim.finished.connect(_hide_after)
             self._search_anim = anim
             anim.start()
@@ -1208,32 +1345,131 @@ class TitleBar(Widget):
             except Exception:
                 continue
 
+
+    def _on_omni_type_filter_changed(self, _index: int):
+        pcfg.omni_result_type_filter = str(self._omniTypeFilter.currentData() or "all")
+        q = (self.omniSearch.text() or "").strip()
+        if q:
+            self._on_omni_search_text_edited(q)
+
+    def _on_omni_show_unavailable_changed(self, state: int):
+        pcfg.omni_show_unavailable = bool(state)
+        self._omni_actions_cache = None
+        q = (self.omniSearch.text() or "").strip()
+        if q:
+            self._on_omni_search_text_edited(q)
+
+    @staticmethod
+    def _fuzzy_match(query: str, text: str) -> bool:
+        q = (query or "").lower().strip()
+        t = (text or "").lower()
+        if not q:
+            return True
+        if q in t:
+            return True
+        qi = 0
+        for ch in t:
+            if qi < len(q) and ch == q[qi]:
+                qi += 1
+                if qi == len(q):
+                    return True
+        return False
+
+    def _registry_meta_for_top_level(self, top_level: str):
+        t = str(top_level or "").lower()
+        category_map = {
+            "file": "File",
+            "edit": "Edit",
+            "view": "View",
+            "go": "Navigation",
+            "pipeline": "Pipeline",
+            "tools": "Developer / Advanced",
+            "translation": "Translation",
+            "diagnostics": "Diagnostics",
+            "export": "Export",
+            "models": "Models",
+            "help": "Help",
+        }
+        workflow_map = {
+            "file": "editor",
+            "edit": "editor",
+            "view": "editor",
+            "go": "editor",
+            "pipeline": "editor",
+            "tools": "advanced",
+            "translation": "editor",
+            "diagnostics": "diagnostics",
+            "export": "editor",
+            "models": "models",
+            "help": "help",
+        }
+        return category_map.get(t, top_level), workflow_map.get(t, "editor")
+
     def _get_actions_cache(self, force_rebuild: bool = False):
         if self._omni_actions_cache is not None and not force_rebuild:
             return self._omni_actions_cache
         actions = []
         try:
-            # Tool buttons hold menus (some are set later, but by the time user searches they should exist)
+            self._action_registry.clear()
             for btn, name in (
                 (getattr(self, "fileToolBtn", None), "File"),
                 (getattr(self, "editToolBtn", None), "Edit"),
                 (getattr(self, "viewToolBtn", None), "View"),
                 (getattr(self, "goToolBtn", None), "Go"),
-                (getattr(self, "runToolBtn", None), "Run"),
+                (getattr(self, "runToolBtn", None), "Pipeline"),
                 (getattr(self, "toolsToolBtn", None), "Tools"),
+                (getattr(self, "translationToolBtn", None), "Translation"),
+                (getattr(self, "diagnosticsToolBtn", None), "Diagnostics"),
+                (getattr(self, "exportToolBtn", None), "Export"),
+                (getattr(self, "modelsToolBtn", None), "Models"),
+                (getattr(self, "helpToolBtn", None), "Help"),
             ):
-                if btn is None:
-                    continue
-                m = btn.menu()
+                m = btn.menu() if btn is not None else None
                 if m is None:
                     continue
-                actions.extend(list(self._walk_menu_actions(m, prefix=f"{name} > ")))
+                self._action_registry.register_menu_tree(name, m, menu_path_prefix=f"{name} > ")
+                # annotate visibility defaults by top-level groups for simple mode
+                for act in m.actions() or []:
+                    pass
+            has_project = bool(getattr(self.mainwindow, "imgtrans_proj", None) and not getattr(self.mainwindow.imgtrans_proj, "is_empty", True))
+            for rec in self._action_registry.all_records():
+                cat, wf = self._registry_meta_for_top_level(rec.top_level)
+                rec.category = cat
+                rec.workflow_mode = wf
+                mp = (rec.menu_path or "").lower()
+                lbl = (rec.label or "").lower()
+                if mp.startswith("diagnostics") or mp.startswith("tools > models"):
+                    rec.simple_mode_visible = False
+                elif mp.startswith("translation") or mp.startswith("export") or mp.startswith("models"):
+                    rec.simple_mode_visible = True
+                else:
+                    rec.simple_mode_visible = True
+
+                # Populate clearer unavailable reasons for project-dependent actions.
+                requires_project = any(k in lbl for k in (
+                    "translate page", "concordance", "layout review", "ocr triage", "translation qa",
+                    "batch find/replace", "export current page", "export all pages", "structured ocr",
+                ))
+                if requires_project and not has_project:
+                    rec.enabled = False
+                    rec.disabled_reason = self.tr("Open a project first to use this command.")
+            actions = list(self._action_registry.discoverable_actions(show_unavailable=bool(getattr(pcfg, "omni_show_unavailable", False))))
         except Exception:
             pass
         self._omni_actions_cache = actions
         return actions
 
+    def _result_type_allowed(self, payload: dict) -> bool:
+        cur = str(getattr(pcfg, "omni_result_type_filter", "all") or "all")
+        if cur == "all":
+            return True
+        ptype = str((payload or {}).get("type") or "").lower()
+        mapping = {"action": "command", "config": "setting", "canvas": "text_block", "ui_text": "page", "recent": "recent", "help": "help"}
+        return mapping.get(ptype, ptype) == cur
+
     def _add_result_item(self, label: str, payload: dict):
+        if not self._result_type_allowed(payload):
+            return
         it = QStandardItem(label)
         it.setEditable(False)
         it.setData(payload, Qt.ItemDataRole.UserRole)
@@ -1250,9 +1486,9 @@ class TitleBar(Widget):
         max_items = 40
 
         # 1) Menu actions
-        for label, act in self._get_actions_cache():
-            if q_low in label.lower():
-                self._add_result_item(label, {"type": "action", "action": act})
+        for label, act, meta in self._get_actions_cache():
+            if self._fuzzy_match(q_low, label):
+                self._add_result_item(label, {"type": "action", "action": act, "enabled": bool(meta.get("enabled", True)), "reason": meta.get("reason", ""), "result_badge": "Command"})
                 n_added += 1
                 if n_added >= max_items:
                     break
@@ -1299,7 +1535,7 @@ class TitleBar(Widget):
                             label = f"{base_label} = {value_str}"
                         hay = f"{base_label} {value_str}".lower()
                         if q_low in hay:
-                            self._add_result_item(label, {"type": "config", "idx0": sb.idx0, "idx1": sb.idx1})
+                            self._add_result_item(f"[Setting] {label}", {"type": "config", "idx0": sb.idx0, "idx1": sb.idx1, "result_badge": "Setting"})
                             n_added += 1
                             if n_added >= max_items:
                                 break
@@ -1326,7 +1562,7 @@ class TitleBar(Widget):
                         if len(short) > 80:
                             short = short[:80] + "…"
                         label = f"Canvas > Block {getattr(it, 'idx', '?')}: {short}"
-                        self._add_result_item(label, {"type": "canvas", "block_idx": int(getattr(it, "idx", -1))})
+                        self._add_result_item(f"[Text block] {label}", {"type": "canvas", "block_idx": int(getattr(it, "idx", -1)), "result_badge": "Text block"})
                         n_added += 1
                         if n_added >= max_items:
                             break
@@ -1353,7 +1589,7 @@ class TitleBar(Widget):
                         bottom_items.append(label)
                     for lbl in bottom_items:
                         if q_low in lbl.lower():
-                            self._add_result_item(f"UI > Bottom bar > {lbl}", {"type": "ui_text", "target": "bottom"})
+                            self._add_result_item(f"[Page] UI > Bottom bar > {lbl}", {"type": "ui_text", "target": "bottom", "result_badge": "Page"})
                             n_added += 1
                             if n_added >= max_items:
                                 break
@@ -1368,7 +1604,7 @@ class TitleBar(Widget):
                         if not txt:
                             continue
                         if q_low in txt.lower():
-                            self._add_result_item(f"UI > Format/Text panel > {txt}", {"type": "ui_text", "target": "text_panel"})
+                            self._add_result_item(f"[Page] UI > Format/Text panel > {txt}", {"type": "ui_text", "target": "text_panel", "result_badge": "Page"})
                             n_added += 1
                             if n_added >= max_items:
                                 break
@@ -1381,7 +1617,7 @@ class TitleBar(Widget):
                             if not label:
                                 continue
                             if q_low in label.lower():
-                                self._add_result_item(f"UI > Format/Text panel > {label}", {"type": "ui_text", "target": "text_panel"})
+                                self._add_result_item(f"[Page] UI > Format/Text panel > {label}", {"type": "ui_text", "target": "text_panel", "result_badge": "Page"})
                                 n_added += 1
                                 if n_added >= max_items:
                                     break
@@ -1421,8 +1657,8 @@ class TitleBar(Widget):
                 # Show a short list of menu actions as a starting point.
                 self._omni_model.clear()
                 n = 0
-                for label, act in self._get_actions_cache():
-                    self._add_result_item(label, {"type": "action", "action": act})
+                for label, act, meta in self._get_actions_cache():
+                    self._add_result_item(label, {"type": "action", "action": act, "enabled": bool(meta.get("enabled", True)), "reason": meta.get("reason", ""), "result_badge": "Command"})
                     n += 1
                     if n >= 30:
                         break
@@ -1495,6 +1731,10 @@ class TitleBar(Widget):
             try:
                 t = payload.get("type")
                 if t == "action":
+                    if not bool(payload.get("enabled", True)):
+                        reason = payload.get("reason") or self.tr("Action is unavailable right now.")
+                        QMessageBox.information(self, self.tr("Unavailable command"), reason)
+                        return
                     act = payload.get("action")
                     if act is not None and hasattr(act, "trigger"):
                         act.trigger()
@@ -1514,6 +1754,18 @@ class TitleBar(Widget):
                     elif target == "bottom":
                         if hasattr(self.mainwindow, "setupImgTransUI"):
                             self.mainwindow.setupImgTransUI()
+                elif t == "recent":
+                    path = str(payload.get("path") or "").strip()
+                    if path and hasattr(self.mainwindow, "OpenProj"):
+                        self.mainwindow.OpenProj(path)
+                elif t == "help":
+                    hid = str(payload.get("help_id") or "")
+                    if hid == "help_doc" and hasattr(self.mainwindow, "on_help_documentation"):
+                        self.mainwindow.on_help_documentation()
+                    elif hid == "help_about" and hasattr(self.mainwindow, "on_help_about"):
+                        self.mainwindow.on_help_about()
+                    elif hid == "help_shortcuts" and hasattr(self.mainwindow, "open_shortcuts_dialog"):
+                        self.mainwindow.open_shortcuts_dialog()
             except Exception:
                 pass
 
@@ -1576,6 +1828,59 @@ class TitleBar(Widget):
         fileMenu.addMenu(importMenu)
         self.fileToolBtn.setMenu(fileMenu)
         self._omni_actions_cache = None
+
+
+
+    def apply_legacy_menu_layout(self, enabled: bool):
+        """Toggle visibility of legacy catch-all Tools menu during phased IA migration."""
+        try:
+            self.toolsToolBtn.setVisible(bool(enabled))
+            if not enabled:
+                self.toolsToolBtn.setToolTip(self.tr("Legacy Tools menu hidden; use Translation/Diagnostics/Export/Models."))
+            else:
+                self.toolsToolBtn.setToolTip("")
+            self._omni_actions_cache = None
+        except Exception:
+            pass
+
+    def apply_ui_mode_visibility(self, ui_mode: str):
+        """Simple mode hides advanced actions without changing handlers or shortcuts."""
+        mode = str(ui_mode or "advanced").lower()
+        show_all = mode in ("advanced", "developer")
+
+        def _apply_menu(menu):
+            if menu is None:
+                return
+            for action in menu.actions() or []:
+                sub = action.menu()
+                if sub is not None:
+                    _apply_menu(sub)
+                    continue
+                rec = self._action_registry.record_for_action(action)
+                if rec is not None:
+                    action.setVisible(bool(rec.advanced_mode_visible if show_all else rec.simple_mode_visible))
+                else:
+                    text = (action.text() or "").lower()
+                    is_advanced = any(k in text for k in self._advanced_action_keywords)
+                    action.setVisible(show_all or not is_advanced)
+
+        try:
+            for btn in (self.fileToolBtn, self.editToolBtn, self.viewToolBtn, self.goToolBtn, self.runToolBtn, self.toolsToolBtn, self.translationToolBtn, self.diagnosticsToolBtn, self.exportToolBtn, self.modelsToolBtn, self.helpToolBtn):
+                _apply_menu(btn.menu() if btn is not None else None)
+
+            # In simple mode, keep navigation light by hiding Go menu button.
+            self.goToolBtn.setVisible(show_all)
+            self.diagnosticsToolBtn.setVisible(show_all)
+            self.modelsToolBtn.setVisible(True)
+            self.exportToolBtn.setVisible(True)
+            self.helpToolBtn.setVisible(True)
+            if mode == "simple":
+                self.toolsToolBtn.setToolTip(self.tr("Tools (simple mode hides advanced actions)"))
+            else:
+                self.toolsToolBtn.setToolTip("")
+            self._omni_actions_cache = None
+        except Exception:
+            pass
 
     def apply_shortcuts(self, shortcuts_dict):
         """Apply shortcuts to title-bar menu actions without duplicating MainWindow shortcuts.
@@ -1692,6 +1997,20 @@ class TitleBar(Widget):
     def leaveEvent(self, e) -> None:
         self.mPos = None
         return super().leaveEvent(e)
+
+    def set_workflow_hint(self, workflow_id: str):
+        wf = str(workflow_id or "home").strip().lower() or "home"
+        labels = {
+            "home": self.tr("Home / Launcher"),
+            "editor": self.tr("Manga Editor"),
+            "settings": self.tr("Settings"),
+            "live": self.tr("Live Translator"),
+            "downloader": self.tr("Raw Downloader"),
+            "batch": self.tr("Batch Queue"),
+            "models": self.tr("Models"),
+            "diagnostics": self.tr("Diagnostics"),
+        }
+        self.workflowHintLabel.setText(self.tr("Workflow: {0}").format(labels.get(wf, wf)))
 
     def setTitleContent(self, proj_name: str = None, page_name: str = None, save_state: str = None):
         max_proj_len = 50

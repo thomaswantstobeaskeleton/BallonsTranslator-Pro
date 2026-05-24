@@ -97,6 +97,109 @@
       "size_estimate": "~30 MB",
       "required_deps": [],
       "support_tier": "advanced"
+    },
+    {
+      "module_key": "ysg_comic_text_segmenter_v8m",
+      "category": "textdetector",
+      "size_estimate": "~210 MB",
+      "required_deps": [
+        "ultralytics"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "ysg_comic_speech_bubble_v8m",
+      "category": "textdetector",
+      "size_estimate": "~210 MB",
+      "required_deps": [
+        "ultralytics"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "mangalens_bubble_segmentation",
+      "category": "textdetector",
+      "size_estimate": "~1.2 GB",
+      "required_deps": [
+        "torch",
+        "transformers"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "sam2_1_hiera_large",
+      "category": "textdetector",
+      "size_estimate": "~1.1 GB",
+      "required_deps": [
+        "torch",
+        "transformers"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "sam3_hiera_large",
+      "category": "textdetector",
+      "size_estimate": "~1.3 GB",
+      "required_deps": [
+        "torch",
+        "transformers"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "flux1_kontext_inpaint",
+      "category": "inpaint",
+      "size_estimate": "~12 GB",
+      "required_deps": [
+        "diffusers",
+        "torch"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "flux2_klein_inpaint",
+      "category": "inpaint",
+      "size_estimate": "~8 GB",
+      "required_deps": [
+        "diffusers",
+        "torch"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "opencv_inpaint_fast",
+      "category": "inpaint",
+      "size_estimate": "~0 MB",
+      "required_deps": [],
+      "support_tier": "core"
+    },
+    {
+      "module_key": "paddleocr_vl_1_5",
+      "category": "ocr",
+      "size_estimate": "~2.0 GB",
+      "required_deps": [
+        "transformers",
+        "torch"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "realcugan_upscaler",
+      "category": "upscale",
+      "size_estimate": "~70 MB",
+      "required_deps": [
+        "onnxruntime"
+      ],
+      "support_tier": "community"
+    },
+    {
+      "module_key": "anime_sharp_v4_x2",
+      "category": "upscale",
+      "size_estimate": "~95 MB",
+      "required_deps": [
+        "onnxruntime"
+      ],
+      "support_tier": "community"
     }
   ],
   "packages": [
@@ -181,6 +284,57 @@
         {
           "category": "_optional_onnx",
           "module_key": null
+        }
+      ]
+    },
+    {
+      "id": "community_showcase",
+      "label": "Community showcase models",
+      "description": "Optional community models shown in project feature screenshots (segmentation, inpaint, OCR-VL, upscaling).",
+      "modules": [
+        {
+          "category": "textdetector",
+          "module_key": "ysg_comic_text_segmenter_v8m"
+        },
+        {
+          "category": "textdetector",
+          "module_key": "ysg_comic_speech_bubble_v8m"
+        },
+        {
+          "category": "textdetector",
+          "module_key": "mangalens_bubble_segmentation"
+        },
+        {
+          "category": "textdetector",
+          "module_key": "sam2_1_hiera_large"
+        },
+        {
+          "category": "textdetector",
+          "module_key": "sam3_hiera_large"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "flux1_kontext_inpaint"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "flux2_klein_inpaint"
+        },
+        {
+          "category": "inpaint",
+          "module_key": "opencv_inpaint_fast"
+        },
+        {
+          "category": "ocr",
+          "module_key": "paddleocr_vl_1_5"
+        },
+        {
+          "category": "upscale",
+          "module_key": "realcugan_upscaler"
+        },
+        {
+          "category": "upscale",
+          "module_key": "anime_sharp_v4_x2"
         }
       ]
     }

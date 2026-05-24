@@ -36,6 +36,29 @@ def test_candidate_layout_widths_include_balanced_shape_specific_widths():
     assert any(145 <= width <= 175 for width in widths)
 
 
+def test_rectangle_alias_uses_simple_box_width_candidates():
+    square = candidate_layout_widths(
+        max_width=240,
+        min_width=60,
+        words_width=520,
+        delimiter_total_width=40,
+        line_height=24,
+        target_box_height=120,
+        balloon_shape="square",
+    )
+    rectangle = candidate_layout_widths(
+        max_width=240,
+        min_width=60,
+        words_width=520,
+        delimiter_total_width=40,
+        line_height=24,
+        target_box_height=120,
+        balloon_shape="rectangle",
+    )
+
+    assert rectangle == square
+
+
 def test_target_line_count_responds_to_tall_narrow_bubbles():
     wide = estimate_target_line_count(480, 24, 240, 80, "elongated")
     narrow = estimate_target_line_count(480, 24, 120, 240, "narrow")
@@ -96,23 +119,28 @@ def test_auto_layout_profile_defaults_cover_advanced_knobs():
         "layout_stub_penalty_1word",
     }
     assert expected <= set(balanced)
+    assert balanced["layout_balloon_shape"] == "square"
+    assert fit["layout_balloon_shape"] == "square"
+    assert readable["layout_balloon_shape"] == "square"
     assert balanced["layout_balloon_shape_auto_method"] == "contour_ratio"
     assert balanced["layout_balloon_shape_model_id"] == ""
     assert fit["layout_height_overflow_penalty"] > balanced["layout_height_overflow_penalty"]
     assert readable["layout_font_size_min"] > balanced["layout_font_size_min"]
-    assert "Balanced" in auto_layout_profile_summary("balanced")
+    assert "rectangular text boxes" in auto_layout_profile_summary("balanced")
 
 
 def test_apply_auto_layout_profile_updates_config_like_object():
     class Cfg:
         layout_auto_preset = "balanced"
         layout_font_size_min = 1.0
+        layout_balloon_shape = "auto"
         layout_balloon_shape_model_id = "old/model"
 
     cfg = Cfg()
     applied = apply_auto_layout_profile(cfg, "fit inside")
     assert cfg.layout_auto_preset == "fit"
     assert cfg.layout_font_size_min == applied["layout_font_size_min"] == 6.0
+    assert cfg.layout_balloon_shape == "square"
     assert cfg.layout_balloon_shape_model_id == ""
     assert cfg.layout_constrain_to_bubble is True
 
@@ -128,6 +156,7 @@ def test_auto_layout_setting_hints_explain_numeric_values():
         "layout_max_line_width_frac_no_bubble": 0.9,
         "layout_center_in_bubble_min_gap_px": 0,
         "layout_box_size_check_model_id": "builtin",
+        "layout_balloon_shape": "auto",
         "layout_balloon_shape_auto_method": "model_contour",
         "layout_balloon_shape_model_id": "shape/model",
     })
@@ -143,6 +172,16 @@ def test_auto_layout_setting_hints_explain_numeric_values():
         "layout_font_size_min": 6,
         "layout_font_size_max": 64,
     })
+
+
+def test_auto_layout_setting_hints_identify_simple_rectangle_shape():
+    hints = auto_layout_setting_hints({
+        "layout_balloon_shape": "square",
+        "layout_balloon_shape_auto_method": "model_contour",
+        "layout_balloon_shape_model_id": "shape/model",
+    })
+
+    assert hints["shape_detection"] == "simple rectangle"
 
 
 def test_auto_layout_presets_normalize_and_shift_behavior():

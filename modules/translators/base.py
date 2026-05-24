@@ -12,6 +12,7 @@ from utils.io_utils import text_is_empty, normalize_line_breaks
 from utils.logger import logger as LOGGER
 from utils.translation_cache import TranslationCache
 from utils.config import pcfg
+from utils.line_breaking import normalize_artificial_hyphenation
 
 TRANSLATORS = Registry('translators')
 register_translator = TRANSLATORS.register_module
@@ -20,12 +21,16 @@ PROXY = urllib.request.getproxies()
 
 
 def sanitize_translation_text(text: str) -> str:
-    """Normalize HTML line breaks and trim excessive trailing repetition from LLM/API output."""
+    """Normalize translator output before assigning it to text blocks."""
     if not text or not isinstance(text, str):
         return text
     # Unescape literal \n and \r\n from API (e.g. "Mortal\nworld" as two chars -> real newline)
     text = text.replace("\\n", "\n").replace("\\r\\n", "\n").replace("\\r", "\n")
     text = normalize_line_breaks(text)
+    # Some web translators/layout passes can return artificial visible word
+    # fragments such as "NE‐ VER" / "MI‐ ND‐...".  Clean those here so every
+    # translator and cache path benefits before rendering.
+    text = normalize_artificial_hyphenation(text)
     # Trim excessive trailing repetition (e.g. "one one one one one" or "一个一个..." from stuck generation)
     text = text.rstrip()
     if len(text) < 4:
@@ -91,6 +96,7 @@ LANG_LATIN_DISPLAY = {
     'Polski': 'Polish',
     'Português': 'Portuguese',
     'Brazilian Portuguese': 'Brazilian Portuguese',
+    'limba romana': 'Romanian',
     'limba română': 'Romanian',
     'русский язык': 'Russian',
     'Español': 'Spanish',

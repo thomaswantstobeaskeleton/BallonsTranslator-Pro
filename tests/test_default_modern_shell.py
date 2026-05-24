@@ -1,0 +1,275 @@
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+
+try:
+    from qtpy.QtCore import Signal
+    from qtpy.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+except Exception as exc:  # pragma: no cover - optional Qt test environment
+    pytest.skip(f"Qt is not available: {exc}", allow_module_level=True)
+
+from ui.default_modern_shell import (
+    PIPELINE_JOB_ID,
+    install_default_editor_inspector,
+    install_default_job_drawer,
+    install_default_modern_navigation,
+    install_default_welcome_signal_fallbacks,
+    route_modern_mode_request,
+    upsert_default_job,
+)
+from ui.editor_inspector import EditorInspector
+from ui.job_status_drawer import JobStatusDrawer, JobStatusSpec
+from ui.mode_rail import ModeRail
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+
+class DummyLeftBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.open_images_called = 0
+
+    def onOpenImages(self):
+        self.open_images_called += 1
+
+
+class DummyBottomBar(QWidget):
+    pass
+
+
+class DummyWelcomeWidget(QWidget):
+    open_assist_requested = Signal()
+
+
+class DummyMainWindow(QWidget):
+    def __init__(self, include_bottom_bar: bool = False, include_right_stack: bool = False):
+        super().__init__()
+        self.calls = []
+        self.leftBar = DummyLeftBar(self)
+        self.content = QWidget(self)
+        self.mainvlayout = QVBoxLayout(self)
+        self.main_hlayout = QHBoxLayout()
+        self.main_hlayout.addWidget(self.leftBar)
+        self.main_hlayout.addWidget(self.content)
+        self.mainvlayout.addLayout(self.main_hlayout)
+        self.bottomBar = DummyBottomBar(self) if include_bottom_bar else None
+        if self.bottomBar is not None:
+            self.mainvlayout.addWidget(self.bottomBar)
+        self.rightComicTransStackPanel = QStackedWidget(self) if include_right_stack else None
+        if self.rightComicTransStackPanel is not None:
+            self.rightComicTransStackPanel.addWidget(QWidget(self))
+        self.project_open = False
+
+    def _show_welcome_screen(self):
+        self.calls.append("home")
+
+    def _show_main_content(self):
+        self.calls.append("main")
+
+    def _has_open_project(self):
+        return self.project_open
+
+    def setupImgTransUI(self):
+        self.calls.append("editor")
+
+    def on_open_realtime_translator(self):
+        self.calls.append("live")
+
+    def on_open_manga_source(self):
+        self.calls.append("downloader")
+
+    def on_open_batch_queue(self):
+        self.calls.append("batch")
+
+    def on_open_translation_assist_dock(self):
+        self.calls.append("assist")
+
+    def on_open_manage_models(self):
+        self.calls.append("models")
+
+    def setupConfigUI(self):
+        self.calls.append("settings")
+
+    def on_environment_doctor(self):
+        self.calls.append("diagnostics")
+
+    def on_open_ocr_crop_inspector_requested(self):
+        self.calls.append("ocr_crop")
+
+    def on_run_layout_review_requested(self):
+        self.calls.append("layout_review")
+
+    def on_open_typography_qa_report(self):
+        self.calls.append("typography_qa")
+
+    def on_pipeline_stage_event(self, stage_name: str, progress: int, page_name: str):
+        self.calls.append(f"stage:{stage_name}:{progress}:{page_name}")
+
+    def on_imgtrans_pipeline_finished(self):
+        self.calls.append("pipeline_finished")
+
+
+def test_install_default_modern_navigation_adds_mode_rail_before_leftbar(qapp):
+    win = DummyMainWindow()
+
+    assert install_default_modern_navigation(win) is True
+
+    assert isinstance(win.modeRail, ModeRail)
+    assert win.main_hlayout.indexOf(win.modeRail) == 0
+    assert win.main_hlayout.indexOf(win.leftBar) == 1
+    assert win.modeRail.current_mode() == "home"
+
+
+def test_install_default_modern_navigation_is_idempotent(qapp):
+    win = DummyMainWindow()
+
+    assert install_default_modern_navigation(win) is True
+    first = win.modeRail
+    first_drawer = win.jobStatusDrawer
+    assert install_default_modern_navigation(win) is True
+
+    assert win.modeRail is first
+    assert win.jobStatusDrawer is first_drawer
+    assert sum(1 for i in range(win.main_hlayout.count()) if win.main_hlayout.itemAt(i).widget() is first) == 1
+    assert sum(1 for i in range(win.mainvlayout.count()) if win.mainvlayout.itemAt(i).widget() is first_drawer) == 1
+
+
+def test_install_default_job_drawer_adds_collapsed_drawer_before_bottom_bar(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+
+    assert install_default_job_drawer(win) is True
+
+    assert isinstance(win.jobStatusDrawer, JobStatusDrawer)
+    assert win.mainvlayout.indexOf(win.jobStatusDrawer) == win.mainvlayout.indexOf(win.bottomBar) - 1
+    assert win.jobStatusDrawer.list_widget.isVisible() is False
+
+
+def test_upsert_default_job_populates_installed_drawer(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    assert upsert_default_job(win, JobStatusSpec(job_id="pipeline-1", title="Pipeline", status="running", progress=25)) is True
+
+    assert win.jobStatusDrawer.job_ids() == ["pipeline-1"]
+
+
+def test_pipeline_stage_events_are_mirrored_to_default_job_drawer(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    win.on_pipeline_stage_event("OCR", 42, "001.png")
+
+    assert win.calls == ["stage:OCR:42:001.png"]
+    assert win.jobStatusDrawer.job_ids() == [PIPELINE_JOB_ID]
+    job = win.jobStatusDrawer._jobs[PIPELINE_JOB_ID]
+    assert job.status == "running"
+    assert job.progress == 42
+    assert job.detail == "OCR · 001.png"
+    assert job.can_cancel is True
+
+
+def test_pipeline_finish_event_marks_default_job_complete(qapp):
+    win = DummyMainWindow(include_bottom_bar=True)
+    install_default_job_drawer(win)
+
+    win.on_pipeline_stage_event("Translate", 65, "002.png")
+    win.on_imgtrans_pipeline_finished()
+
+    assert win.calls == ["stage:Translate:65:002.png", "pipeline_finished"]
+    job = win.jobStatusDrawer._jobs[PIPELINE_JOB_ID]
+    assert job.status == "succeeded"
+    assert job.progress == 100
+    assert job.detail == "Pipeline finished"
+    assert job.can_cancel is False
+
+
+def test_install_default_editor_inspector_adds_shell_to_right_stack(qapp):
+    win = DummyMainWindow(include_right_stack=True)
+    before = win.rightComicTransStackPanel.count()
+
+    assert install_default_editor_inspector(win) is True
+
+    assert isinstance(win.editorInspector, EditorInspector)
+    assert win.rightComicTransStackPanel.count() == before + 1
+    assert win.rightComicTransStackPanel.indexOf(win.editorInspector) == before
+
+
+def test_default_editor_inspector_buttons_reuse_existing_handlers(qapp):
+    win = DummyMainWindow(include_right_stack=True)
+    install_default_editor_inspector(win)
+
+    win.editorInspector.request_translation_assist.emit()
+    win.editorInspector.request_ocr_rerun.emit()
+    win.editorInspector.request_layout_review.emit()
+    win.editorInspector.request_typography_qa.emit()
+
+    assert win.calls == ["assist", "ocr_crop", "layout_review", "typography_qa"]
+
+
+def test_route_modern_mode_request_reuses_existing_handlers(qapp):
+    win = DummyMainWindow()
+
+    route_modern_mode_request(win, "home")
+    route_modern_mode_request(win, "editor")
+    win.project_open = True
+    route_modern_mode_request(win, "editor")
+    route_modern_mode_request(win, "quick_image")
+    route_modern_mode_request(win, "assist")
+    route_modern_mode_request(win, "diagnostics")
+
+    assert win.calls == ["home", "home", "editor", "assist", "diagnostics"]
+    assert win.leftBar.open_images_called == 1
+
+
+def test_legacy_navigation_handlers_keep_mode_rail_selection_synced(qapp):
+    win = DummyMainWindow()
+    install_default_modern_navigation(win)
+
+    win.setupConfigUI()
+    assert win.modeRail.current_mode() == "settings"
+
+    win.on_open_manga_source()
+    assert win.modeRail.current_mode() == "downloader"
+
+    win.on_open_translation_assist_dock()
+    assert win.modeRail.current_mode() == "assist"
+
+    win.project_open = True
+    win.setupImgTransUI()
+    assert win.modeRail.current_mode() == "editor"
+
+    win._show_welcome_screen()
+    assert win.modeRail.current_mode() == "home"
+
+
+def test_mode_sync_wrappers_are_not_installed_twice(qapp):
+    win = DummyMainWindow()
+    install_default_modern_navigation(win)
+    first_setup_settings_func = getattr(win.setupConfigUI, "__func__", None)
+
+    install_default_modern_navigation(win)
+    second_setup_settings_func = getattr(win.setupConfigUI, "__func__", None)
+    win.setupConfigUI()
+
+    assert second_setup_settings_func is first_setup_settings_func
+    assert win.calls == ["settings"]
+    assert win.modeRail.current_mode() == "settings"
+
+
+def test_welcome_assist_fallback_connects_once(qapp):
+    win = DummyMainWindow()
+    welcome = DummyWelcomeWidget()
+
+    assert install_default_welcome_signal_fallbacks(welcome, win) is True
+    assert install_default_welcome_signal_fallbacks(welcome, win) is True
+    welcome.open_assist_requested.emit()
+
+    assert win.calls == ["assist"]
