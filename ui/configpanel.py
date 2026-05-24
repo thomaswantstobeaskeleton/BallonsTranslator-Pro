@@ -1485,6 +1485,28 @@ class ConfigPanel(Widget):
             self.tr('Optional balloon shape model ID'),
             discription=self.tr('Recommended: leave empty. If you choose a model-based auto shape method, set a Hugging Face image-classification model here. Example heavy model: prithivMLmods/Geometric-Shapes-Classification; lighter: 0-ma/vit-geometric-shapes-tiny.')
         ))
+        # Allowed shapes for Auto mode (issue #138): multi-checkbox filter
+        _allowed_shapes_container = QWidget()
+        _allowed_shapes_layout = QHBoxLayout(_allowed_shapes_container)
+        _allowed_shapes_layout.setContentsMargins(0, 0, 0, 0)
+        _allowed_shapes_layout.setSpacing(8)
+        _shape_keys = ['round', 'elongated', 'narrow', 'diamond', 'square', 'bevel', 'pentagon', 'point']
+        _shape_labels = [self.tr('Round'), self.tr('Elongated'), self.tr('Narrow'), self.tr('Diamond'), self.tr('Square'), self.tr('Bevel'), self.tr('Pentagon'), self.tr('Point')]
+        allowed_raw = (getattr(pcfg.module, 'layout_balloon_shape_auto_allowed', '') or '')
+        allowed_set = {s.strip().lower() for s in allowed_raw.split(',') if s.strip()}
+        self._balloon_shape_allowed_checkboxes = {}
+        for key, label in zip(_shape_keys, _shape_labels):
+            cb = QCheckBox(label)
+            cb.setChecked(not allowed_set or key in allowed_set)
+            cb.stateChanged.connect(self._on_balloon_shape_allowed_changed)
+            _allowed_shapes_layout.addWidget(cb)
+            self._balloon_shape_allowed_checkboxes[key] = cb
+        _allowed_shapes_layout.addStretch(1)
+        generalConfigPanel.addSublock(ConfigSubBlock(
+            _allowed_shapes_container,
+            self.tr('Allowed shapes for Auto detection'),
+            discription=self.tr('When Balloon shape is Auto, restrict which shapes the auto-detector may assign. Uncheck shapes you never want (e.g. uncheck Diamond to avoid diamond-shaped text layout). All checked = no restriction.')
+        ))
         # Minimum line width so short text (e.g. "pluck!") is not broken into 2–3 char lines
         self.layout_min_line_width_spin = QSpinBox()
         self.layout_min_line_width_spin.setRange(40, 400)
@@ -1929,6 +1951,13 @@ class ConfigPanel(Widget):
             self.layout_balloon_shape_auto_method_combo.blockSignals(True)
             self.layout_balloon_shape_auto_method_combo.setCurrentIndex(idx)
             self.layout_balloon_shape_auto_method_combo.blockSignals(False)
+        if hasattr(self, '_balloon_shape_allowed_checkboxes'):
+            allowed_raw = (getattr(pcfg.module, 'layout_balloon_shape_auto_allowed', '') or '')
+            allowed_set = {s.strip().lower() for s in allowed_raw.split(',') if s.strip()}
+            for key, cb in self._balloon_shape_allowed_checkboxes.items():
+                cb.blockSignals(True)
+                cb.setChecked(not allowed_set or key in allowed_set)
+                cb.blockSignals(False)
         self._update_auto_layout_interpretation()
 
     def _update_auto_layout_interpretation(self):
@@ -2075,6 +2104,17 @@ class ConfigPanel(Widget):
     def _on_layout_balloon_shape_model_id_changed(self, text: str):
         pcfg.module.layout_balloon_shape_model_id = (text or "").strip()
         self._update_auto_layout_interpretation()
+        self.save_config.emit()
+
+    def _on_balloon_shape_allowed_changed(self, _state=None):
+        if not hasattr(self, '_balloon_shape_allowed_checkboxes'):
+            return
+        checked = [k for k, cb in self._balloon_shape_allowed_checkboxes.items() if cb.isChecked()]
+        all_keys = list(self._balloon_shape_allowed_checkboxes.keys())
+        if set(checked) == set(all_keys):
+            pcfg.module.layout_balloon_shape_auto_allowed = ""
+        else:
+            pcfg.module.layout_balloon_shape_auto_allowed = ",".join(checked)
         self.save_config.emit()
 
     def _on_layout_min_line_width_changed(self, value: int):
