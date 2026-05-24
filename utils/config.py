@@ -190,6 +190,8 @@ class ModuleConfig(Config):
     # When "auto": which method(s) to use and in what order. Default is model-free contour/aspect-ratio detection; set a model ID to opt into model-based shape classification.
     layout_balloon_shape_auto_method: str = "contour_ratio"
     layout_balloon_shape_model_id: str = ""  # Optional. Heavier: prithivMLmods/Geometric-Shapes-Classification. Lighter: 0-ma/vit-geometric-shapes-tiny.
+    # When "auto": comma-separated list of shape names the auto-detector is allowed to assign. Empty = all shapes. E.g. "round,elongated,square,bevel,point"
+    layout_balloon_shape_auto_allowed: str = ""
     # Minimum line width (px) so short text (e.g. "pluck!") is not forced into 2–3 char lines; layout never uses a narrower width.
     layout_min_line_width_px: float = 80.0
     # Max line width as fraction of box width for free-standing text (no bubble). Lower = more lines, shorter lines. Only used when region_rect is None.

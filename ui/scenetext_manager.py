@@ -264,6 +264,15 @@ def _resolve_auto_balloon_shape(
     else:
         steps = ["model", "contour", "ratio"]
 
+    def _apply_allowed_filter(shape: str) -> str:
+        allowed_str = (getattr(pcfg.module, "layout_balloon_shape_auto_allowed", None) or "").strip()
+        if not allowed_str:
+            return shape
+        allowed = {s.strip().lower() for s in allowed_str.split(",") if s.strip()}
+        if not allowed:
+            return shape
+        return shape if shape in allowed else "square"
+
     for step in steps:
         if step == "model":
             s = try_model()
@@ -272,8 +281,8 @@ def _resolve_auto_balloon_shape(
         else:
             s = try_ratio()
         if s:
-            return s
-    return try_ratio()
+            return _apply_allowed_filter(s)
+    return _apply_allowed_filter(try_ratio())
 
 
 def _word_count(line: str) -> int:

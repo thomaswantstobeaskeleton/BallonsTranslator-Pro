@@ -103,6 +103,76 @@ def test_auto_layout_profile_defaults_cover_advanced_knobs():
     assert "Balanced" in auto_layout_profile_summary("balanced")
 
 
+def test_auto_layout_presets_default_to_square_balloon_shape():
+    balanced = auto_layout_profile_defaults("balanced")
+    fit = auto_layout_profile_defaults("fit")
+    readable = auto_layout_profile_defaults("readable")
+
+    assert balanced["layout_balloon_shape"] == "square"
+    assert fit["layout_balloon_shape"] == "square"
+    assert readable["layout_balloon_shape"] == "square"
+
+
+def test_apply_auto_layout_profile_resets_balloon_shape_to_square():
+    class Cfg:
+        layout_auto_preset = "balanced"
+        layout_font_size_min = 1.0
+        layout_balloon_shape = "auto"
+        layout_balloon_shape_model_id = "old/model"
+
+    cfg = Cfg()
+    apply_auto_layout_profile(cfg, "fit inside")
+    assert cfg.layout_balloon_shape == "square"
+    assert cfg.layout_balloon_shape_model_id == ""
+
+
+def test_rectangle_alias_uses_same_candidates_as_square():
+    square = candidate_layout_widths(
+        max_width=240,
+        min_width=60,
+        words_width=520,
+        delimiter_total_width=40,
+        line_height=24,
+        target_box_height=120,
+        balloon_shape="square",
+    )
+    rectangle = candidate_layout_widths(
+        max_width=240,
+        min_width=60,
+        words_width=520,
+        delimiter_total_width=40,
+        line_height=24,
+        target_box_height=120,
+        balloon_shape="rectangle",
+    )
+    assert rectangle == square
+
+
+def test_auto_layout_setting_hints_identifies_simple_rectangle_for_square():
+    hints = auto_layout_setting_hints({
+        "layout_balloon_shape": "square",
+        "layout_balloon_shape_auto_method": "model_contour",
+        "layout_balloon_shape_model_id": "shape/model",
+    })
+    assert hints["shape_detection"] == "simple rectangle"
+
+
+def test_auto_layout_setting_hints_identifies_simple_rectangle_for_rect_aliases():
+    for alias in ("rectangle", "rect"):
+        hints = auto_layout_setting_hints({
+            "layout_balloon_shape": alias,
+            "layout_balloon_shape_auto_method": "contour_ratio",
+            "layout_balloon_shape_model_id": "",
+        })
+        assert hints["shape_detection"] == "simple rectangle", f"alias {alias!r} not recognised"
+
+
+def test_auto_layout_profile_summaries_mention_rectangular_text_boxes():
+    for preset in ("balanced", "fit", "readable"):
+        summary = auto_layout_profile_summary(preset)
+        assert "rectangular text boxes" in summary, f"preset {preset!r} summary missing 'rectangular text boxes'"
+
+
 def test_apply_auto_layout_profile_updates_config_like_object():
     class Cfg:
         layout_auto_preset = "balanced"
@@ -128,6 +198,7 @@ def test_auto_layout_setting_hints_explain_numeric_values():
         "layout_max_line_width_frac_no_bubble": 0.9,
         "layout_center_in_bubble_min_gap_px": 0,
         "layout_box_size_check_model_id": "builtin",
+        "layout_balloon_shape": "auto",
         "layout_balloon_shape_auto_method": "model_contour",
         "layout_balloon_shape_model_id": "shape/model",
     })
