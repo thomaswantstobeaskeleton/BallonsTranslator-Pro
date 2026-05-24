@@ -1,7 +1,8 @@
+import os.path as osp
 from typing import List, Union, Tuple
 
 from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
-from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent, QColor
+from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent, QColor, QIcon
 from qtpy.QtWidgets import (QPushButton, QKeySequenceEdit, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit,
     QSpinBox, QComboBox, QDoubleSpinBox, QColorDialog, QMessageBox, QFileDialog, QDialog)
@@ -299,7 +300,7 @@ class ConfigContent(SmoothScrollArea):
 
 
 class TableItem(QStandardItem):
-    def __init__(self, text, fontsize):
+    def __init__(self, text, fontsize, icon_path: str = None):
         super().__init__()
         font = self.font()
         size = max(1, fontsize) if fontsize <= 0 else fontsize
@@ -308,6 +309,8 @@ class TableItem(QStandardItem):
         self.setFont(font)
         self.setText(text)
         self.setEditable(False)
+        if icon_path:
+            self.setIcon(QIcon(icon_path))
 
     def setBold(self, bold: bool):
         font = self.font()
@@ -353,9 +356,9 @@ class ConfigTable(QTreeView):
             self.setFont(_sanitize_font(f))
         super().showEvent(event)
 
-    def addHeader(self, header: str) -> TableItem:
+    def addHeader(self, header: str, icon_path: str = None) -> TableItem:
         rootNode = self.model().invisibleRootItem()
-        ti = TableItem(header, _config_font_size(CONFIG_FONTSIZE_TABLE))
+        ti = TableItem(header, _config_font_size(CONFIG_FONTSIZE_TABLE), icon_path=icon_path)
         rootNode.appendRow(ti)
         return ti
 
@@ -419,14 +422,45 @@ class ConfigPanel(Widget):
         self.configTreeFocusRing = FocusRingFrame()
         self.configTreeFocusRing.setChild(self.configTable)
         self.configContent = ConfigContent()
-        # Ensure content has enough width so Typesetting combos and Test translator/OCR buttons don't get cut off
-        self.configContent.setMinimumWidth(420)
+        # Phase 4: raise content minimum widths so Typesetting combos, Test translator/OCR buttons,
+        # and the 4×2 allowed-shapes grid never clip on default window sizes.
+        self.configContent.setMinimumWidth(480)
         w = self.configContent.widget()
         if w is not None:
-            w.setMinimumWidth(520)
-        dlConfigPanel, dltableitem = self.addConfigBlock(self.tr('DL Module'))
-        generalConfigPanel, generalTableItem = self.addConfigBlock(self.tr('General'))
-        
+            w.setMinimumWidth(600)
+        # UI/UX restructure: split the old 2-block layout (DL Module + General) into 4
+        # focused top-level categories so the settings are easier to navigate.
+        # The variable `generalConfigPanel` is reassigned at strategic points later in
+        # this method so existing widget creation code routes to the correct block
+        # without rewriting every addSublock call.
+        modelsConfigPanel, modelsTableItem = self.addConfigBlock(
+            self.tr('Models & Pipeline'),
+            osp.join(C.PROGRAM_PATH, 'icons', 'config_models.svg')
+        )
+        layoutConfigPanel, layoutTableItem = self.addConfigBlock(
+            self.tr('Layout Engine'),
+            osp.join(C.PROGRAM_PATH, 'icons', 'config_layout_engine.svg')
+        )
+        typesettingConfigPanel, typesettingTableItem = self.addConfigBlock(
+            self.tr('Typesetting & Style'),
+            osp.join(C.PROGRAM_PATH, 'icons', 'config_typesetting.svg')
+        )
+        generalConfigPanel, generalTableItem = self.addConfigBlock(
+            self.tr('General'),
+            osp.join(C.PROGRAM_PATH, 'icons', 'config_general.svg')
+        )
+
+        # Backwards-compat aliases for the previous block names. Tests, external callers,
+        # and the existing widget creation code paths reference these.
+        dlConfigPanel = modelsConfigPanel
+        dltableitem = modelsTableItem
+
+        # Expose the new top-level blocks on self so tests and follow-up phases can find them.
+        self.modelsConfigPanel = modelsConfigPanel
+        self.layoutConfigPanel = layoutConfigPanel
+        self.typesettingConfigPanel = typesettingConfigPanel
+        self.generalConfigPanel = generalConfigPanel
+
         label_text_det = self.tr('Text Detection')
         label_text_ocr = self.tr('OCR')
         label_inpaint = self.tr('Inpaint')
@@ -439,20 +473,34 @@ class ConfigPanel(Widget):
         label_saladict = self.tr('SalaDict')
         label_canvas = self.tr('Canvas')
         label_integrations = self.tr('Integrations')
-    
-        dltableitem.appendRows([
+
+        # Models & Pipeline (was DL Module): per-module pages.
+        modelsTableItem.appendRows([
             TableItem(self.tr('Image upscaling'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_text_det, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_text_ocr, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_inpaint, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_translator, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
-        generalTableItem.appendRows([
-            TableItem(label_startup, _config_font_size(CONFIG_FONTSIZE_TABLE)),
-            TableItem(label_display, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+        # Layout Engine: only one TextLabel sub-row ("Advanced auto-layout engine").
+        layoutTableItem.appendRows([
+            TableItem(self.tr('Auto-layout engine'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
+        ])
+        # Typesetting & Style: Vertical CJK, Project text rendering defaults,
+        # Typesetting (text-in-box + global font format), OCR result, Save & Export.
+        typesettingTableItem.appendRows([
+            TableItem(self.tr('Vertical CJK'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(self.tr('Project text rendering'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_typesetting, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_ocr_result, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_save, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+        ])
+        # General: Startup, Pipeline Insights / LLM QA, Runtime HTTP, Display, Canvas, Integrations.
+        generalTableItem.appendRows([
+            TableItem(label_startup, _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(self.tr('Pipeline Insights / LLM QA'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(self.tr('Runtime HTTP / Automation'), _config_font_size(CONFIG_FONTSIZE_TABLE)),
+            TableItem(label_display, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_canvas, _config_font_size(CONFIG_FONTSIZE_TABLE)),
             TableItem(label_integrations, _config_font_size(CONFIG_FONTSIZE_TABLE)),
         ])
@@ -548,12 +596,14 @@ class ConfigPanel(Widget):
         )
         dlConfigPanel.vlayout.addWidget(merge_min_sublock)
         self.unload_model_btn = QPushButton(parent=self)
-        self.unload_model_btn.setFixedWidth(500)
+        self.unload_model_btn.setMinimumWidth(240)
+        self.unload_model_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.unload_model_btn.setText(self.tr('Unload All Models'))
         self.unload_model_btn.clicked.connect(self.unload_models)
         msublock.layout().addWidget(self.unload_model_btn)
         self.check_download_models_btn = QPushButton(parent=self)
-        self.check_download_models_btn.setFixedWidth(500)
+        self.check_download_models_btn.setMinimumWidth(240)
+        self.check_download_models_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.check_download_models_btn.setText(self.tr('Check / Download module files'))
         self.check_download_models_btn.setToolTip(self.tr('Check and download required model files for all detectors, OCR, inpainters, and translators. Run this if a module fails to load.'))
         self.check_download_models_btn.clicked.connect(self.on_check_download_module_files)
@@ -870,6 +920,8 @@ class ConfigPanel(Widget):
             self.tr('Data path health'),
             discription=self.tr('Shows active data path and free disk space.')
         ))
+        # Route widgets in this section to the new 'Typesetting & Style' top-level block.
+        generalConfigPanel = typesettingConfigPanel
         generalConfigPanel.addTextLabel(self.tr('Vertical CJK rendering'))
         self.vertical_cjk_rotate_latin_checker, _ = generalConfigPanel.addCheckBox(
             self.tr('Rotate latin glyphs in vertical text'),
@@ -1069,6 +1121,8 @@ class ConfigPanel(Widget):
         )
         generalConfigPanel.addSublock(sublock_arm)
 
+        # End of Typesetting section: route remaining widgets back to General (Display).
+        generalConfigPanel = self.generalConfigPanel
         generalConfigPanel.addTextLabel(label_display)
         self.darkmode_checker = DangoSwitch(self)
         self.darkmode_checker.setChecked(bool(getattr(pcfg, 'darkmode', False)))
@@ -1176,6 +1230,8 @@ class ConfigPanel(Widget):
         generalConfigPanel.addSublock(sublock)
         self.logical_dpi_spin.valueChanged.connect(self.on_logical_dpi_changed)
 
+        # Route 'Typesetting' subsection (text-in-box + global font format grid) to Typesetting & Style.
+        generalConfigPanel = typesettingConfigPanel
         generalConfigPanel.addTextLabel(label_typesetting)
 
         text_fit_auto = self.tr('Auto fit to box')
@@ -1263,8 +1319,19 @@ class ConfigPanel(Widget):
 
         global_fntfmt_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding), 11, 0)
 
+        # Route the entire 'Advanced auto-layout engine' section to its own dedicated top-level block.
+        generalConfigPanel = layoutConfigPanel
         generalConfigPanel.addTextLabel(self.tr('Advanced auto-layout engine'))
         generalConfigPanel.addSectionDescription(self.tr('Engine-level layout tuning. These affect automatic layout calculations globally; per-style overrides such as writing mode, fit mode, line breaks, spacing, stroke, and fallback fonts are in the right text panel.'))
+
+        # Basic / Advanced visibility toggle: hides ~15 expert knobs by default so first-time users
+        # only see the high-level preset + balloon shape + main checkboxes.
+        self.show_advanced_settings_checker, _ = generalConfigPanel.addCheckBox(
+            self.tr('Show advanced controls'),
+            discription=self.tr('When off, hide expert auto-layout knobs (penalties, page-size scaling, optional model IDs, optimize-line-breaks, binary-search font, final-fit pass, QA fixes, max-line-width-fraction, interpretation label). Recommended off for new users.')
+        )
+        self.show_advanced_settings_checker.setChecked(bool(getattr(pcfg, 'show_advanced_settings', False)))
+        self.show_advanced_settings_checker.stateChanged.connect(self._on_show_advanced_settings_changed)
 
         self.let_autolayout_checker, sublock = generalConfigPanel.addCheckBox(self.tr('Auto layout'),
                 discription=self.tr('When on: scale font size to fit the speech bubble and wrap lines to the balloon shape. When off: use global font size and still wrap to the balloon (text may overflow if too long). Works with "Text in box" = Auto fit to box.'))
@@ -1487,21 +1554,24 @@ class ConfigPanel(Widget):
         ))
         # Allowed shapes for Auto mode (issue #138): multi-checkbox filter
         _allowed_shapes_container = QWidget()
-        _allowed_shapes_layout = QHBoxLayout(_allowed_shapes_container)
+        # Phase 4: use a 4×2 grid so 8 checkboxes don't overflow on narrow content widths.
+        _allowed_shapes_layout = QGridLayout(_allowed_shapes_container)
         _allowed_shapes_layout.setContentsMargins(0, 0, 0, 0)
-        _allowed_shapes_layout.setSpacing(8)
+        _allowed_shapes_layout.setHorizontalSpacing(12)
+        _allowed_shapes_layout.setVerticalSpacing(4)
         _shape_keys = ['round', 'elongated', 'narrow', 'diamond', 'square', 'bevel', 'pentagon', 'point']
         _shape_labels = [self.tr('Round'), self.tr('Elongated'), self.tr('Narrow'), self.tr('Diamond'), self.tr('Square'), self.tr('Bevel'), self.tr('Pentagon'), self.tr('Point')]
         allowed_raw = (getattr(pcfg.module, 'layout_balloon_shape_auto_allowed', '') or '')
         allowed_set = {s.strip().lower() for s in allowed_raw.split(',') if s.strip()}
         self._balloon_shape_allowed_checkboxes = {}
-        for key, label in zip(_shape_keys, _shape_labels):
+        for idx, (key, label) in enumerate(zip(_shape_keys, _shape_labels)):
             cb = QCheckBox(label)
             cb.setChecked(not allowed_set or key in allowed_set)
             cb.stateChanged.connect(self._on_balloon_shape_allowed_changed)
-            _allowed_shapes_layout.addWidget(cb)
+            row = idx // 4
+            col = idx % 4
+            _allowed_shapes_layout.addWidget(cb, row, col)
             self._balloon_shape_allowed_checkboxes[key] = cb
-        _allowed_shapes_layout.addStretch(1)
         generalConfigPanel.addSublock(ConfigSubBlock(
             _allowed_shapes_container,
             self.tr('Allowed shapes for Auto detection'),
@@ -1565,6 +1635,8 @@ class ConfigPanel(Widget):
         )
         self.layout_panel_preserve_line_breaks_checker.stateChanged.connect(self._on_layout_panel_preserve_line_breaks_changed)
 
+        # End of Layout Engine section: route style behavior toggles (uppercase, indep styles, custom fonts only) to Typesetting & Style.
+        generalConfigPanel = typesettingConfigPanel
         self.let_uppercase_checker, _ = generalConfigPanel.addCheckBox(self.tr('To uppercase'))
         self.let_uppercase_checker.stateChanged.connect(self.on_uppercase_changed)
 
@@ -1601,6 +1673,8 @@ class ConfigPanel(Widget):
         self.intermediate_imgformat_combobox, intermediate_imsave_sublock = generalConfigPanel.addCombobox(['PNG', 'JXL'], self.tr('Intermediate image format'))
         self.intermediate_imgformat_combobox.activated.connect(self.on_intermediate_imgformat_changed)
 
+        # End of Typesetting section: route Canvas + Integrations back to General.
+        generalConfigPanel = self.generalConfigPanel
         generalConfigPanel.addTextLabel(label_canvas)
         self.context_menu_btn = QPushButton(self.tr("Context menu options..."))
         self.context_menu_btn.setToolTip(self.tr("Choose which actions appear in the canvas right-click menu."))
@@ -1631,8 +1705,13 @@ class ConfigPanel(Widget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.configTreeFocusRing)
         splitter.addWidget(self.configContent)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
+        # Phase 4 sizing fix: the category tree is fixed-ish width (so labels never truncate)
+        # and the content area absorbs all extra horizontal space. Avoids clipping of long
+        # combos and Test-translator/OCR buttons on small windows.
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([280, 720])
+        self.configTable.setMinimumWidth(220)
         hlayout = QHBoxLayout(self)
 
         hlayout.addWidget(splitter)
@@ -1640,6 +1719,10 @@ class ConfigPanel(Widget):
         hlayout.setContentsMargins(0, 0, 0, 0)
 
         self.configTable.expandAll()
+
+        # Apply the Basic/Advanced visibility on first load so the expert knobs default to hidden
+        # (unless the user previously persisted show_advanced_settings = True).
+        self._apply_show_advanced_settings()
 
     def on_load_model_changed(self):
         pcfg.module.load_model_on_demand = self.load_model_checker.isChecked()
@@ -1674,12 +1757,12 @@ class ConfigPanel(Widget):
     def on_keepline_clicked(self):
         pcfg.module.keep_exist_textlines = self.detect_config_panel.keep_existing_checker.isChecked()
 
-    def addConfigBlock(self, header: str) -> Tuple[ConfigBlock, TableItem]:
+    def addConfigBlock(self, header: str, icon_path: str = None) -> Tuple[ConfigBlock, TableItem]:
         cb = ConfigBlock(header, parent=self)
         cb.sublock_pressed.connect(self.onSublockPressed)
         self.configContent.addConfigBlock(cb)
         cb.setIndex(len(self.configContent.config_block_list)-1)
-        ti = self.configTable.addHeader(header)
+        ti = self.configTable.addHeader(header, icon_path=icon_path)
         return cb, ti
 
     def onSublockPressed(self, idx0, idx1):
@@ -2135,6 +2218,46 @@ class ConfigPanel(Widget):
     def _on_layout_panel_preserve_line_breaks_changed(self):
         pcfg.module.layout_panel_preserve_line_breaks = self.layout_panel_preserve_line_breaks_checker.isChecked()
         self.save_config.emit()
+
+    # ---- Basic / Advanced visibility toggle ----------------------------------------------------
+    # Widget names whose enclosing ConfigSubBlock is hidden when 'Show advanced controls' is off.
+    # Centralised here so the list is easy to audit; tests assert these widgets exist.
+    _ADVANCED_LAYOUT_WIDGET_NAMES = (
+        'layout_short_line_penalty_spin',
+        'layout_height_overflow_penalty_spin',
+        'layout_stub_penalty_1word_spin',
+        'layout_scale_reference_mp_spin',
+        'layout_scale_use_box_area_checker',
+        'production_auto_pass_enable_qa_checker',
+        'layout_box_size_check_model_id_edit',
+        'layout_balloon_shape_model_id_edit',
+        'optimize_line_breaks_checker',
+        'layout_font_binary_search_checker',
+        'layout_auto_final_fit_pass_checker',
+        'layout_center_in_bubble_min_gap_spin',
+        'layout_max_line_width_frac_no_bubble_spin',
+        'layout_advanced_interpretation_label',
+        'layout_scale_font_by_page_size_checker',
+    )
+
+    def _on_show_advanced_settings_changed(self):
+        pcfg.show_advanced_settings = bool(self.show_advanced_settings_checker.isChecked())
+        self._apply_show_advanced_settings()
+        self.save_config.emit()
+
+    def _apply_show_advanced_settings(self):
+        """Hide/show ~15 expert layout knobs based on `pcfg.show_advanced_settings`."""
+        show = bool(getattr(pcfg, 'show_advanced_settings', False))
+        for name in self._ADVANCED_LAYOUT_WIDGET_NAMES:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            parent = widget.parent()
+            # Walk up until we find the enclosing ConfigSubBlock (which is what the layout adds).
+            while parent is not None and not isinstance(parent, ConfigSubBlock):
+                parent = parent.parent()
+            if parent is not None:
+                parent.setVisible(show)
 
     def on_text_box_format_changed(self):
         """Sync Font Size and Auto layout from the Text in box dropdown (issue #1077)."""
