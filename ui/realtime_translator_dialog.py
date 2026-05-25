@@ -3,9 +3,9 @@ from typing import List, Tuple, Optional, Callable
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QPlainTextEdit, QCheckBox, QSpinBox, QFormLayout,
-    QMessageBox, QApplication, QWidget
+    QMessageBox, QApplication, QWidget, QTextBrowser
 )
-from qtpy.QtCore import QTimer, Qt, QThread, QObject, Signal, QPoint, QRect
+from qtpy.QtCore import QTimer, Qt, QThread, Signal, QPoint, QRect
 from qtpy.QtGui import QPainter, QPen, QBrush, QColor, QBitmap, QFont, QTextCharFormat, QImage
 import numpy as np
 
@@ -80,8 +80,8 @@ class ScreenRangeSelector(QWidget):
             self.close()
 
 
-class _OcrTrWorker(QObject):
-    """Runs OCR + translation off the UI thread."""
+class _OcrTrWorker(QThread):
+    """Runs OCR + translation off the UI thread (Dango-style QThread subclass)."""
     finished = Signal(object)  # emits RealtimeState
 
     def __init__(self, img: np.ndarray, ocr_fn: Callable, tr_fn: Callable):
@@ -167,10 +167,12 @@ class RealtimeTranslatorDialog(QDialog):
         self.start_btn = QPushButton(self.tr("Start"), self)
         self.pause_btn = QPushButton(self.tr("Pause"), self)
         self.now_btn = QPushButton(self.tr("Translate now"), self)
+        self.test_capture_btn = QPushButton(self.tr("Test Capture"), self)
         self.hide_result_btn = QPushButton(self.tr("Hide Result"), self)
         btns.addWidget(self.start_btn)
         btns.addWidget(self.pause_btn)
         btns.addWidget(self.now_btn)
+        btns.addWidget(self.test_capture_btn)
         btns.addWidget(self.hide_result_btn)
         root.addLayout(btns)
 
@@ -211,6 +213,7 @@ class RealtimeTranslatorDialog(QDialog):
         self.start_btn.clicked.connect(self._on_start)
         self.pause_btn.clicked.connect(self._on_pause)
         self.now_btn.clicked.connect(self._on_translate_now)
+        self.test_capture_btn.clicked.connect(self._on_test_capture)
         self.hide_result_btn.clicked.connect(self._result_window.hide)
         self.select_range_btn.clicked.connect(self._on_select_range)
         self.auto_mode_cb.toggled.connect(self._on_auto_mode_changed)
@@ -248,6 +251,26 @@ class RealtimeTranslatorDialog(QDialog):
         if self.auto_mode_cb.isChecked():
             self._on_translate_now()
 
+    def _on_test_capture(self):
+        self.output.appendPlainText("[Test Capture] starting...")
+        if self._region is None:
+            self.output.appendPlainText("[Test Capture] FAIL: no region selected")
+            return
+        img = self._capture_region()
+        if img is None:
+            self.output.appendPlainText("[Test Capture] FAIL: capture returned None")
+            return
+        if img.size == 0:
+            self.output.appendPlainText("[Test Capture] FAIL: capture returned empty array")
+            return
+        mean_val = float(np.mean(img))
+        std_val = float(np.std(img))
+        self.output.appendPlainText(
+            f"[Test Capture] OK: shape={img.shape}, dtype={img.dtype}, mean={mean_val:.1f}, std={std_val:.1f}"
+        )
+        if mean_val < 1.0 and std_val < 1.0:
+            self.output.appendPlainText("[Test Capture] WARNING: image appears blank (all black)")
+
     # ------------------------------------------------------------------
     # QScreen capture with SSIM deduplication
     # ------------------------------------------------------------------
@@ -257,9 +280,15 @@ class RealtimeTranslatorDialog(QDialog):
         x, y, w, h = self._region
         screen = QApplication.primaryScreen()
         if screen is None:
+            self.output.appendPlainText("[Capture] ERROR: QApplication.primaryScreen() is None")
             return None
-        pixmap = screen.grabWindow(0, x, y, w, h)
+        try:
+            pixmap = screen.grabWindow(0, x, y, w, h)
+        except Exception as e:
+            self.output.appendPlainText(f"[Capture] ERROR: grabWindow failed: {e}")
+            return None
         if pixmap.isNull():
+            self.output.appendPlainText("[Capture] ERROR: pixmap.isNull()")
             return None
         img = self._pixmap_to_numpy(pixmap)
         return img
@@ -338,37 +367,43 @@ class RealtimeTranslatorDialog(QDialog):
     # Tick: screenshot → SSIM skip? → background OCR/translate → result
     # ------------------------------------------------------------------
     def _tick(self):
+        self.output.appendPlainText(f"[_tick] start: region={self._region}, pending_running={self._pending_worker is not None and self._pending_worker.isRunning()}")
         if self._pending_worker is not None and self._pending_worker.isRunning():
-            return  # skip if previous job still running
+            self.output.appendPlainText("[_tick] SKIP: previous worker still running")
+            return
         if self._region is None:
+            self.output.appendPlainText("[_tick] SKIP: no region selected")
             return
 
+        self.output.appendPlainText("[_tick] capturing region...")
         img = self._capture_region()
         if img is None:
-            self.output.appendPlainText(self.tr("Capture failed: got null image"))
+            self.output.appendPlainText("[_tick] FAIL: capture returned None")
             return
         if img.size == 0:
+            self.output.appendPlainText("[_tick] FAIL: capture returned empty array")
             return
+        self.output.appendPlainText(f"[_tick] captured shape={img.shape} dtype={img.dtype}")
 
         # SSIM deduplication: skip if screen hasn't changed
         if self._last_image is not None and self._images_similar(self._last_image, img):
+            self.output.appendPlainText("[_tick] SKIP: screen unchanged (SSIM)")
             return
         self._last_image = img.copy()
 
-        # Run OCR+translation in background thread
+        self.output.appendPlainText("[_tick] starting OCR+translation worker...")
+        # Run OCR+translation in background thread (Dango-style QThread subclass)
         worker = _OcrTrWorker(img, self._ocr_image, self._translate_text)
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
         worker.finished.connect(self._on_worker_finished)
-        worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._pending_worker = thread
-        thread.start()
+        self._pending_worker = worker
+        worker.start()
 
     def _on_worker_finished(self, state: RealtimeState):
         self._pending_worker = None
+        self.output.appendPlainText(
+            f"[_on_worker_finished] status={state.status}, ocr_len={len(state.last_ocr_text or '')}, tr_len={len(state.last_translation or '')}"
+        )
         for w in state.warnings:
             if str(w).strip():
                 self.output.appendPlainText(self.tr("Warning: {}").format(str(w).strip()))
@@ -449,7 +484,7 @@ class RealtimeTranslatorDialog(QDialog):
 
 
 class _TranslationResultWindow(QWidget):
-    """Frameless always-on-top window showing translated text (Dango-style)."""
+    """Frameless always-on-top window showing translated text with Dango-style outlined QTextBrowser."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -459,16 +494,35 @@ class _TranslationResultWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(0)
+
+        self._browser = QTextBrowser(self)
+        self._browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._browser.setStyleSheet(
+            "border-width: 0; border-style: outset; color: white; font-weight: bold; background-color: rgba(62,62,62,180);"
+        )
+        layout.addWidget(self._browser)
+
+        self._format = QTextCharFormat()
+        self._format.setForeground(QColor("#FFFFFF"))
+        self._format.setTextOutline(QPen(QColor(0, 120, 255), 0.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+
         self._text = ""
-        self._font = QFont("Microsoft YaHei", 14)
-        self._font.setBold(True)
-        self._text_color = QColor(255, 255, 255)
-        self._outline_color = QColor(0, 120, 255)
-        self._bg_color = QColor(0, 0, 0, 160)
 
     def set_text(self, text: str):
         self._text = str(text or "")
-        self.update()
+        self._browser.clear()
+        cursor = self._browser.textCursor()
+        cursor.mergeCharFormat(self._format)
+        for line in self._text.split("\n"):
+            cursor.insertText(line)
+            cursor.insertBlock()
+        self._browser.setTextCursor(cursor)
+        self._resize_to_content()
 
     def show_at(self, x: int, y: int, w: int, h: int):
         self.setGeometry(x, y, w, h)
@@ -476,20 +530,9 @@ class _TranslationResultWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Background
-        painter.fillRect(self.rect(), self._bg_color)
-        # Text with outline
-        painter.setFont(self._font)
-        pen = QPen(self._outline_color, 2)
-        painter.setPen(pen)
-        # Simple centered text rendering
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.TextWordWrap, self._text)
-        # Inner text
-        pen = QPen(self._text_color, 1)
-        painter.setPen(pen)
-        inner = self.rect().adjusted(2, 2, -2, -2)
-        painter.drawText(inner, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.TextWordWrap, self._text)
+    def _resize_to_content(self):
+        doc = self._browser.document()
+        new_h = int(doc.size().height()) + 30
+        self.resize(self.width(), new_h)
+        self._browser.setGeometry(0, 0, self.width(), new_h)
 
