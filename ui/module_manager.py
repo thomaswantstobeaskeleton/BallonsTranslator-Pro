@@ -788,9 +788,11 @@ class ImgtransThread(QThread):
                     inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(
                         im, mask=tgt_mask[y1: y2, x1: x2], **cleaning_kwargs
                     )
-                    # Dilate mask slightly so original text (e.g. Chinese) is fully covered and erased
+                    # Dilate mask slightly so original text (e.g. Chinese) is fully covered and erased.
+                    # Using a 7x7 kernel instead of 5x5 because tight detectors (e.g. YSGYOLO) can leave
+                    # anti-aliased text edges un-masked, which then remain visible after inpaint (#935).
                     if inpaint_mask_array is not None and inpaint_mask_array.size > 0:
-                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
                         inpaint_mask_array = cv2.dilate(
                             (inpaint_mask_array > 127).astype(np.uint8) * 255, kernel, iterations=1
                         )

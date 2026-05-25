@@ -188,7 +188,7 @@ class ParamWidget(QWidget):
                     else:
                         size = size2width(param_size)
 
-                    options_list = list(param_dict['options'])
+                    options_list = list(param_dict.get('options', []))
                     if param_key == 'device':
                         default_label = self.tr('Default')
                         if default_label not in options_list:
@@ -237,6 +237,13 @@ class ParamWidget(QWidget):
                     param_widget.paramwidget_edited.connect(self.on_paramwidget_edited)
                     if 'description' in param_dict:
                         param_widget.setToolTip(param_dict['description'])
+
+                # Fix #904: fallback for unknown/malformed param types so a missing option
+                # list or unrecognised param_type doesn't crash the module config UI.
+                if param_widget is None:
+                    param_widget = ParamLineEditor(param_key, force_digital=is_digital)
+                    param_widget.setText(str(value))
+                    param_widget.paramwidget_edited.connect(self.on_paramwidget_edited)
 
             widget_idx = 0
             if require_label:

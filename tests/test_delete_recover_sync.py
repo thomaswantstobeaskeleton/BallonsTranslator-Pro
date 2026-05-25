@@ -15,6 +15,8 @@ def _install_scenetext_stubs():
     qtwidgets.QApplication = object
     qtwidgets.QWidget = object
     qtwidgets.QGraphicsItem = object
+    qtwidgets.QScrollArea = object
+    qtwidgets.QSizePolicy = object
     qtwidgets.QUndoCommand = DummyUndoCommand
 
     qtcore = types.ModuleType("qtpy.QtCore")
@@ -98,6 +100,7 @@ def _install_scenetext_stubs():
     sys.modules["utils.config"] = cfg
 
     shared = types.ModuleType("utils.shared")
+    shared.PROGRAM_PATH = "."
     sys.modules["utils.shared"] = shared
 
     imgproc = types.ModuleType("utils.imgproc_utils")

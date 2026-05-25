@@ -205,7 +205,7 @@ class FontSizeBox(QFrame):
         self.downBtn.setObjectName("FsizeIncrementDown")
         self.upBtn.clicked.connect(self.onUpBtnClicked)
         self.downBtn.clicked.connect(self.onDownBtnClicked)
-        self.fcombobox = SizeComboBox([1, 1000], 'font_size', self)
+        self.fcombobox = SizeComboBox([1, 300], 'font_size', self)
         self.fcombobox.addItems([
             "5", "5.5", "6", "6.5", "7", "7.5", "8", "9", "10", "10.5",
             "11", "12", "14", "16", "18", "20", "22", "24", "26", "28",
@@ -238,7 +238,7 @@ class FontSizeBox(QFrame):
         newsize = int(round(size * raito))
         if newsize == size:
             newsize += 1
-        newsize = min(1000, newsize)
+        newsize = min(300, newsize)
         if newsize != size:
             if not multi_size:
                 self.param_changed.emit('font_size', newsize)
