@@ -258,7 +258,9 @@ class BallonsShell(QMainWindow):
         self._add_page("editor", EditorPage())
 
         # Core redesigned section shells
-        self._add_page("live_translate", LiveTranslatePage())
+        live = LiveTranslatePage()
+        live.open_translator_requested.connect(self._open_realtime_translator)
+        self._add_page("live_translate", live)
         self._add_page("quick_image", QuickImagePage())
         self._add_page("downloader", DownloaderPage())
         self._add_page("batch_queue", BatchQueuePage())
@@ -384,6 +386,22 @@ class BallonsShell(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 self._open_project("")
         return editor is not None and editor.current_image_path() is not None
+
+    def _open_realtime_translator(self):
+        """Open the existing RealtimeTranslatorDialog (dev mode only)."""
+        if not getattr(pcfg, 'dev_mode', False):
+            QMessageBox.information(
+                self, "Developer Mode Required",
+                "Realtime Translator is a developer-only feature.\n"
+                "Enable Developer Mode in Settings > General to use it."
+            )
+            return
+        try:
+            from ui.realtime_translator_dialog import RealtimeTranslatorDialog
+            dlg = RealtimeTranslatorDialog(self, self)
+            dlg.show()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open Realtime Translator:\n{e}")
 
     def _refresh_recent_projects(self):
         """Pull recent projects from config and push to HomePage."""
