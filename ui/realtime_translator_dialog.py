@@ -3,7 +3,7 @@ from typing import List, Tuple, Optional, Callable
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QPlainTextEdit, QCheckBox, QSpinBox, QFormLayout,
-    QMessageBox, QApplication, QWidget, QDesktopWidget
+    QMessageBox, QApplication, QWidget
 )
 from qtpy.QtCore import QTimer, Qt, QThread, QObject, Signal, QPoint, QRect
 from qtpy.QtGui import QPainter, QPen, QBrush, QColor, QBitmap, QFont, QTextCharFormat
@@ -36,11 +36,10 @@ class ScreenRangeSelector(QWidget):
         self.setStyleSheet("background-color:black;")
         self.setWindowOpacity(0.4)
 
-        desktop = QDesktopWidget()
-        screen_count = desktop.screenCount()
+        screens = QApplication.screens()
         max_width, max_height = 0, 0
-        for i in range(screen_count):
-            geom = desktop.screenGeometry(i)
+        for sc in screens:
+            geom = sc.geometry()
             max_height = max(max_height, geom.height())
             max_width += geom.width()
         self.setGeometry(0, 0, max_width - 1, max_height - 1)
