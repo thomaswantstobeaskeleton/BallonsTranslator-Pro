@@ -34,6 +34,11 @@ from .nav_controller import NavController, SECTIONS
 from .sidebar_widget import SidebarWidget
 from .pages.home_page import HomePage
 from .pages.editor_page import EditorPage
+from .pages.assist_qa_page import AssistQAPage
+from .pages.batch_queue_page import BatchQueuePage
+from .pages.diagnostics_page import DiagnosticsPage
+from .pages.models_ai_page import ModelsAIPage
+from .pages.settings_page import SettingsPage
 from .pages.stub_page import StubPage
 
 
@@ -199,9 +204,16 @@ class BallonsShell(QMainWindow):
         # EDITOR – redesigned workspace shell
         self._add_page("editor", EditorPage())
 
+        # Core redesigned section shells
+        self._add_page("batch_queue", BatchQueuePage())
+        self._add_page("assist_qa", AssistQAPage())
+        self._add_page("models_ai", ModelsAIPage())
+        self._add_page("settings", SettingsPage())
+        self._add_page("diagnostics", DiagnosticsPage())
+
         # All other sections – stubs for now
         for section_id in SECTIONS:
-            if section_id in {"home", "editor"}:
+            if section_id in {"home", "editor", "batch_queue", "assist_qa", "models_ai", "settings", "diagnostics"}:
                 continue
             page = StubPage(section_id)
             self._add_page(section_id, page)
