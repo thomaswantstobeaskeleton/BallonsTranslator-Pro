@@ -354,7 +354,6 @@ class ApplyTranslationCandidateCommand(QUndoCommand):
         self.trans_edit = trans_edit
         self.new_text = str(new_text or "")
         self.old_text = str(getattr(getattr(blk_item, "blk", None), "translation", "") or "")
-        self._first = True
 
     def _apply(self, text: str):
         if getattr(self.blk_item, "blk", None) is not None:
@@ -364,9 +363,6 @@ class ApplyTranslationCandidateCommand(QUndoCommand):
             self.trans_edit.setPlainText(text)
 
     def redo(self):
-        if self._first:
-            self._first = False
-            return
         self._apply(self.new_text)
 
     def undo(self):

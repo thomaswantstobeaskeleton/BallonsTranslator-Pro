@@ -693,9 +693,12 @@ class TitleBar(Widget):
 
         mangaSourceAction = QAction(self.tr('Manga / Comic source...'), self)
         self.manga_source_trigger = mangaSourceAction.triggered
-        realtimeTranslatorAction = QAction(self.tr('Realtime Screen Translator...'), self)
-        realtimeTranslatorAction.setToolTip(self.tr('Live OCR + translation for a selected screen/window region without opening a full project.'))
+        realtimeTranslatorAction = QAction(self.tr('Realtime Screen Translator (dev)...'), self)
+        realtimeTranslatorAction.setToolTip(self.tr('Live OCR + translation for a selected screen/window region without opening a full project. (Developer mode only)'))
         self.realtime_translator_trigger = realtimeTranslatorAction.triggered
+        self.realtime_translator_action = realtimeTranslatorAction
+        # Only visible in dev mode
+        realtimeTranslatorAction.setVisible(pcfg.dev_mode)
         translationAssistAction = QAction(self.tr('Translation Assist (beta)...'), self)
         translationAssistAction.setToolTip(self.tr('Open Translation Assist sidebar for side-by-side candidates and glossary/TM hints.'))
         self.translation_assist_trigger = translationAssistAction.triggered

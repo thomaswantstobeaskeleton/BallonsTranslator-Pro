@@ -1,87 +1,243 @@
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > **If you're sharing the translated result publicly and no experienced human translator participated in a thorough translation or proofread, please mark it as machine translation somewhere clear to see.**
 
+<div align="center">
+
 # BallonsTranslator-Pro
+
+**AI-powered manga & comic translation toolkit — forked from [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) with 50+ extra modules and production-grade workflow tools.**
+
 [简体中文](/README_zh_CN.md) | English | [pt-BR](doc/README_PT-BR.md) | [Русский](doc/README_RU.md) | [日本語](doc/README_JA.md) | [Indonesia](doc/README_ID.md) | [Tiếng Việt](doc/README_VI.md) | [한국어](doc/README_KO.md) | [Español](doc/README_ES.md) | [Français](doc/README_FR.md)
 
-BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) focused on serious manga/comic translation workflows.
+[![GitHub Stars](https://img.shields.io/github/stars/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&logo=github&color=gold)](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&logo=github&color=blue)](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/network/members)
+[![License](https://img.shields.io/github/license/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&color=green)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=for-the-badge)](docs/GPU_ACCELERATION.md)
+
+</div>
 
 <p align="center">
   <img src="doc/src/1111.png" width="100%">
 </p>
 
-At a high level, BallonsTranslator-Pro helps you:
+## What is BallonsTranslator-Pro?
 
-1. Detect speech balloons/text areas
-2. Read text (OCR)
-3. Translate text
-4. Clean original text from artwork (inpaint)
-5. Edit and export pages
+BallonsTranslator-Pro is an advanced fork of [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) built for **serious manga/comic scanlation workflows**. It keeps everything great from the original and adds:
 
-- Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
-
----
-
-## Launch the app quickly (what to click)
-
-After cloning/downloading and opening the project folder:
-
-- **Windows (recommended):** double-click `launcher.bat` for a single menu with setup, auto-update, AMD/NVIDIA/CPU GPU modes.
-- **Windows quick start:** double-click `launch_win.bat` to start immediately with auto GPU detection.
-- **Cross-platform (manual):** run `python launch.py` in terminal.
-- **GPU help:** see [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md), especially for AMD Radeon RX 9070/9060/7900 cards.
-
-If batch files are blocked by Windows SmartScreen, right-click the `.bat` file → **Run as administrator** (or choose **More info → Run anyway**).
+- **90+ AI modules** — 20+ text detectors, 30+ OCR engines, 25+ translators, 15+ inpainters
+- **Production lettering tools** — auto-layout, overflow checks, shape-aware safe areas, density-aware font scaling
+- **Realtime screen translation** — always-on-top overlay for live manga reader translation
+- **Translation Assist dock** — per-block TM/glossary/candidates, provider comparison, QA warnings
+- **Batch queue** — multi-folder processing with pause/resume/cancel
+- **Automation API** — local REST API + MCP-style command surface for headless workflows
+- **Docker / server mode** — run without GUI for CI or remote workflows
 
 ---
 
-## Install Google Fonts (native in-app)
+## Quick Start
 
-You can now install Google Fonts directly from the app:
-
-1. Open **Tools → Models → Install Google Font...**
-2. Enter a family name (example: `Bangers`, `Noto Sans JP`, `Comic Neue`)
-3. The app downloads and registers the font automatically.
-
-Installed fonts are stored under `fonts/google/` and become available in font pickers.
-
----
-
-## Clone / download instructions
-
-### Option A — Download ZIP (easiest)
-
-1. Open the repo page on GitHub.
-2. Click **Code** → **Download ZIP**.
-3. Extract to a normal folder (example: `Documents/BallonsTranslator-Pro`).
-4. Open that folder.
-5. Launch using `launch_win.bat` (Windows) or terminal (`python launch.py`).
-
-### Option B — Git clone (terminal)
+| OS | One-liner |
+|---|---|
+| ![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white) | Double-click `launcher.bat` or `launch_win.bat` |
+| ![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white) | `python launch.py` |
+| ![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black) | `python launch.py` |
 
 ```bash
+# Or clone and run
 git clone https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro
 cd BallonsTranslator-Pro
 python launch.py
 ```
 
-### Option C — GitHub Desktop
-
-1. Install GitHub Desktop.
-2. **File → Clone repository**.
-3. Paste repo URL and choose a local path.
-4. Open the local folder.
-5. Launch `launch_win.bat` (Windows) or `python launch.py`.
+> GPU help (AMD RX 9070/9060/7900, NVIDIA, Apple Silicon): [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md)
 
 ---
 
-## Requirements
+## Feature Highlights
 
-- Python 3.10.2+ (Python 3.10.0/3.10.1 can crash PyInstaller builds with `IndexError: tuple index out of range`)
-- Internet for first-time setup/model downloads
-- Enough disk space for selected models
+### One-Click Translation Pipeline
+<p align="center"><img src="doc/src/run.gif" width="80%"></p>
 
-Check Python:
+Mix-and-match **90+ modules** across the full pipeline. No need to settle for one-size-fits-all defaults.
+
+### Realtime Screen Translator
+<p align="center"><img src="doc/src/pro/realtime_overlay.png" width="80%" alt="Realtime overlay placeholder — capture overlay in action"></p>
+
+Always-on-top, click-through overlay. Select any screen region or follow a window. Privacy-first: nothing is persisted or logged by default.
+
+### Translation Assist
+<p align="center"><img src="doc/src/pro/translation_assist.png" width="80%" alt="Translation Assist dock placeholder"></p>
+
+Per-block candidate suggestions, TM/glossary lookup, side-by-side provider comparison, and block-level QA warnings.
+
+### Production Lettering & Auto-Layout
+<p align="center"><img src="doc/src/multisel_autolayout.gif" width="80%"></p>
+
+Shape-aware safe areas, balanced line breaks, density-aware font scaling, and overflow safety checks.
+
+### Batch Queue
+<p align="center"><img src="doc/src/pro/batch_queue.png" width="80%" alt="Batch queue placeholder"></p>
+
+Process multiple folders in a single queue with pause, resume, and cancel.
+
+---
+
+## Module Catalog
+
+<details>
+<summary><b>Text Detectors (20+)</b> — click to expand</summary>
+
+| Module | Type | Best For |
+|---|---|---|
+| `ctd` (ComicTextDetector) | Built-in | Default; Japanese/English manga |
+| `ysgyolo` | Pro | Filters onomatopoeia; lh5426 model |
+| `animetext_yolo` | Pro | Complex anime scenes (AnimeText dataset) |
+| `mangalens_bubble_segmentation` | Pro | Bubble segmentation |
+| `paddle_det` / `paddle_det_v5` | Pro | Chinese/English/Japanese |
+| `pp_doclayout_v3` | Pro | Complex layouts, curved pages, mixed columns |
+| `easyocr_det` | Pro | Multilingual scene text |
+| `craft_det` | Pro | Curved/oriented text |
+| `mmocr_det` | Pro | Document/comic text (polygon) |
+| `rapidocr_det` | Pro | Lightweight ONNX detection |
+| `dptext_detr` | Pro | Dynamic point queries |
+| `hf_object_det` | Pro | Bubble/text object detection |
+| `hunyuan_ocr_det` | Pro | Full-image spotting |
+| `magi_det` | Pro | Manga panels + reading order (CVPR 2024) |
+| `surya_det` | Pro | 90+ languages, line-level |
+| `sam_text_det` / `sam3_refiner` | Pro | SAM prompt-based segmentation |
+| `swintextspotter_v2` | Pro | End-to-end text spotting |
+| `textmamba_det` | Pro | Curved text (Mamba SSM) |
+| `stariver_ocr` | Pro | Stariver cloud OCR |
+
+</details>
+
+<details>
+<summary><b>OCR Engines (30+)</b> — click to expand</summary>
+
+| Module | Type | Best For |
+|---|---|---|
+| `mit_32px` / `mit_48px` / `mit_48px_ctc` | Built-in | Manga-image-translator models |
+| `manga_ocr` | Built-in | Japanese manga (kha-white) |
+| `paddle_ocr` / `paddle_vl` | Pro | Chinese/Japanese/English |
+| `easyocr_ocr` | Pro | Multilingual |
+| `rapid_ocr` | Pro | Lightweight ONNX |
+| `florence2_ocr` | Pro | Microsoft vision model |
+| `got_ocr2` | Pro | Unified plain/scene/formatted |
+| `hunyuan_ocr` | Pro | 100+ languages, spotting |
+| `glm_ocr` | Pro | 0.9B document OCR |
+| `internvl2_ocr` / `internvl3_ocr` | Pro | Document/chart/OCR |
+| `lighton_ocr` | Pro | 1B parameter OCR |
+| `chandra_ocr` | Pro | 9B document OCR (layout, tables, math) |
+| `deepseek_ocr` | Pro | Heavyweight document OCR |
+| `docowl2_ocr` | Pro | OCR-free document understanding |
+| `bing_ocr` | Pro | Bing image OCR API |
+| `google_vision` | Pro | Google Cloud Vision |
+| `google_lens_exp` | Pro | Experimental Google Lens API |
+| `macos_ocr` | Pro | Apple Vision (macOS native) |
+| `callisto_ocr` / `qwen2vl_ocr` | Pro | VLM-based 2B OCR |
+| `vlm_ocr` (generic HF) | Pro | Any HF VLM (Qwen, InternVL, OlmOCR) |
+| `donut` | Pro | OCR-free document understanding |
+| `llm_ocr` | Pro | LLM API OCR |
+| `lens_proto` | Pro | Google Lens Protobuf |
+
+</details>
+
+<details>
+<summary><b>Translators (25+)</b> — click to expand</summary>
+
+| Module | Type | Best For |
+|---|---|---|
+| `google` | Built-in | Free, fast |
+| `deepl` / `deeplx` / `deeplx_api` | Pro | High-quality NMT |
+| `sugoi` | Pro | Japanese → English (offline) |
+| `sakura` | Pro | Japanese → Chinese (Sakura-13B) |
+| `chatgpt` / `chatgpt_exp` / `openai` | Pro | GPT-4 / GPT-3.5 |
+| `gemini_neverliie` / `mistral_neverliie` | Pro | Gemini / Mistral (neverliie SDK) |
+| `cohere_command_r` | Pro | Cohere Command R+ |
+| `qwen_mt` | Pro | Alibaba Qwen translation |
+| `hy_mt_1_5_7b` | Pro | Tencent Hunyuan MT |
+| `hunyuan_mt_chimera_7b` | Pro | Ensemble refiner (multi-source → Chimera) |
+| `chimera` | Pro | Multi-source ensemble |
+| `ensemble` | Pro | 3 translators + LLM judge |
+| `chain` | Pro | Chained translation (e.g. JP → EN → CN) |
+| `mbart50` | Pro | 50-language Meta NMT |
+| `nllb200` | Pro | 200-language Meta NMT |
+| `opus_mt` | Pro | Helsinki NLP per-pair models |
+| `t5_mt` | Pro | Prompt-based T5 translation |
+| `m2m100` / `m2m100_hf` | Pro | Meta many-to-many |
+| `manual` | Pro | JSON prompt workflow |
+| `llm_api_translator` | Pro | Generic LLM API |
+| `eztrans` | Pro | Korean game translation |
+| `text-generation-webui` | Pro | Local TGW backend |
+| `translatorspack` | Pro | Aggregator (google, bing, baidu, etc.) |
+| `caiyun` / `baidu` / `papago` | Pro | Chinese cloud APIs |
+
+</details>
+
+<details>
+<summary><b>Inpainters (15+)</b> — click to expand</summary>
+
+| Module | Type | Best For |
+|---|---|---|
+| `aot` | Built-in | Manga-image-translator default |
+| `patchmatch` | Built-in | Non-deep learning (PS-like) |
+| `lama_mpe` | Built-in | Fine-tuned LaMa |
+| `cuhk_manga_inpaint` | Pro | CUHK Seamless Manga (SIGGRAPH 2021) |
+| `lama_onnx` / `lama_manga_onnx` | Pro | ONNX LaMa (general / manga) |
+| `simple_lama` | Pro | pip-installable LaMa |
+| `mat` | Pro | Mask-Aware Transformer (CVPR 2022) |
+| `opencv-tela` / `opencv-classic` | Pro | OpenCV inpainting |
+| `diffusers_sd_inpaint` / `diffusers_sd2_inpaint` / `diffusers_sdxl_inpaint` | Pro | Stable Diffusion family |
+| `dreamshaper_inpaint` | Pro | DreamShaper 8 |
+| `kandinsky_inpaint` | Pro | Kandinsky 2.1 |
+| `fluently_v4_inpaint` | Pro | Anime/comic tuned |
+| `repaint` | Pro | DDPM-based |
+| `flux_fill` | Pro | FLUX.1 Fill (12B, high quality) |
+| `qwen_image_edit` | Pro | Qwen-Image-Edit semantic fill |
+
+</details>
+
+---
+
+## Pro vs Original — At a Glance
+
+| Capability | Original | Pro |
+|---|---|---|
+| Text Detectors | 3 | **20+** |
+| OCR Engines | 5 | **30+** |
+| Translators | 10 | **25+** |
+| Inpainters | 3 | **15+** |
+| Realtime Screen Overlay | No | **Yes** |
+| Translation Assist Dock | No | **Yes** |
+| Batch Queue (multi-folder) | No | **Yes** |
+| Layout Review & Auto-Layout | Basic | **Advanced** |
+| Automation API / Headless | No | **Yes** |
+| Docker / Server Mode | No | **Yes** |
+| In-App Google Fonts Installer | No | **Yes** |
+| Environment Doctor | No | **Yes** |
+| Model Manager | No | **Yes** |
+| PSD Export | No | **Yes** |
+| InDesign LPTXT Workflow | No | **Yes** |
+
+---
+
+## Basic Workflow
+
+1. **Open pages** — `File → Open Folder / Open Images`
+2. **Select modules** — pick your detector + OCR + translator + inpainter
+3. **Run** — one-click full pipeline
+4. **Review & edit** — rich text editor with undo/redo, multi-select, style presets
+5. **Export** — `Tools → Export all pages` (PNG, CBZ, PSD, InDesign LPTXT)
+
+---
+
+## System Requirements
+
+- **Python** 3.10.2+ (avoid 3.10.0/3.10.1 — PyInstaller crash bug)
+- **Internet** for first-time setup and model downloads
+- **Disk** ~10-50 GB depending on selected models
+- **GPU** optional (CUDA, ROCm, Apple Silicon, or CPU)
 
 ```bash
 python --version
@@ -89,113 +245,33 @@ python --version
 
 ---
 
-## Why Pro
+## Documentation
 
-- Practical module combinations for real projects
-- Better batch and long-chapter workflow support
-- More automatic bubble lettering with shape-aware safe areas, balanced line breaks, density-aware font scaling, and final overflow safety checks (see [Automatic text formatting](doc/AUTOMATIC_TEXT_FORMATTING.md))
-- LLM-aided review chain for quality/consistency
-- Strong defaults for fast onboarding
-- Local automation/API documentation for headless and MCP-style workflows (see [Local Automation API](docs/LOCAL_AUTOMATION_API.md))
-- Docker/server-mode quickstart plus sample curl/Python client snippets are included in the same document.
+| Start Here | Quality & Lettering | Automation & Plans |
+|---|---|---|
+| [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) | [QUALITY_RANKINGS](docs/QUALITY_RANKINGS.md) | [LOCAL_AUTOMATION_API](docs/LOCAL_AUTOMATION_API.md) |
+| [GPU_ACCELERATION](docs/GPU_ACCELERATION.md) | [MODELS_REFERENCE](docs/MODELS_REFERENCE.md) | [REALTIME_TRANSLATION_MODE_PLAN](docs/REALTIME_TRANSLATION_MODE_PLAN.md) |
+| [DOCS_HIGHLIGHTS](docs/DOCS_HIGHLIGHTS.md) | [TRANSLATION_CONTEXT_AND_GLOSSARY](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md) | [TRANSLATION_ASSIST_PLAN](docs/TRANSLATION_ASSIST_PLAN.md) |
+| | [INDESIGN_LPTXT_WORKFLOW](docs/INDESIGN_LPTXT_WORKFLOW.md) | [FEATURE_PARITY_MATRIX](docs/FEATURE_PARITY_MATRIX.md) |
 
----
-
-## Feature map (quick overview)
-
-### Core production pipeline
-
-- **Pipeline modules**: Mix-and-match detector, OCR, translator, inpainter, plus typography/layout passes for scanlation workflows.
-- **Layout review & auto-layout**: Layout Review tools, auto-fit/atomic bubble fit, overflow checks, reading-order helpers, and typography QA passes for production lettering.
-- **Text editing abilities**: Rich text bubble editor with undo/redo, multi-select transforms, find/replace tools, text style presets, warp/shape controls, and per-block OCR/translation inspection workflows.
-- **Quality-first postprocessing**: Includes block-level QA hints, review-oriented tooling, and consistency helpers to reduce obvious translation/lettering regressions.
-
-### Translation quality stack
-
-- **Translation Assist (beta)**: Per-block assist dock with TM/glossary/SFX/concordance candidates, explicit apply, edit-before-apply flow, add-to-TM/glossary actions, block QA warnings, provider telemetry, and cache controls.
-- **Compare providers/modules workflow**: Compare candidate outputs by preset (`low_latency`, `high_quality`) and compare scope (`translator`, `ocr`, `detector`, `inpainter`) from one assist surface.
-- **Prompt/profile controls**: Per-project assist prompt profiles and provider preference controls are available for controlled quality tuning.
-- **Structured quality docs**: Quality guidance and model-ranking references are documented under [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) and [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md).
-
-### Realtime, automation, and operations
-
-- **Realtime Screen Translator (experimental)**: Project-less live OCR/translation from selected regions (Tools → Realtime Screen Translator), with privacy-first defaults.
-- **Automation API**: Local API route discovery (`/routes`) and MCP-style command surface for headless/control-plane tooling, including translation-assist and realtime namespaces.
-- **Batch & exports**: Batch queue, archive/CBZ flows, structured OCR/translation interchange, and proof/handoff oriented outputs.
-- **Raw downloader**: Registry-based manga/raw source system with explicit legal/safety boundaries and provider extensibility.
-- **Diagnostics & troubleshooting**: Environment doctor, startup diagnostics, optional dependency docs, GPU/runtime guidance.
-
-### Platform and usability highlights
-
-- **Windows-first launch ergonomics**: `launcher.bat`/`launch_win.bat` flows for setup + fast launch.
-- **In-app Google Fonts installer**: Install and register families without leaving the app.
-- **Model/provider compatibility flexibility**: Blend local/offline and cloud-capable OCR/MT/LLM components depending on your constraints.
+- Full change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
-
-## Basic workflow
-
-1. **Open pages**: File → Open Folder / Open Images
-2. **Select modules**: Detector / OCR / Inpaint / Translator
-3. Click **Run**
-4. Review and edit text bubbles
-5. Export from **Tools → Export all pages**
-
----
-
-## Useful paths in this repo
-
-- App launcher: `launch.py`
-- Windows one-click launcher: `launch_win.bat`
-- Config template: `config/config.example.json`
-- Active config: `config/config.json`
-- Models: `data/models/`
-- Fonts: `fonts/`
-
----
-
-## Docs by use case
-
-### Start here
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md)
-- [docs/DOCS_HIGHLIGHTS.md](docs/DOCS_HIGHLIGHTS.md) — one-page guide describing each major document and when to use it.
-
-### Quality, translation, and lettering
-- [docs/QUALITY_RANKINGS.md](docs/QUALITY_RANKINGS.md) — quality/performance expectations for module combinations.
-- [docs/MODELS_REFERENCE.md](docs/MODELS_REFERENCE.md) — model/module reference and selection notes.
-- [docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md](docs/TRANSLATION_CONTEXT_AND_GLOSSARY.md) — context/glossary strategy and consistency guidance.
-- [docs/INDESIGN_LPTXT_WORKFLOW.md](docs/INDESIGN_LPTXT_WORKFLOW.md) — professional handoff workflow for downstream lettering tools.
-
-### Automation, realtime, and plans
-- [docs/LOCAL_AUTOMATION_API.md](docs/LOCAL_AUTOMATION_API.md) — route contract + automation client examples.
-- [docs/REALTIME_TRANSLATION_MODE_PLAN.md](docs/REALTIME_TRANSLATION_MODE_PLAN.md) — realtime mode phases and constraints.
-- [docs/TRANSLATION_ASSIST_PLAN.md](docs/TRANSLATION_ASSIST_PLAN.md) — translation assist capabilities and roadmap.
-- [docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md](docs/ALTERNATIVES_FEATURE_GAP_IMPLEMENTATION_PLAN.md) — feature-gap plan and checkpoint log.
-- [docs/FEATURE_PARITY_MATRIX.md](docs/FEATURE_PARITY_MATRIX.md) — parity status tracker across workflow areas.
-
 
 ## Manga / Comic Raw Downloader
 
-BallonsTranslator-Pro includes a registry-backed manga/raw source downloader. Existing sources (MangaDex, Comick, GOMANGA, Manhwa Reader, MangaForFree, ToonGod, Mangakakalot, NaruRaw, ManhwaRaw, 1kkk, generic chapter URLs, and local folders) are preserved, and new providers can be added through `utils/manga_sources/provider_base.py` plus `utils/manga_sources/registry.py` without manually rebuilding the UI source list.
+BallonsTranslator-Pro includes a registry-backed manga source downloader with built-in providers (MangaDex, Comick, GOMANGA, MangaForFree, ToonGod, Mangakakalot, NaruRaw, and more). New providers can be added via `utils/manga_sources/provider_base.py` without rebuilding the UI.
 
-Current first-batch registry providers include MangaSee/MangaSee123, ReadManga-style pages, and Manganato/Manganelo compatibility. Providers must use public pages/APIs only, respect request delays, and must not bypass DRM, paywalls, login restrictions, private APIs, CAPTCHA, Cloudflare, or other access controls. Browser rendering remains the explicit user-controlled Playwright option.
-
-Developer docs:
-
-- `docs/RAW_SOURCE_PROVIDER_EXPANSION_PLAN.md` — audit and roadmap.
-- `docs/MANGA_SOURCE_PLUGIN_API.md` — provider interface, registry metadata, legal/ToS expectations, and tests.
-- `docs/EXTERNAL_SOURCE_AUDIT.md` — generated local audit report for optional external downloader repositories.
-
-Smoke tests:
+- `docs/RAW_SOURCE_PROVIDER_EXPANSION_PLAN.md` — roadmap
+- `docs/MANGA_SOURCE_PLUGIN_API.md` — provider interface
 
 ```bash
 python scripts/test_manga_sources.py
-python scripts/test_manga_sources.py --stable-registry-only
 pytest -q tests/test_manga_provider_base.py
 ```
 
+---
 
-## Realtime Screen Translator (Experimental)
+## License
 
-BallonsTranslator-Pro now includes an optional project-less realtime dialog (Tools → Realtime Screen Translator) for live OCR+translation on a selected screen region. Privacy defaults are local-first: no screenshot/OCR/translation persistence and no live-text logging unless explicitly enabled in future settings.
+[GPL-3.0](LICENSE) — Forked from [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator).

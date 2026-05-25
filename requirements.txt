@@ -75,5 +75,7 @@ playwright>=1.40.0
 rarfile
 # Optional: Video translator — Audio (ASR) source. Enables speech-to-text from video audio (pip install faster-whisper if not installed).
 faster-whisper
+# Optional: Live translator screen capture backend (cross-platform).
+mss
 # Optional: Video translator — ASR "Separate vocals" to reduce music noise before transcription (pip install demucs).
 demucs

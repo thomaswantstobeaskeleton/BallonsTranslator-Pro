@@ -18,7 +18,7 @@ from urllib import error as urlerror
 
 from tqdm import tqdm
 from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QProgressBar, QLabel, QWidget, QInputDialog, QFormLayout, QDialogButtonBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QPushButton, QSizePolicy
-from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
+from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer, QThread
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage, QShowEvent, QCursor, QPixmap, QBrush, QColor
 
 from utils.logger import logger as LOGGER
@@ -117,6 +117,7 @@ from utils.translation_assist import (
     estimate_candidate_cost_usd,
     make_synthetic_mt_candidate,
 )
+from ui.translation_assist_worker import CompareWorker
 from modules.llm_quality import enforce_glossary, back_translation_drift_score
 from modules.text_normalization import normalize_text
 from modules.text_replace_profiles import apply_profile, default_profiles
@@ -1340,12 +1341,10 @@ class MainWindow(mainwindow_cls):
             if action == 'set':
                 pcfg.module.preferred_assist_providers = list((_b or {}).get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
                 pcfg.module.default_assist_prompt_profile = str((_b or {}).get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
-                pcfg.module.compare_provider_models = dict((_b or {}).get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'})) or {'openai': 'gpt-4o-mini'})
             return {
                 'ok': True,
                 'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
                 'default_assist_prompt_profile': str(getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue') or 'dialogue'),
-                'compare_provider_models': dict(getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}) or {'openai': 'gpt-4o-mini'}),
                 'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
             }
         return self._api_call_ui(_ui, body)
@@ -1430,12 +1429,10 @@ class MainWindow(mainwindow_cls):
             )
             # external provider fan-out (synthetic candidate orchestration placeholder)
             external = [p for p in providers if p.lower() in {'openai', 'deepl', 'google', 'ollama', 'lmstudio'}]
-            compare_models = dict((_b or {}).get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {})) or {})
             for p in external:
                 try:
                     t0 = time.perf_counter()
                     row = make_synthetic_mt_candidate(source, p, mode=preset)
-                    model_name = str(compare_models.get(str(p).lower(), '') or '').strip()
                     tele = {
                         "latency_ms": int((time.perf_counter()-t0)*1000),
                         "source": "external_provider",
@@ -1443,7 +1440,7 @@ class MainWindow(mainwindow_cls):
                     }
                     candidates.append({
                         "candidate_id": f"ext_{p}_{len(candidates)+1}",
-                        "provider": (f"{p}:{model_name}" if model_name else p),
+                        "provider": p,
                         "text": row.get("text", ""),
                         "telemetry": tele,
                     })
@@ -5292,7 +5289,6 @@ class MainWindow(mainwindow_cls):
                 'preset': 'high_quality',
                 'max_candidates': int(getattr(pcfg.module, 'max_mt_candidates', 6) or 6),
                 'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
-                'compare_provider_models': dict(getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}) or {'openai': 'gpt-4o-mini'}),
                 'page': target_blocks[0]['page'],
                 'block': target_blocks[0]['block'],
             })
@@ -5412,9 +5408,11 @@ class MainWindow(mainwindow_cls):
                 'max_mt_candidates': getattr(pcfg.module, 'max_mt_candidates', 6),
                 'preferred_assist_providers': getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']),
                 'default_assist_prompt_profile': getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue'),
-                'compare_provider_models': getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}),
                 'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
             })
+            # Refresh dynamic provider lists from module registry
+            all_providers = ['TM', 'Glossary', 'Concordance', 'SFX'] + sorted(GET_VALID_TRANSLATORS())
+            self._translation_assist_dock.refresh_provider_list(all_providers)
         self._translation_assist_dock.show()
         self._translation_assist_dock.raise_()
         self.refresh_translation_assist_for_selection()
@@ -5453,7 +5451,6 @@ class MainWindow(mainwindow_cls):
         pcfg.module.max_mt_candidates = int(opts.get('max_mt_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6)
         pcfg.module.preferred_assist_providers = list(opts.get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
         pcfg.module.default_assist_prompt_profile = str(opts.get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
-        pcfg.module.compare_provider_models = dict(opts.get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'})) or {'openai': 'gpt-4o-mini'})
         if bool(opts.get('clear_assist_cache', False)):
             self._api_translation_assist_cache({'action': 'clear'})
         sel = self._selected_assist_page_block()
@@ -5469,27 +5466,25 @@ class MainWindow(mainwindow_cls):
         source = str(base.get('source_text', '') or '')
         target = str(base.get('current_target_text', '') or '')
         if bool(opts.get('run_compare', False)):
-            cmp_rst = self._api_translation_assist_compare({
-                'page': sel['page'],
-                'block': sel['block'],
-                'source_text': source,
-                'preset': str(opts.get('compare_preset', 'low_latency') or 'low_latency'),
-                'max_candidates': int(opts.get('max_mt_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6),
-                'compare_provider_models': dict(getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}) or {'openai': 'gpt-4o-mini'}),
-            })
-            self._api_translation_assist_candidates({
-                'page': sel['page'], 'block': sel['block'],
-                'source_text': source, 'current_target_text': target,
-                'candidates': list(cmp_rst.get('candidates', []) or []),
-            })
-            warn = [str(w.get('message', '')) for w in list(cmp_rst.get('warnings', []) or []) if str(w.get('message', '')).strip()]
-            self._translation_assist_dock.set_assist_payload({
-                'source_text': source,
-                'current_target_text': target,
-                'candidates': list(cmp_rst.get('candidates', []) or []),
-                'summary': self.tr('Compare preset: {0} | candidates: {1}').format(str(cmp_rst.get('preset', 'low_latency')), int(cmp_rst.get('count', 0))),
-                'qa_warnings': self._translation_assist_block_qa_warnings(sel['page'], sel['block']) + warn,
-            })
+            scope = str(opts.get('compare_scope', 'translator') or 'translator').strip().lower()
+            providers = list(opts.get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
+            self._translation_assist_dock.set_busy(True)
+            worker = CompareWorker(
+                scope=scope,
+                providers=providers,
+                source_text=source,
+                lang_source=str(getattr(pcfg.module, 'translate_source', 'Auto') or 'Auto'),
+                lang_target=str(getattr(pcfg.module, 'translate_target', '简体中文') or '简体中文'),
+                current_module=str(getattr(pcfg.module, 'translator', '') or '') if scope == 'translator' else str(getattr(pcfg.module, {'ocr': 'ocr', 'detector': 'textdetector', 'inpainter': 'inpainter'}.get(scope, ''), '') or ''),
+            )
+            thread = QThread(self)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.finished.connect(lambda rst: self._on_compare_worker_finished(rst, sel['page'], sel['block'], source, target))
+            worker.finished.connect(thread.quit)
+            thread.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.start()
             return
         max_n = max(1, int(getattr(pcfg.module, 'max_mt_candidates', 6) or 6))
         tm_hits = []
@@ -5537,6 +5532,27 @@ class MainWindow(mainwindow_cls):
             'candidates': list(cand_payload.get('candidates', []) or []),
             'summary': self.tr('Candidates: {0}').format(len(candidates)),
             'qa_warnings': self._translation_assist_block_qa_warnings(sel['page'], sel['block']),
+        })
+
+    def _on_compare_worker_finished(self, rst: dict, page: str, block: int, source: str, target: str):
+        if not hasattr(self, '_translation_assist_dock') or self._translation_assist_dock is None:
+            return
+        self._translation_assist_dock.set_busy(False)
+        scope = str(rst.get('scope', 'translator'))
+        candidates = list(rst.get('candidates', []) or [])
+        warnings = list(rst.get('warnings', []) or [])
+        self._api_translation_assist_candidates({
+            'page': page, 'block': block,
+            'source_text': source, 'current_target_text': target,
+            'candidates': candidates,
+        })
+        warn_texts = [str(w.get('message', '')) for w in warnings if str(w.get('message', '')).strip()]
+        self._translation_assist_dock.set_assist_payload({
+            'source_text': source,
+            'current_target_text': target,
+            'candidates': candidates,
+            'summary': self.tr('Compare scope: {0} | candidates: {1}').format(scope, len(candidates)),
+            'qa_warnings': self._translation_assist_block_qa_warnings(page, block) + warn_texts,
         })
 
     def on_translation_assist_selection_changed(self):
@@ -5654,8 +5670,13 @@ class MainWindow(mainwindow_cls):
 
     def on_open_realtime_translator(self):
         """Open realtime screen translation dialog (project-less live mode)."""
+        # Dev-only feature - guard against accidental use
+        if not pcfg.dev_mode:
+            from utils.message import create_info_dialog
+            create_info_dialog(self, self.tr('Developer Mode Required'), self.tr('Realtime Screen Translator is a developer-only feature. Enable Developer Mode in Settings > General to use it.'))
+            return
         if not hasattr(self, '_realtime_translator_dialog') or self._realtime_translator_dialog is None:
-            self._realtime_translator_dialog = RealtimeTranslatorDialog(self)
+            self._realtime_translator_dialog = RealtimeTranslatorDialog(self, module_manager=self.module_manager)
         if self._realtime_translator_dialog.isVisible():
             self._realtime_translator_dialog.raise_()
             self._realtime_translator_dialog.activateWindow()
@@ -7324,6 +7345,9 @@ class MainWindow(mainwindow_cls):
 
     def on_dev_mode_changed(self):
         """Refresh detector/OCR/translator dropdowns after dev_mode toggle."""
+        # Update realtime translator menu item visibility
+        if hasattr(self.titleBar, 'realtime_translator_action'):
+            self.titleBar.realtime_translator_action.setVisible(pcfg.dev_mode)
         valid_det = GET_VALID_TEXTDETECTORS()
         valid_ocr = GET_VALID_OCR()
         valid_trans = GET_VALID_TRANSLATORS()

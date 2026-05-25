@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from typing import Callable, Dict, Optional
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox
-    , QComboBox
+    QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox,
+    QComboBox, QShortcut
 )
+from qtpy.QtGui import QKeySequence
 
 
 class TranslationAssistDock(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(self.tr('Translation Assist (beta)'))
+        # Set standard dock features (close button, movable, floatable)
+        self.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable |
+            QDockWidget.DockWidgetFeature.DockWidgetMovable |
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
         self._refresh_cb: Optional[Callable[[Dict], None]] = None
         self._apply_cb: Optional[Callable[[str], None]] = None
         self._add_tm_cb: Optional[Callable[[str], None]] = None
@@ -51,15 +59,12 @@ class TranslationAssistDock(QDockWidget):
         self.prompt_profile.setToolTip(self.tr('Prompt profile for assist candidate generation/QA context.'))
         self.provider_list = QListWidget(root)
         self.provider_list.setToolTip(self.tr('Select providers for assist/compare.'))
-        self.provider_list.setMaximumHeight(84)
+        self.provider_list.setMaximumHeight(160)
         for nm in ['TM', 'Glossary', 'Concordance', 'SFX', 'google', 'deepl', 'openai', 'ollama', 'lmstudio']:
             it = QListWidgetItem(str(nm))
             it.setFlags(it.flags() | it.flags().ItemIsUserCheckable)
-            it.setCheckState(0)
+            it.setCheckState(Qt.Unchecked)
             self.provider_list.addItem(it)
-        self.openai_model_combo = QComboBox(root)
-        self.openai_model_combo.addItems(['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'])
-        self.openai_model_combo.setToolTip(self.tr('OpenAI model used in compare provider labeling.'))
         self.compare_preset = QComboBox(root)
         self.compare_preset.addItems(["low_latency", "high_quality"])
         self.compare_preset.setToolTip(self.tr('Preset for multi-provider compare orchestration.'))
@@ -92,12 +97,14 @@ class TranslationAssistDock(QDockWidget):
         self.add_glossary_btn = QPushButton(self.tr('Add Selected to Glossary'), root)
         self.apply_edited_btn = QPushButton(self.tr('Apply Edited Text'), root)
         self.clear_cache_btn = QPushButton(self.tr('Clear Assist Cache'), root)
+        self.fullscreen_btn = QPushButton(self.tr('Fullscreen'), root)
         self.add_tm_btn.setEnabled(False)
         self.add_glossary_btn.setEnabled(False)
         self.apply_edited_btn.setEnabled(False)
         row.addWidget(self.refresh_btn)
         row.addWidget(self.compare_btn)
         row.addWidget(self.apply_btn)
+        row.addWidget(self.fullscreen_btn)
         lay.addWidget(self.source_box)
         lay.addWidget(self.target_box)
         lay.addWidget(self.candidates)
@@ -105,7 +112,6 @@ class TranslationAssistDock(QDockWidget):
         lay.addWidget(self.summary)
         lay.addLayout(scope_row)
         lay.addWidget(self.provider_list)
-        lay.addWidget(self.openai_model_combo)
         lay.addLayout(row)
         row2 = QHBoxLayout()
         row2.addWidget(self.add_tm_btn)
@@ -123,6 +129,26 @@ class TranslationAssistDock(QDockWidget):
         self.apply_edited_btn.clicked.connect(self._on_apply_edited)
         self.candidates.itemSelectionChanged.connect(self._on_candidate_selection_changed)
         self.clear_cache_btn.clicked.connect(self._on_clear_cache)
+        self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+
+        # Escape key shortcut to exit fullscreen (works even without focus)
+        self._esc_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._esc_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._esc_shortcut.activated.connect(self._exit_fullscreen)
+
+    def _toggle_fullscreen(self):
+        if self.isFloating():
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+        else:
+            self.setFloating(True)
+            self.showFullScreen()
+
+    def _exit_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
 
     def set_preview(self, source: str, target: str):
         self.source_box.setPlainText(source or '')
@@ -144,12 +170,7 @@ class TranslationAssistDock(QDockWidget):
         selected = set(str(x).strip() for x in list(opts.get('preferred_assist_providers', []) or []) if str(x).strip())
         for i in range(self.provider_list.count()):
             it = self.provider_list.item(i)
-            it.setCheckState(2 if it.text() in selected else 0)
-        model_map = dict(opts.get('compare_provider_models', {}) or {})
-        dflt_model = str(model_map.get('openai', 'gpt-4o-mini') or 'gpt-4o-mini')
-        idx = self.openai_model_combo.findText(dflt_model)
-        if idx >= 0:
-            self.openai_model_combo.setCurrentIndex(idx)
+            it.setCheckState(Qt.Checked if it.text() in selected else Qt.Unchecked)
         self.prompt_profile.clear()
         for p in list(opts.get('prompt_profiles', []) or []):
             self.prompt_profile.addItem(str(p))
@@ -187,7 +208,6 @@ class TranslationAssistDock(QDockWidget):
                 'auto_query_concordance': self.query_concordance.isChecked(),
                 'max_mt_candidates': int(self.max_candidates.value()),
                 'preferred_assist_providers': self._selected_provider_list(),
-                'compare_provider_models': {'openai': str(self.openai_model_combo.currentText() or 'gpt-4o-mini')},
                 'default_assist_prompt_profile': str(self.prompt_profile.currentText() or 'dialogue'),
             })
 
@@ -198,7 +218,6 @@ class TranslationAssistDock(QDockWidget):
                 'compare_preset': str(self.compare_preset.currentText() or 'low_latency'),
                 'compare_scope': str(self.compare_scope.currentText() or 'translator'),
                 'preferred_assist_providers': self._selected_provider_list(),
-                'compare_provider_models': {'openai': str(self.openai_model_combo.currentText() or 'gpt-4o-mini')},
                 'max_mt_candidates': int(self.max_candidates.value()),
             })
 
@@ -244,10 +263,30 @@ class TranslationAssistDock(QDockWidget):
         if self._refresh_cb is not None:
             self._refresh_cb({'clear_assist_cache': True})
 
+    def set_busy(self, busy: bool):
+        self.refresh_btn.setEnabled(not busy)
+        self.compare_btn.setEnabled(not busy)
+        self.apply_btn.setEnabled(not busy and self.candidates.currentItem() is not None)
+        self.summary.setText(self.tr('Loading...') if busy else self.tr('Ready.'))
+
+    def refresh_provider_list(self, providers: list, preserve_checked: bool = True):
+        checked = set()
+        if preserve_checked:
+            for i in range(self.provider_list.count()):
+                it = self.provider_list.item(i)
+                if it.checkState() == Qt.Checked:
+                    checked.add(str(it.text()))
+        self.provider_list.clear()
+        for nm in providers:
+            it = QListWidgetItem(str(nm))
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if str(nm) in checked else Qt.Unchecked)
+            self.provider_list.addItem(it)
+
     def _selected_provider_list(self):
         out = []
         for i in range(self.provider_list.count()):
             it = self.provider_list.item(i)
-            if it.checkState() == 2:
+            if it.checkState() == Qt.Checked:
                 out.append(str(it.text()))
         return out
