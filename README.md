@@ -108,7 +108,7 @@ Process multiple folders in a single queue with pause, resume, and cancel.
 | `sam_text_det` / `sam3_refiner` | Pro | SAM prompt-based segmentation |
 | `swintextspotter_v2` | Pro | End-to-end text spotting |
 | `textmamba_det` | Pro | Curved text (Mamba SSM) |
-| `stariver_ocr` | Pro | Stariver cloud OCR |
+| `stariver_ocr` | Pro | Stariver cloud OCR | 
 
 </details>
 
