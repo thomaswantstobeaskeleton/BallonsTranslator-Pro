@@ -586,7 +586,14 @@ class TextBlkItem(QGraphicsTextItem):
         return path
 
     def setRect(self, rect: Union[List, QRectF], padding=True, repaint=True) -> None:
-        
+
+        def _xywh_to_xyxy(r):
+            if isinstance(r, QRectF):
+                x, y, w, h = r.x(), r.y(), r.width(), r.height()
+            else:
+                x, y, w, h = r[0], r[1], r[2], r[3]
+            return [x, y, x + w, y + h]
+
         if isinstance(rect, List):
             rect = QRectF(*rect)
         if padding:
@@ -596,6 +603,7 @@ class TextBlkItem(QGraphicsTextItem):
         self._display_rect = rect
         self.layout.setMaxSize(rect.width(), rect.height())
         self.setCenterTransform()
+        self.blk.xyxy = _xywh_to_xyxy(rect)
         if repaint:
             self.repaint_background()
 

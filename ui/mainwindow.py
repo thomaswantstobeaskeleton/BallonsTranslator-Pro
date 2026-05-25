@@ -52,7 +52,7 @@ from .mainwindowbars import TitleBar, LeftBar, BottomBar
 from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, GitUpdateThread, ModelDownloadThread
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
-from .textedit_commands import GlobalRepalceAllCommand, ApplyTranslationCandidateCommand
+from .textedit_commands import GlobalRepalceAllCommand, ApplyTranslationCandidateCommand, MergeBlkItemsCommand
 from .framelesswindow import FramelessWindow, FramelessMoveResize
 from .drawing_commands import RunBlkTransCommand
 from .keywordsubwidget import KeywordSubWidget
@@ -8570,25 +8570,7 @@ class MainWindow(mainwindow_cls):
         blks = self.canvas.selected_text_items()
         if len(blks) < 2:
             return
-        blks = sorted(blks, key=lambda b: b.idx)
-        first = blks[0]
-        page_name = self.imgtrans_proj.current_img
-        if not page_name:
-            return
-        src_parts = [self.st_manager.pairwidget_list[b.idx].e_source.toPlainText() for b in blks]
-        trans_parts = [self.st_manager.pairwidget_list[b.idx].e_trans.toPlainText() for b in blks]
-        first.blk.text = ['\n'.join(src_parts)]
-        first.blk.translation = '\n'.join(trans_parts)
-        self.st_manager.pairwidget_list[first.idx].e_source.setPlainText('\n'.join(src_parts))
-        self.st_manager.pairwidget_list[first.idx].e_trans.setPlainText('\n'.join(trans_parts))
-        indices_to_remove = sorted([b.idx for b in blks[1:]], reverse=True)
-        for i in indices_to_remove:
-            self.imgtrans_proj.pages[page_name].pop(i)
-        to_remove_items = blks[1:]
-        to_remove_widgets = [self.st_manager.pairwidget_list[b.idx] for b in blks[1:]]
-        self.st_manager.deleteTextblkItemList(to_remove_items, to_remove_widgets)
-        self.canvas.setProjSaveState(False)
-        self.global_search_widget.set_document_edited()
+        self.canvas.push_undo_command(MergeBlkItemsCommand(blks, self.st_manager))
 
     def on_split_selected_regions(self):
         """Try to split each selected region into multiple regions using image gaps (e.g. two bubbles in one box)."""
