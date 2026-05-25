@@ -433,7 +433,13 @@ class RealtimeTranslatorDialog(QDialog):
                 return ""
             blk_list = detector.detect(img)
             if not blk_list:
+                self.output.appendPlainText(self.tr("Realtime: no text blocks detected"))
                 return ""
+            # Convert numpy array polygons to TextBlock objects if needed
+            if blk_list and isinstance(blk_list[0], np.ndarray):
+                from utils.textblock import TextBlock
+                blk_list = [TextBlock(blk) for blk in blk_list]
+                self.output.appendPlainText(f"Realtime: wrapped {len(blk_list)} polygons into TextBlocks")
             ocr = getattr(self._module_manager, "ocr", None)
             if ocr is None:
                 self.output.appendPlainText(self.tr("Realtime: OCR not loaded"))
@@ -441,12 +447,16 @@ class RealtimeTranslatorDialog(QDialog):
             ocr.run_ocr(img, blk_list)
             parts = []
             for blk in blk_list:
-                txt = getattr(blk, "get_text", lambda: "")()
+                txt = blk.get_text()
                 if txt and str(txt).strip():
                     parts.append(str(txt).strip())
-            return "\n".join(parts)
+            result = "\n".join(parts)
+            self.output.appendPlainText(f"Realtime: OCR extracted {len(parts)} text parts")
+            return result
         except Exception as e:
+            import traceback
             self.output.appendPlainText(self.tr("Realtime OCR error: {}").format(e))
+            self.output.appendPlainText(traceback.format_exc())
             return ""
 
     def _translate_text(self, text: str) -> str:
