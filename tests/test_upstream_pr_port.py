@@ -53,3 +53,42 @@ def test_mainwindow_merge_uses_command():
     with open("ui/mainwindow.py", "r", encoding="utf8") as f:
         source = f.read()
     assert "MergeBlkItemsCommand(blks, self.st_manager)" in source
+
+
+# --- Test RealtimeOverlayWidget uses always-on-top frameless flags ---
+def test_realtime_overlay_window_flags():
+    with open("ui/realtime_overlay.py", "r", encoding="utf8") as f:
+        source = f.read()
+    assert "WindowStaysOnTopHint" in source
+    assert "FramelessWindowHint" in source
+    assert "WA_TransparentForMouseEvents" in source
+    assert "WA_TranslucentBackground" in source
+    assert "HWND_TOPMOST" in source
+
+
+# --- Test RealtimeTranslatorDialog uses RealtimeOverlayWidget ---
+def test_realtime_dialog_uses_overlay_widget():
+    with open("ui/realtime_translator_dialog.py", "r", encoding="utf8") as f:
+        source = f.read()
+    assert "RealtimeOverlayWidget" in source
+    assert "module_manager" in source
+    assert "_OcrTrWorker" in source
+    assert "self._ocr_image" in source
+    assert "self._translate_text" in source
+
+
+# --- Test WindowsNativeBackend is real not stub ---
+def test_windows_native_backend_is_real():
+    with open("utils/realtime_mode.py", "r", encoding="utf8") as f:
+        source = f.read()
+    assert "backend_name = \"windows_native\"" in source
+    assert "_win32gui.GetDesktopWindow" in source
+    assert "PrintWindow" in source
+    assert "EnumWindows" in source
+
+
+# --- Test mainwindow passes module_manager to dialog ---
+def test_mainwindow_passes_module_manager():
+    with open("ui/mainwindow.py", "r", encoding="utf8") as f:
+        source = f.read()
+    assert "module_manager=self.module_manager" in source

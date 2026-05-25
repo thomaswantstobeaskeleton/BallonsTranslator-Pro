@@ -71,4 +71,4 @@ def test_screenshot_backend_factory_supports_mss_selection_or_fallback():
 
 def test_screenshot_backend_factory_supports_windows_native_selection_or_fallback():
     backend = create_screenshot_backend("windows_native")
-    assert backend.backend_name in {"windows_native_stub", "qt_fallback"}
+    assert backend.backend_name in {"windows_native", "qt_fallback"}

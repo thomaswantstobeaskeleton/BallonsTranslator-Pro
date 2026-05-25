@@ -5655,7 +5655,7 @@ class MainWindow(mainwindow_cls):
     def on_open_realtime_translator(self):
         """Open realtime screen translation dialog (project-less live mode)."""
         if not hasattr(self, '_realtime_translator_dialog') or self._realtime_translator_dialog is None:
-            self._realtime_translator_dialog = RealtimeTranslatorDialog(self)
+            self._realtime_translator_dialog = RealtimeTranslatorDialog(self, module_manager=self.module_manager)
         if self._realtime_translator_dialog.isVisible():
             self._realtime_translator_dialog.raise_()
             self._realtime_translator_dialog.activateWindow()
