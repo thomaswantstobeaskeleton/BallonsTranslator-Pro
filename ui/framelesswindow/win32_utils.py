@@ -54,7 +54,7 @@ def isSystemBorderAccentEnabled():
         CloseKey(key)
 
         return bool(value)
-    except:
+    except OSError:
         return False
 
 

@@ -179,7 +179,7 @@ def plot_mapresult(sumbyvector, xlength, span_list=None, thresh=None):
                         label = 'vline_multiple - full height')
                 plt.hlines(y = tr * sumbyvector.mean(), xmin = 0, xmax = xlength, linestyles='--')
         plt.show()
-    except:
+    except Exception:
         pass
 
 

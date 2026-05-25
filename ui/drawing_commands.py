@@ -2,7 +2,7 @@ from qtpy.QtCore import Signal, Qt, QPointF, QSize, QLineF, QDateTime, QRectF, Q
 from qtpy.QtGui import QPen, QColor, QCursor, QPainter, QPixmap, QBrush, QFontMetrics, QImage
 try:
     from qtpy.QtWidgets import QUndoCommand
-except:
+except ImportError:
     from qtpy.QtGui import QUndoCommand
 
 from typing import Union, Tuple, List

@@ -47,7 +47,7 @@ def detectLang(translateText: str) -> str:
     try:
         language = detect(translateText)
         return language.upper()
-    except:
+    except Exception:
         return "EN"
 
 
@@ -123,7 +123,7 @@ def make_deepl_request(url, postDataStr, proxy_mounts):  # Изменено: pro
             except Exception:
                 try:
                     return resp.json()
-                except:
+                except Exception:
                     try:
                         return json.loads(brotli.decompress(resp.content))
                     except Exception as e:

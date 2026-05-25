@@ -71,7 +71,7 @@ def maybe_quantize_optional_onnx_models():
 def prepare_pkuseg():
     try:
         import pkuseg
-    except:
+    except ImportError:
         import spacy_pkuseg as pkuseg
 
     flist = [

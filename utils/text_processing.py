@@ -190,7 +190,7 @@ def seg_ch_pkg(text: str):
     if CHSEG is None:
         try:
             import pkuseg
-        except:
+        except ImportError:
             import spacy_pkuseg as pkuseg
         CHSEG = pkuseg.pkuseg(postag=True)
 

@@ -4,7 +4,7 @@ import copy
 from qtpy.QtGui import QFont
 try:
     from qtpy.QtWidgets import QUndoCommand
-except:
+except ImportError:
     from qtpy.QtGui import QUndoCommand
 
 from . import shared_widget as SW

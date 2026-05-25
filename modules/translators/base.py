@@ -242,7 +242,7 @@ class BaseTranslator(BaseModule):
         if is_list:
             try:
                 assert len(text_trans) == len(text)
-            except:
+            except AssertionError:
                 LOGGER.error('This translator seems to have messed up the translation which resulted in inconsistent translated line count.\n'
                              'Set concate_text to False or change textblk_break in the source code may solve the problem.')
                 raise
@@ -375,7 +375,7 @@ class BaseTranslator(BaseModule):
             if delay:
                 try:
                     return float(delay)
-                except:
+                except (ValueError, TypeError):
                     pass
         return 0.
 

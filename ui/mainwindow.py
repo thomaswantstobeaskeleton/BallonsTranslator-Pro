@@ -6278,7 +6278,7 @@ class MainWindow(mainwindow_cls):
                 self.imgtrans_proj.set_current_img(current_img)
                 self.canvas.updateCanvas()
                 self.st_manager.updateSceneTextitems()
-        except:
+        except Exception:
             pass
         
         # Show result
@@ -8318,7 +8318,9 @@ class MainWindow(mainwindow_cls):
         except Exception:
             pass
 
-    def translate_preprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None, source_text:list = []):
+    def translate_preprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None, source_text:list = None):
+        if source_text is None:
+            source_text = []
         for i in range(len(source_text)):
             source_text[i] = self.mtPreSubWidget.sub_text(source_text[i])
 

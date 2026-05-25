@@ -101,7 +101,7 @@ def strokewidth_check(text_mask, labels, num_labels, stats, debug_type=0):
     if len(rays_width) != 0:
         rays_width = np.array(rays_width)
         mean_width = np.mean(rays_width[:, 1])
-        ma = np.int0(rays_width[:, 0])
+        ma = rays_width[:, 0].astype(np.int32)
         mean_area = np.mean(stats[ma][:, 4])
 
         false_labels = np.where(rays_width[:, 1] > 2*mean_width)[0]
