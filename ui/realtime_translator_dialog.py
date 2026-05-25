@@ -415,11 +415,14 @@ class RealtimeTranslatorDialog(QDialog):
         if state.last_translation and state.status == "translated":
             self._result_window.set_text(state.last_translation)
             # Position at first block if available, otherwise at region center
-            if self._last_blocks:
+            # Add region offset since block coordinates are relative to captured region
+            if self._last_blocks and self._region:
+                rx, ry, _, _ = self._region
                 blk = self._last_blocks[0]
                 x1, y1, x2, y2 = blk.xyxy
-                self._result_window.show_at(int(x1), int(y1), int(x2-x1), int(y2-y1))
-                self.output.appendPlainText(f"Result shown at block: ({x1}, {y1}, {x2-x1}, {y2-y1})")
+                abs_x, abs_y = int(rx + x1), int(ry + y1)
+                self._result_window.show_at(abs_x, abs_y, int(x2-x1), int(y2-y1))
+                self.output.appendPlainText(f"Result shown at absolute: ({abs_x}, {abs_y}, {int(x2-x1)}, {int(y2-y1)}) [block: {x1},{y1} region: {rx},{ry}]")
             elif self._region:
                 x, y, w, h = self._region
                 # Show at center of region, smaller size
