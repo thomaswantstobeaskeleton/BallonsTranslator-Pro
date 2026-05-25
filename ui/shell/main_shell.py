@@ -32,6 +32,8 @@ from utils.config import ProgramConfig, pcfg
 from .theme import COLORS, FONTS, SPACING, TITLEBAR_HEIGHT, build_shell_stylesheet
 from .nav_controller import NavController, SECTIONS
 from .sidebar_widget import SidebarWidget
+from .top_action_bar import TopActionBar
+from .status_footer import StatusFooter
 from .command_palette import CommandPalette
 from .job_status_drawer import JobStatusDrawer
 from .pages.home_page import HomePage
@@ -141,6 +143,10 @@ class BallonsShell(QMainWindow):
         self._title_bar = _TitleBar()
         outer.addWidget(self._title_bar)
 
+        # Top action bar (New/Open/Save/Import/Export/OCR/Translate/Inpaint/Typeset)
+        self._action_bar = TopActionBar()
+        outer.addWidget(self._action_bar)
+
         # Main row: sidebar + stack
         main_row = QHBoxLayout()
         main_row.setContentsMargins(0, 0, 0, 0)
@@ -160,6 +166,10 @@ class BallonsShell(QMainWindow):
         # ── Create pages ──────────────────────────────────────
         self._pages: dict[str, QWidget] = {}
         self._create_pages()
+
+        # Status footer
+        self._status_footer = StatusFooter()
+        outer.addWidget(self._status_footer)
 
         # Job Status Drawer (hidden by default, Ctrl+J toggles)
         self._job_drawer = JobStatusDrawer()
