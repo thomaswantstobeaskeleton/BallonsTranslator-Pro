@@ -62,12 +62,12 @@ python launch.py
 全链路自由组合 **90+ 模块**，告别一刀切默认方案。
 
 ### 实时屏幕翻译
-<p align="center"><img src="doc/src/pro/realtime_overlay.png" width="80%" alt="实时悬浮窗占位图"></p>
+
 
 始终置顶、鼠标穿透的悬浮窗。可选任意屏幕区域或跟随窗口。默认隐私优先：不保存、不记录。
 
 ### Translation Assist 面板
-<p align="center"><img src="doc/src/pro/translation_assist.png" width="80%" alt="Translation Assist 占位图"></p>
+
 
 逐块候选建议、术语表查询、多提供商并排对比、块级 QA 警告。
 
@@ -77,7 +77,7 @@ python launch.py
 形状感知安全区、平衡换行、密度感知字体缩放、溢出安全检查。
 
 ### 批处理队列
-<p align="center"><img src="doc/src/pro/batch_queue.png" width="80%" alt="批处理队列占位图"></p>
+
 
 多文件夹统一队列，支持暂停、恢复与取消。
 
