@@ -118,10 +118,11 @@ class SizeComboBox(QComboBox):
         txt = self.currentText()
         try:
             val = float(txt)
+            val = min(self.max_val, max(self.min_val, val))
             self._value = val
             return val
         except:
-            return self._value
+            return min(self.max_val, max(self.min_val, self._value))
 
     def setValue(self, value: float):
         value = min(self.max_val, max(self.min_val, value))
