@@ -20,7 +20,7 @@ from typing import Optional
 
 from qtpy.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QLabel, QFrame, QApplication, QSizePolicy, QFileDialog,
+    QLabel, QFrame, QApplication, QSizePolicy, QFileDialog, QMessageBox,
 )
 from qtpy.QtCore import Qt, Signal, QSize, QTimer, QUrl
 from qtpy.QtGui import QIcon, QFont, QCloseEvent, QKeySequence, QShortcut
@@ -337,20 +337,53 @@ class BallonsShell(QMainWindow):
             self._status_footer.status_label.setText(f"Exported to {osp.basename(path)}")
 
     def _run_ocr(self):
-        self._status_footer.status_label.setText("Running OCR...")
-        # TODO: wire to actual OCR pipeline
+        self._ensure_editor_project("OCR requires an open project.\nOpen one now?")
+        editor = self._pages.get("editor")
+        if editor and editor.current_image_path():
+            self._status_footer.status_label.setText("Running OCR...")
+            editor.ocr_requested.emit()
+        else:
+            self._status_footer.status_label.setText("OCR: no image open")
 
     def _run_translate(self):
-        self._status_footer.status_label.setText("Running Translation...")
-        # TODO: wire to actual translation pipeline
+        self._ensure_editor_project("Translation requires an open project.\nOpen one now?")
+        editor = self._pages.get("editor")
+        if editor and editor.current_image_path():
+            self._status_footer.status_label.setText("Running Translation...")
+            editor.translate_requested.emit()
+        else:
+            self._status_footer.status_label.setText("Translate: no image open")
 
     def _run_inpaint(self):
-        self._status_footer.status_label.setText("Running Inpaint...")
-        # TODO: wire to actual inpaint pipeline
+        self._ensure_editor_project("Inpaint requires an open project.\nOpen one now?")
+        editor = self._pages.get("editor")
+        if editor and editor.current_image_path():
+            self._status_footer.status_label.setText("Running Inpaint...")
+            editor.inpaint_requested.emit()
+        else:
+            self._status_footer.status_label.setText("Inpaint: no image open")
 
     def _run_typeset(self):
-        self._status_footer.status_label.setText("Running Typeset...")
-        # TODO: wire to actual typeset pipeline
+        self._ensure_editor_project("Typeset requires an open project.\nOpen one now?")
+        editor = self._pages.get("editor")
+        if editor and editor.current_image_path():
+            self._status_footer.status_label.setText("Running Typeset...")
+            editor.export_requested.emit()
+        else:
+            self._status_footer.status_label.setText("Typeset: no image open")
+
+    def _ensure_editor_project(self, msg: str) -> bool:
+        """Navigate to editor and prompt for project if none open."""
+        self._nav.navigate("editor")
+        editor = self._pages.get("editor")
+        if editor and not editor.current_image_path():
+            reply = QMessageBox.question(
+                self, "Open Project", msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._open_project("")
+        return editor is not None and editor.current_image_path() is not None
 
     def _refresh_recent_projects(self):
         """Pull recent projects from config and push to HomePage."""
