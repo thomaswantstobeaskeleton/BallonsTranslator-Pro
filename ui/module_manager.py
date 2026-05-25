@@ -2113,6 +2113,13 @@ class ModuleManager(QObject):
             translator = cfg_module.translator
         valid = GET_VALID_TRANSLATORS()
         if translator not in valid:
+            if translator in TRANSLATORS.module_dict:
+                LOGGER.warning(
+                    "Translator '%s' is registered but model files are not yet downloaded; "
+                    "skipping initialization. Will auto-set after download completes.",
+                    translator,
+                )
+                return
             fallback = 'google' if 'google' in valid else (valid[0] if valid else None)
             if fallback:
                 LOGGER.warning(
@@ -2141,6 +2148,13 @@ class ModuleManager(QObject):
             inpainter = cfg_module.inpainter
         valid = GET_VALID_INPAINTERS()
         if inpainter not in valid:
+            if inpainter in INPAINTERS.module_dict:
+                LOGGER.warning(
+                    "Inpainter '%s' is registered but model files are not yet downloaded; "
+                    "skipping initialization. Will auto-set after download completes.",
+                    inpainter,
+                )
+                return
             fallback = valid[0] if valid else None
             if fallback:
                 LOGGER.warning(
@@ -2169,6 +2183,13 @@ class ModuleManager(QObject):
             textdetector = cfg_module.textdetector
         valid = GET_VALID_TEXTDETECTORS()
         if textdetector not in valid:
+            if textdetector in TEXTDETECTORS.module_dict:
+                LOGGER.warning(
+                    "Text detector '%s' is registered but model files are not yet downloaded; "
+                    "skipping initialization. Will auto-set after download completes.",
+                    textdetector,
+                )
+                return
             fallback = "ctd" if "ctd" in valid else (valid[0] if valid else None)
             if fallback is None:
                 create_error_dialog(
@@ -2230,6 +2251,13 @@ class ModuleManager(QObject):
             ocr = cfg_module.ocr
         valid = GET_VALID_OCR()
         if ocr not in valid:
+            if ocr in OCR.module_dict:
+                LOGGER.warning(
+                    "OCR '%s' is registered but model files are not yet downloaded; "
+                    "skipping initialization. Will auto-set after download completes.",
+                    ocr,
+                )
+                return
             fallback = valid[0] if valid else None
             if fallback:
                 LOGGER.warning(

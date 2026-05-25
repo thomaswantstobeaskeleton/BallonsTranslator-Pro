@@ -5997,16 +5997,16 @@ class MainWindow(mainwindow_cls):
     def _reset_modules_to_core_defaults(self):
         """Set detector/OCR/inpainter/translator with core defaults when available, else fallback to available modules."""
         pcfg.module.textdetector = 'ctd'
-        pcfg.module.ocr = 'manga_ocr'
+        pcfg.module.ocr = 'mit48px'
         pcfg.module.inpainter = 'aot'
         pcfg.module.translator = 'google'
         save_config()
         self.module_manager.setTextDetector('ctd')
-        self.module_manager.setOCR('manga_ocr')
+        self.module_manager.setOCR('mit48px')
         self.module_manager.setInpainter('aot')
         self.module_manager.setTranslator('google')
 
-        applied = [('Detector', 'ctd'), ('OCR', 'manga_ocr'), ('Inpainter', 'aot'), ('Translator', 'google')]
+        applied = [('Detector', 'ctd'), ('OCR', 'mit48px'), ('Inpainter', 'aot'), ('Translator', 'google')]
         lines = []
         for label, key in applied:
             lines.append(f'• {label}: {key} (core default requested; runtime may fallback)')
