@@ -11,7 +11,7 @@
 
 [![GitHub Stars](https://img.shields.io/github/stars/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&logo=github&color=gold)](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&logo=github&color=blue)](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro/network/members)
-[![License](https://img.shields.io/github/license/thomaswantstobeaskeleton/BallonsTranslator-Pro?style=for-the-badge&color=green)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=for-the-badge)](docs/GPU_ACCELERATION.md)
 
