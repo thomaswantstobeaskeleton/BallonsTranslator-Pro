@@ -134,6 +134,13 @@ class TranslationAssistDock(QDockWidget):
             self.setFloating(True)
             self.showFullScreen()
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape and self.isFullScreen():
+            self.showNormal()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def set_preview(self, source: str, target: str):
         self.source_box.setPlainText(source or '')
         self.target_box.setPlainText(target or '')

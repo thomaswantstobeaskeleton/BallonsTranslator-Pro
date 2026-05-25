@@ -438,7 +438,20 @@ class RealtimeTranslatorDialog(QDialog):
             # Convert numpy array polygons to TextBlock objects if needed
             if blk_list and isinstance(blk_list[0], np.ndarray):
                 from utils.textblock import TextBlock
-                blk_list = [TextBlock(blk) for blk in blk_list]
+                def _poly_to_textblock(poly):
+                    # poly is Nx2 array of points, convert to xyxy bounding box
+                    if poly.ndim == 2 and poly.shape[1] == 2:
+                        x1, y1 = poly[:, 0].min(), poly[:, 1].min()
+                        x2, y2 = poly[:, 0].max(), poly[:, 1].max()
+                    elif poly.ndim == 1 and poly.size == 4:
+                        # Already flat [x1, y1, x2, y2]
+                        x1, y1, x2, y2 = poly.tolist()
+                    else:
+                        # Fallback: try to flatten
+                        flat = poly.flatten()
+                        x1, y1, x2, y2 = float(flat[0]), float(flat[1]), float(flat[2]), float(flat[3])
+                    return TextBlock([int(x1), int(y1), int(x2), int(y2)])
+                blk_list = [_poly_to_textblock(blk) for blk in blk_list]
                 self.output.appendPlainText(f"Realtime: wrapped {len(blk_list)} polygons into TextBlocks")
             ocr = getattr(self._module_manager, "ocr", None)
             if ocr is None:
