@@ -58,9 +58,6 @@ class TranslationAssistDock(QDockWidget):
             it.setFlags(it.flags() | it.flags().ItemIsUserCheckable)
             it.setCheckState(Qt.Unchecked)
             self.provider_list.addItem(it)
-        self.openai_model_combo = QComboBox(root)
-        self.openai_model_combo.addItems(['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'])
-        self.openai_model_combo.setToolTip(self.tr('OpenAI model used in compare provider labeling.'))
         self.compare_preset = QComboBox(root)
         self.compare_preset.addItems(["low_latency", "high_quality"])
         self.compare_preset.setToolTip(self.tr('Preset for multi-provider compare orchestration.'))
@@ -106,7 +103,6 @@ class TranslationAssistDock(QDockWidget):
         lay.addWidget(self.summary)
         lay.addLayout(scope_row)
         lay.addWidget(self.provider_list)
-        lay.addWidget(self.openai_model_combo)
         lay.addLayout(row)
         row2 = QHBoxLayout()
         row2.addWidget(self.add_tm_btn)
@@ -146,11 +142,6 @@ class TranslationAssistDock(QDockWidget):
         for i in range(self.provider_list.count()):
             it = self.provider_list.item(i)
             it.setCheckState(Qt.Checked if it.text() in selected else Qt.Unchecked)
-        model_map = dict(opts.get('compare_provider_models', {}) or {})
-        dflt_model = str(model_map.get('openai', 'gpt-4o-mini') or 'gpt-4o-mini')
-        idx = self.openai_model_combo.findText(dflt_model)
-        if idx >= 0:
-            self.openai_model_combo.setCurrentIndex(idx)
         self.prompt_profile.clear()
         for p in list(opts.get('prompt_profiles', []) or []):
             self.prompt_profile.addItem(str(p))
@@ -188,7 +179,6 @@ class TranslationAssistDock(QDockWidget):
                 'auto_query_concordance': self.query_concordance.isChecked(),
                 'max_mt_candidates': int(self.max_candidates.value()),
                 'preferred_assist_providers': self._selected_provider_list(),
-                'compare_provider_models': {'openai': str(self.openai_model_combo.currentText() or 'gpt-4o-mini')},
                 'default_assist_prompt_profile': str(self.prompt_profile.currentText() or 'dialogue'),
             })
 
@@ -199,7 +189,6 @@ class TranslationAssistDock(QDockWidget):
                 'compare_preset': str(self.compare_preset.currentText() or 'low_latency'),
                 'compare_scope': str(self.compare_scope.currentText() or 'translator'),
                 'preferred_assist_providers': self._selected_provider_list(),
-                'compare_provider_models': {'openai': str(self.openai_model_combo.currentText() or 'gpt-4o-mini')},
                 'max_mt_candidates': int(self.max_candidates.value()),
             })
 

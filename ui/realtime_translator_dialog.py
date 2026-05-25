@@ -158,6 +158,12 @@ class RealtimeTranslatorDialog(QDialog):
         self.capture_interval_ms.valueChanged.connect(self._timer.setInterval)
         self.min_ocr_interval_ms.valueChanged.connect(self._update_min_ocr_interval)
 
+        # --- Module readiness poll ---
+        self._ready_timer = QTimer(self)
+        self._ready_timer.setInterval(500)
+        self._ready_timer.timeout.connect(self._update_start_button_state)
+        self._ready_timer.start()
+
         # --- Connections ---
         self.start_btn.clicked.connect(self._on_start)
         self.pause_btn.clicked.connect(self._on_pause)
@@ -248,9 +254,30 @@ class RealtimeTranslatorDialog(QDialog):
     # ------------------------------------------------------------------
     # Start / pause
     # ------------------------------------------------------------------
+    def _modules_ready(self) -> bool:
+        if self._module_manager is None:
+            return False
+        return (
+            getattr(self._module_manager, "textdetector", None) is not None
+            and getattr(self._module_manager, "ocr", None) is not None
+            and getattr(self._module_manager, "translator", None) is not None
+        )
+
+    def _update_start_button_state(self):
+        ready = self._modules_ready()
+        self.start_btn.setEnabled(ready)
+        if not ready:
+            self.start_btn.setToolTip(self.tr("Waiting for detector, OCR, and translator modules to load..."))
+        else:
+            self.start_btn.setToolTip(self.tr("Start live screen capture + OCR + translation"))
+
     def _on_start(self):
-        self._timer.start()
+        if not self._modules_ready():
+            self.output.appendPlainText(self.tr("Cannot start: detector, OCR, or translator not loaded yet."))
+            return
+        self._on_show_overlay()
         self._overlay.show()
+        self._timer.start()
 
     def _on_pause(self):
         self._timer.stop()
@@ -301,18 +328,20 @@ class RealtimeTranslatorDialog(QDialog):
 
     def _on_worker_finished(self, state: RealtimeState):
         self._pending_worker = None
+        for w in state.warnings:
+            if str(w).strip():
+                self.output.appendPlainText(self.tr("Warning: {}") .format(str(w).strip()))
         line = f"status={state.status} | src={state.last_ocr_text} | tr={state.last_translation}"
         self.output.appendPlainText(line)
 
-        # Update overlay
+        # Always ensure overlay is visible at current region geometry
+        x, y, w, h = self._current_region_rect()
         if state.last_translation and state.status == "translated":
-            x, y, w, h = self._current_region_rect()
             blocks = [TranslatedBlock((0, 0, w, h), src_text=state.last_ocr_text, trans_text=state.last_translation)]
             self._overlay.set_blocks(blocks)
-            self._overlay.show_at(x, y, w, h)
         else:
             self._overlay.set_blocks([])
-            self._overlay.update()
+        self._overlay.show_at(x, y, w, h)
 
     # ------------------------------------------------------------------
     # OCR & Translation — wired to ModuleManager pipeline
@@ -325,6 +354,7 @@ class RealtimeTranslatorDialog(QDialog):
             # 1. Detect text blocks
             detector = getattr(self._module_manager, "textdetector", None)
             if detector is None:
+                self.output.appendPlainText(self.tr("Realtime: text detector not loaded"))
                 return ""
             blk_list = detector.detect(img)
             if not blk_list:
@@ -332,6 +362,7 @@ class RealtimeTranslatorDialog(QDialog):
             # 2. Run OCR
             ocr = getattr(self._module_manager, "ocr", None)
             if ocr is None:
+                self.output.appendPlainText(self.tr("Realtime: OCR not loaded"))
                 return ""
             ocr.run_ocr(img, blk_list)
             parts = []
@@ -341,6 +372,7 @@ class RealtimeTranslatorDialog(QDialog):
                     parts.append(str(txt).strip())
             return "\n".join(parts)
         except Exception as e:
+            self.output.appendPlainText(self.tr("Realtime OCR error: {}").format(e))
             return ""
 
     def _translate_text(self, text: str) -> str:
@@ -350,14 +382,18 @@ class RealtimeTranslatorDialog(QDialog):
         try:
             translator = getattr(self._module_manager, "translator", None)
             if translator is None:
+                self.output.appendPlainText(self.tr("Realtime: translator not loaded"))
                 return ""
-            # Build a temporary TextBlock with the text
+            # Build a temporary TextBlock with minimal required attributes
             blk = TextBlock()
+            blk.xyxy = [0, 0, 1, 1]
+            blk.angle = 0
             blk.text = [text]
             blk.translation = ""
             translator.translate_textblk_lst([blk])
             return str(getattr(blk, "translation", "") or "")
-        except Exception:
+        except Exception as e:
+            self.output.appendPlainText(self.tr("Realtime translation error: {}").format(e))
             return ""
 
     def _update_min_ocr_interval(self):
@@ -372,6 +408,7 @@ class RealtimeTranslatorDialog(QDialog):
 
     def closeEvent(self, event):
         self._timer.stop()
+        self._ready_timer.stop()
         self._overlay.hide()
         super().closeEvent(event)
 

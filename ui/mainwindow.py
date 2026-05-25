@@ -1341,12 +1341,10 @@ class MainWindow(mainwindow_cls):
             if action == 'set':
                 pcfg.module.preferred_assist_providers = list((_b or {}).get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
                 pcfg.module.default_assist_prompt_profile = str((_b or {}).get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
-                pcfg.module.compare_provider_models = dict((_b or {}).get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'})) or {'openai': 'gpt-4o-mini'})
             return {
                 'ok': True,
                 'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
                 'default_assist_prompt_profile': str(getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue') or 'dialogue'),
-                'compare_provider_models': dict(getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}) or {'openai': 'gpt-4o-mini'}),
                 'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
             }
         return self._api_call_ui(_ui, body)
@@ -1431,12 +1429,10 @@ class MainWindow(mainwindow_cls):
             )
             # external provider fan-out (synthetic candidate orchestration placeholder)
             external = [p for p in providers if p.lower() in {'openai', 'deepl', 'google', 'ollama', 'lmstudio'}]
-            compare_models = dict((_b or {}).get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {})) or {})
             for p in external:
                 try:
                     t0 = time.perf_counter()
                     row = make_synthetic_mt_candidate(source, p, mode=preset)
-                    model_name = str(compare_models.get(str(p).lower(), '') or '').strip()
                     tele = {
                         "latency_ms": int((time.perf_counter()-t0)*1000),
                         "source": "external_provider",
@@ -1444,7 +1440,7 @@ class MainWindow(mainwindow_cls):
                     }
                     candidates.append({
                         "candidate_id": f"ext_{p}_{len(candidates)+1}",
-                        "provider": (f"{p}:{model_name}" if model_name else p),
+                        "provider": p,
                         "text": row.get("text", ""),
                         "telemetry": tele,
                     })
@@ -5293,7 +5289,6 @@ class MainWindow(mainwindow_cls):
                 'preset': 'high_quality',
                 'max_candidates': int(getattr(pcfg.module, 'max_mt_candidates', 6) or 6),
                 'preferred_assist_providers': list(getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']) or []),
-                'compare_provider_models': dict(getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}) or {'openai': 'gpt-4o-mini'}),
                 'page': target_blocks[0]['page'],
                 'block': target_blocks[0]['block'],
             })
@@ -5413,7 +5408,6 @@ class MainWindow(mainwindow_cls):
                 'max_mt_candidates': getattr(pcfg.module, 'max_mt_candidates', 6),
                 'preferred_assist_providers': getattr(pcfg.module, 'preferred_assist_providers', ['current_translator']),
                 'default_assist_prompt_profile': getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue'),
-                'compare_provider_models': getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'}),
                 'prompt_profiles': sorted(PROMPT_PROFILES.keys()),
             })
             # Refresh dynamic provider lists from module registry
@@ -5457,7 +5451,6 @@ class MainWindow(mainwindow_cls):
         pcfg.module.max_mt_candidates = int(opts.get('max_mt_candidates', getattr(pcfg.module, 'max_mt_candidates', 6)) or 6)
         pcfg.module.preferred_assist_providers = list(opts.get('preferred_assist_providers', getattr(pcfg.module, 'preferred_assist_providers', ['current_translator'])) or [])
         pcfg.module.default_assist_prompt_profile = str(opts.get('default_assist_prompt_profile', getattr(pcfg.module, 'default_assist_prompt_profile', 'dialogue')) or 'dialogue')
-        pcfg.module.compare_provider_models = dict(opts.get('compare_provider_models', getattr(pcfg.module, 'compare_provider_models', {'openai': 'gpt-4o-mini'})) or {'openai': 'gpt-4o-mini'})
         if bool(opts.get('clear_assist_cache', False)):
             self._api_translation_assist_cache({'action': 'clear'})
         sel = self._selected_assist_page_block()

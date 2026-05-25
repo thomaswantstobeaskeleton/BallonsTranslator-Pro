@@ -182,6 +182,17 @@ def test_build_candidates_from_sources_deduplicates():
     assert "world" in texts
 
 
+def test_dock_has_no_hardcoded_openai_model_combo():
+    """Regression: the dock should not have a hardcoded OpenAI-only model combo."""
+    pytest.importorskip("qtpy")
+    from qtpy.QtWidgets import QApplication
+    from ui.translation_assist_dock import TranslationAssistDock
+
+    app = QApplication.instance() or QApplication([])
+    dock = TranslationAssistDock()
+    assert not hasattr(dock, "openai_model_combo")
+
+
 def test_normalize_provider_warning_maps_codes():
     from utils.translation_assist import normalize_provider_warning
 
