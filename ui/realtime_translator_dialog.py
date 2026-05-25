@@ -3,10 +3,18 @@ from typing import List, Tuple, Optional, Callable
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QPlainTextEdit, QCheckBox, QSpinBox, QFormLayout,
-    QMessageBox
+    QMessageBox, QApplication, QWidget, QDesktopWidget
 )
-from qtpy.QtCore import QTimer, Qt, QThread, QObject, Signal
+from qtpy.QtCore import QTimer, Qt, QThread, QObject, Signal, QPoint, QRect
+from qtpy.QtGui import QPainter, QPen, QBrush, QColor, QBitmap, QFont, QTextCharFormat
 import numpy as np
+
+try:
+    from cv2 import cvtColor, COLOR_BGR2GRAY
+    from skimage.metrics import structural_similarity as ssim
+    _CV2_OK = True
+except Exception:
+    _CV2_OK = False
 
 from utils.realtime_mode import (
     RealtimeRegion, RealtimeWatcher, RealtimeState,
@@ -15,6 +23,62 @@ from utils.realtime_mode import (
 )
 from utils.textblock import TextBlock
 from .realtime_overlay import RealtimeOverlayWidget, TranslatedBlock
+
+
+class ScreenRangeSelector(QWidget):
+    """Fullscreen overlay for drag-to-select a screen region (Dango-style)."""
+
+    region_selected = Signal(tuple)  # (x, y, w, h)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setStyleSheet("background-color:black;")
+        self.setWindowOpacity(0.4)
+
+        desktop = QDesktopWidget()
+        screen_count = desktop.screenCount()
+        max_width, max_height = 0, 0
+        for i in range(screen_count):
+            geom = desktop.screenGeometry(i)
+            max_height = max(max_height, geom.height())
+            max_width += geom.width()
+        self.setGeometry(0, 0, max_width - 1, max_height - 1)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+        self._is_drawing = False
+        self._start_point = QPoint()
+        self._end_point = QPoint()
+
+    def paintEvent(self, event):
+        if not self._is_drawing:
+            return
+        painter = QPainter(self)
+        pen = QPen(QColor(0, 120, 255), 2)
+        painter.setPen(pen)
+        brush = QBrush(QColor(0, 120, 255, 60))
+        painter.setBrush(brush)
+        rect = QRect(self._start_point, self._end_point).normalized()
+        painter.drawRect(rect)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._start_point = event.pos()
+            self._end_point = self._start_point
+            self._is_drawing = True
+
+    def mouseMoveEvent(self, event):
+        if self._is_drawing:
+            self._end_point = event.pos()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._is_drawing:
+            self._is_drawing = False
+            self._end_point = event.pos()
+            rect = QRect(self._start_point, self._end_point).normalized()
+            self.region_selected.emit((rect.x(), rect.y(), rect.width(), rect.height()))
+            self.close()
 
 
 class _OcrTrWorker(QObject):
@@ -43,7 +107,7 @@ class _OcrTrWorker(QObject):
 
 
 class RealtimeTranslatorDialog(QDialog):
-    """Realtime screen translator dialog with always-on-top overlay."""
+    """Realtime screen translator dialog with Dango-style range selection and result window."""
 
     def __init__(self, parent=None, module_manager=None):
         super().__init__(parent)
@@ -68,62 +132,47 @@ class RealtimeTranslatorDialog(QDialog):
         self.privacy_hint.setWordWrap(True)
         root.addWidget(self.privacy_hint)
 
-        # --- Window selection ---
-        win_row = QHBoxLayout()
-        win_row.addWidget(QLabel(self.tr("Target window"), self))
-        self.window_combo = QComboBox(self)
-        self.window_combo.addItem(self.tr("Manual region"), "")
-        self._refresh_window_list()
-        win_row.addWidget(self.window_combo, stretch=1)
-        self.refresh_win_btn = QPushButton(self.tr("Refresh"), self)
-        self.refresh_win_btn.clicked.connect(self._refresh_window_list)
-        win_row.addWidget(self.refresh_win_btn)
-        root.addLayout(win_row)
+        # --- Region selection ---
+        region_row = QHBoxLayout()
+        self.select_range_btn = QPushButton(self.tr("Select Screen Region"), self)
+        self.select_range_btn.setToolTip(self.tr("Drag to select the screen area to capture and translate."))
+        self.auto_mode_cb = QCheckBox(self.tr("Auto-translate mode"), self)
+        self.auto_mode_cb.setToolTip(self.tr("Continuously capture and translate the selected region."))
+        region_row.addWidget(self.select_range_btn)
+        region_row.addWidget(self.auto_mode_cb)
+        root.addLayout(region_row)
 
-        self.follow_window = QCheckBox(self.tr("Follow window position"), self)
-        root.addWidget(self.follow_window)
+        # --- Region display ---
+        self.region_label = QLabel(self.tr("Region: not set"), self)
+        root.addWidget(self.region_label)
 
-        # --- Region + timing form ---
+        # --- Timing form ---
         form = QFormLayout()
-        self.x_spin = QSpinBox(self); self.x_spin.setRange(0, 10000)
-        self.y_spin = QSpinBox(self); self.y_spin.setRange(0, 10000)
-        self.w_spin = QSpinBox(self); self.w_spin.setRange(1, 10000); self.w_spin.setValue(640)
-        self.h_spin = QSpinBox(self); self.h_spin.setRange(1, 10000); self.h_spin.setValue(480)
-        form.addRow(self.tr("Region X"), self.x_spin)
-        form.addRow(self.tr("Region Y"), self.y_spin)
-        form.addRow(self.tr("Region Width"), self.w_spin)
-        form.addRow(self.tr("Region Height"), self.h_spin)
-
         self.capture_interval_ms = QSpinBox(self)
         self.capture_interval_ms.setRange(100, 5000)
         self.capture_interval_ms.setValue(700)
         self.min_ocr_interval_ms = QSpinBox(self)
         self.min_ocr_interval_ms.setRange(0, 5000)
         self.min_ocr_interval_ms.setValue(0)
+        self.ssim_threshold = QSpinBox(self)
+        self.ssim_threshold.setRange(50, 100)
+        self.ssim_threshold.setValue(95)
+        self.ssim_threshold.setSuffix("%")
         form.addRow(self.tr("Capture interval (ms)"), self.capture_interval_ms)
         form.addRow(self.tr("Min OCR interval (ms)"), self.min_ocr_interval_ms)
+        form.addRow(self.tr("Image similarity threshold"), self.ssim_threshold)
         root.addLayout(form)
-
-        # --- Overlay controls ---
-        overlay_row = QHBoxLayout()
-        self.pin_overlay = QCheckBox(self.tr("Pin overlay (draggable)"), self)
-        self.hide_overlay_btn = QPushButton(self.tr("Hide overlay"), self)
-        self.show_overlay_btn = QPushButton(self.tr("Show overlay"), self)
-        self.test_capture_btn = QPushButton(self.tr("Test capture"), self)
-        overlay_row.addWidget(self.pin_overlay)
-        overlay_row.addWidget(self.hide_overlay_btn)
-        overlay_row.addWidget(self.show_overlay_btn)
-        overlay_row.addWidget(self.test_capture_btn)
-        root.addLayout(overlay_row)
 
         # --- Main buttons ---
         btns = QHBoxLayout()
         self.start_btn = QPushButton(self.tr("Start"), self)
         self.pause_btn = QPushButton(self.tr("Pause"), self)
         self.now_btn = QPushButton(self.tr("Translate now"), self)
+        self.hide_result_btn = QPushButton(self.tr("Hide Result"), self)
         btns.addWidget(self.start_btn)
         btns.addWidget(self.pause_btn)
         btns.addWidget(self.now_btn)
+        btns.addWidget(self.hide_result_btn)
         root.addLayout(btns)
 
         # --- Output log ---
@@ -132,24 +181,19 @@ class RealtimeTranslatorDialog(QDialog):
         self.output.setMaximumBlockCount(200)
         root.addWidget(self.output)
 
-        # --- Overlay widget ---
+        # --- Result window (frameless always-on-top) ---
+        self._result_window = _TranslationResultWindow()
+        self._result_window.hide()
+
+        # --- Legacy overlay (kept for compatibility) ---
         self._overlay = RealtimeOverlayWidget(None)
         self._overlay.hide()
 
-        # --- Backend & watcher ---
-        self._fallback_backend = create_screenshot_backend("auto")
-        self._wrapped_backend = OverlayExclusionBackend(
-            self._fallback_backend,
-            self._hide_overlay_for_capture,
-            self._show_overlay_after_capture
-        )
-        self._watcher = RealtimeWatcher(
-            self._wrapped_backend,
-            self._ocr_image,
-            self._translate_text
-        )
-        self._region = RealtimeRegion("default", (0, 0, 640, 480))
+        # --- State ---
+        self._region: Optional[Tuple[int, int, int, int]] = None
+        self._last_image: Optional[np.ndarray] = None
         self._pending_worker: Optional[QThread] = None
+        self._stop_sign = False
 
         # --- Timer ---
         self._timer = QTimer(self)
@@ -167,12 +211,10 @@ class RealtimeTranslatorDialog(QDialog):
         # --- Connections ---
         self.start_btn.clicked.connect(self._on_start)
         self.pause_btn.clicked.connect(self._on_pause)
-        self.now_btn.clicked.connect(self._tick)
-        self.pin_overlay.toggled.connect(self._overlay.set_pinned)
-        self.hide_overlay_btn.clicked.connect(self._overlay.hide)
-        self.show_overlay_btn.clicked.connect(self._on_show_overlay)
-        self.test_capture_btn.clicked.connect(self._on_test_capture)
-        self.window_combo.currentIndexChanged.connect(self._on_window_changed)
+        self.now_btn.clicked.connect(self._on_translate_now)
+        self.hide_result_btn.clicked.connect(self._result_window.hide)
+        self.select_range_btn.clicked.connect(self._on_select_range)
+        self.auto_mode_cb.toggled.connect(self._on_auto_mode_changed)
 
         self._append_backend_info()
 
@@ -192,67 +234,64 @@ class RealtimeTranslatorDialog(QDialog):
         return getattr(tr, "name", "unknown") if tr else self.tr("not loaded")
 
     # ------------------------------------------------------------------
-    # Window list
+    # Range selection (Dango-style fullscreen drag)
     # ------------------------------------------------------------------
-    def _refresh_window_list(self):
-        self.window_combo.clear()
-        self.window_combo.addItem(self.tr("Manual region"), "")
+    def _on_select_range(self):
+        selector = ScreenRangeSelector(self)
+        selector.region_selected.connect(self._set_region)
+        selector.show()
+
+    def _set_region(self, rect: Tuple[int, int, int, int]):
+        self._region = rect
+        self.region_label.setText(self.tr("Region: x={} y={} w={} h={}").format(*rect))
+        self.output.appendPlainText(self.tr("Region set: {}").format(rect))
+        # If auto-mode is on, trigger immediately
+        if self.auto_mode_cb.isChecked():
+            self._on_translate_now()
+
+    # ------------------------------------------------------------------
+    # QScreen capture with SSIM deduplication
+    # ------------------------------------------------------------------
+    def _capture_region(self) -> Optional[np.ndarray]:
+        if self._region is None:
+            return None
+        x, y, w, h = self._region
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return None
+        pixmap = screen.grabWindow(0, x, y, w, h)
+        if pixmap.isNull():
+            return None
+        img = self._pixmap_to_numpy(pixmap)
+        return img
+
+    @staticmethod
+    def _pixmap_to_numpy(pixmap) -> np.ndarray:
+        image = pixmap.toImage().convertToFormat(Qt.ImageFormat.Format_ARGB32)
+        width = image.width()
+        height = image.height()
+        ptr = image.bits()
+        ptr.setsize(height * width * 4)
+        import numpy as np
+        arr = np.array(ptr, dtype=np.uint8).reshape((height, width, 4))
+        return arr[:, :, :3]  # drop alpha
+
+    def _images_similar(self, img_a: np.ndarray, img_b: np.ndarray) -> bool:
+        if not _CV2_OK:
+            return False
         try:
-            wins = self._fallback_backend.list_windows()
+            if img_a.shape != img_b.shape:
+                return False
+            gray_a = cvtColor(img_a, COLOR_BGR2GRAY)
+            gray_b = cvtColor(img_b, COLOR_BGR2GRAY)
+            score = ssim(gray_a, gray_b)
+            threshold = self.ssim_threshold.value() / 100.0
+            return score >= threshold
         except Exception:
-            wins = []
-        for w in wins:
-            title = w.get("title", "") or ""
-            wid = str(w.get("id", ""))
-            if title and wid:
-                display = f"{title[:50]} ({wid})"
-                self.window_combo.addItem(display, wid)
-
-    def _on_window_changed(self, idx: int):
-        wid = self.window_combo.itemData(idx)
-        if not wid:
-            return
-        # Try to auto-fill region from window rect
-        try:
-            rect = self._fallback_backend.resolve_follow_window_rect(wid)
-            if rect:
-                self.x_spin.setValue(rect[0])
-                self.y_spin.setValue(rect[1])
-                self.w_spin.setValue(rect[2])
-                self.h_spin.setValue(rect[3])
-        except Exception:
-            pass
+            return False
 
     # ------------------------------------------------------------------
-    # Capture & overlay helpers
-    # ------------------------------------------------------------------
-    def _hide_overlay_for_capture(self):
-        if self._overlay.isVisible():
-            self._overlay.hide()
-
-    def _show_overlay_after_capture(self):
-        pass  # overlay is updated on next _tick finish
-
-    def _on_show_overlay(self):
-        x, y, w, h = self._current_region_rect()
-        self._overlay.show_at(x, y, w, h)
-
-    def _current_region_rect(self) -> Tuple[int, int, int, int]:
-        return (self.x_spin.value(), self.y_spin.value(),
-                self.w_spin.value(), self.h_spin.value())
-
-    def _on_test_capture(self):
-        x, y, w, h = self._current_region_rect()
-        try:
-            img = self._fallback_backend.capture_region((x, y, w, h))
-            self.output.appendPlainText(
-                self.tr("Test capture OK: shape={shape} dtype={dtype}").format(
-                    shape=img.shape, dtype=img.dtype))
-        except Exception as e:
-            self.output.appendPlainText(self.tr("Test capture failed: {}").format(e))
-
-    # ------------------------------------------------------------------
-    # Start / pause
+    # Start / pause / auto mode
     # ------------------------------------------------------------------
     def _modules_ready(self) -> bool:
         if self._module_manager is None:
@@ -264,10 +303,12 @@ class RealtimeTranslatorDialog(QDialog):
         )
 
     def _update_start_button_state(self):
-        ready = self._modules_ready()
+        ready = self._modules_ready() and self._region is not None
         self.start_btn.setEnabled(ready)
-        if not ready:
+        if not self._modules_ready():
             self.start_btn.setToolTip(self.tr("Waiting for detector, OCR, and translator modules to load..."))
+        elif self._region is None:
+            self.start_btn.setToolTip(self.tr("Select a screen region first."))
         else:
             self.start_btn.setToolTip(self.tr("Start live screen capture + OCR + translation"))
 
@@ -275,44 +316,45 @@ class RealtimeTranslatorDialog(QDialog):
         if not self._modules_ready():
             self.output.appendPlainText(self.tr("Cannot start: detector, OCR, or translator not loaded yet."))
             return
-        self._on_show_overlay()
-        self._overlay.show()
+        if self._region is None:
+            self.output.appendPlainText(self.tr("Cannot start: no region selected. Click 'Select Screen Region' first."))
+            return
+        self._stop_sign = False
         self._timer.start()
+        self.output.appendPlainText(self.tr("Auto-translate started."))
 
     def _on_pause(self):
         self._timer.stop()
+        self._stop_sign = True
+        self.output.appendPlainText(self.tr("Auto-translate paused."))
+
+    def _on_auto_mode_changed(self, checked: bool):
+        if checked and self._region is not None and self._modules_ready():
+            self._on_start()
+
+    def _on_translate_now(self):
+        self._tick()
 
     # ------------------------------------------------------------------
-    # Tick: screenshot → background OCR/translate → update overlay
+    # Tick: screenshot → SSIM skip? → background OCR/translate → result
     # ------------------------------------------------------------------
     def _tick(self):
         if self._pending_worker is not None and self._pending_worker.isRunning():
             return  # skip if previous job still running
-
-        # Build region
-        x, y, w, h = self._current_region_rect()
-        self._region.rect = (x, y, w, h)
-        wid = self.window_combo.currentData()
-        if wid and self.follow_window.isChecked():
-            self._region.window_id = str(wid)
-            self._region.follow_window = True
-        else:
-            self._region.window_id = ""
-            self._region.follow_window = False
-
-        # Capture image directly from backend
-        capture_rect = (x, y, w, h)
-        if wid and self.follow_window.isChecked() and self._wrapped_backend.supports_follow_window:
-            resolved = self._wrapped_backend.resolve_follow_window_rect(str(wid))
-            if resolved is not None:
-                capture_rect = resolved
-        try:
-            img = self._wrapped_backend.capture_region(capture_rect)
-        except Exception as e:
-            self.output.appendPlainText(self.tr("Capture failed: {}").format(e))
+        if self._region is None:
             return
-        if img is None or img.size == 0:
+
+        img = self._capture_region()
+        if img is None:
+            self.output.appendPlainText(self.tr("Capture failed: got null image"))
             return
+        if img.size == 0:
+            return
+
+        # SSIM deduplication: skip if screen hasn't changed
+        if self._last_image is not None and self._images_similar(self._last_image, img):
+            return
+        self._last_image = img.copy()
 
         # Run OCR+translation in background thread
         worker = _OcrTrWorker(img, self._ocr_image, self._translate_text)
@@ -330,18 +372,18 @@ class RealtimeTranslatorDialog(QDialog):
         self._pending_worker = None
         for w in state.warnings:
             if str(w).strip():
-                self.output.appendPlainText(self.tr("Warning: {}") .format(str(w).strip()))
+                self.output.appendPlainText(self.tr("Warning: {}").format(str(w).strip()))
         line = f"status={state.status} | src={state.last_ocr_text} | tr={state.last_translation}"
         self.output.appendPlainText(line)
 
-        # Always ensure overlay is visible at current region geometry
-        x, y, w, h = self._current_region_rect()
+        # Show result in dedicated result window
         if state.last_translation and state.status == "translated":
-            blocks = [TranslatedBlock((0, 0, w, h), src_text=state.last_ocr_text, trans_text=state.last_translation)]
-            self._overlay.set_blocks(blocks)
+            self._result_window.set_text(state.last_translation)
+            if self._region:
+                x, y, w, h = self._region
+                self._result_window.show_at(x, y, w, h)
         else:
-            self._overlay.set_blocks([])
-        self._overlay.show_at(x, y, w, h)
+            self._result_window.hide()
 
     # ------------------------------------------------------------------
     # OCR & Translation — wired to ModuleManager pipeline
@@ -351,7 +393,6 @@ class RealtimeTranslatorDialog(QDialog):
         if self._module_manager is None:
             return ""
         try:
-            # 1. Detect text blocks
             detector = getattr(self._module_manager, "textdetector", None)
             if detector is None:
                 self.output.appendPlainText(self.tr("Realtime: text detector not loaded"))
@@ -359,7 +400,6 @@ class RealtimeTranslatorDialog(QDialog):
             blk_list = detector.detect(img)
             if not blk_list:
                 return ""
-            # 2. Run OCR
             ocr = getattr(self._module_manager, "ocr", None)
             if ocr is None:
                 self.output.appendPlainText(self.tr("Realtime: OCR not loaded"))
@@ -384,7 +424,6 @@ class RealtimeTranslatorDialog(QDialog):
             if translator is None:
                 self.output.appendPlainText(self.tr("Realtime: translator not loaded"))
                 return ""
-            # Build a temporary TextBlock with minimal required attributes
             blk = TextBlock()
             blk.xyxy = [0, 0, 1, 1]
             blk.angle = 0
@@ -397,18 +436,61 @@ class RealtimeTranslatorDialog(QDialog):
             return ""
 
     def _update_min_ocr_interval(self):
-        self._watcher.min_ocr_interval_sec = float(self.min_ocr_interval_ms.value()) / 1000.0
+        pass  # not used in this design
 
     def _append_backend_info(self):
-        primary = getattr(self._wrapped_backend, "backend_name", "unknown")
-        fallback = getattr(self._fallback_backend, "backend_name", "unknown")
-        self.output.appendPlainText(f"capture_backend={primary} | fallback={fallback}")
-        if not bool(getattr(self._wrapped_backend, "supports_window_exclusion", False)):
-            self.output.appendPlainText("overlay_exclusion=fallback_hide_show")
+        self.output.appendPlainText("capture_backend=qscreen_grabWindow")
 
     def closeEvent(self, event):
         self._timer.stop()
         self._ready_timer.stop()
         self._overlay.hide()
+        self._result_window.hide()
         super().closeEvent(event)
+
+
+class _TranslationResultWindow(QWidget):
+    """Frameless always-on-top window showing translated text (Dango-style)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._text = ""
+        self._font = QFont("Microsoft YaHei", 14)
+        self._font.setBold(True)
+        self._text_color = QColor(255, 255, 255)
+        self._outline_color = QColor(0, 120, 255)
+        self._bg_color = QColor(0, 0, 0, 160)
+
+    def set_text(self, text: str):
+        self._text = str(text or "")
+        self.update()
+
+    def show_at(self, x: int, y: int, w: int, h: int):
+        self.setGeometry(x, y, w, h)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Background
+        painter.fillRect(self.rect(), self._bg_color)
+        # Text with outline
+        painter.setFont(self._font)
+        pen = QPen(self._outline_color, 2)
+        painter.setPen(pen)
+        # Simple centered text rendering
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.TextWordWrap, self._text)
+        # Inner text
+        pen = QPen(self._text_color, 1)
+        painter.setPen(pen)
+        inner = self.rect().adjusted(2, 2, -2, -2)
+        painter.drawText(inner, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.TextWordWrap, self._text)
 

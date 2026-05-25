@@ -52,7 +52,7 @@ class TranslationAssistDock(QDockWidget):
         self.prompt_profile.setToolTip(self.tr('Prompt profile for assist candidate generation/QA context.'))
         self.provider_list = QListWidget(root)
         self.provider_list.setToolTip(self.tr('Select providers for assist/compare.'))
-        self.provider_list.setMaximumHeight(84)
+        self.provider_list.setMaximumHeight(160)
         for nm in ['TM', 'Glossary', 'Concordance', 'SFX', 'google', 'deepl', 'openai', 'ollama', 'lmstudio']:
             it = QListWidgetItem(str(nm))
             it.setFlags(it.flags() | it.flags().ItemIsUserCheckable)
@@ -90,12 +90,14 @@ class TranslationAssistDock(QDockWidget):
         self.add_glossary_btn = QPushButton(self.tr('Add Selected to Glossary'), root)
         self.apply_edited_btn = QPushButton(self.tr('Apply Edited Text'), root)
         self.clear_cache_btn = QPushButton(self.tr('Clear Assist Cache'), root)
+        self.fullscreen_btn = QPushButton(self.tr('Fullscreen'), root)
         self.add_tm_btn.setEnabled(False)
         self.add_glossary_btn.setEnabled(False)
         self.apply_edited_btn.setEnabled(False)
         row.addWidget(self.refresh_btn)
         row.addWidget(self.compare_btn)
         row.addWidget(self.apply_btn)
+        row.addWidget(self.fullscreen_btn)
         lay.addWidget(self.source_box)
         lay.addWidget(self.target_box)
         lay.addWidget(self.candidates)
@@ -120,6 +122,17 @@ class TranslationAssistDock(QDockWidget):
         self.apply_edited_btn.clicked.connect(self._on_apply_edited)
         self.candidates.itemSelectionChanged.connect(self._on_candidate_selection_changed)
         self.clear_cache_btn.clicked.connect(self._on_clear_cache)
+        self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+
+    def _toggle_fullscreen(self):
+        if self.isFloating():
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+        else:
+            self.setFloating(True)
+            self.showFullScreen()
 
     def set_preview(self, source: str, target: str):
         self.source_box.setPlainText(source or '')
