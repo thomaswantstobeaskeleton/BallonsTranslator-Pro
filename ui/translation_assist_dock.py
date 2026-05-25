@@ -5,7 +5,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox,
-    QComboBox
+    QComboBox, QShortcut
 )
 
 
@@ -124,6 +124,10 @@ class TranslationAssistDock(QDockWidget):
         self.clear_cache_btn.clicked.connect(self._on_clear_cache)
         self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
 
+        # Escape key shortcut to exit fullscreen
+        self._esc_shortcut = QShortcut(Qt.Key_Escape, self)
+        self._esc_shortcut.activated.connect(self._exit_fullscreen)
+
     def _toggle_fullscreen(self):
         if self.isFloating():
             if self.isFullScreen():
@@ -134,12 +138,9 @@ class TranslationAssistDock(QDockWidget):
             self.setFloating(True)
             self.showFullScreen()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape and self.isFullScreen():
+    def _exit_fullscreen(self):
+        if self.isFullScreen():
             self.showNormal()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
 
     def set_preview(self, source: str, target: str):
         self.source_box.setPlainText(source or '')

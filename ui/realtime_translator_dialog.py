@@ -435,21 +435,25 @@ class RealtimeTranslatorDialog(QDialog):
             if not blk_list:
                 self.output.appendPlainText(self.tr("Realtime: no text blocks detected"))
                 return ""
-            # Convert numpy array polygons to TextBlock objects if needed
-            if blk_list and isinstance(blk_list[0], np.ndarray):
+            # Convert polygon lists/arrays to TextBlock objects if needed
+            if blk_list and not isinstance(blk_list[0], TextBlock):
                 from utils.textblock import TextBlock
                 def _poly_to_textblock(poly):
-                    # poly is Nx2 array of points, convert to xyxy bounding box
-                    if poly.ndim == 2 and poly.shape[1] == 2:
-                        x1, y1 = poly[:, 0].min(), poly[:, 1].min()
-                        x2, y2 = poly[:, 0].max(), poly[:, 1].max()
-                    elif poly.ndim == 1 and poly.size == 4:
-                        # Already flat [x1, y1, x2, y2]
-                        x1, y1, x2, y2 = poly.tolist()
-                    else:
-                        # Fallback: try to flatten
-                        flat = poly.flatten()
+                    # Convert various polygon formats to xyxy bounding box
+                    arr = np.array(poly)
+                    if arr.ndim == 2 and arr.shape[1] >= 2:
+                        # Nx2 polygon -> bounding box
+                        x1, y1 = arr[:, 0].min(), arr[:, 1].min()
+                        x2, y2 = arr[:, 0].max(), arr[:, 1].max()
+                    elif arr.ndim == 1 and arr.size == 4:
+                        # Flat [x1, y1, x2, y2]
+                        x1, y1, x2, y2 = arr.tolist()
+                    elif arr.ndim >= 1:
+                        # Fallback: flatten and take first 4
+                        flat = arr.flatten()
                         x1, y1, x2, y2 = float(flat[0]), float(flat[1]), float(flat[2]), float(flat[3])
+                    else:
+                        raise ValueError(f"Unexpected polygon format: {poly}")
                     return TextBlock([int(x1), int(y1), int(x2), int(y2)])
                 blk_list = [_poly_to_textblock(blk) for blk in blk_list]
                 self.output.appendPlainText(f"Realtime: wrapped {len(blk_list)} polygons into TextBlocks")
