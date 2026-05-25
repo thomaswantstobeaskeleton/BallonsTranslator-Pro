@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Callable, Dict, Optional
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox
-    , QComboBox
+    QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox,
+    QComboBox
 )
 
 
@@ -55,7 +56,7 @@ class TranslationAssistDock(QDockWidget):
         for nm in ['TM', 'Glossary', 'Concordance', 'SFX', 'google', 'deepl', 'openai', 'ollama', 'lmstudio']:
             it = QListWidgetItem(str(nm))
             it.setFlags(it.flags() | it.flags().ItemIsUserCheckable)
-            it.setCheckState(0)
+            it.setCheckState(Qt.Unchecked)
             self.provider_list.addItem(it)
         self.openai_model_combo = QComboBox(root)
         self.openai_model_combo.addItems(['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'])
@@ -144,7 +145,7 @@ class TranslationAssistDock(QDockWidget):
         selected = set(str(x).strip() for x in list(opts.get('preferred_assist_providers', []) or []) if str(x).strip())
         for i in range(self.provider_list.count()):
             it = self.provider_list.item(i)
-            it.setCheckState(2 if it.text() in selected else 0)
+            it.setCheckState(Qt.Checked if it.text() in selected else Qt.Unchecked)
         model_map = dict(opts.get('compare_provider_models', {}) or {})
         dflt_model = str(model_map.get('openai', 'gpt-4o-mini') or 'gpt-4o-mini')
         idx = self.openai_model_combo.findText(dflt_model)
@@ -244,10 +245,30 @@ class TranslationAssistDock(QDockWidget):
         if self._refresh_cb is not None:
             self._refresh_cb({'clear_assist_cache': True})
 
+    def set_busy(self, busy: bool):
+        self.refresh_btn.setEnabled(not busy)
+        self.compare_btn.setEnabled(not busy)
+        self.apply_btn.setEnabled(not busy and self.candidates.currentItem() is not None)
+        self.summary.setText(self.tr('Loading...') if busy else self.tr('Ready.'))
+
+    def refresh_provider_list(self, providers: list, preserve_checked: bool = True):
+        checked = set()
+        if preserve_checked:
+            for i in range(self.provider_list.count()):
+                it = self.provider_list.item(i)
+                if it.checkState() == Qt.Checked:
+                    checked.add(str(it.text()))
+        self.provider_list.clear()
+        for nm in providers:
+            it = QListWidgetItem(str(nm))
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if str(nm) in checked else Qt.Unchecked)
+            self.provider_list.addItem(it)
+
     def _selected_provider_list(self):
         out = []
         for i in range(self.provider_list.count()):
             it = self.provider_list.item(i)
-            if it.checkState() == 2:
+            if it.checkState() == Qt.Checked:
                 out.append(str(it.text()))
         return out
