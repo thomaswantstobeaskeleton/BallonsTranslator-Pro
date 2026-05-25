@@ -451,24 +451,29 @@ class RealtimeTranslatorDialog(QDialog):
                 return ""
             # Convert polygon lists/arrays to TextBlock objects if needed
             if blk_list and not isinstance(blk_list[0], TextBlock):
-                def _poly_to_textblock(poly):
+                def _poly_to_textblock(poly, idx):
                     # Convert various polygon formats to xyxy bounding box
                     arr = np.array(poly)
+                    self.output.appendPlainText(f"  Polygon {idx}: shape={arr.shape}, dtype={arr.dtype}, sample={arr.flatten()[:8].tolist()}")
                     if arr.ndim == 2 and arr.shape[1] >= 2:
                         # Nx2 polygon -> bounding box
-                        x1, y1 = arr[:, 0].min(), arr[:, 1].min()
-                        x2, y2 = arr[:, 0].max(), arr[:, 1].max()
+                        x1, y1 = int(arr[:, 0].min()), int(arr[:, 1].min())
+                        x2, y2 = int(arr[:, 0].max()), int(arr[:, 1].max())
                     elif arr.ndim == 1 and arr.size == 4:
                         # Flat [x1, y1, x2, y2]
-                        x1, y1, x2, y2 = arr.tolist()
-                    elif arr.ndim >= 1:
+                        x1, y1, x2, y2 = [int(v) for v in arr.tolist()]
+                    elif arr.ndim >= 1 and arr.size >= 4:
                         # Fallback: flatten and take first 4
                         flat = arr.flatten()
-                        x1, y1, x2, y2 = float(flat[0]), float(flat[1]), float(flat[2]), float(flat[3])
+                        x1, y1, x2, y2 = int(flat[0]), int(flat[1]), int(flat[2]), int(flat[3])
                     else:
-                        raise ValueError(f"Unexpected polygon format: {poly}")
-                    return TextBlock([int(x1), int(y1), int(x2), int(y2)])
-                blk_list = [_poly_to_textblock(blk) for blk in blk_list]
+                        self.output.appendPlainText(f"  WARNING: Unexpected polygon format, using defaults: {arr.shape}")
+                        x1, y1, x2, y2 = 0, 0, 100, 50  # Default fallback
+                    self.output.appendPlainText(f"  -> xyxy: [{x1}, {y1}, {x2}, {y2}]")
+                    blk = TextBlock(xyxy=[x1, y1, x2, y2])
+                    self.output.appendPlainText(f"  -> TextBlock.xyxy: {blk.xyxy}")
+                    return blk
+                blk_list = [_poly_to_textblock(blk, i) for i, blk in enumerate(blk_list)]
                 self.output.appendPlainText(f"Realtime: wrapped {len(blk_list)} polygons into TextBlocks")
             ocr = getattr(self._module_manager, "ocr", None)
             if ocr is None:
@@ -574,7 +579,7 @@ class _TranslationResultWindow(QWidget):
         self.setGeometry(x, y, w, h)
         self.show()
         self.raise_()
-        self.activateWindow()
+        # Don't call activateWindow() - window has WindowDoesNotAcceptFocus
 
     def _resize_to_content(self):
         doc = self._browser.document()
