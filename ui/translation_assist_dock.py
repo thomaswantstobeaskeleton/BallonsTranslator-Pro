@@ -14,6 +14,12 @@ class TranslationAssistDock(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(self.tr('Translation Assist (beta)'))
+        # Set standard dock features (close button, movable, floatable)
+        self.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable |
+            QDockWidget.DockWidgetFeature.DockWidgetMovable |
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
         self._refresh_cb: Optional[Callable[[Dict], None]] = None
         self._apply_cb: Optional[Callable[[str], None]] = None
         self._add_tm_cb: Optional[Callable[[str], None]] = None

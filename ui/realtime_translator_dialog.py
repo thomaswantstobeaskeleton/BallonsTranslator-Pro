@@ -193,6 +193,7 @@ class RealtimeTranslatorDialog(QDialog):
         # --- State ---
         self._region: Optional[Tuple[int, int, int, int]] = None
         self._last_image: Optional[np.ndarray] = None
+        self._last_blocks: List = []  # Store detected blocks for positioning
         self._pending_worker: Optional[QThread] = None
         self._stop_sign = False
 
@@ -410,12 +411,21 @@ class RealtimeTranslatorDialog(QDialog):
         line = f"status={state.status} | src={state.last_ocr_text} | tr={state.last_translation}"
         self.output.appendPlainText(line)
 
-        # Show result in dedicated result window
+        # Show result at first detected block position (or center of region if no blocks)
         if state.last_translation and state.status == "translated":
             self._result_window.set_text(state.last_translation)
-            if self._region:
+            # Position at first block if available, otherwise at region center
+            if self._last_blocks:
+                blk = self._last_blocks[0]
+                x1, y1, x2, y2 = blk.xyxy
+                self._result_window.show_at(int(x1), int(y1), int(x2-x1), int(y2-y1))
+                self.output.appendPlainText(f"Result shown at block: ({x1}, {y1}, {x2-x1}, {y2-y1})")
+            elif self._region:
                 x, y, w, h = self._region
-                self._result_window.show_at(x, y, w, h)
+                # Show at center of region, smaller size
+                cx, cy = x + w//4, y + h//4
+                self._result_window.show_at(cx, cy, w//2, 100)
+                self.output.appendPlainText(f"Result shown at region center: ({cx}, {cy})")
         else:
             self._result_window.hide()
 
@@ -469,6 +479,8 @@ class RealtimeTranslatorDialog(QDialog):
                     parts.append(str(txt).strip())
             result = "\n".join(parts)
             self.output.appendPlainText(f"Realtime: OCR extracted {len(parts)} text parts")
+            # Store blocks for positioning result window
+            self._last_blocks = blk_list
             return result
         except Exception as e:
             import traceback
@@ -511,7 +523,8 @@ class RealtimeTranslatorDialog(QDialog):
 
 
 class _TranslationResultWindow(QWidget):
-    """Frameless always-on-top window showing translated text with Dango-style outlined QTextBrowser."""
+    """Frameless always-on-top window showing translated text with Dango-style outlined QTextBrowser.
+    Non-blocking: doesn't steal focus and allows mouse clicks to pass through to underlying windows."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -519,8 +532,11 @@ class _TranslationResultWindow(QWidget):
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # Allow mouse events to pass through to underlying windows
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
