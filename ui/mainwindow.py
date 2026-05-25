@@ -5670,6 +5670,11 @@ class MainWindow(mainwindow_cls):
 
     def on_open_realtime_translator(self):
         """Open realtime screen translation dialog (project-less live mode)."""
+        # Dev-only feature - guard against accidental use
+        if not pcfg.dev_mode:
+            from utils.message import create_info_dialog
+            create_info_dialog(self, self.tr('Developer Mode Required'), self.tr('Realtime Screen Translator is a developer-only feature. Enable Developer Mode in Settings > General to use it.'))
+            return
         if not hasattr(self, '_realtime_translator_dialog') or self._realtime_translator_dialog is None:
             self._realtime_translator_dialog = RealtimeTranslatorDialog(self, module_manager=self.module_manager)
         if self._realtime_translator_dialog.isVisible():
@@ -7340,6 +7345,9 @@ class MainWindow(mainwindow_cls):
 
     def on_dev_mode_changed(self):
         """Refresh detector/OCR/translator dropdowns after dev_mode toggle."""
+        # Update realtime translator menu item visibility
+        if hasattr(self.titleBar, 'realtime_translator_action'):
+            self.titleBar.realtime_translator_action.setVisible(pcfg.dev_mode)
         valid_det = GET_VALID_TEXTDETECTORS()
         valid_ocr = GET_VALID_OCR()
         valid_trans = GET_VALID_TRANSLATORS()
