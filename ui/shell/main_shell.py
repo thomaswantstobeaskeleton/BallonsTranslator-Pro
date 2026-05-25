@@ -33,6 +33,7 @@ from .theme import COLORS, FONTS, SPACING, TITLEBAR_HEIGHT, build_shell_styleshe
 from .nav_controller import NavController, SECTIONS
 from .sidebar_widget import SidebarWidget
 from .pages.home_page import HomePage
+from .pages.editor_page import EditorPage
 from .pages.stub_page import StubPage
 
 
@@ -195,9 +196,12 @@ class BallonsShell(QMainWindow):
         # Populate recent projects from config
         self._refresh_recent_projects()
 
+        # EDITOR – redesigned workspace shell
+        self._add_page("editor", EditorPage())
+
         # All other sections – stubs for now
         for section_id in SECTIONS:
-            if section_id == "home":
+            if section_id in {"home", "editor"}:
                 continue
             page = StubPage(section_id)
             self._add_page(section_id, page)
