@@ -562,8 +562,8 @@ class Canvas(QGraphicsScene):
         if view_mode == "debug":
             # Debug: show base image + mask overlay (boxes/masks) for QA
             if self.imgtrans_proj.mask_valid:
-                painter.setOpacity(0.5)
-                painter.drawPixmap(origin, ndarray2pixmap(self.imgtrans_proj.mask_array))
+                mask_rgba = self._build_mask_overlay(self.imgtrans_proj.mask_array, 0.5)
+                painter.drawPixmap(origin, ndarray2pixmap(mask_rgba))
             painter.end()
             self.inpaintLayer.setPixmap(pixmap)
             return
@@ -577,11 +577,31 @@ class Canvas(QGraphicsScene):
                 painter.drawPixmap(origin, pixmap)
 
         if self.imgtrans_proj.mask_valid and pcfg.mask_transparency > 0 and not self.textEditMode():
-            painter.setOpacity(pcfg.mask_transparency)
-            painter.drawPixmap(origin, ndarray2pixmap(self.imgtrans_proj.mask_array))
+            # Build RGBA overlay so per-pixel alpha is preserved (#1117).
+            # Gray mask values become alpha; magenta tint makes it visible on any bg.
+            mask_rgba = self._build_mask_overlay(self.imgtrans_proj.mask_array, pcfg.mask_transparency)
+            painter.drawPixmap(origin, ndarray2pixmap(mask_rgba))
 
         painter.end()
         self.inpaintLayer.setPixmap(pixmap)
+
+    @staticmethod
+    def _build_mask_overlay(mask: np.ndarray, transparency: float) -> np.ndarray:
+        """Convert grayscale mask to RGBA with per-pixel alpha (#1117).
+
+        Each mask pixel value (0-255) is multiplied by *transparency* to become the
+        alpha channel.  A magenta tint makes the mask visible against any background.
+        """
+        h, w = mask.shape[:2]
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        # Magenta tint for visibility: R=200, G=0, B=200
+        rgba[:, :, 0] = 200
+        rgba[:, :, 2] = 200
+        # Alpha = mask_intensity * transparency, clamped to 0-255
+        alpha = mask.astype(np.float32) * transparency
+        np.clip(alpha, 0, 255, out=alpha)
+        rgba[:, :, 3] = alpha.astype(np.uint8)
+        return rgba
 
     def setMaskTransparency(self, transparency: float):
         pcfg.mask_transparency = transparency
