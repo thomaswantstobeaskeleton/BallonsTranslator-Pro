@@ -6,7 +6,7 @@ from qtpy.QtWidgets import (
     QMessageBox, QApplication, QWidget
 )
 from qtpy.QtCore import QTimer, Qt, QThread, QObject, Signal, QPoint, QRect
-from qtpy.QtGui import QPainter, QPen, QBrush, QColor, QBitmap, QFont, QTextCharFormat
+from qtpy.QtGui import QPainter, QPen, QBrush, QColor, QBitmap, QFont, QTextCharFormat, QImage
 import numpy as np
 
 try:
@@ -266,7 +266,7 @@ class RealtimeTranslatorDialog(QDialog):
 
     @staticmethod
     def _pixmap_to_numpy(pixmap) -> np.ndarray:
-        image = pixmap.toImage().convertToFormat(Qt.ImageFormat.Format_ARGB32)
+        image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
         width = image.width()
         height = image.height()
         ptr = image.bits()
