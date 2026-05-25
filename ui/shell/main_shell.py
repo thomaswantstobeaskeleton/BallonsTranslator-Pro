@@ -23,7 +23,7 @@ from qtpy.QtWidgets import (
     QLabel, QFrame, QApplication, QSizePolicy, QFileDialog,
 )
 from qtpy.QtCore import Qt, Signal, QSize, QTimer, QUrl
-from qtpy.QtGui import QIcon, QFont, QCloseEvent
+from qtpy.QtGui import QIcon, QFont, QCloseEvent, QKeySequence, QShortcut
 from qtpy.QtQuickWidgets import QQuickWidget
 
 import utils.shared as shared
@@ -32,12 +32,17 @@ from utils.config import ProgramConfig, pcfg
 from .theme import COLORS, FONTS, SPACING, TITLEBAR_HEIGHT, build_shell_stylesheet
 from .nav_controller import NavController, SECTIONS
 from .sidebar_widget import SidebarWidget
+from .command_palette import CommandPalette
+from .job_status_drawer import JobStatusDrawer
 from .pages.home_page import HomePage
 from .pages.editor_page import EditorPage
 from .pages.assist_qa_page import AssistQAPage
 from .pages.batch_queue_page import BatchQueuePage
 from .pages.diagnostics_page import DiagnosticsPage
+from .pages.downloader_page import DownloaderPage
+from .pages.live_translate_page import LiveTranslatePage
 from .pages.models_ai_page import ModelsAIPage
+from .pages.quick_image_page import QuickImagePage
 from .pages.settings_page import SettingsPage
 from .pages.stub_page import StubPage
 
@@ -156,6 +161,30 @@ class BallonsShell(QMainWindow):
         self._pages: dict[str, QWidget] = {}
         self._create_pages()
 
+        # Job Status Drawer (hidden by default, Ctrl+J toggles)
+        self._job_drawer = JobStatusDrawer()
+        self._job_drawer.hide()
+        outer.addWidget(self._job_drawer)
+
+        # Command Palette (Ctrl+K)
+        self._command_palette = CommandPalette(self)
+        self._command_palette.set_commands([
+            ("Go to Home", "nav:home"),
+            ("Go to Editor", "nav:editor"),
+            ("Open Live Translate", "nav:live_translate"),
+            ("Open Quick Image", "nav:quick_image"),
+            ("Open Downloader", "nav:downloader"),
+            ("Open Batch Queue", "nav:batch_queue"),
+            ("Open Assist / QA", "nav:assist_qa"),
+            ("Open Models / AI", "nav:models_ai"),
+            ("Open Settings", "nav:settings"),
+            ("Open Diagnostics", "nav:diagnostics"),
+            ("Toggle Job Status Drawer", "toggle:jobs"),
+        ])
+        self._command_palette.command_selected.connect(self._run_shell_command)
+        QShortcut(QKeySequence("Ctrl+K"), self, activated=self._command_palette.show)
+        QShortcut(QKeySequence("Ctrl+J"), self, activated=self._toggle_job_drawer)
+
         # ── Wire navigation ───────────────────────────────────
         self._nav.sectionChanged.connect(self._on_navigate)
 
@@ -205,6 +234,9 @@ class BallonsShell(QMainWindow):
         self._add_page("editor", EditorPage())
 
         # Core redesigned section shells
+        self._add_page("live_translate", LiveTranslatePage())
+        self._add_page("quick_image", QuickImagePage())
+        self._add_page("downloader", DownloaderPage())
         self._add_page("batch_queue", BatchQueuePage())
         self._add_page("assist_qa", AssistQAPage())
         self._add_page("models_ai", ModelsAIPage())
@@ -213,7 +245,7 @@ class BallonsShell(QMainWindow):
 
         # All other sections – stubs for now
         for section_id in SECTIONS:
-            if section_id in {"home", "editor", "batch_queue", "assist_qa", "models_ai", "settings", "diagnostics"}:
+            if section_id in {"home", "editor", "live_translate", "quick_image", "downloader", "batch_queue", "assist_qa", "models_ai", "settings", "diagnostics"}:
                 continue
             page = StubPage(section_id)
             self._add_page(section_id, page)
@@ -226,6 +258,15 @@ class BallonsShell(QMainWindow):
         page = self._pages.get(section_id)
         if page:
             self._stack.setCurrentWidget(page)
+
+    def _toggle_job_drawer(self):
+        self._job_drawer.setVisible(not self._job_drawer.isVisible())
+
+    def _run_shell_command(self, command_id: str):
+        if command_id.startswith("nav:"):
+            self._nav.navigate(command_id.split(":", 1)[1])
+        elif command_id == "toggle:jobs":
+            self._toggle_job_drawer()
 
     # ── Project actions ───────────────────────────────────────
     def _open_project(self, path: str = ""):
