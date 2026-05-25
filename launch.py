@@ -84,6 +84,7 @@ if IS_WIN7:
 else:
     parser.add_argument("--qt-api", default='pyqt6', choices=QT_APIS, help='Set qt api')
 parser.add_argument("--debug", action='store_true')
+parser.add_argument("--legacy-ui", action='store_true', help='Use legacy UI (classic BallonsTranslator window) instead of the new shell')
 parser.add_argument("--requirements", default='requirements.txt')
 parser.add_argument("--headless", action='store_true', help='run without GUI')
 parser.add_argument("--headless_continuous", action='store_true', help='like headless but after finishing --exec_dirs prompts for new dirs (comma-separated) until you enter "exit"')
@@ -550,22 +551,35 @@ def main():
 
     setup_locks()
 
-    from ui.mainwindow import MainWindow
     open_path = (args.proj_dir or getattr(args, 'path', '') or '').strip()
-    ballontrans = MainWindow(app, config, open_dir=open_path, **vars(args))
+    use_legacy = getattr(args, 'legacy_ui', False)
     global BT
-    BT = ballontrans
-    BT.restart_signal.connect(restart)
 
-    if not args.headless and not getattr(args, 'headless_continuous', False):
-        if shared.SCREEN_W > 1707 and sys.platform == 'win32':
-            # https://github.com/dmMaze/BallonsTranslator/issues/220
-            BT.comicTransSplitter.setHandleWidth(7)
+    if use_legacy or args.headless or getattr(args, 'headless_continuous', False):
+        # Legacy UI path (classic BallonsTranslator window)
+        from ui.mainwindow import MainWindow
+        ballontrans = MainWindow(app, config, open_dir=open_path, **vars(args))
+        BT = ballontrans
+        BT.restart_signal.connect(restart)
 
+        if not args.headless and not getattr(args, 'headless_continuous', False):
+            if shared.SCREEN_W > 1707 and sys.platform == 'win32':
+                # https://github.com/dmMaze/BallonsTranslator/issues/220
+                BT.comicTransSplitter.setHandleWidth(7)
+
+            ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
+            ballontrans.show()
+            ballontrans.resetStyleSheet()
+            _stage("UI shown", "ok", "mainwindow.show() [legacy]")
+    else:
+        # New shell UI
+        from ui.shell.main_shell import BallonsShell
+        ballontrans = BallonsShell(app, config, open_dir=open_path, **vars(args))
+        BT = ballontrans
+        BT.restart_signal.connect(restart)
         ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
         ballontrans.show()
-        ballontrans.resetStyleSheet()
-        _stage("UI shown", "ok", "mainwindow.show()")
+        _stage("UI shown", "ok", "shell.show() [new]")
 
         # Optional: offer Windows context menu on first launch (once per config)
         if sys.platform == 'win32' and not getattr(config, 'windows_context_menu_offered', False):
