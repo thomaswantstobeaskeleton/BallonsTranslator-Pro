@@ -145,6 +145,15 @@ class BallonsShell(QMainWindow):
 
         # Top action bar (New/Open/Save/Import/Export/OCR/Translate/Inpaint/Typeset)
         self._action_bar = TopActionBar()
+        self._action_bar.new_project_clicked.connect(self._new_project)
+        self._action_bar.open_project_clicked.connect(lambda: self._open_project(""))
+        self._action_bar.save_clicked.connect(self._save_project)
+        self._action_bar.import_clicked.connect(self._import_project)
+        self._action_bar.export_clicked.connect(self._export_project)
+        self._action_bar.ocr_clicked.connect(self._run_ocr)
+        self._action_bar.translate_clicked.connect(self._run_translate)
+        self._action_bar.inpaint_clicked.connect(self._run_inpaint)
+        self._action_bar.typeset_clicked.connect(self._run_typeset)
         outer.addWidget(self._action_bar)
 
         # Main row: sidebar + stack
@@ -194,6 +203,11 @@ class BallonsShell(QMainWindow):
         self._command_palette.command_selected.connect(self._run_shell_command)
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self._command_palette.show)
         QShortcut(QKeySequence("Ctrl+J"), self, activated=self._toggle_job_drawer)
+
+        # Common action shortcuts
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._new_project)
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=lambda: self._open_project(""))
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=self._save_project)
 
         # ── Wire navigation ───────────────────────────────────
         self._nav.sectionChanged.connect(self._on_navigate)
@@ -287,6 +301,8 @@ class BallonsShell(QMainWindow):
             )
         if path:
             self._title_bar.set_project(osp.basename(path))
+            self._status_footer.project_label.setText(osp.basename(path))
+            self._status_footer.status_label.setText("Project loaded")
             # TODO: wire to actual project loading
 
     def _new_project(self):
@@ -296,7 +312,45 @@ class BallonsShell(QMainWindow):
         )
         if path:
             self._title_bar.set_project(osp.basename(path))
+            self._status_footer.project_label.setText(osp.basename(path))
             # TODO: wire to actual project creation
+
+    def _save_project(self):
+        # TODO: wire to actual save
+        self._status_footer.status_label.setText("Saved")
+
+    def _import_project(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Import Project Folder", "",
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if path:
+            self._title_bar.set_project(osp.basename(path))
+            self._status_footer.project_label.setText(osp.basename(path))
+
+    def _export_project(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Select Export Destination", "",
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if path:
+            self._status_footer.status_label.setText(f"Exported to {osp.basename(path)}")
+
+    def _run_ocr(self):
+        self._status_footer.status_label.setText("Running OCR...")
+        # TODO: wire to actual OCR pipeline
+
+    def _run_translate(self):
+        self._status_footer.status_label.setText("Running Translation...")
+        # TODO: wire to actual translation pipeline
+
+    def _run_inpaint(self):
+        self._status_footer.status_label.setText("Running Inpaint...")
+        # TODO: wire to actual inpaint pipeline
+
+    def _run_typeset(self):
+        self._status_footer.status_label.setText("Running Typeset...")
+        # TODO: wire to actual typeset pipeline
 
     def _refresh_recent_projects(self):
         """Pull recent projects from config and push to HomePage."""
