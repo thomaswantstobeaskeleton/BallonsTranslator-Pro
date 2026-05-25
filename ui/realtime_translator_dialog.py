@@ -426,6 +426,7 @@ class RealtimeTranslatorDialog(QDialog):
         """Run text detection + OCR on a captured image. Returns joined text."""
         if self._module_manager is None:
             return ""
+        from utils.textblock import TextBlock
         try:
             detector = getattr(self._module_manager, "textdetector", None)
             if detector is None:
@@ -437,7 +438,6 @@ class RealtimeTranslatorDialog(QDialog):
                 return ""
             # Convert polygon lists/arrays to TextBlock objects if needed
             if blk_list and not isinstance(blk_list[0], TextBlock):
-                from utils.textblock import TextBlock
                 def _poly_to_textblock(poly):
                     # Convert various polygon formats to xyxy bounding box
                     arr = np.array(poly)

@@ -7,6 +7,7 @@ from qtpy.QtWidgets import (
     QListWidget, QListWidgetItem, QHBoxLayout, QCheckBox, QSpinBox,
     QComboBox, QShortcut
 )
+from qtpy.QtGui import QKeySequence
 
 
 class TranslationAssistDock(QDockWidget):
@@ -124,8 +125,9 @@ class TranslationAssistDock(QDockWidget):
         self.clear_cache_btn.clicked.connect(self._on_clear_cache)
         self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
 
-        # Escape key shortcut to exit fullscreen
-        self._esc_shortcut = QShortcut(Qt.Key_Escape, self)
+        # Escape key shortcut to exit fullscreen (works even without focus)
+        self._esc_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._esc_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._esc_shortcut.activated.connect(self._exit_fullscreen)
 
     def _toggle_fullscreen(self):
