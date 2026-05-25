@@ -62,12 +62,12 @@ python launch.py
 Mix-and-match **90+ modules** across the full pipeline. No need to settle for one-size-fits-all defaults.
 
 ### Realtime Screen Translator
-<p align="center"><img src="doc/src/pro/realtime_overlay.png" width="80%" alt="Realtime overlay placeholder — capture overlay in action"></p>
+
 
 Always-on-top, click-through overlay. Select any screen region or follow a window. Privacy-first: nothing is persisted or logged by default.
 
 ### Translation Assist
-<p align="center"><img src="doc/src/pro/translation_assist.png" width="80%" alt="Translation Assist dock placeholder"></p>
+
 
 Per-block candidate suggestions, TM/glossary lookup, side-by-side provider comparison, and block-level QA warnings.
 
@@ -77,7 +77,7 @@ Per-block candidate suggestions, TM/glossary lookup, side-by-side provider compa
 Shape-aware safe areas, balanced line breaks, density-aware font scaling, and overflow safety checks.
 
 ### Batch Queue
-<p align="center"><img src="doc/src/pro/batch_queue.png" width="80%" alt="Batch queue placeholder"></p>
+
 
 Process multiple folders in a single queue with pause, resume, and cancel.
 
