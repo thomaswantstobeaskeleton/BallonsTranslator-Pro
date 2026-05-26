@@ -16,13 +16,15 @@ from utils.textblock import mit_merge_textlines, sort_regions, examine_textblk, 
 from utils.imgproc_utils import xywh2xyxypoly
 
 
+from utils.logger import logger as _LOGGER
+
 _ANIME_TEXT_YOLO_AVAILABLE = False
 try:
     from ultralytics import YOLO
     from huggingface_hub import hf_hub_download, list_repo_files
     _ANIME_TEXT_YOLO_AVAILABLE = True
-except Exception:
-    pass
+except ImportError as _e:
+    _LOGGER.warning("AnimeText YOLO dependencies missing: %s", _e)
 
 
 HF_REPO_ID = "deepghs/AnimeText_yolo"
@@ -35,12 +37,18 @@ def _find_yolo_model_file() -> str:
         # Prefer .pt, then .safetensors
         candidates = [f for f in files if f.endswith(".pt") or f.endswith(".safetensors")]
         if not candidates:
+            _LOGGER.warning("AnimeText YOLO: no .pt/.safetensors files found in repo %s", HF_REPO_ID)
             return None
         # Heuristic: pick the largest / most specific name (often best)
         candidates.sort(key=lambda x: ("best" in x.lower(), "last" not in x.lower(), len(x)), reverse=True)
         chosen = candidates[0]
+        _LOGGER.info("AnimeText YOLO: downloading model file '%s' from %s", chosen, HF_REPO_ID)
         return hf_hub_download(repo_id=HF_REPO_ID, filename=chosen, repo_type="model")
-    except Exception:
+    except ImportError as e:
+        _LOGGER.error("AnimeText YOLO: huggingface_hub not available: %s", e)
+        return None
+    except Exception as e:
+        _LOGGER.error("AnimeText YOLO: failed to download model from Hugging Face: %s", e)
         return None
 
 
@@ -94,6 +102,7 @@ class AnimeTextYoloDetector(TextDetectorBase):
         "description": "AnimeText YOLO12 (deepghs/AnimeText_yolo). Auto-downloads from Hugging Face. Best for anime/manga scenes with complex text.",
     }
 
+    download_file_on_load = True
     _load_model_keys = {"model"}
 
     def __init__(self, **params) -> None:
