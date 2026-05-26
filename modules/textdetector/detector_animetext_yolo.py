@@ -30,20 +30,17 @@ except ImportError as _e:
 HF_REPO_ID = "deepghs/AnimeText_yolo"
 
 
-def _find_yolo_model_file() -> str:
-    """Return path to the best YOLO model file from the HF repo, downloading if needed."""
+# Exact verified paths for the best AnimeText YOLO model files
+HF_MODEL_PT = "yolo12l_animetext/model.pt"
+HF_MODEL_ONNX = "yolo12l_animetext/model.onnx"
+
+
+def _find_yolo_model_file(prefer_onnx: bool = False) -> str:
+    """Return local path to the YOLO model file, downloading from HF if needed."""
     try:
-        files = list_repo_files(HF_REPO_ID, repo_type="model")
-        # Prefer .pt, then .safetensors
-        candidates = [f for f in files if f.endswith(".pt") or f.endswith(".safetensors")]
-        if not candidates:
-            _LOGGER.warning("AnimeText YOLO: no .pt/.safetensors files found in repo %s", HF_REPO_ID)
-            return None
-        # Heuristic: pick the largest / most specific name (often best)
-        candidates.sort(key=lambda x: ("best" in x.lower(), "last" not in x.lower(), len(x)), reverse=True)
-        chosen = candidates[0]
-        _LOGGER.info("AnimeText YOLO: downloading model file '%s' from %s", chosen, HF_REPO_ID)
-        return hf_hub_download(repo_id=HF_REPO_ID, filename=chosen, repo_type="model")
+        filename = HF_MODEL_ONNX if prefer_onnx else HF_MODEL_PT
+        _LOGGER.info("AnimeText YOLO: downloading '%s' from %s", filename, HF_REPO_ID)
+        return hf_hub_download(repo_id=HF_REPO_ID, filename=filename, repo_type="model")
     except ImportError as e:
         _LOGGER.error("AnimeText YOLO: huggingface_hub not available: %s", e)
         return None
@@ -102,7 +99,12 @@ class AnimeTextYoloDetector(TextDetectorBase):
         "description": "AnimeText YOLO12 (deepghs/AnimeText_yolo). Auto-downloads from Hugging Face. Best for anime/manga scenes with complex text.",
     }
 
-    download_file_on_load = True
+    download_file_list = [{
+        "url": "https://huggingface.co/deepghs/AnimeText_yolo/resolve/main/",
+        "files": [HF_MODEL_PT, HF_MODEL_ONNX],
+        "save_dir": "data/models/animetext_yolo",
+        "concatenate_url_filename": 1,
+    }]
     _load_model_keys = {"model"}
 
     def __init__(self, **params) -> None:
@@ -119,7 +121,8 @@ class AnimeTextYoloDetector(TextDetectorBase):
         if model_path and osp.exists(model_path):
             self._model_path = model_path
         else:
-            cached = _find_yolo_model_file()
+            prefer_onnx = self.get_param_value("device") == "cpu"
+            cached = _find_yolo_model_file(prefer_onnx=prefer_onnx)
             if not cached:
                 raise RuntimeError(
                     "Could not download AnimeText YOLO model from Hugging Face. "
