@@ -172,3 +172,118 @@ tests/test_manga_provider_base.py
 | **Medium** | Add `encoding="utf-8"` to all `Path.read_text()` calls across `tests/` | TBD |
 | **Medium** | Run `pytest` with `pytest-randomly` to surface order-dependent test failures | TBD |
 | **Low** | Document `trans_deeplx.py` header maintenance policy | TBD |
+
+---
+
+## 9. Competitor Analysis: Koharu + Comic Translate
+
+**Date:** 2026-05-25  
+**Scope:** Deep code review of Koharu (Rust/Tauri) and Comic Translate (Python/PySide6), identifying features, UI patterns, and workflows BallonsTranslator-Pro can adopt.
+
+---
+
+### 9.1 Koharu (Rust/Tauri) — Backend-First, Modern UI
+
+**Architecture:** Rust monorepo with modular crates (`koharu-core`, `koharu-app`, `koharu-ml`, `koharu-llm`, `koharu-psd`, `koharu-rpc`). Web-based UI via Tauri. Scene graph with immutable `Op` mutations and content-addressed blob storage (blake3 hashes).
+
+**Features we lack:**
+
+| Feature | Koharu Implementation | What We Can Port |
+|---|---|---|
+| **MCP Server** | `koharu-rpc` crate with axum; SSE events; `GET /events`, `GET /operations` | Add FastAPI server in `modules/mcp_server.py` exposing detect/OCR/translate/export tools |
+| **Headless Mode** | `--headless --port` runs without GUI; serves web client | Extend `launch.py` with `--headless-api` to skip QApplication and serve dashboard |
+| **Layered PSD Export** | `koharu-psd` writes real Type layers with font/size/color | Replace JSX handoff with true PSD writer using `psd-tools` or raw layer/image resources |
+| **Local LLM (llama.cpp)** | `koharu-llm` wraps `llama.cpp`; supports Gemma, Qwen, Sugoi, Sakura GGUFs | Add `translator_llama_cpp.py` using `llama-cpp-python` with pre-configured HF GGUF downloads |
+| **Google Fonts** | On-demand fetch + local cache under app data dir | Add `google_fonts_manager.py` that queries Google Fonts API and registers in `QFontDatabase` |
+| **Advanced Text Rendering** | OpenType shaping, vertical CJK punctuation alignment, RTL, real glyph metrics | Upgrade `TextBlockItem` to use `QTextLayout` with `QGlyphRun` or HarfBuzz for shaping |
+| **FLUX.2 Inpainting** | `koharu-ml` supports `unsloth/FLUX.2-klein-4B-GGUF` for page redraws | Add optional `diffusers`/`transformers` inpainter module |
+| **Multi-GPU Backends** | CUDA, ZLUDA (AMD), Metal (Apple), Vulkan, CPU | Our code is CUDA-only; consider `DirectML` or `onnxruntime-directml` for AMD |
+| **Font Detection Model** | `YuzuMarker.FontDetection` (`fffonion/yuzumarker-font-detection`) | Add `font_detector.py` wrapper to auto-infer font family, color, stroke |
+
+**UI patterns to adopt:**
+- Keyboard shortcut system: `V` select, `M` block, `B` brush, `E` eraser, `[`/`]` brush size — already partially implemented
+- Real-time status via SSE instead of polling
+- Project-centric blob storage: all assets hashed by blake3, deduplicated
+
+---
+
+### 9.2 Comic Translate (Python/PySide6) — UI-First, Format-Rich
+
+**Architecture:** Python with PySide6, uses `dayu_widgets` (Ant Design-like) theme system. Custom frameless window with `EdgeResizer`. Canvas uses composition pattern: `ImageViewer` delegates to `DrawingManager`, `InteractionManager`, `LazyWebtoonManager`, `EventHandler`.
+
+**Features we lack:**
+
+| Feature | Comic Translate Implementation | What We Can Port |
+|---|---|---|
+| **Webtoon Mode** | `LazyWebtoonManager` with lazy loading, viewport culling, position→page mapping | Add `ui/canvas/webtoon_manager.py` with vertical layout and lazy `QPixmap` loading |
+| **Multi-Format Input** | PDF (`pymupdf`), EPUB (`ebooklib`), CBR/CBZ (`zipfile`/`rarfile`) | Add `modules/io/archive_reader.py` to extract archives to temp projects |
+| **Bubble+Text Joint Detection** | `RT-DETR-v2` (`ogkalu/comic-text-and-bubble-detector`) trained on 11k images | Add `detector_bubble_text.py` with bubble type classification (speech, thought, caption, sfx) |
+| **Page-Context Translation** | Feeds *entire page text* + optional image to GPT-4.1/Claude/Gemini | Add `translate_page()` override in LLM translators with full-page prompt |
+| **Font Analysis** | Trained font detection + color extraction model | Same as Koharu — wrap `YuzuMarker.FontDetection` |
+| **Custom Title Bar** | `CustomTitleBar` with project chip, undo/redo, autosave toggle, macOS traffic lights | Rewrite `TitleBar` in `mainwindowbars.py` with `_ProjectChip`, snap assist, `_CtrlButton` paint |
+| **Theme System** | `dayu_widgets.MTheme` generates 10 color tints, applies QSS template with `@token@` substitution | Create `ui/theme_engine.py` with `set_theme("light"|"dark")`, `set_primary_color(hex)` |
+| **Touch/Gestures** | `PanGesture` + `PinchGesture` on viewport | Add to `CanvasView` in `ui/canvas.py` |
+| **Settings Resize Preview** | Snap pixmap during resize to avoid "pinch" artifacts | Add to `ConfigPanel` in `ui/configpanel.py` |
+| **Batch Find/Replace** | `search_replace.py` controller with project-wide scope | Enhance `ui/global_search_widget.py` with regex, preview, scope selection |
+| **27+ Language Support** | Language mapping dict with reverse lookup | Expand `DISPLAY_LANGUAGE_MAP` in `utils/shared.py` |
+
+**UI patterns to adopt:**
+- **Startup home screen:** Comic Translate's `StartupHomeScreen` has project thumbnails, drag-and-drop zone, quick settings. Our `WelcomeWidget` is plain buttons.
+- **Nav rail:** Left-side icon rail with active-state highlighting instead of our checker-style left bar.
+- **Frameless window with edge resizing:** Their `EdgeResizer` + `nativeEvent` (`WM_NCHITTEST`) gives smooth Windows snap. Our `FramelessWindow` is simpler.
+- **Project chip in title bar:** Shows elided project name with `*` dirty marker. Double-click to rename. Popup menu for recent projects.
+- **Card-based layouts:** `dayu_widgets` uses `MPushButton`, `MLabel`, `MTheme` for consistent elevation, hover, and focus states.
+
+---
+
+### 9.3 What BallonsTranslator-Pro Has That Competitors Lack
+
+Before copying features, note our **unique strengths** that should be preserved and enhanced:
+
+- **Rich text editing canvas:** Gradients, text on path, per-block styles, vertical text, outline/stroke — neither competitor has this depth.
+- **Layout Review Agent:** AI-powered page layout fixing (local + cloud) — unique to us.
+- **Typography QA Report:** Overflow detection, fallback font analysis, RTL issues — unique.
+- **Production Auto Pass:** One-click lettering + fit + review + render pipeline — unique.
+- **Reading Order Editor:** Visual drag-to-reorder with arrow connections — unique.
+- **Concordance Search:** Project-wide source/target search with page provenance — unique.
+- **Pipeline Dashboard / Insights:** Stage-level rerun, mask diagnostics, OCR crop inspector — unique.
+- **Video Translator + Subtitle Editor:** Neither competitor handles video.
+- **Multiple export formats:** XLIFF, CSV, JSON, SVG text handoff, LPtxt, structured OCR — broader than competitors.
+- **Regex Profiles:** Project-specific regex substitution chains — unique.
+- **Environment Doctor:** Dependency/auth checks with report — unique.
+- **Model Package Manager:** Selective download of detector/OCR/inpainter packages — unique.
+- **Glossary Management:** Auto-extract + guardrails + concordance — more advanced than competitors.
+
+---
+
+### 9.4 Roadmap: Features to Implement
+
+| Priority | Feature | Effort | Source | Files to Create/Modify |
+|---|---|---|---|---|
+| **P0** | MCP Server + Headless API | High | Koharu `koharu-rpc/` | `modules/mcp_server.py`, `ui/headless_dashboard/` |
+| **P0** | Local LLM (llama.cpp) | High | Koharu `koharu-llm/` | `modules/translation/translator_llama_cpp.py` |
+| **P0** | Multi-format input (PDF/CBR/CBZ/EPUB) | Medium | Comic Translate `imkit/io.py` | `modules/io/archive_reader.py` |
+| **P1** | Unified Theme Engine | High | Comic Translate `dayu_widgets/theme.py` | `ui/theme_engine.py`, `ui/themes/base.qss` |
+| **P1** | Custom Title Bar + Project Chip | Medium | Comic Translate `title_bar.py` | `ui/mainwindowbars.py` |
+| **P1** | Page-context LLM translation | Medium | Comic Translate `modules/translation/` | `modules/translation/base.py` |
+| **P1** | Bubble+Text joint detector | Medium | Comic Translate `detection/` | `modules/textdetector/detector_bubble_text.py` |
+| **P2** | Startup Home Screen | Medium | Comic Translate `startup_home.py` | `ui/welcome_widget.py` |
+| **P2** | Webtoon Mode | High | Comic Translate `canvas/webtoons/` | `ui/canvas/webtoon_manager.py` |
+| **P2** | True Layered PSD Export | High | Koharu `koharu-psd/` | `modules/io/psd_native_export.py` |
+| **P2** | Google Fonts Integration | Medium | Koharu docs | `modules/fonts/google_fonts_manager.py` |
+| **P2** | Font Detection Model | Medium | Koharu `koharu-ml/src/font.rs` | `modules/ocr/font_detector.py` |
+| **P2** | Batch Find/Replace with Preview | Low | Comic Translate `search_replace.py` | `ui/global_search_widget.py` |
+| **P3** | Touch/Pinch Gestures | Low | Comic Translate `image_viewer.py` | `ui/canvas.py` |
+| **P3** | FLUX.2 / Diffusion Inpainting | High | Koharu docs | `modules/inpaint/inpaint_flux_diffusion.py` |
+| **P3** | Settings Resize Preview | Low | Comic Translate `window.py` | `ui/configpanel.py` |
+
+---
+
+### 9.5 Bug Fixes to Add
+
+| Issue | Root Cause | Fix Location |
+|---|---|---|
+| Module download race conditions | `download_file_on_load` + `download_file_list` combo in some modules | Audit all modules in `modules/*/`, ensure exactly one mechanism |
+| Canvas performance on large projects | All `TextBlkItem` kept in memory; no viewport culling | `ui/canvas.py` — skip rendering items outside visible rect |
+| Translation cache invalidation | `clear_pipeline_caches` doesn't clear `.translation` on blocks | `ui/module_manager.py` |
+| Memory leak in model loading | Models stay in GPU when switching to CPU | `modules/base.py` — add `unload_model()` hook; call in `module_manager.py` |
