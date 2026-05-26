@@ -121,7 +121,7 @@ class SizeComboBox(QComboBox):
             val = min(self.max_val, max(self.min_val, val))
             self._value = val
             return val
-        except:
+        except ValueError:
             return min(self.max_val, max(self.min_val, self._value))
 
     def setValue(self, value: float):

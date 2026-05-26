@@ -59,7 +59,7 @@ def connect_once(signal, exec_func: Callable):
         def _try_disconnect():
             try:
                 signal.disconnect(connect_func)
-            except:
+            except Exception:
                 print('Failed to disconnect')
                 print(traceback.format_exc())
 

@@ -5,8 +5,12 @@ from transformers import AutoTokenizer, VisionEncoderDecoderModel
 import numpy as np
 import torch
 from typing import List
+import logging
 
 from .base import OCRBase, register_OCR, DEFAULT_DEVICE, DEVICE_SELECTOR, TextBlock
+
+# Suppress noisy tensor-parallel shard warnings from transformers (harmless for VisionEncoderDecoderModel)
+logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 MANGA_OCR_PATH = r'data/models/manga-ocr-base'
 

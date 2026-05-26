@@ -8,7 +8,7 @@ from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWh
 
 try:
     from qtpy.QtWidgets import QUndoStack, QUndoCommand
-except:
+except ImportError:
     from qtpy.QtGui import QUndoStack, QUndoCommand
 
 from .misc import ndarray2pixmap, pixmap2ndarray, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION

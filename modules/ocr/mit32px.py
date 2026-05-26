@@ -218,8 +218,12 @@ class AddCoords(nn.Module):
         return ret
 
 class Beam :
-    def __init__(self, char_seq = [], logprobs = []) :
+    def __init__(self, char_seq = None, logprobs = None) :
         # L
+        if char_seq is None:
+            char_seq = []
+        if logprobs is None:
+            logprobs = []
         if isinstance(char_seq, list) :
             self.chars = torch.tensor(char_seq, dtype=torch.long)
             self.logprobs = torch.tensor(logprobs, dtype=torch.float32)

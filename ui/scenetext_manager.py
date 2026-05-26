@@ -9,7 +9,7 @@ from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF, QPoint
 from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
     from qtpy.QtWidgets import QUndoCommand
-except:
+except ImportError:
     from qtpy.QtGui import QUndoCommand
 
 from .textitem import TextBlkItem, TextBlock

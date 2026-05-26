@@ -77,7 +77,9 @@ if platform.system() == 'Darwin' and platform.mac_ver()[0] >= '10.15':
             return res
 
     class AppleOCR:
-        def __init__(self, lang=[], recog_level='accurate', min_confidence='0.1'):
+        def __init__(self, lang=None, recog_level='accurate', min_confidence='0.1'):
+            if lang is None:
+                lang = []
             self.lang = lang
             self.recog_level = recog_level 
             self.min_confidence = min_confidence

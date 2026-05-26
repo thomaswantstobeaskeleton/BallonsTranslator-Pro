@@ -170,9 +170,9 @@ class GPTTranslator(BaseTranslator):
             return None
 
         samples = self.params['chat sample']['value']
-        try: 
+        try:
             samples = yaml.load(self.params['chat sample']['value'], Loader=yaml.FullLoader)
-        except:
+        except yaml.YAMLError:
             self.logger.error(f'failed to load parse sample: {samples}')
             samples = {}
         src_tgt = self.lang_source + '-' + self.lang_target

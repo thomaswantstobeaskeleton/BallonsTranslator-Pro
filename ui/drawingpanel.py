@@ -427,7 +427,7 @@ class DrawingPanel(Widget):
             set_method()
             if self.currentTool is not None:
                 self.currentTool.setChecked(True)
-        except:
+        except Exception:
             LOGGER.error(f'{set_method} not found in drawing panel')
 
     def shortcutSetCurrentToolByName(self, tool_name: str):
@@ -440,7 +440,7 @@ class DrawingPanel(Widget):
             tool: QStackedWidget = getattr(self, tool)
             base = tool.toolTip().split(' — ')[0] if tool.toolTip() else tool_name
             tool.setToolTip(f'{base} — {shortcut}')
-        except:
+        except Exception:
             LOGGER.error(f'{tool} not found in drawing panel')
 
     def initDLModule(self, module_manager: ModuleManager):

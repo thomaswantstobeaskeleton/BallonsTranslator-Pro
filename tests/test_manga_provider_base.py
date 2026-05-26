@@ -63,13 +63,13 @@ def test_readmanga_fixture_parsers():
 
 def test_raw_providers_fixture_parsers():
     rawkuma = RawKumaClient(request_delay=0)
-    rk_search = rawkuma.parse_search((FIXTURES / "rawkuma_search.html").read_text())
-    rk_feed = rawkuma.parse_feed((FIXTURES / "rawkuma_feed.html").read_text(), manga_id="sample-raw")
+    rk_search = rawkuma.parse_search((FIXTURES / "rawkuma_search.html").read_text(encoding="utf-8"))
+    rk_feed = rawkuma.parse_feed((FIXTURES / "rawkuma_feed.html").read_text(encoding="utf-8"), manga_id="sample-raw")
     assert rk_search and rk_feed
 
     mhg = ManhuaguiClient(request_delay=0)
-    mhg_search = mhg.parse_search((FIXTURES / "manhuagui_search.html").read_text())
-    mhg_feed = mhg.parse_feed((FIXTURES / "manhuagui_feed.html").read_text(), manga_id="12345")
+    mhg_search = mhg.parse_search((FIXTURES / "manhuagui_search.html").read_text(encoding="utf-8"))
+    mhg_feed = mhg.parse_feed((FIXTURES / "manhuagui_feed.html").read_text(encoding="utf-8"), manga_id="12345")
     assert mhg_search and mhg_feed
 
 

@@ -5997,16 +5997,16 @@ class MainWindow(mainwindow_cls):
     def _reset_modules_to_core_defaults(self):
         """Set detector/OCR/inpainter/translator with core defaults when available, else fallback to available modules."""
         pcfg.module.textdetector = 'ctd'
-        pcfg.module.ocr = 'manga_ocr'
+        pcfg.module.ocr = 'mit48px'
         pcfg.module.inpainter = 'aot'
         pcfg.module.translator = 'google'
         save_config()
         self.module_manager.setTextDetector('ctd')
-        self.module_manager.setOCR('manga_ocr')
+        self.module_manager.setOCR('mit48px')
         self.module_manager.setInpainter('aot')
         self.module_manager.setTranslator('google')
 
-        applied = [('Detector', 'ctd'), ('OCR', 'manga_ocr'), ('Inpainter', 'aot'), ('Translator', 'google')]
+        applied = [('Detector', 'ctd'), ('OCR', 'mit48px'), ('Inpainter', 'aot'), ('Translator', 'google')]
         lines = []
         for label, key in applied:
             lines.append(f'• {label}: {key} (core default requested; runtime may fallback)')
@@ -6278,7 +6278,7 @@ class MainWindow(mainwindow_cls):
                 self.imgtrans_proj.set_current_img(current_img)
                 self.canvas.updateCanvas()
                 self.st_manager.updateSceneTextitems()
-        except:
+        except Exception:
             pass
         
         # Show result
@@ -8318,7 +8318,9 @@ class MainWindow(mainwindow_cls):
         except Exception:
             pass
 
-    def translate_preprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None, source_text:list = []):
+    def translate_preprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None, source_text:list = None):
+        if source_text is None:
+            source_text = []
         for i in range(len(source_text)):
             source_text[i] = self.mtPreSubWidget.sub_text(source_text[i])
 
