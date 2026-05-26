@@ -36,10 +36,7 @@ class AnimeBigLamaInpainter(InpainterBase):
     inpaint_by_block = False
     check_need_inpaint = True
 
-    download_file_list = [{
-        "url": f"https://huggingface.co/{HF_REPO_ID}/resolve/main/{HF_MODEL_FILENAME}",
-        "files": f"data/models/{HF_MODEL_FILENAME}",
-    }]
+    # Model is fetched via hf_hub_download inside _load_model; no download_file_list needed.
     params = {
         "model_path": {
             "type": "line_editor",

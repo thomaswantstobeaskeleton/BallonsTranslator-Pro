@@ -230,7 +230,7 @@ QLineEdit:hover, QComboBox:hover, QPlainTextEdit:hover {
 
 QPushButton#LeftBarRunBtn, QPushButton#BottomBarRunBtn, TitleBarToolBtn#PipelineRunBtn {
     border: 1px solid @accentColorRgba80;
-    min-height: 32px;
+    min-height: 28px;
 }
 
 QPushButton#LeftBarRunBtn:focus, QPushButton#BottomBarRunBtn:focus {

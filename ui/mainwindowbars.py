@@ -99,7 +99,6 @@ class LeftBar(Widget):
         super().__init__(mainwindow, *args, **kwargs)
         self.mainwindow: QMainWindow = mainwindow
 
-        padding = (LEFTBAR_WIDTH - LEFTBTN_WIDTH) // 2
         self.setFixedWidth(LEFTBAR_WIDTH)
         self.showPageListLabel = ShowPageListChecker()
 
@@ -118,7 +117,7 @@ class LeftBar(Widget):
 
         self.runBtn = QPushButton()
         self.runBtn.setObjectName('LeftBarRunBtn')
-        self.runBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
+        self.runBtn.setFixedSize(28, 28)
         run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'leftbar_run.svg')
         if not osp.isfile(run_icon_path):
             run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate_activate.svg')
@@ -126,6 +125,7 @@ class LeftBar(Widget):
             run_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'bottombar_translate.svg')
         if osp.isfile(run_icon_path):
             self.runBtn.setIcon(QIcon(run_icon_path))
+        self.runBtn.setIconSize(QSize(20, 20))
         self.runBtn.setToolTip(self.tr('Run pipeline (same as Pipeline → Run).'))
         self.runBtn.clicked.connect(self.run_clicked.emit)
 
@@ -189,25 +189,34 @@ class LeftBar(Widget):
         openMenu.addSeparator()
         openMenu.addAction(actionSaveProj)
         self.openBtn = OpenBtn()
-        self.openBtn.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
+        self.openBtn.setFixedSize(28, 28)
+        open_icon_path = osp.join(C.PROGRAM_PATH, 'icons', 'openbtn.svg')
+        if osp.isfile(open_icon_path):
+            self.openBtn.setIcon(QIcon(open_icon_path))
+        self.openBtn.setIconSize(QSize(26, 26))
+        self.openBtn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.openBtn.setAutoRaise(True)
         self.openBtn.setMenu(openMenu)
         self.openBtn.setPopupMode(QToolButton.InstantPopup)
-    
-        openBtnToolBar = QToolBar(self)
-        openBtnToolBar.setFixedSize(LEFTBTN_WIDTH, LEFTBTN_WIDTH)
-        openBtnToolBar.addWidget(self.openBtn)
-        
+
         vlayout = QVBoxLayout(self)
-        vlayout.addWidget(openBtnToolBar)
+        vlayout.setContentsMargins(4, 8, 4, 8)
+        vlayout.setSpacing(6)
+        vlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Top section: open + page list toggle + search
+        vlayout.addWidget(self.openBtn)
         vlayout.addWidget(self.showPageListLabel)
         vlayout.addWidget(self.globalSearchChecker)
+        vlayout.addSpacing(8)
+
+        # Middle section: primary mode switchers (imgtrans / config)
         vlayout.addWidget(self.imgTransChecker)
-        vlayout.addItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
         vlayout.addWidget(self.configChecker)
+        vlayout.addItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Bottom section: run pipeline
         vlayout.addWidget(self.runBtn)
-        vlayout.setContentsMargins(padding, LEFTBTN_WIDTH // 2, padding, LEFTBTN_WIDTH // 2)
-        vlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vlayout.setSpacing(LEFTBTN_WIDTH * 3 // 4)
         self.setGeometry(0, 0, 300, 500)
         self.setMouseTracking(True)
 
@@ -450,6 +459,47 @@ class LeftBar(Widget):
 
     def needleftStackWidget(self) -> bool:
         return self.showPageListLabel.isChecked() or self.globalSearchChecker.isChecked()
+
+
+class _ProjectChip(QWidget):
+    """Small rounded chip showing the current project name with a dirty-state dot."""
+
+    def __init__(self, parent: QWidget = None) -> None:
+        super().__init__(parent)
+        self._dirty = False
+        self.setFixedHeight(22)
+        self.setMinimumWidth(60)
+        self.setMaximumWidth(280)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(4)
+
+        self._dot = QLabel(self)
+        self._dot.setFixedSize(6, 6)
+        self._dot.setStyleSheet("background-color: transparent; border-radius: 3px;")
+
+        self._label = QLabel(self)
+        self._label.setObjectName("ProjectChipLabel")
+        self._label.setStyleSheet("color: inherit; background: transparent;")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(self._dot)
+        layout.addWidget(self._label, 1)
+        self.setLayout(layout)
+
+    def set_project(self, name: str, dirty: bool = False) -> None:
+        self._dirty = dirty
+        self._label.setText(name or "")
+        if dirty:
+            self._dot.setStyleSheet("background-color: #FF9800; border-radius: 3px;")
+        else:
+            self._dot.setStyleSheet("background-color: #4CAF50; border-radius: 3px;")
+        self.setVisible(bool(name))
+
+    def set_dirty(self, dirty: bool) -> None:
+        if dirty != self._dirty:
+            self.set_project(self._label.text(), dirty)
 
 
 class TitleBar(Widget):
@@ -1075,6 +1125,10 @@ class TitleBar(Widget):
         self._centerLayout.addWidget(self._searchRow)
         self._centerContainer.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
+        self.projectChip = _ProjectChip(self)
+        self.projectChip.setObjectName("ProjectChip")
+        self.projectChip.hide()
+
         hlayout = QHBoxLayout(self)
         hlayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hlayout.addWidget(self.iconLabel)
@@ -1084,6 +1138,7 @@ class TitleBar(Widget):
         hlayout.addWidget(self.goToolBtn)
         hlayout.addWidget(self.runToolBtn)
         hlayout.addWidget(self.toolsToolBtn)
+        hlayout.addWidget(self.projectChip)
         hlayout.addStretch()
         hlayout.addWidget(self._centerContainer)
         hlayout.addStretch()
@@ -1707,6 +1762,7 @@ class TitleBar(Widget):
     def setTitleContent(self, proj_name: str = None, page_name: str = None, save_state: str = None):
         max_proj_len = 50
         max_page_len = 50
+        dirty = False
         if proj_name is not None:
             if len(proj_name) > max_proj_len:
                 proj_name = proj_name[:max_proj_len-3] + '...'
@@ -1717,10 +1773,11 @@ class TitleBar(Widget):
             self.page_name = page_name
         if save_state is not None:
             self.save_state = save_state
-        title = self.proj_name + ' - ' + self.page_name
-        if self.save_state != '':
-            title += ' - '  + self.save_state
-        self.titleLabel.setText(title)
+            dirty = (save_state != '')
+        # Update project chip (left side, visible when project is open)
+        self.projectChip.set_project(self.proj_name, dirty=dirty)
+        # Keep titleLabel clean: just page name, centered
+        self.titleLabel.setText(self.page_name)
 
 
 class SmallConfigPutton(QPushButton):

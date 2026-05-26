@@ -1137,3 +1137,329 @@ class HorizontalTextDocumentLayout(SceneTextLayout):
                 cpos = context.cursorPosition - blpos
             layout.drawCursor(painter, QPointF(0, 0), cpos, 1)
         painter.restore()
+
+
+# =============================================================================
+# Node-based layout tree (Vertical Layout Refactor — Phase 1)
+# =============================================================================
+# These classes provide a declarative, tree-structured representation of the
+# vertical text layout.  They are designed to coexist with the existing
+# SceneTextLayout / VerticalTextDocumentLayout implementations so the
+# legacy renderer keeps working while new features (e.g. per-glyph animation,
+# diff-based relayout, or export to SVG/JSON) can target the node tree.
+#
+# Usage:
+#     builder = VerticalLayoutBuilder(doc, fontformat)
+#     root = builder.build()
+#     for paragraph in root.children:
+#         for line in paragraph.children:
+#             for run in line.children:
+#                 for glyph in run.children:
+#                     print(glyph.char, glyph.rect)
+# =============================================================================
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Iterator
+from abc import ABC, abstractmethod
+
+
+class LayoutNode(ABC):
+    """Base class for a node in the layout tree."""
+
+    def __init__(self, parent: Optional["LayoutNode"] = None) -> None:
+        self.parent = parent
+        self.children: List["LayoutNode"] = []
+        self.rect: QRectF = QRectF()
+        self.offset: QPointF = QPointF()
+
+    def add_child(self, child: "LayoutNode") -> "LayoutNode":
+        child.parent = self
+        self.children.append(child)
+        return child
+
+    def remove_child(self, child: "LayoutNode") -> None:
+        if child in self.children:
+            self.children.remove(child)
+            child.parent = None
+
+    def clear_children(self) -> None:
+        for c in self.children:
+            c.parent = None
+        self.children.clear()
+
+    @property
+    def global_rect(self) -> QRectF:
+        """Bounding rect in document coordinates."""
+        return QRectF(
+            self.rect.x() + self.offset.x(),
+            self.rect.y() + self.offset.y(),
+            self.rect.width(),
+            self.rect.height(),
+        )
+
+    def walk(self) -> Iterator["LayoutNode"]:
+        """Depth-first traversal yielding self then descendants."""
+        yield self
+        for child in self.children:
+            yield from child.walk()
+
+    def walk_glyphs(self) -> Iterator["GlyphNode"]:
+        """Yield only GlyphNode descendants."""
+        for node in self.walk():
+            if isinstance(node, GlyphNode):
+                yield node
+
+    @abstractmethod
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        raise NotImplementedError
+
+
+class DocumentNode(LayoutNode):
+    """Root node representing the entire document."""
+
+    def __init__(self, width: float = 0, height: float = 0) -> None:
+        super().__init__()
+        self.rect = QRectF(0, 0, width, height)
+
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        visitor.visit_document(self)
+
+
+class ParagraphNode(LayoutNode):
+    """A text paragraph (QTextBlock equivalent)."""
+
+    def __init__(
+        self,
+        block_number: int = 0,
+        text: str = "",
+        block_format=None,
+        parent: Optional[LayoutNode] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.block_number = block_number
+        self.text = text
+        self.block_format = block_format
+
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        visitor.visit_paragraph(self)
+
+
+class LineNode(LayoutNode):
+    """A layout line inside a paragraph."""
+
+    def __init__(
+        self,
+        line_index: int = 0,
+        text_start: int = 0,
+        text_length: int = 0,
+        ascent: float = 0,
+        descent: float = 0,
+        parent: Optional[LayoutNode] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.line_index = line_index
+        self.text_start = text_start
+        self.text_length = text_length
+        self.ascent = ascent
+        self.descent = descent
+
+    @property
+    def text_end(self) -> int:
+        return self.text_start + self.text_length
+
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        visitor.visit_line(self)
+
+
+class RunNode(LayoutNode):
+    """A text run with uniform character formatting."""
+
+    def __init__(
+        self,
+        text: str = "",
+        font_family: str = "",
+        font_size: float = 12.0,
+        bold: bool = False,
+        italic: bool = False,
+        stroke_width: float = 0.0,
+        parent: Optional[LayoutNode] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.text = text
+        self.font_family = font_family
+        self.font_size = font_size
+        self.bold = bold
+        self.italic = italic
+        self.stroke_width = stroke_width
+
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        visitor.visit_run(self)
+
+
+class GlyphNode(LayoutNode):
+    """A single glyph / character."""
+
+    def __init__(
+        self,
+        char: str = "",
+        rotated: bool = False,
+        tate_chu_yoko: bool = False,
+        char_format: Optional[CharFontFormat] = None,
+        parent: Optional[LayoutNode] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.char = char
+        self.rotated = rotated
+        self.tate_chu_yoko = tate_chu_yoko
+        self.char_format = char_format
+
+    def accept(self, visitor: "LayoutVisitor") -> None:
+        visitor.visit_glyph(self)
+
+
+class LayoutVisitor(ABC):
+    """Visitor interface for traversing the layout tree."""
+
+    def visit_document(self, node: DocumentNode) -> None:
+        for child in node.children:
+            child.accept(self)
+
+    def visit_paragraph(self, node: ParagraphNode) -> None:
+        for child in node.children:
+            child.accept(self)
+
+    def visit_line(self, node: LineNode) -> None:
+        for child in node.children:
+            child.accept(self)
+
+    def visit_run(self, node: RunNode) -> None:
+        for child in node.children:
+            child.accept(self)
+
+    @abstractmethod
+    def visit_glyph(self, node: GlyphNode) -> None:
+        raise NotImplementedError
+
+
+class VerticalLayoutBuilder:
+    """
+    Build a node-based layout tree from a QTextDocument + FontFormat.
+
+    This reuses the existing CharFontFormat and punctuation helpers so
+    the node tree reflects the same metrics as VerticalTextDocumentLayout.
+    """
+
+    def __init__(self, doc: QTextDocument, fontformat: FontFormat) -> None:
+        self.doc = doc
+        self.fontformat = fontformat
+        self._block_charfmt_lst: List[List[CharFontFormat]] = []
+        self._map_charidx2frag: List[dict] = []
+
+    def build(self) -> DocumentNode:
+        """Parse the document and return a DocumentNode tree."""
+        root = DocumentNode()
+        self._index_charformats()
+        block = self.doc.firstBlock()
+        while block.isValid():
+            para = self._build_paragraph(block)
+            root.add_child(para)
+            block = block.next()
+        return root
+
+    def _index_charformats(self) -> None:
+        """Pre-compute CharFontFormat lists per block (mirrors reLayoutEverything)."""
+        self._block_charfmt_lst.clear()
+        self._map_charidx2frag.clear()
+        block = self.doc.firstBlock()
+        while block.isValid():
+            charfmt_lst = []
+            charidx_map = {}
+            it = block.begin()
+            frag_idx = 0
+            char_idx = 0
+            while not it.atEnd():
+                fragment = it.fragment()
+                fcmt = fragment.charFormat()
+                cfmt = CharFontFormat(fcmt)
+                charfmt_lst.append(cfmt)
+                for _ in range(fragment.length()):
+                    charidx_map[char_idx] = frag_idx
+                    char_idx += 1
+                it += 1
+                frag_idx += 1
+            self._block_charfmt_lst.append(charfmt_lst)
+            self._map_charidx2frag.append(charidx_map)
+            block = block.next()
+
+    def _build_paragraph(self, block: QTextBlock) -> ParagraphNode:
+        para = ParagraphNode(
+            block_number=block.blockNumber(),
+            text=block.text(),
+        )
+        layout = block.layout()
+        for ii in range(layout.lineCount()):
+            line = layout.lineAt(ii)
+            line_node = self._build_line(line, block)
+            para.add_child(line_node)
+        return para
+
+    def _build_line(self, line: "QTextLine", block: QTextBlock) -> LineNode:
+        line_node = LineNode(
+            line_index=line.lineNumber() if hasattr(line, "lineNumber") else 0,
+            text_start=line.textStart(),
+            text_length=line.textLength(),
+            ascent=line.ascent(),
+            descent=line.descent(),
+        )
+        line_node.rect = QRectF(line.rect())
+        line_node.offset = QPointF(line.position())
+        # Build runs by grouping characters with the same fragment format
+        blk_no = block.blockNumber()
+        charidx_map = self._map_charidx2frag[blk_no] if blk_no < len(self._map_charidx2frag) else {}
+        charfmt_lst = self._block_charfmt_lst[blk_no] if blk_no < len(self._block_charfmt_lst) else []
+        txt = block.text()
+        start = line.textStart()
+        length = line.textLength()
+        i = start
+        while i < start + length and i < len(txt):
+            frag_idx = charidx_map.get(i, 0)
+            if frag_idx < len(charfmt_lst):
+                cfmt = charfmt_lst[frag_idx]
+                run_node = RunNode(
+                    text=txt[i],
+                    font_family=cfmt.family,
+                    font_size=cfmt.size,
+                    bold=cfmt.font.bold(),
+                    italic=cfmt.font.italic(),
+                    stroke_width=cfmt.stroke_width,
+                )
+                char = txt[i]
+                should_rotate = char in PUNSET_VERNEEDROTATE and (not char.isalpha() or _vertical_rotate_latin_enabled())
+                glyph = GlyphNode(
+                    char=char,
+                    rotated=should_rotate,
+                    char_format=cfmt,
+                )
+                run_node.add_child(glyph)
+                line_node.add_child(run_node)
+            i += 1
+        return line_node
+
+
+class GlyphMetricsVisitor(LayoutVisitor):
+    """
+    Example visitor: compute aggregate metrics from the node tree.
+    """
+
+    def __init__(self) -> None:
+        self.total_glyphs = 0
+        self.rotated_glyphs = 0
+        self.bounding_rect = QRectF()
+
+    def visit_glyph(self, node: GlyphNode) -> None:
+        self.total_glyphs += 1
+        if node.rotated:
+            self.rotated_glyphs += 1
+        gr = node.global_rect
+        self.bounding_rect = self.bounding_rect.united(gr)
+

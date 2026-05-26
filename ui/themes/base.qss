@@ -1,0 +1,317 @@
+/*
+Base QSS stylesheet for BallonsTranslator-Pro.
+Uses @token@ substitution via ThemeEngine.
+Tokens are replaced at runtime by ui/theme_engine.py.
+
+Available tokens:
+  @primaryColor, @primaryColorRgb, @primaryColorRgba20, @primaryColorRgba35, @primaryColorRgba80
+  @primaryLight, @primaryDark
+  @backgroundColor, @backgroundColorRgb
+  @surfaceColor, @surfaceColorRgb
+  @textPrimaryColor, @textSecondaryColor, @textDisabledColor
+  @borderColor, @hoverColor, @selectedColor, @pressedColor
+  @primaryTint1..5, @primaryShade1..5
+
+Legacy tokens (kept for backwards compatibility):
+  @qwidgetForegroundColor, @sliderHandleColor, etc.
+*/
+
+/* Global application font color */
+QWidget {
+    color: @textPrimaryColor;
+    background-color: @backgroundColor;
+    selection-background-color: @primaryColorRgba35;
+}
+
+/* Main window */
+QMainWindow {
+    background-color: @backgroundColor;
+    border: none;
+}
+
+/* Menu bar & menus */
+QMenuBar {
+    background-color: @surfaceColor;
+    border-bottom: 1px solid @borderColor;
+}
+QMenuBar::item:selected {
+    background-color: @hoverColor;
+}
+QMenu {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    padding: 4px;
+}
+QMenu::item:selected {
+    background-color: @hoverColor;
+    border-radius: 3px;
+}
+QMenu::separator {
+    height: 1px;
+    background-color: @borderColor;
+    margin: 4px 8px;
+}
+
+/* Title bar */
+#ProjectChip {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 11px;
+}
+#ProjectChipLabel {
+    color: @textSecondaryColor;
+    font-size: 11px;
+}
+#TitleLabel {
+    color: @textPrimaryColor;
+    font-size: 13px;
+    font-weight: 500;
+    background: transparent;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    padding: 4px 12px;
+    color: @textPrimaryColor;
+}
+QPushButton:hover {
+    background-color: @hoverColor;
+}
+QPushButton:pressed {
+    background-color: @pressedColor;
+}
+QPushButton:disabled {
+    color: @textDisabledColor;
+    border-color: @borderColor;
+}
+
+/* Primary action buttons */
+QPushButton#PipelineRunBtn {
+    background-color: @primaryColor;
+    color: #FFFFFF;
+    border: none;
+}
+QPushButton#PipelineRunBtn:hover {
+    background-color: @primaryLight;
+}
+QPushButton#PipelineRunBtn:pressed {
+    background-color: @primaryDark;
+}
+
+/* Tool buttons */
+QToolButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 2px;
+    color: @textPrimaryColor;
+}
+QToolButton:hover {
+    background-color: @hoverColor;
+}
+QToolButton:pressed {
+    background-color: @pressedColor;
+}
+
+/* Check boxes */
+QCheckBox {
+    spacing: 6px;
+    color: @textPrimaryColor;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid @borderColor;
+    border-radius: 3px;
+    background-color: @surfaceColor;
+}
+QCheckBox::indicator:checked {
+    background-color: @primaryColor;
+    border-color: @primaryColor;
+}
+
+/* Line edits & text areas */
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    padding: 4px;
+    color: @textPrimaryColor;
+    selection-background-color: @primaryColorRgba35;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border-color: @primaryColor;
+}
+
+/* Combo boxes */
+QComboBox {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: @textPrimaryColor;
+}
+QComboBox:hover {
+    border-color: @primaryColor;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox QAbstractItemView {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    selection-background-color: @hoverColor;
+}
+
+/* Scroll bars */
+QScrollBar:vertical {
+    background-color: transparent;
+    width: 8px;
+    border: none;
+}
+QScrollBar::handle:vertical {
+    background-color: @borderColor;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: @textSecondaryColor;
+}
+QScrollBar:horizontal {
+    background-color: transparent;
+    height: 8px;
+    border: none;
+}
+QScrollBar::handle:horizontal {
+    background-color: @borderColor;
+    border-radius: 4px;
+    min-width: 24px;
+}
+QScrollBar::handle:horizontal:hover {
+    background-color: @textSecondaryColor;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+}
+
+/* Sliders */
+QSlider::groove:horizontal {
+    height: 4px;
+    background-color: @borderColor;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    background-color: @primaryColor;
+    border-radius: 7px;
+    margin: -5px 0;
+}
+QSlider::sub-page:horizontal {
+    background-color: @primaryColorRgba80;
+    border-radius: 2px;
+}
+
+/* Group boxes */
+QGroupBox {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    font-weight: 500;
+    color: @textPrimaryColor;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: @textSecondaryColor;
+}
+
+/* Splitters */
+QSplitter::handle {
+    background-color: @borderColor;
+}
+QSplitter::handle:horizontal {
+    width: 2px;
+}
+QSplitter::handle:vertical {
+    height: 2px;
+}
+
+/* Tabs */
+QTabWidget::pane {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    top: -1px;
+}
+QTabBar::tab {
+    background-color: transparent;
+    border: none;
+    padding: 6px 12px;
+    color: @textSecondaryColor;
+}
+QTabBar::tab:selected {
+    color: @textPrimaryColor;
+    border-bottom: 2px solid @primaryColor;
+}
+QTabBar::tab:hover {
+    color: @textPrimaryColor;
+}
+
+/* Tables / lists */
+QTreeView, QListView, QTableView {
+    background-color: @surfaceColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    color: @textPrimaryColor;
+    outline: none;
+}
+QTreeView::item:selected, QListView::item:selected, QTableView::item:selected {
+    background-color: @selectedColor;
+    color: @textPrimaryColor;
+}
+QTreeView::item:hover, QListView::item:hover, QTableView::item:hover {
+    background-color: @hoverColor;
+}
+
+/* Progress bars */
+QProgressBar {
+    background-color: @borderColor;
+    border-radius: 4px;
+    height: 6px;
+    text-align: center;
+    color: transparent;
+}
+QProgressBar::chunk {
+    background-color: @primaryColor;
+    border-radius: 4px;
+}
+
+/* Tooltip */
+QToolTip {
+    background-color: @surfaceColor;
+    color: @textPrimaryColor;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+/* Dialogs */
+QDialog {
+    background-color: @backgroundColor;
+    border: 1px solid @borderColor;
+    border-radius: 6px;
+}
+
+/* Canvas-specific items */
+TextBlkItem {
+    /* Text items are painted, not styled via QSS */
+}

@@ -86,6 +86,15 @@ class CustomGV(QGraphicsView):
 
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        # Performance optimizations for scenes with many items (#issue-9.5)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontSavePainterState, True)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing, True)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
+        # Touch gesture support (two-finger pan + pinch zoom)
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self.viewport().setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self._pinch_active = False
+        self._pinch_start_scale = 1.0
 
     def wheelEvent(self, event : QWheelEvent) -> None:
         # qgraphicsview always scroll content according to wheelevent
@@ -157,6 +166,33 @@ class CustomGV(QGraphicsView):
             if e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
                 self.scale_with_value.emit(e.value() + 1)
                 e.setAccepted(True)
+                return True
+
+        # Touch pinch-to-zoom (two-finger gesture)
+        if e.type() == QEvent.Type.TouchBegin:
+            self._pinch_active = False
+            e.accept()
+            return True
+        elif e.type() == QEvent.Type.TouchUpdate:
+            touch_points = e.touchPoints()
+            if len(touch_points) == 2:
+                p1 = touch_points[0]
+                p2 = touch_points[1]
+                current_dist = QPointF(p1.pos() - p2.pos()).manhattanLength()
+                start_dist = QPointF(p1.startPos() - p2.startPos()).manhattanLength()
+                if start_dist > 0 and current_dist > 0:
+                    scale_factor = current_dist / start_dist
+                    if not self._pinch_active:
+                        self._pinch_active = True
+                        self._pinch_start_scale = 1.0
+                    self.scale_with_value.emit(scale_factor)
+                    e.accept()
+                    return True
+            elif len(touch_points) == 1:
+                # Single finger pan is handled by ScrollHandDrag mode
+                pass
+        elif e.type() == QEvent.Type.TouchEnd:
+            self._pinch_active = False
 
         return super().event(e)
     
@@ -357,6 +393,14 @@ class Canvas(QGraphicsScene):
         self.num_pushed_drawstep = 0
 
         self.clipboard_blks: List[TextBlock] = []
+
+        # Composition-based event handler (P0 roadmap)
+        from .canvas_event_handler import CanvasEventHandler
+        self._event_handler = CanvasEventHandler(self)
+
+        # Webtoon lazy-loading manager (P0 roadmap)
+        from .webtoon_manager import WebtoonManager
+        self._webtoon_manager = WebtoonManager(self, self.gv)
 
         self.drop_folder: str = None
         self.drop_files: List[str] = []
@@ -695,6 +739,8 @@ class Canvas(QGraphicsScene):
             self.incanvas_selection_changed.emit()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if hasattr(self, '_event_handler') and self._event_handler.on_key_press(event):
+            return
         key = event.key()
 
         modifiers = event.modifiers()
@@ -793,6 +839,8 @@ class Canvas(QGraphicsScene):
         return False
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if hasattr(self, '_event_handler') and self._event_handler.on_mouse_move(event):
+            return
         if self.mid_btn_pressed:
             new_pos = event.screenPos()
             delta_pos = new_pos - self.pan_initial_pos
@@ -893,6 +941,9 @@ class Canvas(QGraphicsScene):
         return True
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        # Composition-based handler gets first crack (P0 roadmap)
+        if hasattr(self, '_event_handler') and self._event_handler.on_mouse_press(event):
+            return
         btn = event.button()
         if btn == Qt.MouseButton.MiddleButton:
             self.mid_btn_pressed = True
@@ -943,6 +994,8 @@ class Canvas(QGraphicsScene):
         return self.image_edit_mode == ImageEditMode.RectTool and self.editor_index == 0
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if hasattr(self, '_event_handler') and self._event_handler.on_mouse_release(event):
+            return super().mouseReleaseEvent(event)
         btn = event.button()
         if btn == Qt.MouseButton.RightButton and self.rubber_band.isVisible() and self.rubber_band_origin is not None:
             r = self.rubber_band.geometry().normalized()
