@@ -2114,7 +2114,7 @@ class ModuleManager(QObject):
         valid = GET_VALID_TRANSLATORS()
         if translator not in valid:
             if translator in TRANSLATORS.module_dict:
-                LOGGER.warning(
+                LOGGER.info(
                     "Translator '%s' is registered but model files are not yet downloaded; "
                     "skipping initialization. Will auto-set after download completes.",
                     translator,
@@ -2149,7 +2149,7 @@ class ModuleManager(QObject):
         valid = GET_VALID_INPAINTERS()
         if inpainter not in valid:
             if inpainter in INPAINTERS.module_dict:
-                LOGGER.warning(
+                LOGGER.info(
                     "Inpainter '%s' is registered but model files are not yet downloaded; "
                     "skipping initialization. Will auto-set after download completes.",
                     inpainter,
@@ -2184,7 +2184,7 @@ class ModuleManager(QObject):
         valid = GET_VALID_TEXTDETECTORS()
         if textdetector not in valid:
             if textdetector in TEXTDETECTORS.module_dict:
-                LOGGER.warning(
+                LOGGER.info(
                     "Text detector '%s' is registered but model files are not yet downloaded; "
                     "skipping initialization. Will auto-set after download completes.",
                     textdetector,
@@ -2252,7 +2252,7 @@ class ModuleManager(QObject):
         valid = GET_VALID_OCR()
         if ocr not in valid:
             if ocr in OCR.module_dict:
-                LOGGER.warning(
+                LOGGER.info(
                     "OCR '%s' is registered but model files are not yet downloaded; "
                     "skipping initialization. Will auto-set after download completes.",
                     ocr,

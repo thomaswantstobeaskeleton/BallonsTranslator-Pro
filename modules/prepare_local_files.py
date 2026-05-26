@@ -254,9 +254,20 @@ def prepare_local_files_forall_with_summary() -> Dict[str, Any]:
         maybe_quantize_optional_onnx_models()
 
     if package_ids_include_pkuseg(package_ids):
+        pkuseg_before = True
+        for kw in [
+            {'url': 'https://github.com/lancopku/pkuseg-python/releases/download/v0.0.16/postag.zip', 'files': ['features.pkl', 'weights.npz'], 'sha256_pre_calculated': ['17d734c186a0f6e76d15f4990e766a00eed5f72bea099575df23677435ee749d', '2bbd53b366be82a1becedb4d29f76296b36ad7560b6a8c85d54054900336d59a'], 'archived_files': 'postag.zip', 'save_dir': 'data/models/pkuseg/postag'},
+            {'url': 'https://github.com/explosion/spacy-pkuseg/releases/download/v0.0.26/spacy_ontonotes.zip', 'files': ['features.msgpack', 'weights.npz'], 'sha256_pre_calculated': ['fd4322482a7018b9bce9216173ae9d2848efe6d310b468bbb4383fb55c874a18', '5ada075eb25a854f71d6e6fa4e7d55e7be0ae049255b1f8f19d05c13b1b68c9e'], 'archived_files': 'spacy_ontonotes.zip', 'save_dir': 'data/models/pkuseg/spacy_ontonotes'},
+        ]:
+            if not _all_files_ready(kw):
+                pkuseg_before = False
+                break
         try:
             prepare_pkuseg()
-            downloaded += 1
+            if pkuseg_before:
+                skipped += 1
+            else:
+                downloaded += 1
         except Exception as e:
             failed += 1
             failed_items.append("pkuseg")

@@ -99,12 +99,7 @@ class AnimeTextYoloDetector(TextDetectorBase):
         "description": "AnimeText YOLO12 (deepghs/AnimeText_yolo). Auto-downloads from Hugging Face. Best for anime/manga scenes with complex text.",
     }
 
-    download_file_list = [{
-        "url": "https://huggingface.co/deepghs/AnimeText_yolo/resolve/main/",
-        "files": [HF_MODEL_PT, HF_MODEL_ONNX],
-        "save_dir": "data/models/animetext_yolo",
-        "concatenate_url_filename": 1,
-    }]
+    download_file_on_load = True
     _load_model_keys = {"model"}
 
     def __init__(self, **params) -> None:
