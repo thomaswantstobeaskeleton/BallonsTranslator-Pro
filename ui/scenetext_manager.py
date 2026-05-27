@@ -929,6 +929,11 @@ class SceneTextManager(QObject):
         self.txtblkShapeControl.setBlkItem(None)
         for blkitem in self.textblk_item_list:
             self.canvas.removeItem(blkitem)
+            # Explicitly schedule deletion to free QTextDocument + pixmap memory (#issue-9.5)
+            try:
+                blkitem.deleteLater()
+            except Exception:
+                pass
         self.textblk_item_list.clear()
         self.textEditList.clearAllSelected()
         for textwidget in self.pairwidget_list:
@@ -3102,7 +3107,17 @@ class SceneTextManager(QObject):
         if doc_h < 1:
             doc_h = 1
         scale = min(box_w / doc_w, box_h / doc_h)
-        scale = max(0.25, min(scale, 2.0))
+        current_pt = max(1.0, blkitem.font().pointSizeF() or 1.0)
+        ff = getattr(blkitem.blk, 'fontformat', None) if blkitem.blk is not None else None
+        min_pt, max_pt = resolve_fit_font_size_bounds(
+            getattr(ff, 'fit_font_size_min', 0.0) if ff else 0.0,
+            getattr(ff, 'fit_font_size_max', 0.0) if ff else 0.0,
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_min', 6.0),
+            getattr(getattr(pcfg, 'module', None), 'layout_font_size_max', 96.0),
+        )
+        min_scale = max(0.1, min_pt / current_pt)
+        max_scale = min(3.0, max_pt / current_pt)
+        scale = max(min_scale, min(scale, max_scale))
         if abs(scale - 1.0) < 0.01:
             return
         blkitem.setRelFontSize(scale, repaint_background=True)

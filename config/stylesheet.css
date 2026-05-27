@@ -545,17 +545,22 @@ QCheckBox#TextblockChecker::indicator:checked{
 
 OpenBtn {
     border-style: none;
-    image: url(icons/openbtn.svg);
     background-color: @widgetBackgroundColor;
+    icon-size: 24px 24px;
+    padding: 0px;
+}
 
+OpenBtn::menu-indicator {
+    image: none;
+    width: 0px;
 }
 
 OpenBtn::hover {
-    image: url(icons/openbtn_activate.svg);
+    background-color: @widgetBackgroundColor;
 }
 
 OpenBtn::pressed {
-    image: url(icons/openbtn_activate.svg);
+    background-color: @widgetBackgroundColor;
 }
 
 QProgressBar {

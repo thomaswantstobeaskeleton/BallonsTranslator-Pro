@@ -5946,6 +5946,11 @@ class MainWindow(mainwindow_cls):
         self._relaunch_with_overrides(extra_args=['--qt-api', 'pyqt5'])
 
     def on_relaunch_cpu_only_safe_mode(self):
+        # Unload GPU models before switching to CPU-only to free VRAM.
+        try:
+            self.on_release_model_caches()
+        except Exception:
+            pass
         self._relaunch_with_overrides(env_overrides={'CUDA_VISIBLE_DEVICES': ''})
 
     def _recover_window_geometry_if_offscreen(self):
@@ -6139,6 +6144,18 @@ class MainWindow(mainwindow_cls):
         try:
             from utils.pipeline_cache_manager import clear_block_level_caches
             clear_block_level_caches()
+        except Exception:
+            pass
+        # Also clear translation strings on all text blocks so next run re-translates.
+        try:
+            if self.imgtrans_proj is not None:
+                for page_name, blk_list in self.imgtrans_proj.pages.items():
+                    for blk in blk_list:
+                        blk.translation = ""
+                # Update visible text items to reflect cleared translations.
+                if hasattr(self, 'st_manager') and self.st_manager is not None:
+                    for blkitem in self.st_manager.textblk_item_list:
+                        blkitem.setPlainText("")
         except Exception:
             pass
 
