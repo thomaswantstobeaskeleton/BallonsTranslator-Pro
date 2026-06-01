@@ -2,7 +2,7 @@
 #define MyAppName "BallonsTranslator Pro"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "BallonsTranslator-Pro"
-#define MyAppURL "https://github.com/dmMaze/BallonsTranslator"
+#define MyAppURL "https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro"
 #define MyAppExeName "launch.exe"
 #define MyBuildDir "..\\..\\dist\\launch"
 
