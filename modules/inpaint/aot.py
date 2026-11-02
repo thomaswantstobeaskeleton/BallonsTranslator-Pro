@@ -253,7 +253,7 @@ class AOTGenerator(nn.Module) :
 
 def load_aot_model(model_path, device) -> AOTGenerator:
     model = AOTGenerator(in_ch=4, out_ch=3, ch=32, alpha=0.0)
-    sd = torch.load(model_path, map_location = 'cpu')
+    sd = torch.load(model_path, map_location = 'cpu', weights_only=True)
     model.load_state_dict(sd['model'] if 'model' in sd else sd)
     model.eval().to(device)
     return model
